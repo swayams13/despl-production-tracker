@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -11,4 +9,615 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Scope: BUILD-SPEC-v2.md §2 data model only (Client..AuditLog). Users/RBAC,
+// welding, hold-point clearances etc. are out of scope until later steps
+// (IMPLEMENTATION-GUIDE.md Step 8+) — actor fields below are plain strings
+// until a Users table exists to hang a real FK off.
+//
+// Invariant #1 (CLAUDE.md): fields marked "server-set only" below must never
+// appear in a request DTO/zod schema once Server Actions are built (Step 7+)
+// — the service layer sets them from the DB clock, not the client.
+// ─────────────────────────────────────────────────────────────────────────
+
+// ── Enums ───────────────────────────────────────────────────────────────
+
+enum JobPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum JobStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETE
+  CANCELLED
+}
+
+enum ProcessEdgeType {
+  FINISH_TO_START
+  START_TO_START_WITH_OVERLAP
+}
+
+enum ScheduleMode {
+  FORWARD
+  BACKWARD
+  OVERRIDE
+}
+
+enum ScheduleFeasibility {
+  FEASIBLE
+  TIGHT
+  INFEASIBLE
+}
+
+enum ProcessPlanStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  COMPLETE
+  ON_HOLD
+}
+
+enum ComponentType {
+  PLATE
+  PIPE
+  ELBOW
+  TEE
+  REDUCER
+  FLANGE
+  FORGING
+  TUBE
+  TUBE_SHEET
+  DISHED_END
+  CONE
+  SADDLE
+  SKIRT
+  LUG
+  PAD
+  FASTENER
+  PLUG
+  NIPPLE
+  UNION
+  COUPLING
+  VALVE
+  GASKET
+  STRUCTURAL_STEEL
+  PLATFORM
+  LADDER
+  OTHER
+}
+
+enum ProcurementStatus {
+  NOT_STARTED
+  INDENT_RAISED
+  INDENT_APPROVED
+  PO_PLACED
+  IN_STOCK
+}
+
+enum MaterialReceivedStatus {
+  NOT_RECEIVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+}
+
+enum PmiResult {
+  NA
+  PENDING
+  ACCEPT
+  REJECT
+}
+
+enum CanonicalOperation {
+  RECEIPT
+  MTC_VERIFICATION
+  CUTTING
+  EDGE_PREP
+  FORMING
+  MACHINING
+  FIT_UP
+  WELDING
+  GRINDING
+  NDT
+  SURFACE_PREP
+  PAINTING
+  INSPECTION
+  THREADING
+  EXPANSION
+  ASSEMBLY_CHECK
+}
+
+enum Sourcing {
+  IN_HOUSE
+  OUTSOURCE
+  NA
+}
+
+enum ItemOperationStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETE
+}
+
+enum TestType {
+  RT
+  UT
+  HT
+  PNEUMATIC
+  DP
+  VACUUM
+}
+
+enum TestResult {
+  PENDING
+  ACCEPT
+  REJECT
+}
+
+enum QcpItemKind {
+  SECTION
+  CHECKPOINT
+}
+
+enum QcpCode {
+  P
+  W
+  H
+  R
+  RW
+  R_AND_A
+}
+
+enum QcpExecutionResult {
+  PENDING
+  ACCEPTED
+  REJECTED
+  NA
+}
+
+enum DrawingType {
+  GA
+  FABRICATION
+  WELD_MAP
+  PID
+  ISOMETRIC
+}
+
+enum DrawingStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  RELEASED
+}
+
+enum DelayCategory {
+  MATERIAL_DELAY
+  MANPOWER
+  MACHINE_BREAKDOWN
+  REWORK_QUALITY
+  CLIENT_HOLD
+  DRAWING_ENGINEERING_HOLD
+  OTHER
+}
+
+enum DelayReviewStatus {
+  PENDING
+  ACKNOWLEDGED
+  DISPUTED
+}
+
+// ── Client / Job / Equipment / Unit ────────────────────────────────────
+
+model Client {
+  id   Int     @id @default(autoincrement())
+  name String
+  code String? @unique
+
+  jobs Job[]
+
+  @@map("clients")
+}
+
+model Job {
+  id                Int         @id @default(autoincrement())
+  jobNumber         String      @unique @map("job_number")
+  clientId          Int         @map("client_id")
+  poRef             String?     @map("po_ref")
+  designCode        String?     @map("design_code")
+  orderDate         DateTime?   @map("order_date")
+  deliveryDate      DateTime?   @map("delivery_date")
+  priority          JobPriority @default(NORMAL)
+  status            JobStatus   @default(ACTIVE)
+  // raw "Work Order No." cell from the source CSV — kept as-is, does not
+  // necessarily match jobNumber (see seed/data-issues.json JOB_NUMBER_MISMATCH)
+  workOrderNoInFile String?     @map("work_order_no_in_file")
+  remarks           String?
+
+  client       Client            @relation(fields: [clientId], references: [id])
+  equipments   Equipment[]
+  schedules    ProjectSchedule[]
+  qcpTemplates QcpTemplate[]
+  drawings     AssemblyDrawing[]
+
+  @@map("jobs")
+}
+
+model Equipment {
+  id      Int     @id @default(autoincrement())
+  jobId   Int     @map("job_id")
+  name    String
+  // raw block number from the source CSV (equipmentBlocks[].blockNo)
+  blockNo Int?    @map("block_no")
+  remarks String?
+
+  job       Job               @relation(fields: [jobId], references: [id])
+  units     Unit[]
+  bomItems  BomItem[]
+  schedules ProjectSchedule[]
+
+  @@map("equipments")
+}
+
+model Unit {
+  id          Int      @id @default(autoincrement())
+  equipmentId Int      @map("equipment_id")
+  serialNo    String   @map("serial_no")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  equipment     Equipment      @relation(fields: [equipmentId], references: [id])
+  qcpExecutions QcpExecution[]
+
+  @@unique([equipmentId, serialNo])
+  @@map("units")
+}
+
+// ── Lead-time spine (36 processes, immutable reference) ────────────────
+
+model LeadTimeProcess {
+  code                    Int     @id
+  name                    String
+  mainActivities          String? @map("main_activities")
+  durationMinDays         Int     @map("duration_min_days")
+  durationMaxDays         Int     @map("duration_max_days")
+  cumulativePrinted       String? @map("cumulative_printed")
+  defaultDepartmentCode   String  @map("default_department_code")
+  // crosswalk to the 25-stage work-order reporting view
+  workOrderStages         Int[]   @map("work_order_stages")
+  envelopeFinishByMinDays Int     @map("envelope_finish_by_min_days")
+  envelopeFinishByMaxDays Int     @map("envelope_finish_by_max_days")
+  envelopeStartByMinDays  Int     @map("envelope_start_by_min_days")
+  envelopeStartByMaxDays  Int     @map("envelope_start_by_max_days")
+
+  defaultDepartment  Department           @relation("DefaultDepartment", fields: [defaultDepartmentCode], references: [code])
+  processDepartment  ProcessDepartment?
+  edgesAsProcess     ProcessEdge[]        @relation("EdgeProcess")
+  edgesAsPredecessor ProcessEdge[]        @relation("EdgePredecessor")
+  processPlans       ProjectProcessPlan[]
+
+  @@map("lead_time_processes")
+}
+
+model ProcessEdge {
+  processCode     Int             @map("process_code")
+  predecessorCode Int             @map("predecessor_code")
+  type            ProcessEdgeType
+  lagDays         Int             @map("lag_days")
+
+  process     LeadTimeProcess @relation("EdgeProcess", fields: [processCode], references: [code])
+  predecessor LeadTimeProcess @relation("EdgePredecessor", fields: [predecessorCode], references: [code])
+
+  @@id([processCode, predecessorCode])
+  @@map("process_edges")
+}
+
+model Department {
+  code  String  @id
+  name  String
+  scope String?
+
+  defaultForProcesses LeadTimeProcess[]    @relation("DefaultDepartment")
+  ownedProcesses      ProcessDepartment[]
+  processPlans        ProjectProcessPlan[]
+
+  @@map("departments")
+}
+
+// live, admin-editable owner of a process — separate from LeadTimeProcess's
+// seeded defaultDepartmentCode
+model ProcessDepartment {
+  processCode    Int    @id @map("process_code")
+  departmentCode String @map("department_code")
+
+  process    LeadTimeProcess @relation(fields: [processCode], references: [code])
+  department Department      @relation(fields: [departmentCode], references: [code])
+
+  @@map("process_departments")
+}
+
+// ── Scheduling ──────────────────────────────────────────────────────────
+
+model ProjectSchedule {
+  id                   Int                  @id @default(autoincrement())
+  jobId                Int                  @map("job_id")
+  equipmentId          Int?                 @map("equipment_id")
+  version              Int
+  mode                 ScheduleMode
+  projectStartDate     DateTime             @map("project_start_date")
+  requiredDeliveryDate DateTime?            @map("required_delivery_date")
+  feasibility          ScheduleFeasibility?
+  overrideReason       String?              @map("override_reason")
+  createdAt            DateTime             @default(now()) @map("created_at")
+
+  job          Job                  @relation(fields: [jobId], references: [id])
+  equipment    Equipment?           @relation(fields: [equipmentId], references: [id])
+  processPlans ProjectProcessPlan[]
+
+  @@unique([jobId, equipmentId, version])
+  @@map("project_schedules")
+}
+
+model ProjectProcessPlan {
+  id                   Int               @id @default(autoincrement())
+  projectScheduleId    Int               @map("project_schedule_id")
+  processCode          Int               @map("process_code")
+  baselineStart        DateTime?         @map("baseline_start")
+  baselineFinish       DateTime?         @map("baseline_finish")
+  plannedStart         DateTime?         @map("planned_start")
+  plannedFinish        DateTime?         @map("planned_finish")
+  // server-set only (invariant #1) — never from a request DTO
+  actualStart          DateTime?         @map("actual_start")
+  // server-set only (invariant #1) — never from a request DTO
+  actualFinish         DateTime?         @map("actual_finish")
+  durationOverrideDays Int?              @map("duration_override_days")
+  overrideReason       String?           @map("override_reason")
+  status               ProcessPlanStatus @default(NOT_STARTED)
+  ownerDepartmentCode  String            @map("owner_department_code")
+
+  projectSchedule ProjectSchedule @relation(fields: [projectScheduleId], references: [id])
+  process         LeadTimeProcess @relation(fields: [processCode], references: [code])
+  ownerDepartment Department      @relation(fields: [ownerDepartmentCode], references: [code])
+  delayReasons    DelayReason[]
+
+  @@unique([projectScheduleId, processCode])
+  @@map("project_process_plans")
+}
+
+// ── BOM & traceability ──────────────────────────────────────────────────
+
+model BomItem {
+  id            Int            @id @default(autoincrement())
+  equipmentId   Int            @map("equipment_id")
+  itemNo        Int            @map("item_no")
+  // raw block number, denormalized from Equipment for direct CSV matching
+  blockNo       Int?           @map("block_no")
+  partName      String         @map("part_name")
+  description   String?
+  material      String?
+  qty           String
+  unit          String?
+  componentType ComponentType? @map("component_type")
+  remarks       String?
+
+  equipment               Equipment                @relation(fields: [equipmentId], references: [id])
+  procurement             Procurement?
+  materialIdentifications MaterialIdentification[]
+  operations              ItemOperation[]
+  tests                   ItemTest[]
+
+  @@map("bom_items")
+}
+
+model Procurement {
+  id             Int                     @id @default(autoincrement())
+  bomItemId      Int                     @unique @map("bom_item_id")
+  indentNo       String?                 @map("indent_no")
+  indentDate     DateTime?               @map("indent_date")
+  approvedDate   DateTime?               @map("approved_date")
+  status         ProcurementStatus       @default(NOT_STARTED)
+  poNo           String?                 @map("po_no")
+  poDate         DateTime?               @map("po_date")
+  receivedStatus MaterialReceivedStatus? @map("received_status")
+  receivedDate   DateTime?               @map("received_date")
+
+  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+
+  @@map("procurements")
+}
+
+// replaces the misused "Material Identification" CSV column
+model MaterialIdentification {
+  id         Int        @id @default(autoincrement())
+  bomItemId  Int        @map("bom_item_id")
+  heatNumber String     @map("heat_number")
+  mtcRef     String?    @map("mtc_ref")
+  pmiResult  PmiResult? @map("pmi_result")
+
+  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+
+  @@map("material_identifications")
+}
+
+model ItemOperation {
+  id        Int                 @id @default(autoincrement())
+  bomItemId Int                 @map("bom_item_id")
+  operation CanonicalOperation
+  sourcing  Sourcing?
+  startDate DateTime?           @map("start_date")
+  endDate   DateTime?           @map("end_date")
+  status    ItemOperationStatus @default(NOT_STARTED)
+
+  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+
+  @@map("item_operations")
+}
+
+model ItemTest {
+  id        Int        @id @default(autoincrement())
+  bomItemId Int        @map("bom_item_id")
+  type      TestType
+  startDate DateTime?  @map("start_date")
+  endDate   DateTime?  @map("end_date")
+  result    TestResult @default(PENDING)
+
+  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+
+  @@map("item_tests")
+}
+
+// ── QCP engine (dynamic parties + full code set) ────────────────────────
+
+model InspectionParty {
+  id            Int     @id @default(autoincrement())
+  qcpTemplateId Int     @map("qcp_template_id")
+  code          String
+  name          String?
+
+  qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id])
+  itemCodes   QcpItemPartyCode[]
+
+  @@unique([qcpTemplateId, code])
+  @@map("inspection_parties")
+}
+
+model QcpTemplate {
+  id         Int     @id @default(autoincrement())
+  jobId      Int?    @map("job_id")
+  // raw "job" label from the source doc — may not resolve to jobId (see
+  // seed/data-issues.json)
+  jobLabel   String  @map("job_label")
+  vessel     String
+  revision   Int     @default(0)
+  designCode String? @map("design_code")
+
+  job     Job?              @relation(fields: [jobId], references: [id])
+  parties InspectionParty[]
+  items   QcpItem[]
+
+  @@map("qcp_templates")
+}
+
+model QcpItem {
+  id                   Int         @id @default(autoincrement())
+  qcpTemplateId        Int         @map("qcp_template_id")
+  srNo                 String      @map("sr_no")
+  kind                 QcpItemKind
+  section              String?
+  activity             String
+  characteristic       String?
+  extentOfCheck        String?     @map("extent_of_check")
+  applicableDocument   String?     @map("applicable_document")
+  acceptanceCriteria   String?     @map("acceptance_criteria")
+  record               String?
+  remarks              String?
+  leadTimeProcessCodes Int[]       @map("lead_time_process_codes")
+
+  qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id])
+  partyCodes  QcpItemPartyCode[]
+  executions  QcpExecution[]
+
+  @@unique([qcpTemplateId, srNo])
+  @@map("qcp_items")
+}
+
+model QcpItemPartyCode {
+  qcpItemId         Int     @map("qcp_item_id")
+  inspectionPartyId Int     @map("inspection_party_id")
+  code              QcpCode
+
+  qcpItem         QcpItem         @relation(fields: [qcpItemId], references: [id])
+  inspectionParty InspectionParty @relation(fields: [inspectionPartyId], references: [id])
+
+  @@id([qcpItemId, inspectionPartyId])
+  @@map("qcp_item_party_codes")
+}
+
+model QcpExecution {
+  id               Int                @id @default(autoincrement())
+  qcpItemId        Int                @map("qcp_item_id")
+  unitId           Int                @map("unit_id")
+  result           QcpExecutionResult @default(PENDING)
+  callGivenOn      DateTime?          @map("call_given_on")
+  // server-set only (invariant #1) — never from a request DTO
+  callAttendedOn   DateTime?          @map("call_attended_on")
+  clearedBy        String?            @map("cleared_by")
+  waiverApprovedBy String?            @map("waiver_approved_by")
+  // server-set only (invariant #1) — never from a request DTO
+  recordedAt       DateTime           @default(now()) @map("recorded_at")
+
+  qcpItem QcpItem @relation(fields: [qcpItemId], references: [id])
+  unit    Unit    @relation(fields: [unitId], references: [id])
+
+  @@unique([qcpItemId, unitId])
+  @@map("qcp_executions")
+}
+
+// ── Drawings ─────────────────────────────────────────────────────────────
+
+model AssemblyDrawing {
+  id           Int           @id @default(autoincrement())
+  jobId        Int           @map("job_id")
+  type         DrawingType
+  revisionNo   String?       @map("revision_no")
+  status       DrawingStatus @default(DRAFT)
+  approvedDate DateTime?     @map("approved_date")
+  releasedDate DateTime?     @map("released_date")
+
+  job Job @relation(fields: [jobId], references: [id])
+
+  @@map("assembly_drawings")
+}
+
+// ── Delay, notifications, audit (per PRD/TRD v1.0, unchanged) ──────────
+
+model DelayReason {
+  id                   Int               @id @default(autoincrement())
+  projectProcessPlanId Int               @map("project_process_plan_id")
+  category             DelayCategory
+  detail               String?
+  filedBy              String            @map("filed_by")
+  filedAt              DateTime          @default(now()) @map("filed_at")
+  reviewStatus         DelayReviewStatus @default(PENDING) @map("review_status")
+  reviewedBy           String?           @map("reviewed_by")
+
+  projectProcessPlan ProjectProcessPlan @relation(fields: [projectProcessPlanId], references: [id])
+
+  @@map("delay_reasons")
+}
+
+model Notification {
+  id           Int       @id @default(autoincrement())
+  recipientRef String    @map("recipient_ref")
+  type         String
+  entityRef    String?   @map("entity_ref")
+  title        String
+  body         String?
+  readAt       DateTime? @map("read_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@map("notifications")
+}
+
+// append-only: the app DB role has no UPDATE/DELETE grant on this table
+// (invariant #5) — see the REVOKE statement appended to this model's
+// migration. NOTE: while local dev connects as the Postgres superuser,
+// REVOKE has no effect (superuser bypasses grants) — this only becomes
+// load-bearing once a non-superuser app role exists (Railway deploy).
+model AuditLog {
+  id         BigInt   @id @default(autoincrement())
+  actorRef   String   @map("actor_ref")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  before     Json?
+  after      Json?
+  ip         String?
+  userAgent  String?  @map("user_agent")
+  at         DateTime @default(now())
+
+  @@map("audit_log")
 }
