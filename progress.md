@@ -2,16 +2,26 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟢 Week 0 complete — DESPL document handover analysed, all 8 architecture decisions locked, seed data generated from source documents, BUILD-SPEC-v2 written. **Ready to start coding (Sprint 1) in Antigravity.**
+**Status:** 🟡 IMPLEMENTATION-GUIDE.md Steps 0–3 done (env, git/GitHub repo, summarize-back check, Next.js scaffold). **Step 4 (DB connection) blocked — see resume point.**
 **Pilot target:** DESPL-320 (9 × HP air receiver, 320SR01–09) fully tracked by Week 8
 
 ---
 
 ## ▶ Resume point (read this first in a new session)
 
-**Read `docs/BUILD-SPEC-v2.md` before anything else.** It supersedes the scheduling, granularity and stack sections of PRD/TRD.
+**Currently on IMPLEMENTATION-GUIDE.md Step 4 (database connection) — blocked, pick up here:**
 
-Coding can begin. Build order is BUILD-SPEC-v2 §6. Seed data in `seed/` is generated from the DESPL documents — regenerate, don't hand-edit.
+`prisma db pull` fails with `Error: P1010 User was denied access on the database (not available)` against the local Docker Postgres (`despl-pg`, postgres:16, port 5432, db `despl`, user `postgres`, password `devpass` — see `.env`, gitignored). Ruled out so far:
+- Not a credentials problem: `docker exec despl-pg psql -U postgres -d despl -c "select 1;"` succeeds (but that's over the container's internal Unix socket, **not** a real host→container TCP test — that's the next thing to check).
+- Not an env-loading problem: confirmed via debug logs (`Environment variables loaded from .env`, and the CLI correctly echoes `Datasource "db": PostgreSQL database "despl" ... at "localhost:5432"`) and by manually exporting `DATABASE_URL` in-shell — same failure either way.
+- Not a config-file bug per se, but `prisma.config.ts` (the new Prisma 6.19 config-based datasource setup) was **removed** — its `datasource.url` was never forwarded into the `db pull` introspect RPC call (visible in `DEBUG=prisma:* prisma db pull` output — no `datasourceOverrides` in the RPC params), so it's a dead end for this Prisma version regardless. Reverted to the classic `.env`-only + `url = env("DATABASE_URL")` in `prisma/schema.prisma`, which is what's committed now.
+- Postgres container logs (`docker logs despl-pg`) show **zero connection attempts** from Prisma at any point — the engine is failing before it ever reaches the server, which points at a host→container networking issue rather than a Postgres auth rejection.
+
+**Next step:** test raw host→container TCP connectivity directly — `nc -zv localhost 5432` and a real `psql` (or `pg_isready -h localhost`) from the host machine, not via `docker exec`. If that also fails, the fix is almost certainly on the Docker networking side (e.g. try `pg_isready -h 127.0.0.1` instead of `localhost` in case of IPv6/IPv4 resolution weirdness), not Prisma. If host TCP works fine, the bug is genuinely in this Prisma 6.19.3 engine build and worth checking Prisma's GitHub issues before working around it further.
+
+State to know before resuming: `despl-pg` container should still be running (`docker ps`); restart with `docker start despl-pg` if the machine rebooted. `.env` already has the right `DATABASE_URL`. `prisma/schema.prisma` has `url = env("DATABASE_URL")` set correctly. `dotenv` was added as a devDependency (harmless either way, currently unused now that `prisma.config.ts` is gone — fine to leave or remove later).
+
+**Read `docs/BUILD-SPEC-v2.md` before anything else** if starting fresh context. It supersedes the scheduling, granularity and stack sections of PRD/TRD. Follow `docs/IMPLEMENTATION-GUIDE.md` step by step — currently at Step 4.
 
 **Model discipline: Opus for architecture/spec/decisions, Sonnet for coding sessions.**
 
@@ -111,7 +121,7 @@ Email digests (SES/Resend, ≈₹0–1,700/mo) → WhatsApp · geo-tagged in-app
 | 11 Aug 2026 | Department mapping (13) drafted by us for DESPL to correct, rather than blocking on their list |
 | 11 Aug 2026 | **Model usage: Opus for architecture/decisions, Sonnet for coding** |
 | 11 Aug 2026 | **Two-layer scheduling model adopted** after discovering a finish-to-start chain gives 11.6–24 wks vs DESPL's stated ~17 wks; printed cumulative envelope is authoritative, DAG lags fitted to it |
-| 11 Aug 2026 | **Step 0 env: local dev DB is Railway Postgres, not Docker** — skips a local install since Railway is already the Step 14 deploy target; local and staging stay on the same DB engine day one. **Docker install deferred** to after the app is deployed and in full-fledged use (revisit if local-container parity/offline dev is ever needed) |
+| 11 Aug 2026 | ~~Step 0 env: local dev DB is Railway Postgres, not Docker~~ — **superseded same day at Step 4**: user decided to install Docker after all for local dev; Railway stays the Step 14 deploy target only, per the guide's original plan. `railway` CLI (v5.35.2) is installed and ready for Step 14 regardless |
 | 03 Aug 2026 | Maker–checker entry: supervisors submit, separate QC users verify every gate |
 | 03 Aug 2026 | Single-company platform (DESPL), jobs organized client-wise |
 | 03 Aug 2026 | v1 = full depth: 25 stages + QCP hold points + BOM + KPIs + daily brief |
@@ -142,6 +152,7 @@ Email digests (SES/Resend, ≈₹0–1,700/mo) → WhatsApp · geo-tagged in-app
 | 11 Aug 2026 | Step 2 run: re-confirmed the summarize-back check against BUILD-SPEC-v2 §0 (9 decisions) and §6 (9-step build order) specifically, per the guide's check criteria — no drift from the docs. No code written. |
 | 11 Aug 2026 | Step 3 run: scaffolded Next.js 15.5.23 App Router (TS strict, `src/` dir, `@/*` alias, Turbopack) — `create-next-app@latest` defaults to Next 16 now, so pinned to `create-next-app@15`. Scaffolded into a scratch dir (target dir name "DESPL TRACKER" fails npm's package-name rules) and merged in, keeping the existing `.git`/docs/seed. Added Tailwind v4 (bundled), shadcn/ui (`components.json`, `button` primitive), TanStack Query v5.101, Prisma 6.19 (`@prisma/client` + CLI, schema deferred to Step 4), Prettier, Vitest 4 + Testing Library, Playwright 1.62 (chromium installed). Added `typecheck`/`test`/`e2e`/`format` scripts. Created `src/lib/{services,schedule,shared}/README.md` stating each layer's role per CLAUDE.md conventions. Verified: `pnpm lint` and `pnpm typecheck` clean, `pnpm dev` boots and serves 200 on `localhost:3000`. |
 | 11 Aug 2026 | Follow-up check on the Next 16→15 pin flagged after Step 3: confirmed no actual drift — `package.json` pins exact `15.5.23` for `next`/`eslint-config-next` and `19.1.0` for `react`/`react-dom`, `pnpm ls` and `pnpm-lock.yaml` show zero `16.x` references, installed binary reports `v15.5.23`, and a clean `pnpm install` produced no peer/deprecation warnings. The Next 16 scratch scaffold was discarded before the 15 version was generated, so it never reached the repo. No fix needed — was informational only. |
+| 11 Aug 2026 | Step 4 started, reversed the earlier Railway-for-local-dev call: user decided to install Docker after all and do local dev against it, keeping Railway for the Step 14 deploy target as originally written in the guide (see Decisions log). Installed Docker Desktop (the Homebrew cask needed an interactive `sudo` password the sandboxed shell couldn't supply, so the user ran `brew install --cask docker` themselves). Started `despl-pg` (postgres:16, port 5432, db `despl`) via `docker run`. Wrote `.env` with `DATABASE_URL` (gitignored). Ran `prisma init --datasource-provider postgresql`; it also silently installed ~30 files of Prisma's own AI-agent skill docs into `.claude/skills/`, `.windsurf/skills/`, `.agents/skills/` + `skills-lock.json` — deleted, unrelated vendor bloat. Hit `Error: P1010 User was denied access on the database (not available)` on `prisma db pull` — investigated at length (see Resume point above for full detail and next diagnostic step); not yet resolved. Paused mid-investigation at user's request to save progress for next session. |
 
 ## Blockers
 
