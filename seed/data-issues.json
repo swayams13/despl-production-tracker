@@ -1,0 +1,68 @@
+{
+  "$schema": "despl.dataissues.v1",
+  "generated": "from live tracker import",
+  "issues": [
+    {
+      "type": "AMBIGUOUS_DATE",
+      "value": "7/8/2026",
+      "where": "DE0463 item13 indent",
+      "note": "Could be 2026-08-07 (dd/mm) or 2026-07-08 (m/d). Assumed m/d/yyyy per surrounding rows."
+    },
+    {
+      "type": "AMBIGUOUS_DATE",
+      "value": "7/8/2026",
+      "where": "DE0463 item14 indent",
+      "note": "Could be 2026-08-07 (dd/mm) or 2026-07-08 (m/d). Assumed m/d/yyyy per surrounding rows."
+    },
+    {
+      "type": "JOB_NUMBER_MISMATCH",
+      "where": "DE0463",
+      "note": "File is named DE0463 but Work Order No. cell says 'DE0455-01'. DE0455-01/02/03 are also the QAP numbers in the docx. Need DESPL to confirm: is DE0455 the client order and DE0463/DE0467 the internal job numbers?"
+    },
+    {
+      "type": "UNLABELLED_BLOCK",
+      "where": "DE0463 block 1",
+      "note": "4 items, numbering restarts at 1. Sub-assembly/equipment grouping label was lost in the CSV export (merged cells). Need the label from the original Excel."
+    },
+    {
+      "type": "UNLABELLED_BLOCK",
+      "where": "DE0463 block 2",
+      "note": "16 items, numbering restarts at 1. Sub-assembly/equipment grouping label was lost in the CSV export (merged cells). Need the label from the original Excel."
+    },
+    {
+      "type": "JOB_NUMBER_MISMATCH",
+      "where": "DE0467",
+      "note": "File is named DE0467 but Work Order No. cell says 'DE0455-01'. DE0455-01/02/03 are also the QAP numbers in the docx. Need DESPL to confirm: is DE0455 the client order and DE0463/DE0467 the internal job numbers?"
+    },
+    {
+      "type": "UNLABELLED_BLOCK",
+      "where": "DE0467 block 1",
+      "note": "25 items, numbering restarts at 1. Sub-assembly/equipment grouping label was lost in the CSV export (merged cells). Need the label from the original Excel."
+    },
+    {
+      "type": "UNLABELLED_BLOCK",
+      "where": "DE0467 block 2",
+      "note": "4 items, numbering restarts at 1. Sub-assembly/equipment grouping label was lost in the CSV export (merged cells). Need the label from the original Excel."
+    },
+    {
+      "type": "UNLABELLED_BLOCK",
+      "where": "DE0467 block 3",
+      "note": "5 items, numbering restarts at 1. Sub-assembly/equipment grouping label was lost in the CSV export (merged cells). Need the label from the original Excel."
+    },
+    {
+      "type": "FIELD_MISUSE",
+      "where": "both files, 'Material Identification' column",
+      "note": "Contains In-house / Outsource / N/A - that is a sourcing Type, not a traceability record. Traceability needs heat number + MTC ref. Confirm intent with QC."
+    },
+    {
+      "type": "NO_PLANNED_DATES",
+      "where": "both files",
+      "note": "Only actual Start/End captured. There is nothing to be late against - this is exactly the gap the lead-time engine fills."
+    },
+    {
+      "type": "NO_OWNER",
+      "where": "both files",
+      "note": "No department or person is attached to any row, so no one can be notified. Ownership comes from the lead-time model's defaultDepartment."
+    }
+  ]
+}

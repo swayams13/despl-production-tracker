@@ -1,0 +1,1222 @@
+{
+  "$schema": "despl.leadtime.v1",
+  "source": "Lead Time.pdf (DESPL, received 11 Aug 2026)",
+  "spine": "36-process lead time list (master; 25-stage work order = reporting view)",
+  "totalLeadTimePrinted": "~17 Weeks",
+  "calendarBasis": {
+    "value": "CALENDAR_DAYS_6DAY_WEEK",
+    "weekOff": [
+      "SUN"
+    ],
+    "TODO": "CONFIRM WITH SJ: are the printed 'Days' working days or calendar days? Holidays list required."
+  },
+  "durationPolicy": {
+    "mode": "FIXED_BASELINE_EDITABLE_PER_PROJECT",
+    "note": "Baseline seeds every project; planner may override any process duration per project with a mandatory reason, logged to audit."
+  },
+  "departments": [
+    {
+      "code": "PROJECTS",
+      "name": "Projects / PMO",
+      "scope": "Order review, kick-off, client interface"
+    },
+    {
+      "code": "ENGINEERING",
+      "name": "Design & Detail Engineering",
+      "scope": "Design calculation, drawings, client approval cycle"
+    },
+    {
+      "code": "PLANNING",
+      "name": "Planning / PPC",
+      "scope": "BOM & MTO, cutting plan, schedule ownership"
+    },
+    {
+      "code": "PROCUREMENT",
+      "name": "Procurement",
+      "scope": "Plates, pipes/forgings/fittings, bought-out items"
+    },
+    {
+      "code": "STORES",
+      "name": "Stores",
+      "scope": "Material receipt, GRN, issue to shop"
+    },
+    {
+      "code": "QC",
+      "name": "Quality Control / QA",
+      "scope": "Incoming inspection, traceability, NDE, hydro, final inspection, name plate"
+    },
+    {
+      "code": "FABRICATION_PREP",
+      "name": "Fabrication Prep",
+      "scope": "Cutting, blanking, forming, rolling, dishing"
+    },
+    {
+      "code": "MACHINE_SHOP",
+      "name": "Machine Shop",
+      "scope": "Flange, dish-end, nozzle machining"
+    },
+    {
+      "code": "FABRICATION",
+      "name": "Fabrication / Welding",
+      "scope": "Fit-up, welding, assembly, attachments"
+    },
+    {
+      "code": "HEAT_TREATMENT",
+      "name": "Heat Treatment",
+      "scope": "PWHT, furnace, charts"
+    },
+    {
+      "code": "SURFACE_PAINT",
+      "name": "Surface Treatment & Painting",
+      "scope": "Blasting, surface prep, painting, DFT"
+    },
+    {
+      "code": "DOCUMENTATION",
+      "name": "Documentation / MDR",
+      "scope": "MDR compilation, certificates"
+    },
+    {
+      "code": "DISPATCH",
+      "name": "Dispatch & Logistics",
+      "scope": "Packing, preservation, dispatch clearance, loading"
+    }
+  ],
+  "processes": [
+    {
+      "code": 1,
+      "name": "PO Receipt & Order Review",
+      "mainActivities": "PO review, scope, technical specification, drawings, delivery requirement, commercial conditions",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 2
+      },
+      "cumulativePrinted": "1-2 Days",
+      "predecessors": [],
+      "defaultDepartment": "PROJECTS",
+      "workOrderStages": [
+        1
+      ],
+      "envelope": {
+        "finishByMinDays": 1,
+        "finishByMaxDays": 2,
+        "startByMinDays": 0,
+        "startByMaxDays": 0
+      },
+      "edges": []
+    },
+    {
+      "code": 2,
+      "name": "Kick-Off / Pre-Inspection Meeting",
+      "mainActivities": "Internal kick-off, client/PIM, QCP/ITP finalization, responsibility matrix",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 3
+      },
+      "cumulativePrinted": "3-5 Days",
+      "predecessors": [
+        1
+      ],
+      "defaultDepartment": "PROJECTS",
+      "workOrderStages": [
+        1
+      ],
+      "envelope": {
+        "finishByMinDays": 3,
+        "finishByMaxDays": 5,
+        "startByMinDays": 1,
+        "startByMaxDays": 2
+      },
+      "edges": [
+        {
+          "predecessor": 1,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 3,
+      "name": "Engineering - Design Calculation",
+      "mainActivities": "Design calculation, PV Elite analysis, nozzle calculation, flange/skirt/support calculation",
+      "durationDays": {
+        "minDays": 5,
+        "maxDays": 10
+      },
+      "cumulativePrinted": "1-2 Weeks",
+      "predecessors": [
+        2
+      ],
+      "defaultDepartment": "ENGINEERING",
+      "workOrderStages": [
+        2
+      ],
+      "envelope": {
+        "finishByMinDays": 7,
+        "finishByMaxDays": 14,
+        "startByMinDays": 2,
+        "startByMaxDays": 4
+      },
+      "edges": [
+        {
+          "predecessor": 2,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -1
+        }
+      ]
+    },
+    {
+      "code": 4,
+      "name": "Engineering - Manufacturing Drawings",
+      "mainActivities": "GA drawing, fabrication drawing, nozzle orientation, support details, weld details",
+      "durationDays": {
+        "minDays": 5,
+        "maxDays": 10
+      },
+      "cumulativePrinted": "2-3 Weeks",
+      "predecessors": [
+        3
+      ],
+      "defaultDepartment": "ENGINEERING",
+      "workOrderStages": [
+        3
+      ],
+      "envelope": {
+        "finishByMinDays": 14,
+        "finishByMaxDays": 21,
+        "startByMinDays": 9,
+        "startByMaxDays": 11
+      },
+      "edges": [
+        {
+          "predecessor": 3,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -3
+        }
+      ]
+    },
+    {
+      "code": 5,
+      "name": "Client Drawing Approval",
+      "mainActivities": "Submission, review, comments, revision and approval",
+      "durationDays": {
+        "minDays": 5,
+        "maxDays": 15
+      },
+      "cumulativePrinted": "3-5 Weeks",
+      "predecessors": [
+        4
+      ],
+      "defaultDepartment": "ENGINEERING",
+      "workOrderStages": [
+        3
+      ],
+      "envelope": {
+        "finishByMinDays": 21,
+        "finishByMaxDays": 35,
+        "startByMinDays": 16,
+        "startByMaxDays": 20
+      },
+      "edges": [
+        {
+          "predecessor": 4,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -1
+        }
+      ]
+    },
+    {
+      "code": 6,
+      "name": "BOM & MTO Finalization",
+      "mainActivities": "BOM, raw-material requirement, cutting plan, bought-out items",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 4
+      },
+      "cumulativePrinted": "3-5 Weeks",
+      "predecessors": [
+        4
+      ],
+      "defaultDepartment": "PLANNING",
+      "workOrderStages": [
+        4
+      ],
+      "derivationNote": "Runs in parallel with P5 (client approval) - both show cumulative 3-5W.",
+      "needsConfirmation": true,
+      "envelope": {
+        "finishByMinDays": 21,
+        "finishByMaxDays": 35,
+        "startByMinDays": 19,
+        "startByMaxDays": 31
+      },
+      "edges": [
+        {
+          "predecessor": 4,
+          "type": "FINISH_TO_START",
+          "lagDays": 10
+        }
+      ]
+    },
+    {
+      "code": 7,
+      "name": "Material Procurement - Plates",
+      "mainActivities": "RFQ, quotation, PO to mill/vendor, manufacturing, inspection, dispatch",
+      "durationDays": {
+        "minDays": 28,
+        "maxDays": 56
+      },
+      "cumulativePrinted": "5-10 Weeks",
+      "predecessors": [
+        3
+      ],
+      "defaultDepartment": "PROCUREMENT",
+      "workOrderStages": [
+        5
+      ],
+      "derivationNote": "Starts after P3 (design calc), NOT after P6 - long-lead plates ordered early. Derived from cumulative 5-10W = P3 cum (1-2W) + 4-8W.",
+      "needsConfirmation": true,
+      "envelope": {
+        "finishByMinDays": 35,
+        "finishByMaxDays": 70,
+        "startByMinDays": 7,
+        "startByMaxDays": 14
+      },
+      "edges": [
+        {
+          "predecessor": 3,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 8,
+      "name": "Material Procurement - Pipes/Forgings/Fittings",
+      "mainActivities": "Shell pipes, nozzles, flanges, forgings, fittings, etc.",
+      "durationDays": {
+        "minDays": 21,
+        "maxDays": 42
+      },
+      "cumulativePrinted": "5-9 Weeks",
+      "predecessors": [
+        4
+      ],
+      "defaultDepartment": "PROCUREMENT",
+      "workOrderStages": [
+        5
+      ],
+      "derivationNote": "Starts after P4 (mfg drawings). Derived from cumulative 5-9W = P4 cum (2-3W) + 3-6W.",
+      "needsConfirmation": true,
+      "envelope": {
+        "finishByMinDays": 35,
+        "finishByMaxDays": 63,
+        "startByMinDays": 14,
+        "startByMaxDays": 21
+      },
+      "edges": [
+        {
+          "predecessor": 4,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 9,
+      "name": "Bought-Out Items Procurement",
+      "mainActivities": "Gaskets, fasteners, valves, instruments, name plate, supports, etc.",
+      "durationDays": {
+        "minDays": 14,
+        "maxDays": 35
+      },
+      "cumulativePrinted": "4-8 Weeks",
+      "predecessors": [
+        4
+      ],
+      "defaultDepartment": "PROCUREMENT",
+      "workOrderStages": [
+        5
+      ],
+      "derivationNote": "Starts after P4 (mfg drawings). Derived from cumulative 4-8W = P4 cum (2-3W) + 2-5W.",
+      "needsConfirmation": true,
+      "envelope": {
+        "finishByMinDays": 28,
+        "finishByMaxDays": 56,
+        "startByMinDays": 14,
+        "startByMaxDays": 21
+      },
+      "edges": [
+        {
+          "predecessor": 4,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 10,
+      "name": "Material Receipt & Incoming Inspection",
+      "mainActivities": "MTC review, PMI, dimensions, visual inspection, heat-number verification",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 3
+      },
+      "cumulativePrinted": "6-10 Weeks",
+      "predecessors": [
+        7,
+        8,
+        9
+      ],
+      "defaultDepartment": "STORES",
+      "workOrderStages": [
+        6
+      ],
+      "envelope": {
+        "finishByMinDays": 42,
+        "finishByMaxDays": 70,
+        "startByMinDays": 41,
+        "startByMaxDays": 67
+      },
+      "edges": [
+        {
+          "predecessor": 7,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -3
+        },
+        {
+          "predecessor": 8,
+          "type": "FINISH_TO_START",
+          "lagDays": 4
+        },
+        {
+          "predecessor": 9,
+          "type": "FINISH_TO_START",
+          "lagDays": 11
+        }
+      ]
+    },
+    {
+      "code": 11,
+      "name": "Material Identification & Traceability",
+      "mainActivities": "Heat-number transfer, marking, material identification report",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 2
+      },
+      "cumulativePrinted": "6-10 Weeks",
+      "predecessors": [
+        10
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        6
+      ],
+      "envelope": {
+        "finishByMinDays": 42,
+        "finishByMaxDays": 70,
+        "startByMinDays": 41,
+        "startByMaxDays": 68
+      },
+      "edges": [
+        {
+          "predecessor": 10,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -2
+        }
+      ]
+    },
+    {
+      "code": 12,
+      "name": "Cutting / Blanking / Petals",
+      "mainActivities": "Plate cutting, shell courses, dished-end blanks, nozzle blanks",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 4
+      },
+      "cumulativePrinted": "7-10 Weeks",
+      "predecessors": [
+        11
+      ],
+      "defaultDepartment": "FABRICATION_PREP",
+      "workOrderStages": [
+        7
+      ],
+      "envelope": {
+        "finishByMinDays": 49,
+        "finishByMaxDays": 70,
+        "startByMinDays": 47,
+        "startByMaxDays": 66
+      },
+      "edges": [
+        {
+          "predecessor": 11,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -4
+        }
+      ]
+    },
+    {
+      "code": 13,
+      "name": "Forming / Rolling / Dishing",
+      "mainActivities": "Shell rolling, dish-end forming, nozzle forming where applicable",
+      "durationDays": {
+        "minDays": 3,
+        "maxDays": 7
+      },
+      "cumulativePrinted": "7-11 Weeks",
+      "predecessors": [
+        12
+      ],
+      "defaultDepartment": "FABRICATION_PREP",
+      "workOrderStages": [
+        8
+      ],
+      "envelope": {
+        "finishByMinDays": 49,
+        "finishByMaxDays": 77,
+        "startByMinDays": 46,
+        "startByMaxDays": 70
+      },
+      "edges": [
+        {
+          "predecessor": 12,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 14,
+      "name": "Machining",
+      "mainActivities": "Flange machining, dish-end machining, nozzle/flange machining",
+      "durationDays": {
+        "minDays": 3,
+        "maxDays": 7
+      },
+      "cumulativePrinted": "8-11 Weeks",
+      "predecessors": [
+        12
+      ],
+      "defaultDepartment": "MACHINE_SHOP",
+      "workOrderStages": [
+        9
+      ],
+      "derivationNote": "Modelled parallel to P13 (forming) - flanges/forgings machine independently of shell rolling.",
+      "needsConfirmation": true,
+      "envelope": {
+        "finishByMinDays": 56,
+        "finishByMaxDays": 77,
+        "startByMinDays": 53,
+        "startByMaxDays": 70
+      },
+      "edges": [
+        {
+          "predecessor": 12,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 15,
+      "name": "Shell Fit-Up",
+      "mainActivities": "Shell course alignment, longitudinal seam fit-up, dimensional inspection",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 4
+      },
+      "cumulativePrinted": "8-11 Weeks",
+      "predecessors": [
+        13,
+        14
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        10
+      ],
+      "envelope": {
+        "finishByMinDays": 56,
+        "finishByMaxDays": 77,
+        "startByMinDays": 54,
+        "startByMaxDays": 73
+      },
+      "edges": [
+        {
+          "predecessor": 13,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -4
+        },
+        {
+          "predecessor": 14,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -4
+        }
+      ]
+    },
+    {
+      "code": 16,
+      "name": "Shell Welding",
+      "mainActivities": "Longitudinal/circumferential welding as per approved WPS",
+      "durationDays": {
+        "minDays": 3,
+        "maxDays": 7
+      },
+      "cumulativePrinted": "8-12 Weeks",
+      "predecessors": [
+        15
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        10
+      ],
+      "envelope": {
+        "finishByMinDays": 56,
+        "finishByMaxDays": 84,
+        "startByMinDays": 53,
+        "startByMaxDays": 77
+      },
+      "edges": [
+        {
+          "predecessor": 15,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 17,
+      "name": "Weld NDE",
+      "mainActivities": "RT/UT/MT/PT as applicable",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 5
+      },
+      "cumulativePrinted": "9-12 Weeks",
+      "predecessors": [
+        16
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        17
+      ],
+      "envelope": {
+        "finishByMinDays": 63,
+        "finishByMaxDays": 84,
+        "startByMinDays": 61,
+        "startByMaxDays": 79
+      },
+      "edges": [
+        {
+          "predecessor": 16,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -5
+        }
+      ]
+    },
+    {
+      "code": 18,
+      "name": "Head/Dish-End Assembly",
+      "mainActivities": "Fit-up, alignment, welding with shell",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 4
+      },
+      "cumulativePrinted": "9-12 Weeks",
+      "predecessors": [
+        17
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        11
+      ],
+      "envelope": {
+        "finishByMinDays": 63,
+        "finishByMaxDays": 84,
+        "startByMinDays": 61,
+        "startByMaxDays": 80
+      },
+      "edges": [
+        {
+          "predecessor": 17,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -4
+        }
+      ]
+    },
+    {
+      "code": 19,
+      "name": "Nozzle Fabrication & Fit-Up",
+      "mainActivities": "Nozzle preparation, orientation, elevation, projection, reinforcement pads",
+      "durationDays": {
+        "minDays": 3,
+        "maxDays": 5
+      },
+      "cumulativePrinted": "10-12 Weeks",
+      "predecessors": [
+        18
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        12,
+        13
+      ],
+      "envelope": {
+        "finishByMinDays": 70,
+        "finishByMaxDays": 84,
+        "startByMinDays": 67,
+        "startByMaxDays": 79
+      },
+      "edges": [
+        {
+          "predecessor": 18,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -5
+        }
+      ]
+    },
+    {
+      "code": 20,
+      "name": "Nozzle Welding",
+      "mainActivities": "Nozzle-to-shell/head welding and inspection",
+      "durationDays": {
+        "minDays": 3,
+        "maxDays": 5
+      },
+      "cumulativePrinted": "10-13 Weeks",
+      "predecessors": [
+        19
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        13
+      ],
+      "envelope": {
+        "finishByMinDays": 70,
+        "finishByMaxDays": 91,
+        "startByMinDays": 67,
+        "startByMaxDays": 86
+      },
+      "edges": [
+        {
+          "predecessor": 19,
+          "type": "FINISH_TO_START",
+          "lagDays": 2
+        }
+      ]
+    },
+    {
+      "code": 21,
+      "name": "PWHT / Heat Treatment",
+      "mainActivities": "If applicable, furnace/local PWHT and chart review",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 5
+      },
+      "cumulativePrinted": "11-13 Weeks",
+      "predecessors": [
+        20
+      ],
+      "defaultDepartment": "HEAT_TREATMENT",
+      "workOrderStages": [
+        18
+      ],
+      "envelope": {
+        "finishByMinDays": 77,
+        "finishByMaxDays": 91,
+        "startByMinDays": 75,
+        "startByMaxDays": 86
+      },
+      "edges": [
+        {
+          "predecessor": 20,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -5
+        }
+      ]
+    },
+    {
+      "code": 22,
+      "name": "NDE After Welding/PWHT",
+      "mainActivities": "RT/UT/MT/PT, hardness testing if applicable",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 5
+      },
+      "cumulativePrinted": "11-13 Weeks",
+      "predecessors": [
+        21
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        17
+      ],
+      "envelope": {
+        "finishByMinDays": 77,
+        "finishByMaxDays": 91,
+        "startByMinDays": 75,
+        "startByMaxDays": 86
+      },
+      "edges": [
+        {
+          "predecessor": 21,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -5
+        }
+      ]
+    },
+    {
+      "code": 23,
+      "name": "Internal & External Attachments",
+      "mainActivities": "Clips, supports, ladders, platforms, lifting lugs, internals, etc.",
+      "durationDays": {
+        "minDays": 3,
+        "maxDays": 7
+      },
+      "cumulativePrinted": "11-14 Weeks",
+      "predecessors": [
+        22
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        14,
+        15
+      ],
+      "envelope": {
+        "finishByMinDays": 77,
+        "finishByMaxDays": 98,
+        "startByMinDays": 74,
+        "startByMaxDays": 91
+      },
+      "edges": [
+        {
+          "predecessor": 22,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 24,
+      "name": "Final Assembly",
+      "mainActivities": "Internal attachments, external attachments, name-plate bracket, support/base ring",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 5
+      },
+      "cumulativePrinted": "12-14 Weeks",
+      "predecessors": [
+        23
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        15
+      ],
+      "envelope": {
+        "finishByMinDays": 84,
+        "finishByMaxDays": 98,
+        "startByMinDays": 82,
+        "startByMaxDays": 93
+      },
+      "edges": [
+        {
+          "predecessor": 23,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -5
+        }
+      ]
+    },
+    {
+      "code": 25,
+      "name": "Final Dimensional Inspection",
+      "mainActivities": "Overall dimensions, roundness, nozzle orientation, projection, centerline",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 2
+      },
+      "cumulativePrinted": "12-14 Weeks",
+      "predecessors": [
+        24
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        16
+      ],
+      "envelope": {
+        "finishByMinDays": 84,
+        "finishByMaxDays": 98,
+        "startByMinDays": 83,
+        "startByMaxDays": 96
+      },
+      "edges": [
+        {
+          "predecessor": 24,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -2
+        }
+      ]
+    },
+    {
+      "code": 26,
+      "name": "Final Visual Inspection",
+      "mainActivities": "Weld visual, surface condition, internal/external inspection",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 1
+      },
+      "cumulativePrinted": "12-14 Weeks",
+      "predecessors": [
+        25
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        16
+      ],
+      "envelope": {
+        "finishByMinDays": 84,
+        "finishByMaxDays": 98,
+        "startByMinDays": 83,
+        "startByMaxDays": 97
+      },
+      "edges": [
+        {
+          "predecessor": 25,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -1
+        }
+      ]
+    },
+    {
+      "code": 27,
+      "name": "Hydrostatic / Pressure Test",
+      "mainActivities": "Hydrotest, pressure holding, inspection, test report",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 2
+      },
+      "cumulativePrinted": "13-14 Weeks",
+      "predecessors": [
+        26
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        19
+      ],
+      "envelope": {
+        "finishByMinDays": 91,
+        "finishByMaxDays": 98,
+        "startByMinDays": 90,
+        "startByMaxDays": 96
+      },
+      "edges": [
+        {
+          "predecessor": 26,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -2
+        }
+      ]
+    },
+    {
+      "code": 28,
+      "name": "Draining & Drying",
+      "mainActivities": "Complete draining, drying and preservation",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 2
+      },
+      "cumulativePrinted": "13-14 Weeks",
+      "predecessors": [
+        27
+      ],
+      "defaultDepartment": "FABRICATION",
+      "workOrderStages": [
+        19
+      ],
+      "envelope": {
+        "finishByMinDays": 91,
+        "finishByMaxDays": 98,
+        "startByMinDays": 90,
+        "startByMaxDays": 96
+      },
+      "edges": [
+        {
+          "predecessor": 27,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -2
+        }
+      ]
+    },
+    {
+      "code": 29,
+      "name": "Surface Preparation",
+      "mainActivities": "Shot blasting / grit blasting, surface profile inspection",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 3
+      },
+      "cumulativePrinted": "13-15 Weeks",
+      "predecessors": [
+        28
+      ],
+      "defaultDepartment": "SURFACE_PAINT",
+      "workOrderStages": [
+        20
+      ],
+      "envelope": {
+        "finishByMinDays": 91,
+        "finishByMaxDays": 105,
+        "startByMinDays": 90,
+        "startByMaxDays": 102
+      },
+      "edges": [
+        {
+          "predecessor": 28,
+          "type": "FINISH_TO_START",
+          "lagDays": 4
+        }
+      ]
+    },
+    {
+      "code": 30,
+      "name": "Painting / Coating",
+      "mainActivities": "Primer, intermediate, topcoat, DFT inspection",
+      "durationDays": {
+        "minDays": 2,
+        "maxDays": 5
+      },
+      "cumulativePrinted": "14-15 Weeks",
+      "predecessors": [
+        29
+      ],
+      "defaultDepartment": "SURFACE_PAINT",
+      "workOrderStages": [
+        21
+      ],
+      "envelope": {
+        "finishByMinDays": 98,
+        "finishByMaxDays": 105,
+        "startByMinDays": 96,
+        "startByMaxDays": 100
+      },
+      "edges": [
+        {
+          "predecessor": 29,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -5
+        }
+      ]
+    },
+    {
+      "code": 31,
+      "name": "Final Inspection",
+      "mainActivities": "Client/TPI final inspection, punch points and clearance",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 3
+      },
+      "cumulativePrinted": "14-16 Weeks",
+      "predecessors": [
+        30
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        22
+      ],
+      "envelope": {
+        "finishByMinDays": 98,
+        "finishByMaxDays": 112,
+        "startByMinDays": 97,
+        "startByMaxDays": 109
+      },
+      "edges": [
+        {
+          "predecessor": 30,
+          "type": "FINISH_TO_START",
+          "lagDays": 4
+        }
+      ]
+    },
+    {
+      "code": 32,
+      "name": "Name Plate & Final Stamping",
+      "mainActivities": "Name plate verification, stamping, attachment",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 1
+      },
+      "cumulativePrinted": "15-16 Weeks",
+      "predecessors": [
+        31
+      ],
+      "defaultDepartment": "QC",
+      "workOrderStages": [
+        22
+      ],
+      "envelope": {
+        "finishByMinDays": 105,
+        "finishByMaxDays": 112,
+        "startByMinDays": 104,
+        "startByMaxDays": 111
+      },
+      "edges": [
+        {
+          "predecessor": 31,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -1
+        }
+      ]
+    },
+    {
+      "code": 33,
+      "name": "MDR / Final Documentation",
+      "mainActivities": "Manufacturing Data Record, MTC, NDE reports, hydrotest, PWHT, calibration, drawings, certificates",
+      "durationDays": {
+        "minDays": 3,
+        "maxDays": 7
+      },
+      "cumulativePrinted": "15-17 Weeks",
+      "predecessors": [
+        32
+      ],
+      "defaultDepartment": "DOCUMENTATION",
+      "workOrderStages": [
+        23
+      ],
+      "envelope": {
+        "finishByMinDays": 105,
+        "finishByMaxDays": 119,
+        "startByMinDays": 102,
+        "startByMaxDays": 112
+      },
+      "edges": [
+        {
+          "predecessor": 32,
+          "type": "FINISH_TO_START",
+          "lagDays": 0
+        }
+      ]
+    },
+    {
+      "code": 34,
+      "name": "Packing & Preservation",
+      "mainActivities": "Packing, flange protection, nozzle protection, lifting arrangement, marking",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 3
+      },
+      "cumulativePrinted": "16-17 Weeks",
+      "predecessors": [
+        32
+      ],
+      "defaultDepartment": "DISPATCH",
+      "workOrderStages": [
+        24
+      ],
+      "derivationNote": "Modelled parallel to P33 (MDR) - packing need not wait for documentation.",
+      "needsConfirmation": true,
+      "envelope": {
+        "finishByMinDays": 112,
+        "finishByMaxDays": 119,
+        "startByMinDays": 111,
+        "startByMaxDays": 116
+      },
+      "edges": [
+        {
+          "predecessor": 32,
+          "type": "FINISH_TO_START",
+          "lagDays": 4
+        }
+      ]
+    },
+    {
+      "code": 35,
+      "name": "Dispatch Clearance",
+      "mainActivities": "Dispatch inspection, documentation clearance, invoice/e-way bill, transport arrangement",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 2
+      },
+      "cumulativePrinted": "17 Weeks",
+      "predecessors": [
+        33,
+        34
+      ],
+      "defaultDepartment": "DISPATCH",
+      "workOrderStages": [
+        25
+      ],
+      "envelope": {
+        "finishByMinDays": 119,
+        "finishByMaxDays": 119,
+        "startByMinDays": 118,
+        "startByMaxDays": 117
+      },
+      "edges": [
+        {
+          "predecessor": 33,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -2
+        },
+        {
+          "predecessor": 34,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -2
+        }
+      ]
+    },
+    {
+      "code": 36,
+      "name": "Dispatch",
+      "mainActivities": "Loading, securing and dispatch to site",
+      "durationDays": {
+        "minDays": 1,
+        "maxDays": 1
+      },
+      "cumulativePrinted": "~17 Weeks",
+      "predecessors": [
+        35
+      ],
+      "defaultDepartment": "DISPATCH",
+      "workOrderStages": [
+        25
+      ],
+      "envelope": {
+        "finishByMinDays": 119,
+        "finishByMaxDays": 119,
+        "startByMinDays": 118,
+        "startByMaxDays": 118
+      },
+      "edges": [
+        {
+          "predecessor": 35,
+          "type": "START_TO_START_WITH_OVERLAP",
+          "lagDays": -1
+        }
+      ]
+    }
+  ],
+  "schedulingModel": {
+    "approach": "TWO_LAYER",
+    "layer1_envelope": {
+      "name": "Printed cumulative envelope (authoritative)",
+      "use": "Tentative timeline shown on tender/RFQ upload. Reproduces DESPL's own ~17-week figure exactly.",
+      "rule": "planned_finish[i] = project_start + envelope.finishBy*Days ; planned_start[i] = planned_finish[i] - duration[i]"
+    },
+    "layer2_cpm": {
+      "name": "CPM DAG with fitted lags",
+      "use": "Live replanning when actuals slip, critical-path and float computation, gating enforcement.",
+      "rule": "Edges carry lagDays fitted from the printed table. Negative lag = legitimate concurrent work (start-to-start overlap), not an error.",
+      "seededToMatch": "layer1_envelope"
+    },
+    "findings": [
+      "A strict finish-to-start chain yields 11.6-24 weeks and does NOT reproduce the printed ~17 weeks.",
+      "21 of 36 processes have a negative gap after their predecessor => concurrent fabrication is assumed by the table.",
+      "The printed cumulative column is rounded to whole weeks; overlaps of 1-5 days are largely rounding artifacts, larger ones are real concurrency.",
+      "Therefore the envelope is treated as ground truth and the DAG lags are FITTED to it rather than assumed."
+    ],
+    "openQuestionsForSJ": [
+      "Are the printed 'Days' working days or calendar days? Holiday calendar needed.",
+      "Confirm the concurrency this implies: e.g. nozzle fabrication (P19) running while shell welding/NDE (P16/P17) is still open.",
+      "Confirm procurement start points: plates after design calc (P3), pipes and bought-out after drawings (P4).",
+      "The 17-week total is for a single equipment. Does it hold for 40 units (DE0463) or 5 units across 3 equipments (DE0467)?"
+    ]
+  }
+}

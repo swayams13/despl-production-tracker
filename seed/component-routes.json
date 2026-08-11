@@ -1,0 +1,803 @@
+{
+  "$schema": "despl.componentroutes.v1",
+  "source": "Component- Wise Manufacturing Roting.pdf (DESPL, 11 Aug 2026)",
+  "note": "Route library applied per BOM item based on its component type. Closes the PRD pending input 'per-component fabrication routes'.",
+  "canonicalOperations": {
+    "RECEIPT": {
+      "label": "Receipt",
+      "dept": "STORES",
+      "csvColumn": "Material Received Status",
+      "leadTimeProcess": 10
+    },
+    "MTC_VERIFICATION": {
+      "label": "MTC Verification / Material Identification",
+      "dept": "QC",
+      "csvColumn": "Material Identification",
+      "leadTimeProcess": 11
+    },
+    "CUTTING": {
+      "label": "Cutting / Blanking",
+      "dept": "FABRICATION_PREP",
+      "csvColumn": "Cutting",
+      "leadTimeProcess": 12
+    },
+    "EDGE_PREP": {
+      "label": "Edge Preparation / Beveling",
+      "dept": "FABRICATION_PREP",
+      "csvColumn": null,
+      "leadTimeProcess": 12,
+      "GAP": "No dedicated column in the live CSV - currently folded into Cutting or Set-up. Confirm with production."
+    },
+    "FORMING": {
+      "label": "Rolling / Forming / Pressing / Dishing",
+      "dept": "FABRICATION_PREP",
+      "csvColumn": "Bending",
+      "leadTimeProcess": 13
+    },
+    "MACHINING": {
+      "label": "Machining / Facing / Drilling / Groove",
+      "dept": "MACHINE_SHOP",
+      "csvColumn": "Machining",
+      "leadTimeProcess": 14
+    },
+    "FIT_UP": {
+      "label": "Fit-up / Set-up",
+      "dept": "FABRICATION",
+      "csvColumn": "Set-up",
+      "leadTimeProcess": 15
+    },
+    "WELDING": {
+      "label": "Welding",
+      "dept": "FABRICATION",
+      "csvColumn": "Welding",
+      "leadTimeProcess": 16
+    },
+    "GRINDING": {
+      "label": "Grinding",
+      "dept": "FABRICATION",
+      "csvColumn": null,
+      "leadTimeProcess": 16,
+      "GAP": "No column in live CSV. Confirm whether tracked."
+    },
+    "NDT": {
+      "label": "NDT (RT/UT/PT/MT)",
+      "dept": "QC",
+      "csvColumn": "RT|UT|DP",
+      "leadTimeProcess": 17
+    },
+    "SURFACE_PREP": {
+      "label": "Shot/Glass Bead Blasting, Surface Prep",
+      "dept": "SURFACE_PAINT",
+      "csvColumn": "Shot Blasting",
+      "leadTimeProcess": 29
+    },
+    "PAINTING": {
+      "label": "Painting / Coating / Galvanizing",
+      "dept": "SURFACE_PAINT",
+      "csvColumn": "Painting",
+      "leadTimeProcess": 30
+    },
+    "INSPECTION": {
+      "label": "Dimensional / Visual Inspection",
+      "dept": "QC",
+      "csvColumn": null,
+      "leadTimeProcess": 25,
+      "GAP": "Generic 'Inspection' step in routing doc has no CSV column; QC sign-off is implicit. Needs a real record in the tracker."
+    },
+    "THREADING": {
+      "label": "Threading / Thread Inspection",
+      "dept": "MACHINE_SHOP",
+      "csvColumn": null,
+      "leadTimeProcess": 14
+    },
+    "EXPANSION": {
+      "label": "Tube Expansion",
+      "dept": "FABRICATION",
+      "csvColumn": null,
+      "leadTimeProcess": 23
+    },
+    "ASSEMBLY_CHECK": {
+      "label": "Assembly / Dimension / Cert Check",
+      "dept": "QC",
+      "csvColumn": null,
+      "leadTimeProcess": 10
+    }
+  },
+  "routes": [
+    {
+      "componentType": "PLATE",
+      "printedRoute": "Receipt -> MTC Verification -> Cutting -> Edge Preparation -> Rolling/Forming -> Fit-up -> Welding -> RT/UT -> Grinding -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "MTC Verification",
+          "operation": "MTC_VERIFICATION"
+        },
+        {
+          "seq": 3,
+          "printed": "Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 4,
+          "printed": "Edge Preparation",
+          "operation": "EDGE_PREP"
+        },
+        {
+          "seq": 5,
+          "printed": "Rolling/Forming",
+          "operation": "FORMING"
+        },
+        {
+          "seq": 6,
+          "printed": "Fit-up",
+          "operation": "FIT_UP"
+        },
+        {
+          "seq": 7,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 8,
+          "printed": "RT/UT",
+          "operation": "NDT"
+        },
+        {
+          "seq": 9,
+          "printed": "Grinding",
+          "operation": "GRINDING"
+        },
+        {
+          "seq": 10,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "PIPE",
+      "printedRoute": "Receipt -> Cutting -> Beveling -> Fit-up -> Welding -> RT/PT -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 3,
+          "printed": "Beveling",
+          "operation": "EDGE_PREP"
+        },
+        {
+          "seq": 4,
+          "printed": "Fit-up",
+          "operation": "FIT_UP"
+        },
+        {
+          "seq": 5,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 6,
+          "printed": "RT/PT",
+          "operation": "NDT"
+        },
+        {
+          "seq": 7,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "ELBOW",
+      "printedRoute": "Receipt -> Inspection -> Beveling -> Fit-up -> Welding",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        },
+        {
+          "seq": 3,
+          "printed": "Beveling",
+          "operation": "EDGE_PREP"
+        },
+        {
+          "seq": 4,
+          "printed": "Fit-up",
+          "operation": "FIT_UP"
+        },
+        {
+          "seq": 5,
+          "printed": "Welding",
+          "operation": "WELDING"
+        }
+      ]
+    },
+    {
+      "componentType": "TEE",
+      "printedRoute": "Receipt -> Inspection -> Bevel -> Fit-up -> Welding",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        },
+        {
+          "seq": 3,
+          "printed": "Bevel",
+          "operation": "EDGE_PREP"
+        },
+        {
+          "seq": 4,
+          "printed": "Fit-up",
+          "operation": "FIT_UP"
+        },
+        {
+          "seq": 5,
+          "printed": "Welding",
+          "operation": "WELDING"
+        }
+      ]
+    },
+    {
+      "componentType": "REDUCER",
+      "printedRoute": "Receipt -> Inspection -> Bevel -> Welding",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        },
+        {
+          "seq": 3,
+          "printed": "Bevel",
+          "operation": "EDGE_PREP"
+        },
+        {
+          "seq": 4,
+          "printed": "Welding",
+          "operation": "WELDING"
+        }
+      ]
+    },
+    {
+      "componentType": "FLANGE",
+      "printedRoute": "Receipt -> Machining -> Facing -> Drilling -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Machining",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 3,
+          "printed": "Facing",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 4,
+          "printed": "Drilling",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 5,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "FORGING",
+      "printedRoute": "Receipt -> Machining -> NDT -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Machining",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 3,
+          "printed": "NDT",
+          "operation": "NDT"
+        },
+        {
+          "seq": 4,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "TUBE",
+      "printedRoute": "Receipt -> Cutting -> Expansion -> Welding (if applicable) -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 3,
+          "printed": "Expansion",
+          "operation": "EXPANSION"
+        },
+        {
+          "seq": 4,
+          "printed": "Welding (if applicable)",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 5,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "TUBE_SHEET",
+      "printedRoute": "Receipt -> CNC Drilling -> Machining -> Groove -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "CNC Drilling",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 3,
+          "printed": "Machining",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 4,
+          "printed": "Groove",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 5,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "DISHED_END",
+      "printedRoute": "Plate Cutting -> Pressing/Spinning -> Trimming -> NDT -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Plate Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Pressing/Spinning",
+          "operation": "FORMING"
+        },
+        {
+          "seq": 3,
+          "printed": "Trimming",
+          "operation": "FORMING"
+        },
+        {
+          "seq": 4,
+          "printed": "NDT",
+          "operation": "NDT"
+        },
+        {
+          "seq": 5,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "CONE",
+      "printedRoute": "Plate Cutting -> Rolling -> Fit-up -> Welding -> RT",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Plate Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Rolling",
+          "operation": "FORMING"
+        },
+        {
+          "seq": 3,
+          "printed": "Fit-up",
+          "operation": "FIT_UP"
+        },
+        {
+          "seq": 4,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 5,
+          "printed": "RT",
+          "operation": "NDT"
+        }
+      ]
+    },
+    {
+      "componentType": "SADDLE",
+      "printedRoute": "Plate Cutting -> Forming -> Welding -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Plate Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Forming",
+          "operation": "FORMING"
+        },
+        {
+          "seq": 3,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 4,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "SKIRT",
+      "printedRoute": "Plate Rolling -> Welding -> Machining -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Plate Rolling",
+          "operation": "FORMING"
+        },
+        {
+          "seq": 2,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 3,
+          "printed": "Machining",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 4,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "LUG",
+      "printedRoute": "Plate Cutting -> Machining -> Welding",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Plate Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Machining",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 3,
+          "printed": "Welding",
+          "operation": "WELDING"
+        }
+      ]
+    },
+    {
+      "componentType": "PAD",
+      "printedRoute": "Cutting -> Grinding -> Welding",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Grinding",
+          "operation": "GRINDING"
+        },
+        {
+          "seq": 3,
+          "printed": "Welding",
+          "operation": "WELDING"
+        }
+      ]
+    },
+    {
+      "componentType": "FASTENER",
+      "printedRoute": "Receipt -> MTC Verification -> Dimension Check -> Thread Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "MTC Verification",
+          "operation": "MTC_VERIFICATION"
+        },
+        {
+          "seq": 3,
+          "printed": "Dimension Check",
+          "operation": "INSPECTION"
+        },
+        {
+          "seq": 4,
+          "printed": "Thread Inspection",
+          "operation": "THREADING"
+        }
+      ]
+    },
+    {
+      "componentType": "PLUG",
+      "printedRoute": "Machining -> Threading -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Machining",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 2,
+          "printed": "Threading",
+          "operation": "THREADING"
+        },
+        {
+          "seq": 3,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "NIPPLE",
+      "printedRoute": "Pipe Cutting -> Threading/Beveling -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Pipe Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Threading/Beveling",
+          "operation": "THREADING"
+        },
+        {
+          "seq": 3,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "UNION",
+      "printedRoute": "Receipt -> Inspection -> Assembly Check",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        },
+        {
+          "seq": 3,
+          "printed": "Assembly Check",
+          "operation": "ASSEMBLY_CHECK"
+        }
+      ]
+    },
+    {
+      "componentType": "COUPLING",
+      "printedRoute": "Receipt -> Thread Inspection -> Dimension Check",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Thread Inspection",
+          "operation": "THREADING"
+        },
+        {
+          "seq": 3,
+          "printed": "Dimension Check",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "VALVE",
+      "printedRoute": "Receipt -> Hydro Test Certificate Verification -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Hydro Test Certificate Verification",
+          "operation": "ASSEMBLY_CHECK"
+        },
+        {
+          "seq": 3,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "GASKET",
+      "printedRoute": "Receipt -> Material Verification -> Dimension Check",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Receipt",
+          "operation": "RECEIPT"
+        },
+        {
+          "seq": 2,
+          "printed": "Material Verification",
+          "operation": "MTC_VERIFICATION"
+        },
+        {
+          "seq": 3,
+          "printed": "Dimension Check",
+          "operation": "INSPECTION"
+        }
+      ]
+    },
+    {
+      "componentType": "STRUCTURAL_STEEL",
+      "printedRoute": "Cutting -> Drilling -> Welding -> Painting",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Drilling",
+          "operation": "MACHINING"
+        },
+        {
+          "seq": 3,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 4,
+          "printed": "Painting",
+          "operation": "PAINTING"
+        }
+      ]
+    },
+    {
+      "componentType": "PLATFORM",
+      "printedRoute": "Cutting -> Fabrication -> Welding -> Galvanizing/Painting",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Fabrication",
+          "operation": "FIT_UP"
+        },
+        {
+          "seq": 3,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 4,
+          "printed": "Galvanizing/Painting",
+          "operation": "PAINTING"
+        }
+      ]
+    },
+    {
+      "componentType": "LADDER",
+      "printedRoute": "Cutting -> Fabrication -> Welding -> Inspection",
+      "operations": [
+        {
+          "seq": 1,
+          "printed": "Cutting",
+          "operation": "CUTTING"
+        },
+        {
+          "seq": 2,
+          "printed": "Fabrication",
+          "operation": "FIT_UP"
+        },
+        {
+          "seq": 3,
+          "printed": "Welding",
+          "operation": "WELDING"
+        },
+        {
+          "seq": 4,
+          "printed": "Inspection",
+          "operation": "INSPECTION"
+        }
+      ]
+    }
+  ],
+  "TODO_FOR_DESPL": [
+    "Confirm component-type classification rules for BOM lines (auto-classify by Part Name keyword, or manual per item?).",
+    "Edge Preparation, Grinding and generic Inspection have no column in the live tracker - confirm whether they should be tracked as their own steps.",
+    "Routing doc has no route for: Name Plate, Paint (consumable), Blasting service lines that appear as BOM items in DE0463."
+  ]
+}

@@ -1,0 +1,1478 @@
+{
+  "$schema": "despl.qcp.v1",
+  "model": {
+    "dynamicParties": true,
+    "explanation": "Each project declares its own inspection parties. Every checkpoint carries one code PER PARTY.",
+    "observedPartySets": [
+      {
+        "job": "DESPL-320 (HP Air Receiver)",
+        "parties": [
+          "DESPL",
+          "BUYER_TPI"
+        ],
+        "source": "QCP DESPL 320-SR-01 to 09.pdf"
+      },
+      {
+        "job": "DE0455-03 Suction Air Vessel",
+        "parties": [
+          "DESPL",
+          "CLIENT_TPI"
+        ],
+        "source": "production process_work flow.1.docx T2"
+      },
+      {
+        "job": "DE0455-02 / DE0455-01 Piping",
+        "parties": [
+          "DESPL",
+          "CLIENT_TPI"
+        ],
+        "source": "docx T4/T6"
+      },
+      {
+        "job": "ASME U-stamp scope",
+        "parties": [
+          "DESPL",
+          "AI"
+        ],
+        "source": "docx T7",
+        "note": "AI = Authorized Inspector"
+      },
+      {
+        "job": "DE0398001 Ammonia Vaporizer",
+        "parties": [
+          "DESPL",
+          "CLIENT_TPI"
+        ],
+        "source": "docx T9"
+      },
+      {
+        "job": "Heat Exchanger",
+        "parties": [
+          "DESPL",
+          "BUSCI_TPI",
+          "EIL_TPIA"
+        ],
+        "source": "docx T10",
+        "note": "THREE parties - drives the dynamic model"
+      }
+    ],
+    "codes": {
+      "P": {
+        "label": "Perform",
+        "blocksCompletion": false,
+        "requiresCall": false,
+        "desc": "Party performs the activity and records it."
+      },
+      "W": {
+        "label": "Witness",
+        "blocksCompletion": false,
+        "requiresCall": true,
+        "waivable": true,
+        "desc": "Party must be invited. Work may proceed if the party does not attend after notice, but the waiver needs Production Head approval and is audited."
+      },
+      "H": {
+        "label": "Hold",
+        "blocksCompletion": true,
+        "requiresCall": true,
+        "waivable": false,
+        "desc": "Work CANNOT proceed past this point until the party clears it. Hard block."
+      },
+      "R": {
+        "label": "Review",
+        "blocksCompletion": false,
+        "requiresCall": false,
+        "desc": "Document review only; no physical attendance."
+      },
+      "RW": {
+        "label": "Review + Witness",
+        "blocksCompletion": false,
+        "requiresCall": true,
+        "waivable": true,
+        "TODO": "CONFIRM WITH QC: treat as W for blocking purposes? Appears in the heat exchanger and Ammonia Vaporizer QAPs."
+      },
+      "R&A": {
+        "label": "Review & Approve",
+        "blocksCompletion": true,
+        "requiresCall": false,
+        "TODO": "CONFIRM WITH QC: assumed blocking because approval is required before proceeding. Appears in the EIL/TPIA QAP."
+      }
+    },
+    "callTracking": {
+      "fields": [
+        "inspectionCallGivenOn",
+        "inspectionCallAttendedOn"
+      ],
+      "note": "Present in QCP DESPL-320. QC records these on the TPI's behalf in v1 (TPI login is Phase 2)."
+    }
+  },
+  "template": {
+    "job": "DESPL-320-01 to 09",
+    "vessel": "HP AIR RECEIVER",
+    "revision": 0,
+    "designCode": "ASME SEC VIII DIV 1 Edition 2021",
+    "parties": [
+      "DESPL",
+      "BUYER_TPI"
+    ],
+    "items": [
+      {
+        "srNo": "1",
+        "kind": "SECTION",
+        "activity": "DOCUMENTS CONTROL",
+        "section": "1"
+      },
+      {
+        "srNo": "1.1",
+        "kind": "CHECKPOINT",
+        "section": "1",
+        "activity": "DRAWING APPROVAL",
+        "characteristic": "DESIGN AS PER CODE, PO SPECIFICATION",
+        "extentOfCheck": "--",
+        "applicableDocument": "GA DRAWING",
+        "acceptanceCriteria": "ASME SEC VIII DIV 1 As Per 2021 Edition",
+        "record": "APPROVAL OF DRAWING",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          1,
+          2
+        ]
+      },
+      {
+        "srNo": "1.2",
+        "kind": "CHECKPOINT",
+        "section": "1",
+        "activity": "REVIEW AND APPROVAL OF QUALITY CONTOL PLAN",
+        "characteristic": "INDICATION OF HOLD, WITNESS & REVIEW POINTS",
+        "extentOfCheck": "--",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "QCP",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          1,
+          2
+        ]
+      },
+      {
+        "srNo": "1.3",
+        "kind": "CHECKPOINT",
+        "section": "1",
+        "activity": "HOT FORMING PROCEUDE, HT PROCEDURE, RT PROCEDURE, PT PROCEDURE, PAUT & TOFD PROCEDURE",
+        "characteristic": "INDICATION OF HOLD, WITNESS & REVIEW POINTS",
+        "extentOfCheck": "--",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "PROCEDURE",
+        "codes": {
+          "DESPL": "H",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          1,
+          2
+        ]
+      },
+      {
+        "srNo": "2",
+        "kind": "SECTION",
+        "activity": "WELDING QUALIFICATION",
+        "section": "2"
+      },
+      {
+        "srNo": "2.1",
+        "kind": "CHECKPOINT",
+        "section": "2",
+        "activity": "WELDING PROCEDURE & PERFORMANCE QUALIFICATION",
+        "characteristic": "WELDING PARAMETERS / QUALIFICATION REQUIREMENTS",
+        "extentOfCheck": "--",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME SEC IX",
+        "record": "WPQ, WPS & PQR",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          2
+        ]
+      },
+      {
+        "srNo": "3",
+        "kind": "SECTION",
+        "activity": "MATERIAL INSPECTION (IDENTIFICATION)",
+        "section": "3"
+      },
+      {
+        "srNo": "3.1",
+        "kind": "CHECKPOINT",
+        "section": "3",
+        "activity": "PRESSURE PART - PLATES,PIPES/FORGINGS/FLANGE/ FITTINGS",
+        "characteristic": "MATEIAL TYPE: NORMALIZED FINE GRAIN FULLY KILLED CHEMICAL, MECHANICAL TEST and IMPACT TEST (ISO -V-NOTCH ) AT TEMPERATURE -20\u00b0 C NDT -ULTRASONIC TEST VISUAL, DIMENSIONS, CO- RELATION OF MARKINGS WITH TEST CERTIFICATES. IDENTIFICATION & ALLOCATION",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME SEC II PART A + APPROVED DRAWING & ASTM A 516 Gr. 485 CEV .(\u2264 0.43%) For \u2264 25mm Thk, CEV .(\u2264 0.45%) For >25mm Thk & C \u2264 0.23% Impact test : Avg. & Min. 27 J at -20\u00b0C UT Plate : ASTM A 578 Level-B, S1 (Thk\u226520mm ) UT on Forging / Falnges : ASTM A 388 , 3mm FBH",
+        "record": "MILL TEST CERTIFICATES / MATERIAL IDENTIFICATION REPORT",
+        "codes": {
+          "DESPL": "H",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          10,
+          11
+        ]
+      },
+      {
+        "srNo": "3.2",
+        "kind": "CHECKPOINT",
+        "section": "3",
+        "activity": "NON PRESSURE PARTS & ATTACHMENT TO PRESSURE PARTS",
+        "characteristic": "MATEIAL TYPE: NORMALIZED FULLY KILLED CHEMICAL, MECHANICAL TEST NDT -ULTRASONIC TEST VISUAL, DIMENSIONS,",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME SEC II PART A + APPROVED DRAWING UT Plate : ASTM A 578 Level-B, S1 (Thk\u226520mm)",
+        "record": "MILL/LAB CERTIFICATES / MATERIAL IDENTIFICATION REPORT",
+        "codes": {
+          "DESPL": "H",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          10,
+          11
+        ]
+      },
+      {
+        "srNo": "3.3",
+        "kind": "CHECKPOINT",
+        "section": "3",
+        "activity": "WELDING CONSUMABLE",
+        "characteristic": "BATCH NO/TEST CERTIFICATE",
+        "extentOfCheck": "100%",
+        "applicableDocument": "ASME SEC II PART C",
+        "acceptanceCriteria": "ASME SEC II PART C",
+        "record": "BATCH CERTIFICATE",
+        "codes": {
+          "DESPL": "R",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          10,
+          11
+        ]
+      },
+      {
+        "srNo": "3.4",
+        "kind": "CHECKPOINT",
+        "section": "3",
+        "activity": "WELD PLAN/WELD MAP",
+        "characteristic": "WELD PLAN",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "WELD MAP",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          10,
+          11
+        ]
+      },
+      {
+        "srNo": "4",
+        "kind": "SECTION",
+        "activity": "INSPECTION DURING FABRICATION",
+        "section": "4"
+      },
+      {
+        "srNo": "4.1",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "TRANSFER OF MARKING AND CUTTING (SHELL AND DISHED END)",
+        "characteristic": "DIMENSIONS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "-",
+        "codes": {
+          "DESPL": "H",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.2",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "INSPECTION OF TOP & BOTTOM DISHED",
+        "characteristic": "VISUAL, DIMENSIONS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "R",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.2",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "SIMULATION HEAT TREATMENT OF TEST COUPON AFTER FORMING & TESTING",
+        "characteristic": "FURNACE CALIBRATION,HT CHART",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING/PROCEDURE",
+        "acceptanceCriteria": "ASME SEC II PART A + ASME SEC VIII DIV 1 +APPROVED DRAWING",
+        "record": "MTC REPORT",
+        "codes": {
+          "DESPL": "R",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.4",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD EDGE PREPARATION OF TOP & BOTTOM DISHED END",
+        "characteristic": "VISUAL/DEGREE/LPT",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.5",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "SHELL WELD EDGE PREPARATION",
+        "characteristic": "VISUAL/DEGREE/LPT",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.5",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "L' SEAM SET UP OF SHELL (LS-1 ) ALONG WITH PTC",
+        "characteristic": "LENGTH, CIRCUMFERENCE, PROFILE, WELD EDGE PREPARATION, OFFSET, FLATNESS, VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.5",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD LONG SEAM OF SHELL (LS-1 )",
+        "characteristic": "BACK CHIP AND LPT OF 1ST SIDE WELD",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "PT PROCEDURE",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.5",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD VISUAL OF LS-1",
+        "characteristic": "WELD SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME Sec VIII Div. I UG-97",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.5",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "PAUT/TOFD OF LS-1",
+        "characteristic": "JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "ASME SEC V Art. 4, UT Procedure",
+        "acceptanceCriteria": "ASME SEC VIII Div. I",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.6",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "NOZZLE TO FLANGE/ELBOW SET UP (M1/N2/N3)",
+        "characteristic": "WELD EDGE PREPARATION, ROOT GAP, OFFSET, VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.6",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD OF NOZZLE TO FLANGE/ELBOW (M1/N2/N3)",
+        "characteristic": "FPW ROOT RUN BY GTAW",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPOVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.6",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD VISUAL OF CS JOINT NOZZLE M1/N2/N3",
+        "characteristic": "WELD SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME Sec VIII Div. I UG-97",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.6",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "RT CIRC SEAM OF NOZZLE PIPE TO FLANGE (M1/N2/N3)",
+        "characteristic": "JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "RT PROCEDURE",
+        "acceptanceCriteria": "ASME SEC VIII Div. I, UW-51",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.7",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "BOTTOM DISHED END TO SHELL SET UP (CS-2)",
+        "characteristic": "DIMENSION, ORIENTATION, PROFILE, WELD EDGE PREPARATION, OFFSET, VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.7",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD CIRC SEAM OF BOTTOM DISHEND TO SHELL (CS-2)",
+        "characteristic": "BACK CHIP AND LPT OF 1ST SIDE WELD",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "PT PROCEDURE",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.7",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD VISUAL OF CS -2",
+        "characteristic": "WELD SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME Sec VIII Div. I, UG-97",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.7",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "PAUT/TOFD OF CS-2",
+        "characteristic": "JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "PAUT & TOFD PROCEDURE",
+        "acceptanceCriteria": "ASME SEC VIII Div. I",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.8",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "MARKING FOR NOZZLE ON SHELL AND DISHED END (M1, N1 TO N6)",
+        "characteristic": "ORIENTATION,VISUAL/ DIMENSIONAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPOVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.8",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "NOZZLE TO SHELL & DISHED END SET UP (M1/N1/N2/N3/N4/N5/N6)",
+        "characteristic": "ORIENTATION, DIMENSION, SUPPORTS, VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.8",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD OF NOZZLE TO SHELL & DISHED END (M1/N1/N2/N3/N4/N5/N6)",
+        "characteristic": "WELD SIZE, VISUAL, LPT",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPOVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.8",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD VISUAL OF NOZZLE TO SHELL & DISHED END (M1/N1/N2/N3/N4/N5/N6)",
+        "characteristic": "WELD SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME Sec VIII Div. I UG-97",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.8",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "ULTRASONIC TEST OF NOZZLE TO SHELL & DISHED END (M1/N1/N2/N3)",
+        "characteristic": "JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "PAUT & TOFD PROCEDURE",
+        "acceptanceCriteria": "ASME SEC VIII Div. I",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.9",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "CLEARANCE OF SHELL BEFORE CLOSING DISHED END SET UP",
+        "characteristic": "WELD FILLET SIZE, INSIDE FLUSH GRIND, NDE CLEARANCE, VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "RT,UT TEST REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.10",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "TOP DISHED END TO SHELL SET UP (CS- 1)",
+        "characteristic": "DIMENSION, ORIENTATION, PROFILE, WELD EDGE PREPARATION, OFFSET, VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.10",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD CIRC SEAM OF TOP DISHEND TO SHELL (CS-1)",
+        "characteristic": "BACK CHIP AND LPT OF 1ST SIDE WELD",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "PT PROCEDURE",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.10",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD VISUAL OF CS -1",
+        "characteristic": "WELD SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME Sec VIII Div. I UG-97",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.10",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "PAUT/TOFD OF CS-1",
+        "characteristic": "JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "PAUT & TOFD PROCEDURE",
+        "acceptanceCriteria": "ASME SEC VIII Div. I",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.11",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "LIFTING LUG & NAME PLATE BRACKET SET UP",
+        "characteristic": "DIMENSION, ORIENTATION, WELD EDGE PREPARATION, OFFSET, VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.12",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD OF LIFTING LUG",
+        "characteristic": "WELD SIZE / VISUAL & MPT",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "MPT PROCEDURE & ACCEPTANCE ACCORDING TO ASME SEC-8 Div-1 App-6",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.12",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD OF NAME PLATE BRACKET",
+        "characteristic": "WELD SIZE / VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "VT PROCEDURE",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.13",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "SKIRT SUPPORT SET UP",
+        "characteristic": "DIMENSION & VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.14",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "WELD SKIRT SUPPORT",
+        "characteristic": "WELD SIZE / VISUAL & MPT",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "MPT PROCEDURE & ACCEPTANCE ACCORDING TO ASME SEC-8 Div-1 App-6",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "4.15",
+        "kind": "CHECKPOINT",
+        "section": "4",
+        "activity": "CLEARANCE BEFOR PWHT",
+        "characteristic": "FINAL VISUAL ,DIMENSION & NDE REPORT",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ]
+      },
+      {
+        "srNo": "5",
+        "kind": "SECTION",
+        "activity": "PWHT",
+        "section": "5"
+      },
+      {
+        "srNo": "5.1",
+        "kind": "CHECKPOINT",
+        "section": "5",
+        "activity": "INSPECTION OF VESSEL HEAT TREATMENT",
+        "characteristic": "FURNACE CALIBRATION",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING/PROCEDURE",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "R",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          21,
+          22
+        ]
+      },
+      {
+        "srNo": "5.2",
+        "kind": "CHECKPOINT",
+        "section": "5",
+        "activity": "WELD VISUAL OF ALL WELD JOINTS",
+        "characteristic": "WELD SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "ASME Sec VIII Div. I UG-97",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          21,
+          22
+        ]
+      },
+      {
+        "srNo": "5.3",
+        "kind": "CHECKPOINT",
+        "section": "5",
+        "activity": "MPT OF ALL WELD JOINT",
+        "characteristic": "JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "ASME SEC V Art. 7, MPT Procedure",
+        "acceptanceCriteria": "ASME SEC VIII Div. I, App. 6",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          21,
+          22
+        ]
+      },
+      {
+        "srNo": "5.4",
+        "kind": "CHECKPOINT",
+        "section": "5",
+        "activity": "RT TESTING ON ALL BUTT WELD JOINTS(M1/N2/N3) PAUT/TOFD FOR L'SEAM & C'SEAM JOINTS. (after PWHT).",
+        "characteristic": "JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "RT PROCEDURE/PHASED ARRAY. PAUT & TOFD PROCEDURE",
+        "acceptanceCriteria": "ASME SEC VIII Div. I/UW-51",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          21,
+          22
+        ]
+      },
+      {
+        "srNo": "6",
+        "kind": "SECTION",
+        "activity": "HYDROSTATIC TEST",
+        "section": "6"
+      },
+      {
+        "srNo": "6.1",
+        "kind": "CHECKPOINT",
+        "section": "6",
+        "activity": "CLEARANCE FOR HYDROSTATIC TEST",
+        "characteristic": "DIMENSION, ORIENTATION, VISUAL, NDE CLERANCE",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING + PROCEDURE",
+        "acceptanceCriteria": "APPROVED DRAWING + ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          27,
+          28
+        ]
+      },
+      {
+        "srNo": "6.2",
+        "kind": "CHECKPOINT",
+        "section": "6",
+        "activity": "BEFORE HYDROSTATIC TEST CLEARANCE",
+        "characteristic": "LAB TEST REPORT MTC & PTC & REVIEW MATERIAL SUMMARY",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING + PROCEDURE",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          27,
+          28
+        ]
+      },
+      {
+        "srNo": "6.3",
+        "kind": "CHECKPOINT",
+        "section": "6",
+        "activity": "HYDROSTATIC TEST",
+        "characteristic": "CALIBRATION OF GAUGES & RANGE",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING + PROCEDURE",
+        "acceptanceCriteria": "ASME SEC VIII DIV 1",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          27,
+          28
+        ]
+      },
+      {
+        "srNo": "6.4",
+        "kind": "CHECKPOINT",
+        "section": "6",
+        "activity": "MPT / LPT ALL WELD JOINTS AFTER HYDRO TEST",
+        "characteristic": "WHERE EVER MPT IS NOT ACCESSABLE LPT SHALL BE PERFORMED FOR JOINT SOUNDNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "MPT/LPT PROCEDURE",
+        "acceptanceCriteria": "MPT/LPT PROCEDURE & ACCEPTANCE AS PER ASME SEC. VIII DIV-1 , App 6 &8",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          27,
+          28
+        ]
+      },
+      {
+        "srNo": "7",
+        "kind": "SECTION",
+        "activity": "PAINTING",
+        "section": "7"
+      },
+      {
+        "srNo": "7.1",
+        "kind": "CHECKPOINT",
+        "section": "7",
+        "activity": "CLEANING & SURFACE PREPARATION",
+        "characteristic": "CLEANING & VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING/ PAINTING SPECIFICATION",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          29,
+          30
+        ]
+      },
+      {
+        "srNo": "7.2",
+        "kind": "CHECKPOINT",
+        "section": "7",
+        "activity": "PAINTING",
+        "characteristic": "VISUAL & COATING THICKNESS",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING/ PAINTING SPECIFICATION",
+        "record": "INSPECTION REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "W"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          29,
+          30
+        ]
+      },
+      {
+        "srNo": "8",
+        "kind": "SECTION",
+        "activity": "FINAL INSPECTION",
+        "section": "8"
+      },
+      {
+        "srNo": "8.1",
+        "kind": "CHECKPOINT",
+        "section": "8",
+        "activity": "VERIFICATION OF NAME PLATE",
+        "characteristic": "NAME PLATE",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          31,
+          32
+        ]
+      },
+      {
+        "srNo": "8.2",
+        "kind": "CHECKPOINT",
+        "section": "8",
+        "activity": "ATTACHMENT OF NAME PLATE TO NAME PLATE BRACKET",
+        "characteristic": "VERIFICATION OF NAME PLATE ATTACHMENT WELD TACK VISUAL",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "APPROVED DRAWING",
+        "record": "REPORT",
+        "codes": {
+          "DESPL": "P",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          31,
+          32
+        ]
+      },
+      {
+        "srNo": "9.1",
+        "kind": "CHECKPOINT",
+        "section": "8",
+        "activity": "DOCUMENTATION",
+        "characteristic": "VERIFICATION & COMPILATION OF INSPECTION & TEST RECORD",
+        "extentOfCheck": "100%",
+        "applicableDocument": "APPROVED DRAWING",
+        "acceptanceCriteria": "PO",
+        "record": "MDR",
+        "codes": {
+          "DESPL": "R",
+          "BUYER_TPI": "R"
+        },
+        "remarks": "",
+        "leadTimeProcesses": [
+          31,
+          32
+        ]
+      }
+    ]
+  }
+}

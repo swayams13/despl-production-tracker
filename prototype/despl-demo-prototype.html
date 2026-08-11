@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESPL Track — Interactive Demo Prototype</title>
+<style>
+  :root, :root[data-theme="light"]{
+    color-scheme: light;
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --baseline:#c3c2b7; --ring:rgba(11,11,11,.10);
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+    --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+    --goodtext:#006300;
+    --goodbg:rgba(12,163,12,.12); --warnbg:rgba(250,178,25,.16); --critbg:rgba(208,59,59,.12);
+    --bluebg:rgba(42,120,214,.10);
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --baseline:#383835; --ring:rgba(255,255,255,.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+    --goodtext:#0ca30c;
+    --goodbg:rgba(12,163,12,.16); --warnbg:rgba(250,178,25,.14); --critbg:rgba(208,59,59,.18);
+    --bluebg:rgba(57,135,229,.14);
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--page);color:var(--ink);font-size:14px;line-height:1.45}
+  header{position:sticky;top:0;z-index:50;background:var(--surface);border-bottom:1px solid var(--grid);padding:10px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .logo{font-weight:700;font-size:16px;letter-spacing:.2px}
+  .logo span{color:var(--s1)}
+  .demo-tag{font-size:11px;color:var(--ink2);border:1px solid var(--grid);border-radius:999px;padding:2px 10px}
+  .spacer{flex:1}
+  select,button,input{font:inherit;color:inherit}
+  .role-select{background:var(--page);border:1px solid var(--baseline);border-radius:8px;padding:6px 10px;font-weight:600}
+  .ghost-btn{background:none;border:1px solid var(--grid);border-radius:8px;padding:6px 12px;cursor:pointer;color:var(--ink2)}
+  .ghost-btn:hover{background:var(--page)}
+  nav{display:flex;gap:2px;padding:0 12px;background:var(--surface);border-bottom:1px solid var(--grid);overflow-x:auto}
+  nav button{background:none;border:none;border-bottom:2px solid transparent;padding:10px 14px;cursor:pointer;color:var(--ink2);font-weight:600;white-space:nowrap}
+  nav button.active{color:var(--ink);border-bottom-color:var(--s1)}
+  main{max-width:1180px;margin:0 auto;padding:20px}
+  .view{display:none}.view.active{display:block}
+  h2{font-size:18px;margin-bottom:2px}
+  .sub{color:var(--ink2);font-size:13px;margin-bottom:16px}
+  .hint{background:var(--bluebg);border:1px solid var(--ring);border-radius:10px;padding:10px 14px;font-size:13px;color:var(--ink2);margin-bottom:16px}
+  .hint b{color:var(--ink)}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+  .card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:14px}
+  .card .k{font-size:12px;color:var(--ink2);margin-bottom:4px}
+  .card .v{font-size:26px;font-weight:700}
+  .card .d{font-size:12px;color:var(--muted);margin-top:2px}
+  .v.good{color:var(--goodtext)} .v.crit{color:var(--crit)}
+  .panel{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:16px;margin-bottom:16px}
+  .panel h3{font-size:14px;margin-bottom:12px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;padding:6px 8px;border-bottom:1px solid var(--grid)}
+  td{padding:8px;border-bottom:1px solid var(--grid);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 9px}
+  .pill.ok{background:var(--goodbg);color:var(--goodtext)}
+  .pill.risk{background:var(--warnbg);color:var(--ink)}
+  .pill.late{background:var(--critbg);color:var(--crit)}
+  .pill.neutral{background:var(--page);color:var(--ink2);border:1px solid var(--grid)}
+  .bar-row{display:grid;grid-template-columns:120px 1fr 42px;gap:10px;align-items:center;margin-bottom:8px;font-size:13px}
+  .bar-track{background:var(--page);border-radius:4px;height:14px;position:relative}
+  .bar-fill{height:14px;border-radius:4px;background:var(--s1);min-width:2px}
+  .bar-fill.warn-c{background:var(--serious)}
+  .bar-lbl{color:var(--ink2)} .bar-val{color:var(--ink2);font-variant-numeric:tabular-nums;text-align:right;font-size:12px}
+  .avg-line{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);opacity:.55}
+  .prog{background:var(--page);border-radius:4px;height:10px;width:110px;display:inline-block;vertical-align:middle}
+  .prog i{display:block;height:10px;border-radius:4px;background:var(--s1)}
+  /* matrix */
+  .matrix-wrap{overflow-x:auto}
+  .matrix{border-collapse:collapse;font-size:10.5px}
+  .matrix th{position:sticky;left:0;background:var(--surface);font-size:11px;padding:4px 8px;border:none}
+  .matrix td{width:26px;height:22px;padding:0;border:2px solid var(--surface);border-radius:4px;cursor:default}
+  .m-done{background:var(--s1)} .m-prog{background:var(--warn)} .m-late{background:var(--crit)} .m-hold{background:var(--serious)} .m-not{background:var(--page);border:2px solid var(--surface);outline:1px solid var(--grid);outline-offset:-2px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--ink2)}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  /* stage board */
+  .stage{display:grid;grid-template-columns:34px 1fr auto auto;gap:12px;align-items:center;padding:10px 8px;border-bottom:1px solid var(--grid)}
+  .stage:last-child{border-bottom:none}
+  .stage .n{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+  .n.done{background:var(--s1);color:#fff} .n.cur{background:var(--warnbg);color:var(--ink);border:2px solid var(--warn)} .n.lock{background:var(--page);color:var(--muted);border:1px solid var(--grid)} .n.sub{background:var(--bluebg);color:var(--s1);border:2px solid var(--s1)}
+  .stage .meta{font-size:12px;color:var(--muted)}
+  .btn{background:var(--s1);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-weight:600;cursor:pointer}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.subtle{background:var(--page);color:var(--ink);border:1px solid var(--baseline)}
+  .btn.danger{background:var(--crit)}
+  .checklist label{display:flex;gap:10px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--grid);cursor:pointer}
+  .checklist label:last-child{border-bottom:none}
+  .checklist input{width:17px;height:17px;accent-color:var(--s1)}
+  .checklist .done-t{color:var(--muted);text-decoration:line-through}
+  .holdbox{border:1px solid var(--serious);background:var(--warnbg);border-radius:10px;padding:12px;margin-top:12px}
+  .holdbox b{display:flex;align-items:center;gap:6px}
+  .qc-item{border:1px solid var(--ring);border-radius:10px;padding:14px;margin-bottom:12px;background:var(--surface)}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .field{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--ink2)}
+  .field input,.field select{border:1px solid var(--baseline);border-radius:7px;padding:6px 8px;background:var(--page)}
+  /* toasts */
+  #toasts{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:8px;width:min(480px,92vw)}
+  .toast{border-radius:10px;padding:11px 14px;font-size:13px;font-weight:600;color:#fff;box-shadow:0 6px 20px rgba(0,0,0,.25);display:flex;gap:9px;align-items:flex-start;animation:pop .18s ease}
+  .toast.err{background:var(--crit)} .toast.okt{background:var(--good)} .toast.info{background:var(--s1)}
+  .toast small{display:block;font-weight:400;opacity:.9;margin-top:2px}
+  @keyframes pop{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+  /* modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;z-index:90;padding:16px}
+  .modal-bg.open{display:flex}
+  .modal{background:var(--surface);border-radius:14px;padding:20px;width:min(460px,94vw);border:1px solid var(--ring)}
+  .modal h3{margin-bottom:8px}
+  .modal p{color:var(--ink2);font-size:13px;margin-bottom:12px}
+  /* feedback drawer */
+  #fb-drawer{position:fixed;top:0;right:-360px;width:340px;height:100%;background:var(--surface);border-left:1px solid var(--grid);z-index:80;transition:right .2s;padding:18px;overflow-y:auto}
+  #fb-drawer.open{right:0}
+  #fb-drawer textarea{width:100%;min-height:90px;border:1px solid var(--baseline);border-radius:8px;background:var(--page);padding:8px;font:inherit;margin:8px 0}
+  .fb-note{border:1px solid var(--grid);border-radius:8px;padding:8px 10px;font-size:12.5px;margin-bottom:8px;background:var(--page)}
+  .fb-note b{color:var(--s1);display:block;font-size:11px;margin-bottom:2px}
+  .brief-sec{margin-bottom:14px}
+  .brief-sec h4{font-size:12.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+  .brief-li{padding:7px 10px;border-left:3px solid var(--grid);margin-bottom:6px;font-size:13px;background:var(--page);border-radius:0 8px 8px 0}
+  .brief-li.red{border-left-color:var(--crit)}
+  .brief-li.amber{border-left-color:var(--serious)}
+  .brief-li.green{border-left-color:var(--good)}
+  footer{color:var(--muted);text-align:center;font-size:12px;padding:24px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">DESPL <span>Track</span></div>
+  <div class="demo-tag">DEMO PROTOTYPE · sample data · job DESPL-320</div>
+  <div class="spacer"></div>
+  <label style="font-size:12px;color:var(--ink2)">Viewing as&nbsp;
+    <select id="role" class="role-select" onchange="setRole(this.value)">
+      <option value="MD">MD / CEO</option>
+      <option value="PH">Production Head (SJ)</option>
+      <option value="SUP" selected>Supervisor — Production</option>
+      <option value="QC">QC Inspector</option>
+    </select>
+  </label>
+  <button class="ghost-btn" onclick="toggleTheme()">◐ Theme</button>
+  <button class="ghost-btn" onclick="document.getElementById('fb-drawer').classList.toggle('open')">💬 Feedback</button>
+</header>
+
+<nav id="nav">
+  <button data-v="dash" onclick="show('dash')">Company Dashboard</button>
+  <button data-v="brief" onclick="show('brief')">Daily Brief</button>
+  <button data-v="job" onclick="show('job')">Job DESPL-320</button>
+  <button data-v="unit" onclick="show('unit')">Unit 320SR03</button>
+  <button data-v="today" class="active" onclick="show('today')">Today (Priority)</button>
+  <button data-v="qc" onclick="show('qc')">QC Queue</button>
+  <button data-v="weld" onclick="show('weld')">Welding</button>
+</nav>
+
+<main>
+
+<!-- ============ COMPANY DASHBOARD ============ -->
+<section class="view" id="v-dash">
+  <h2>Company Dashboard</h2>
+  <div class="sub">Live picture across all jobs — what MD / CEO opens every morning</div>
+  <div class="hint"><b>Demo:</b> these tiles react to what happens on the floor. File the delay reason in the <b>Today</b> tab and watch “Reason pending” drop. Complete Shell Fabrication on 320SR03 (Supervisor → QC flow) and the unit's % climbs.</div>
+  <div class="cards">
+    <div class="card"><div class="k">Active jobs</div><div class="v">4</div><div class="d">31 units in WIP</div></div>
+    <div class="card"><div class="k">Units on track</div><div class="v good" id="kpi-ontrack">24</div><div class="d">of 31 in WIP</div></div>
+    <div class="card"><div class="k">At risk</div><div class="v" style="color:var(--serious)">5</div><div class="d">predecessor late</div></div>
+    <div class="card"><div class="k">Overdue stages</div><div class="v crit" id="kpi-overdue">2</div><div class="d">need action</div></div>
+    <div class="card"><div class="k">Reason pending</div><div class="v crit" id="kpi-reason">1</div><div class="d">accountability gap</div></div>
+    <div class="card"><div class="k">On-time delivery</div><div class="v">87%</div><div class="d">last 12 months</div></div>
+  </div>
+  <div class="grid2">
+    <div class="panel">
+      <h3>WIP by department — where units are sitting now</h3>
+      <div id="wip-bars"></div>
+      <div class="sub" style="margin:8px 0 0">A tall bar = the current bottleneck.</div>
+    </div>
+    <div class="panel">
+      <h3>Delay Pareto — days lost by reason (this quarter)</h3>
+      <div id="pareto-bars"></div>
+      <div class="sub" style="margin:8px 0 0">Every overdue stage must carry a reason — this chart is why.</div>
+    </div>
+  </div>
+  <div class="panel">
+    <h3>Jobs</h3>
+    <table>
+      <tr><th>Job</th><th>Client</th><th>Units</th><th>Progress</th><th class="num">%</th><th>Delivery</th><th>Status</th></tr>
+      <tr><td><b>DESPL-320</b> · HP Air Receiver</td><td>AHPL</td><td class="num">9</td><td><span class="prog"><i id="p320" style="width:36%"></i></span></td><td class="num" id="p320t">36%</td><td>15 Nov 26</td><td><span class="pill risk">⚠ At risk</span></td></tr>
+      <tr><td><b>DESPL-318</b> · Storage Vessel</td><td>Nuberg</td><td class="num">6</td><td><span class="prog"><i style="width:74%"></i></span></td><td class="num">74%</td><td>30 Sep 26</td><td><span class="pill ok">✓ On track</span></td></tr>
+      <tr><td><b>DESPL-322</b> · LPG Bullet</td><td>Confidence</td><td class="num">2</td><td><span class="prog"><i style="width:18%"></i></span></td><td class="num">18%</td><td>20 Jan 27</td><td><span class="pill ok">✓ On track</span></td></tr>
+      <tr><td><b>DESPL-315</b> · Air Receiver</td><td>ELGI</td><td class="num">14</td><td><span class="prog"><i style="width:91%"></i></span></td><td class="num">91%</td><td>25 Aug 26</td><td><span class="pill late">● Delayed</span></td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ============ DAILY BRIEF ============ -->
+<section class="view" id="v-brief">
+  <h2>Daily Brief — Monday, 03 Aug 2026</h2>
+  <div class="sub">Auto-generated at 07:45 IST. Nobody prepares this — the system does. (Email delivery: Phase 2)</div>
+  <div class="panel">
+    <div class="brief-sec"><h4>⚠ Exceptions first</h4>
+      <div class="brief-li red"><b>320SR06 · Forming</b> — overdue 3 days, <span id="brief-reason" style="color:var(--crit);font-weight:600">reason PENDING from Production</span></div>
+      <div class="brief-li red"><b>315SR11 · Painting</b> — overdue 1 day · reason filed: <i>paint batch delayed by vendor</i> (acknowledged by SJ)</div>
+      <div class="brief-li amber"><b>320SR07 · Cutting</b> — at risk: shell plates for CS course accepted 4 days late</div>
+    </div>
+    <div class="brief-sec"><h4>Upcoming inspection calls</h4>
+      <div class="brief-li amber"><b>320SR03 · Shell Fab</b> — TPI hold point: PAUT/TOFD of CS-2 · call to be given <b>tomorrow</b></div>
+      <div class="brief-li"><b>318SR02 · Hydro test</b> — client witness scheduled Thu 06 Aug</div>
+    </div>
+    <div class="brief-sec"><h4>Yesterday's movement</h4>
+      <div class="brief-li green">7 stages completed across 4 jobs · 2 hold points cleared · 3 material lots accepted (heat nos. verified)</div>
+      <div class="brief-li green"><b>320SR01</b> — Head Assembly complete, entered Nozzle Fabrication</div>
+      <div class="brief-li green"><b>318SR05</b> — Hydro test passed, 75.27 psi held 60 min, no leak</div>
+    </div>
+    <div class="brief-sec"><h4>Company snapshot</h4>
+      <div class="brief-li">31 units in WIP · 24 on track · 5 at risk · 2 overdue · OTD 87% · next dispatch: 315SR09 on 08 Aug</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ JOB MATRIX ============ -->
+<section class="view" id="v-job">
+  <h2>Job DESPL-320 — HP Air Receiver × 9 units</h2>
+  <div class="sub">Client: AHPL · ASME Sec VIII Div 1 · PO delivery 15 Nov 2026 · one row per vessel serial, one cell per stage</div>
+  <div class="hint"><b>Why per-serial:</b> vessel SR01 is in Nozzle Fab while SR09 is still in Cutting — a single job-level status would hide that. Hover any cell for the stage name.</div>
+  <div class="panel">
+    <div class="matrix-wrap"><table class="matrix" id="matrix"></table></div>
+    <div class="legend">
+      <span><i class="m-done"></i>Complete</span>
+      <span><i class="m-prog"></i>In progress</span>
+      <span><i class="m-hold"></i>Hold point open</span>
+      <span><i class="m-late"></i>Overdue</span>
+      <span><i class="m-not" style="outline:1px solid var(--grid)"></i>Not started</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============ UNIT BOARD ============ -->
+<section class="view" id="v-unit">
+  <h2>Unit 320SR03 — Stage Board</h2>
+  <div class="sub">HP Air Receiver · kicked off 02 Jun 26 · planned dispatch 30 Oct 26 · progress <b id="unit-pct">44%</b></div>
+  <div class="hint"><b>Demo the integrity rules:</b> ① as <b>Supervisor</b>, tick the remaining Shell Fab activities and Submit. ② still as Supervisor, try “Verify” — the system refuses (maker–checker). ③ try “Start” on a locked stage — refused (gating). ④ switch role to <b>QC Inspector</b> → QC Queue to clear the TPI hold point and verify.</div>
+  <div class="panel" id="stage-list"></div>
+</section>
+
+<!-- ============ TODAY ============ -->
+<section class="view" id="v-today">
+  <h2>Today — Production Dept Priority List</h2>
+  <div class="sub">Auto-ordered every morning: overdue → due today → at risk → upcoming. This is the supervisor's home screen.</div>
+  <div class="hint"><b>Demo:</b> the red item is blocking — Production cannot log other progress on SR06 until a delay reason is filed. Click it. Then work the Shell Fab item on SR03.</div>
+  <div id="today-list"></div>
+</section>
+
+<!-- ============ QC QUEUE ============ -->
+<section class="view" id="v-qc">
+  <h2>QC Verification Queue</h2>
+  <div class="sub">Second pair of eyes on every gate — a stage is only Complete when QC verifies it. Hold points must be cleared first.</div>
+  <div class="hint"><b>Demo:</b> switch role to <b>QC Inspector</b> (top right). Record the TPI clearance with call dates, then Verify — the stage completes and the next stage unlocks on the Unit board.</div>
+  <div id="qc-list"></div>
+</section>
+
+<!-- ============ WELDING ============ -->
+<section class="view" id="v-weld">
+  <h2>Welding — Productivity &amp; Quality (July 2026)</h2>
+  <div class="sub">Logged by supervisor: per joint for butt welds, day-totals otherwise. NDT results attributed to the welder of each joint.</div>
+  <div class="grid2">
+    <div class="panel">
+      <h3>Weld output per welder — inch-dia / day (▎= team avg 4.6)</h3>
+      <div id="weld-bars"></div>
+      <div class="sub" style="margin:8px 0 0">SJ uses this to rebalance work distribution.</div>
+    </div>
+    <div class="panel">
+      <h3>NDT repair rate per welder</h3>
+      <table>
+        <tr><th>Welder</th><th class="num">Joints</th><th class="num">Repairs</th><th class="num">Rate</th><th>Flag</th></tr>
+        <tr><td>R. Kumar</td><td class="num">48</td><td class="num">1</td><td class="num">2.1%</td><td><span class="pill ok">✓ good</span></td></tr>
+        <tr><td>S. Patel</td><td class="num">42</td><td class="num">1</td><td class="num">2.4%</td><td><span class="pill ok">✓ good</span></td></tr>
+        <tr><td>M. Yadav</td><td class="num">39</td><td class="num">2</td><td class="num">5.1%</td><td><span class="pill neutral">watch</span></td></tr>
+        <tr><td>A. Sharma</td><td class="num">35</td><td class="num">4</td><td class="num">11.4%</td><td><span class="pill late">● review WPS/retrain</span></td></tr>
+        <tr><td>V. Singh</td><td class="num">28</td><td class="num">1</td><td class="num">3.6%</td><td><span class="pill ok">✓ good</span></td></tr>
+      </table>
+    </div>
+  </div>
+</section>
+
+</main>
+<footer>DESPL Track — demo prototype with sample data · built for workflow review · all numbers illustrative</footer>
+
+<!-- toasts -->
+<div id="toasts"></div>
+
+<!-- delay reason modal -->
+<div class="modal-bg" id="modal-delay">
+  <div class="modal">
+    <h3>File delay reason — 320SR06 · Forming</h3>
+    <p>This stage is 3 days overdue. Production is blocked from logging further progress on this unit until a reason is filed. The reason goes to SJ for review and feeds the department KPI.</p>
+    <div class="field"><span>Category</span>
+      <select id="delay-cat">
+        <option>Material delay</option><option>Manpower shortage</option><option>Machine breakdown</option>
+        <option>Rework / quality</option><option>Client hold</option><option>Drawing / engineering hold</option><option>Other</option>
+      </select>
+    </div>
+    <div class="field" style="margin-top:8px"><span>Details</span><input id="delay-txt" placeholder="e.g. dished end vendor delivery slipped by 4 days"></div>
+    <div class="row" style="margin-top:14px;justify-content:flex-end">
+      <button class="btn subtle" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="fileDelay()">File reason</button>
+    </div>
+  </div>
+</div>
+
+<!-- feedback drawer -->
+<div id="fb-drawer">
+  <h3 style="margin-bottom:4px">Review feedback</h3>
+  <p style="font-size:12.5px;color:var(--ink2)">DESPL team: note any change you want on the screen you're viewing. Notes stay on this page — copy them at the end of the session.</p>
+  <textarea id="fb-text" placeholder="e.g. we also need a stage for rolling trial run…"></textarea>
+  <button class="btn" onclick="addNote()">Add note for current screen</button>
+  <button class="btn subtle" style="margin-left:6px" onclick="copyNotes()">Copy all</button>
+  <div id="fb-list" style="margin-top:14px"></div>
+</div>
+
+<script>
+/* ---------- state ---------- */
+const STAGES=["Kick-Off","Engg Review","Detail Engg","BOM Prep","Procurement","Incoming Insp","Cutting","Forming","Edge Prep","Shell Fab","Head Assembly","Nozzle Fab","Nozzle Fit-up","Saddle Fab","Accessories","Dim. Inspection","NDT","PWHT","Hydro Test","Surface Prep","Painting","Final Insp","MDR Docs","Packing","Dispatch"];
+let role="SUP";
+const S={
+  reasonFiled:false,
+  sr03:{ // stage index -> status; interactive slice around stage 9 (Shell Fab, 0-based idx 9)
+    completeUpTo:8,               // stages 0..8 complete
+    shell:{status:"IN_PROGRESS", // IN_PROGRESS -> SUBMITTED -> COMPLETE
+      submittedBy:null,
+      subs:[["Fit-up check (LS-1)",true],["Long seam weld LS-1",true],["RT of LS-1 — accepted",true],["Circ seam fit-up CS-2",true],["Circ seam weld CS-2",false],["Back chip & LPT CS-2",false],["Dimension check",false]],
+      hold:{label:"H — PAUT/TOFD of CS-2 joint soundness · TPI witness (per QCP 4.7)",cleared:false,callGiven:"",callAttended:""}
+    }
+  },
+  units:[ // for matrix: [serial, completeUpTo, current, flag]
+    ["SR01",11,12,"prog"],["SR02",10,11,"prog"],["SR03",8,9,"hold"],["SR04",8,9,"prog"],["SR05",7,8,"prog"],
+    ["SR06",6,7,"late"],["SR07",5,6,"risk"],["SR08",4,5,"prog"],["SR09",3,4,"prog"]
+  ]
+};
+/* ---------- helpers ---------- */
+function toast(kind,msg,sub){
+  const t=document.createElement("div");t.className="toast "+kind;
+  t.innerHTML=(kind==="err"?"⛔":"okt"===kind?"✅":"ℹ️")+"<div>"+msg+(sub?"<small>"+sub+"</small>":"")+"</div>";
+  document.getElementById("toasts").appendChild(t);setTimeout(()=>t.remove(),4600);
+}
+function show(v){document.querySelectorAll(".view").forEach(e=>e.classList.remove("active"));
+  document.getElementById("v-"+v).classList.add("active");
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active",b.dataset.v===v));
+  window.scrollTo(0,0);}
+function setRole(r){role=r;
+  const home={MD:"dash",PH:"dash",SUP:"today",QC:"qc"}[r];
+  toast("info","Now viewing as "+document.querySelector('#role option[value="'+r+'"]').textContent,
+    r==="QC"?"QC can verify stages and clear hold points — but cannot submit production work.":r==="SUP"?"Supervisors submit work for their own department only.":"Management views are read-only — no data entry.");
+  render();show(home);}
+function toggleTheme(){const r=document.documentElement;r.dataset.theme=r.dataset.theme==="dark"?"light":"dark";}
+/* ---------- dashboard charts ---------- */
+function bars(el,data,max,warnIdx){
+  el.innerHTML=data.map((d,i)=>`<div class="bar-row"><span class="bar-lbl">${d[0]}</span>
+    <span class="bar-track"><span class="bar-fill${i===warnIdx?" warn-c":""}" style="width:${Math.round(d[1]/max*100)}%"></span></span>
+    <span class="bar-val">${d[1]}</span></div>`).join("");}
+function weldBars(){
+  const el=document.getElementById("weld-bars");const avg=4.6,max=7;
+  const data=[["R. Kumar",6.2],["S. Patel",5.4],["V. Singh",4.8],["M. Yadav",3.9],["A. Sharma",2.9]];
+  el.innerHTML=data.map(d=>`<div class="bar-row"><span class="bar-lbl">${d[0]}</span>
+    <span class="bar-track"><span class="bar-fill" style="width:${Math.round(d[1]/max*100)}%"></span>
+    <span class="avg-line" style="left:${Math.round(avg/max*100)}%"></span></span>
+    <span class="bar-val">${d[1].toFixed(1)}</span></div>`).join("");}
+/* ---------- matrix ---------- */
+function renderMatrix(){
+  const t=document.getElementById("matrix");
+  let head="<tr><th></th>"+STAGES.map((s,i)=>`<td style="background:none;outline:none;color:var(--muted);font-size:9px;text-align:center;transform:rotate(0)" title="${s}">${i+1}</td>`).join("")+"</tr>";
+  const rows=S.units.map(u=>{
+    const [sn,upTo,cur,flag]=u;
+    const isSr03=sn==="SR03";
+    const upTo2=isSr03?S.sr03.completeUpTo:upTo;
+    const shellDone=isSr03&&S.sr03.shell.status==="COMPLETE";
+    return "<tr><th>320"+sn+"</th>"+STAGES.map((s,i)=>{
+      let cls="m-not";
+      if(i<=upTo2||(isSr03&&shellDone&&i===9))cls="m-done";
+      else if(isSr03&&i===9)cls=S.sr03.shell.status==="SUBMITTED"?"m-prog":"m-hold";
+      else if(!isSr03&&i===cur)cls=flag==="late"?"m-late":flag==="hold"?"m-hold":flag==="risk"?"m-late":"m-prog";
+      return `<td class="${cls}" title="320${sn} · ${i+1}. ${s}"></td>`;}).join("")+"</tr>";
+  }).join("");
+  t.innerHTML=head+rows;
+}
+/* ---------- unit board ---------- */
+function renderUnit(){
+  const el=document.getElementById("stage-list");const sh=S.sr03.shell;
+  el.innerHTML=STAGES.map((s,i)=>{
+    let n="lock",st="Not started · locked",act="";
+    if(i<=S.sr03.completeUpTo){n="done";st="Complete · verified";}
+    else if(i===9){
+      if(sh.status==="COMPLETE"){n="done";st="Complete · verified by QC (I. Mehta)";}
+      else if(sh.status==="SUBMITTED"){n="sub";st="Submitted by supervisor — awaiting QC verification";
+        act=`<button class="btn subtle" onclick="tryVerifyFromUnit()">Verify</button>`;}
+      else{n="cur";st="In progress · planned 20 Jul – 05 Aug · "+sh.subs.filter(x=>x[1]).length+"/"+sh.subs.length+" activities";
+        act=`<button class="btn subtle" onclick="openShell()">Open activities</button>`;}
+    }
+    else if(i===10&&(sh.status==="COMPLETE")){n="cur";st="Unlocked — ready to start";act=`<button class="btn" onclick="startStage(10,true)">Start</button>`;}
+    else{act=`<button class="btn subtle" onclick="startStage(${i},false)">Start</button>`;}
+    return `<div class="stage"><span class="n ${n}">${i+1}</span>
+      <div><b>${s}</b><div class="meta">${st}</div>
+      ${i===9&&sh.status!=="COMPLETE"?`<div id="shell-detail" style="display:none"></div>`:""}</div>
+      <div>${i===9&&sh.hold.cleared&&sh.status!=="COMPLETE"?'<span class="pill ok">hold cleared</span>':i===9&&sh.status!=="COMPLETE"?'<span class="pill risk">⚠ TPI hold open</span>':""}</div>
+      <div>${act}</div></div>`;
+  }).join("");
+  document.getElementById("unit-pct").textContent=sh.status==="COMPLETE"?"48%":"44%";
+  document.getElementById("p320").style.width=sh.status==="COMPLETE"?"38%":"36%";
+  document.getElementById("p320t").textContent=sh.status==="COMPLETE"?"38%":"36%";
+}
+function openShell(){
+  const d=document.getElementById("shell-detail");if(!d)return;
+  d.style.display="block";
+  renderShellChecklist(d);
+}
+function renderShellChecklist(d){
+  const sh=S.sr03.shell;
+  d.innerHTML=`<div class="checklist" style="margin-top:10px;border:1px solid var(--grid);border-radius:10px;padding:4px 10px">`+
+    sh.subs.map((x,i)=>`<label><input type="checkbox" ${x[1]?"checked":""} onchange="tickSub(${i},this)"><span class="${x[1]?"done-t":""}">${x[0]}</span></label>`).join("")+
+    `</div>
+    <div class="holdbox"><b>⚠ ${sh.hold.label}</b>
+    <div class="meta" style="margin-top:4px">Cleared by QC in the QC Queue — production cannot self-clear a hold point.</div></div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="submit-btn" ${sh.subs.every(x=>x[1])?"":"disabled"} onclick="submitShell()">Submit for QC verification</button>
+      <span class="meta">enabled when all activities are done · timestamps are server-set</span>
+    </div>`;
+}
+function tickSub(i,cb){
+  if(role!=="SUP"&&role!=="PH"){cb.checked=S.sr03.shell.subs[i][1];
+    toast("err","Not permitted for this role","Only the Production supervisor logs production activities. Switch role to Supervisor.");return;}
+  S.sr03.shell.subs[i][1]=cb.checked;
+  const d=document.getElementById("shell-detail");renderShellChecklist(d);d.style.display="block";
+  if(S.sr03.shell.subs.every(x=>x[1]))toast("info","All activities done — Submit is now enabled");
+}
+function submitShell(){
+  if(role!=="SUP"&&role!=="PH"){toast("err","Not permitted for this role");return;}
+  S.sr03.shell.status="SUBMITTED";S.sr03.shell.submittedBy="SUP";
+  toast("okt","Shell Fabrication submitted","Timestamp set by server · now waiting for QC verification (maker–checker). Audit log: entry #48213 written.");
+  render();
+}
+function tryVerifyFromUnit(){
+  if(role!=="QC"){toast("err","MAKER_CHECKER_VIOLATION","The account that submitted a stage can never verify it — verification needs a QC Inspector login. This is exactly how fake entries are prevented.");return;}
+  show("qc");toast("info","Verify from the QC Queue — hold point first.");
+}
+function startStage(i,allowed){
+  if(!allowed){toast("err","GATING_BLOCKED","Stage "+(i+1)+" · "+STAGES[i]+" cannot start until every predecessor stage is Complete and QC-verified. Enforced at the server, not just the screen.");return;}
+  toast("okt","Head Assembly started","Actual start date stamped by server: 03 Aug 2026, 14:12 IST");
+}
+/* ---------- today ---------- */
+function renderToday(){
+  const el=document.getElementById("today-list");const sh=S.sr03.shell;
+  let items="";
+  if(!S.reasonFiled)items+=`<div class="qc-item" style="border-color:var(--crit)">
+    <div class="row" style="justify-content:space-between"><b>⛔ OVERDUE 3 DAYS — 320SR06 · Forming</b><span class="pill late">blocking</span></div>
+    <div class="meta" style="margin:6px 0">Planned end 31 Jul. A delay reason must be filed before Production can log anything else on this unit. Escalated to SJ (day 2) and flagged in the MD brief (day 3).</div>
+    <button class="btn danger" onclick="document.getElementById('modal-delay').classList.add('open')">File delay reason</button></div>`;
+  else items+=`<div class="qc-item" style="border-color:var(--good)">
+    <div class="row" style="justify-content:space-between"><b>320SR06 · Forming — reason filed</b><span class="pill ok">✓ unblocked</span></div>
+    <div class="meta" style="margin-top:6px">Sent to SJ for review · counted in the delay Pareto · department KPI updated.</div></div>`;
+  if(sh.status==="IN_PROGRESS")items+=`<div class="qc-item" style="border-color:var(--warn)">
+    <div class="row" style="justify-content:space-between"><b>DUE TODAY — 320SR03 · Shell Fabrication</b><span class="pill risk">⚠ ${sh.subs.filter(x=>x[1]).length}/${sh.subs.length} done</span></div>
+    <div class="meta" style="margin:6px 0">Planned end 05 Aug · remaining: ${sh.subs.filter(x=>!x[1]).map(x=>x[0]).join(" · ")||"—"}</div>
+    <button class="btn" onclick="show('unit');setTimeout(openShell,50)">Open activities</button></div>`;
+  else if(sh.status==="SUBMITTED")items+=`<div class="qc-item"><b>320SR03 · Shell Fabrication</b> <span class="pill neutral">submitted — with QC</span></div>`;
+  else items+=`<div class="qc-item" style="border-color:var(--good)"><b>✓ 320SR03 · Shell Fabrication complete</b> <span class="pill ok">verified</span><div class="meta" style="margin-top:4px">Next for Production on this unit: Head Assembly (unlocked).</div></div>`;
+  items+=`<div class="qc-item"><div class="row" style="justify-content:space-between"><b>UPCOMING — 320SR04 · Shell Fabrication</b><span class="pill neutral">starts 06 Aug</span></div>
+    <div class="meta" style="margin-top:6px">Material ready · drawings released · crew allocation due.</div></div>
+  <div class="qc-item"><div class="row" style="justify-content:space-between"><b>UPCOMING — 320SR09 · Forming</b><span class="pill neutral">starts 08 Aug</span></div>
+    <div class="meta" style="margin-top:6px">Dished ends expected from vendor 07 Aug (heat nos. to verify at incoming inspection).</div></div>`;
+  el.innerHTML=items;
+}
+function fileDelay(){
+  const txt=document.getElementById("delay-txt").value.trim();
+  if(!txt){toast("err","Details required","A categorized reason with details is mandatory — this is the accountability record SJ and MD will see.");return;}
+  S.reasonFiled=true;closeModal();
+  document.getElementById("kpi-reason").textContent="0";
+  const br=document.getElementById("brief-reason");br.textContent="reason filed: "+document.getElementById("delay-cat").value.toLowerCase()+" — pending SJ review";br.style.color="var(--ink2)";
+  toast("okt","Delay reason filed","320SR06 unblocked · reason sent to SJ · reflected in Delay Pareto and department KPI.");
+  render();
+}
+function closeModal(){document.getElementById("modal-delay").classList.remove("open")}
+/* ---------- qc queue ---------- */
+function renderQC(){
+  const el=document.getElementById("qc-list");const sh=S.sr03.shell;
+  let html="";
+  if(sh.status==="SUBMITTED"){
+    html+=`<div class="qc-item" style="border-color:var(--s1)">
+      <div class="row" style="justify-content:space-between"><b>320SR03 · Shell Fabrication — submitted by Production (R. Verma, 03 Aug 14:02)</b><span class="pill neutral">awaiting verification</span></div>
+      <div class="meta" style="margin:6px 0">All 7 activities done · QCP checkpoints 4.5–4.7 recorded · 1 hold point ${sh.hold.cleared?"cleared":"OPEN"}.</div>
+      ${sh.hold.cleared?
+        `<div class="holdbox" style="border-color:var(--good);background:var(--goodbg)"><b>✓ TPI hold point cleared</b><div class="meta">PAUT/TOFD of CS-2 accepted · call given ${sh.hold.callGiven||"04 Aug"} · attended ${sh.hold.callAttended||"05 Aug"} · recorded on TPI's behalf per QCP</div></div>
+        <div class="row" style="margin-top:12px"><button class="btn" onclick="verifyShell()">Verify stage → Complete</button><span class="meta">verifier must differ from submitter — enforced</span></div>`
+        :
+        `<div class="holdbox"><b>⚠ ${sh.hold.label}</b>
+        <div class="row" style="margin-top:10px">
+          <span class="field"><span>Inspection call given</span><input type="date" id="cg" value="2026-08-04"></span>
+          <span class="field"><span>Call attended</span><input type="date" id="ca" value="2026-08-05"></span>
+          <span class="field"><span>Cleared by (TPI)</span><input id="tpi" value="AHPL — Mr. D. Joshi"></span>
+        </div>
+        <div class="row" style="margin-top:10px"><button class="btn" onclick="clearHold()">Record TPI clearance</button>
+        <span class="meta">recorded on TPI's behalf (v1) — TPI login comes in Phase 2</span></div></div>
+        <div class="row" style="margin-top:12px"><button class="btn subtle" onclick="verifyShell()">Verify stage</button><span class="meta">will refuse while the hold point is open</span></div>`}
+    </div>`;
+  } else if(sh.status==="COMPLETE"){
+    html+=`<div class="qc-item" style="border-color:var(--good)"><b>✓ 320SR03 · Shell Fabrication verified</b><div class="meta" style="margin-top:4px">Verified by I. Mehta (QC) · audit #48214 · Head Assembly unlocked for Production.</div></div>`;
+  } else {
+    html+=`<div class="qc-item"><b>320SR03 · Shell Fabrication</b><div class="meta" style="margin-top:4px">Not yet submitted by Production — nothing to verify. (Go to the Today tab as Supervisor and finish the activities.)</div></div>`;
+  }
+  html+=`<div class="qc-item"><div class="row" style="justify-content:space-between"><b>318SR02 · Hydro Test — client witness</b><span class="pill neutral">scheduled Thu 06 Aug</span></div>
+    <div class="meta" style="margin-top:6px">Gauge calibration certificates due for review before test · checklist 6.1–6.3.</div></div>
+  <div class="qc-item"><div class="row" style="justify-content:space-between"><b>320SR05 · Incoming inspection — SA 516 Gr 485 plates</b><span class="pill neutral">due today</span></div>
+    <div class="meta" style="margin-top:6px">MTC review + heat number verification + thickness · links heat nos. to BOM items 201/205.</div></div>`;
+  el.innerHTML=html;
+}
+function clearHold(){
+  if(role!=="QC"){toast("err","Not permitted for this role","Only QC records hold-point clearances. Switch role to QC Inspector (top right).");return;}
+  const sh=S.sr03.shell;sh.hold.cleared=true;
+  sh.hold.callGiven=document.getElementById("cg").value;sh.hold.callAttended=document.getElementById("ca").value;
+  toast("okt","TPI hold point cleared","PAUT/TOFD of CS-2 recorded as accepted · clearance stored with call dates · audit logged.");
+  render();
+}
+function verifyShell(){
+  const sh=S.sr03.shell;
+  if(role!=="QC"){toast("err","MAKER_CHECKER_VIOLATION","Verification requires a QC Inspector login, and the verifier can never be the submitter.");return;}
+  if(!sh.hold.cleared){toast("err","HOLD_POINT_OPEN","Cannot complete Shell Fabrication — the TPI hold point (PAUT/TOFD of CS-2) is not cleared. Record the clearance first.");return;}
+  sh.status="COMPLETE";
+  toast("okt","Stage verified — Shell Fabrication COMPLETE","Head Assembly is now unlocked on 320SR03 · unit progress 44% → 48% · MD dashboard updated.");
+  render();
+}
+/* ---------- feedback ---------- */
+const notes=[];
+function addNote(){
+  const t=document.getElementById("fb-text");if(!t.value.trim())return;
+  const screen=document.querySelector("nav button.active").textContent;
+  notes.push([screen,t.value.trim()]);t.value="";renderNotes();
+  toast("info","Note added for “"+screen+"”");
+}
+function renderNotes(){
+  document.getElementById("fb-list").innerHTML=notes.map(n=>`<div class="fb-note"><b>${n[0]}</b>${n[1]}</div>`).join("")||'<div class="meta" style="color:var(--muted)">No notes yet.</div>';
+}
+function copyNotes(){
+  const txt=notes.map(n=>"["+n[0]+"] "+n[1]).join("\n");
+  navigator.clipboard&&navigator.clipboard.writeText(txt);
+  toast("okt","Feedback copied to clipboard",notes.length+" note(s) — paste into WhatsApp/notes and send to Swayam.");
+}
+/* ---------- render all ---------- */
+function render(){renderMatrix();renderUnit();renderToday();renderQC();}
+bars(document.getElementById("wip-bars"),[["Fabrication",9],["Cutting",5],["NDT / QC",5],["Procurement",4],["Forming",3],["Painting",3],["Dispatch",2]],9,-1);
+bars(document.getElementById("pareto-bars"),[["Material delay",14],["Rework / quality",8],["Manpower",6],["Client hold",5],["Machine breakdown",3]],14,0);
+weldBars();render();renderNotes();
+</script>
+</body>
+</html>
