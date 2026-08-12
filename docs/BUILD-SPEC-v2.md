@@ -3,6 +3,7 @@
 > Supersedes the scheduling and granularity sections of PRD v1.0 / TRD v1.0.
 > Written 11 Aug 2026 after the DESPL document handover. **Read this before writing any code.**
 > Source of truth for seed data: `seed/*.json` (generated from the DESPL documents, not hand-typed).
+> See also `docs/ARCHITECTURE.md` for production-scale data model, security, reliability and concurrency design — decided before Step 5 alongside the decisions below.
 
 ---
 
@@ -11,7 +12,7 @@
 | # | Decision | Consequence |
 |---|---|---|
 | 1 | **36-process Lead Time list is the master spine** | Scheduling, notifications and department ownership all hang off process codes 1–36. The 25-stage work order becomes a *reporting view* (`workOrderStages[]` crosswalk is already in the seed). |
-| 2 | **Granularity = per BOM item, with serial roll-up at assembly** | Procurement and component fabrication track BOM lines (matching the live CSVs). From Final Assembly (P24) onward, records attach to vessel serials. |
+| 2 | **Granularity = per BOM item, with serial roll-up at assembly (hybrid — locked, see ARCHITECTURE.md §2.1)** | Procurement and component fabrication track BOM lines (matching the live CSVs), never per physical piece — BOM `qty` can run to 160 pieces/line, and tracking each individually would multiply the operation-tracking tables by up to 160×. From Final Assembly (P24) onward, records attach to vessel serials. The junction is an explicit consumption/allocation record (which units drew from which batch) — a real table, not an implied relationship, since the stage-completion roll-up needs it as a join key. |
 | 3 | **Scheduling = forward + backward + infeasibility flag, with human override** | Every planned date is editable by an authorised planner with a mandatory reason, written to audit. Overrides never silently overwrite the baseline. |
 | 4 | **Durations = fixed baseline, editable per project** | `lead-time-model.json` seeds every project; per-project overrides live in `project_process_plan`. |
 | 5 | **Stack = single Next.js full-stack app + Postgres** | Replaces the split Next.js/NestJS monorepo in TRD §2. Prisma + Postgres retained. Server Actions / Route Handlers replace the NestJS controllers. All integrity rules move into a `services/` layer that both Server Actions and API routes call. |

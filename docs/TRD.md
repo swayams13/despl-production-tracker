@@ -229,6 +229,8 @@ TLS (Railway-managed); httpOnly + Secure + SameSite cookies; argon2id; login rat
 
 Target: 50 concurrent users, 50 jobs × 10 units live. Worst-case hot query is the company dashboard (~10k unit_stages aggregate) — served by indexed queries + 60s cache; p95 < 500 ms API, dashboards < 2 s. Postgres on Railway's base plan is comfortably 100× this load; no premature optimization (no sharding, no microservices).
 
+**Scale reconciliation (see `docs/ARCHITECTURE.md`):** "100× this load" conflates two different axes. Concurrent users stay roughly fixed (this target scales at most 2×, to ~100 users). Row count does not — it grows to the lakhs (100,000s+) over the system's operating life as jobs accumulate, and that's the axis every scaling failure mode actually comes from (unindexed dashboard aggregates, N+1 roll-up queries, unpartitioned `audit_log` growth, connection-pool sizing at shift-start bursts — see ARCHITECTURE.md §1). None of this changes the "no sharding, no microservices" call, which remains correct at both the row-count and user-count target; it changes indexing, partitioning and query strategy inside the existing architecture. The 60s dashboard cache mitigation above is superseded by the incremental summary-table approach in ARCHITECTURE.md §2.4.
+
 ## 11. Error Handling & Observability
 
 Problem-details JSON errors with stable codes (`GATING_BLOCKED`, `MAKER_CHECKER_VIOLATION`, `REASON_REQUIRED`, `HOLD_POINT_OPEN`…) so the UI explains *why* an action was refused — this is part of the demo story. Sentry on web+api; structured pino logs; health endpoints per service; Railway alerts on crash loops.

@@ -1,6 +1,6 @@
 # IMPLEMENTATION-GUIDE.md — Step-by-Step Build in Antigravity
 
-> Companion to `docs/BUILD-SPEC-v2.md` (the *what/why*) and `CLAUDE.md` (the *invariants*). This is the *how, in order, with exact commands*. Follow it top to bottom. Each step ends with a verification check and a git commit — don't move on until the check passes.
+> Companion to `docs/BUILD-SPEC-v2.md` (the *what/why*), `CLAUDE.md` (the *invariants*), and `docs/ARCHITECTURE.md` (production-scale data model, security, reliability and concurrency design — several steps below now reference it). This is the *how, in order, with exact commands*. Follow it top to bottom. Each step ends with a verification check and a git commit — don't move on until the check passes.
 >
 > **Model discipline:** run coding steps on **Sonnet**. If Antigravity/Claude CLI proposes a real architecture change (different from BUILD-SPEC-v2), stop and bring it back to this Cowork chat (Opus) for a decision before coding it.
 
@@ -128,7 +128,7 @@ pnpm prisma studio   # spot-check: 36 processes, 13 departments, 54 QCP items, 2
 
 This is the core of the release per BUILD-SPEC-v2 §1. Prompt:
 
-> Build lib/schedule/ implementing BUILD-SPEC-v2 §1.2–§1.5: the envelope layer, the CPM layer with fitted lags, forward scheduling, backward scheduling, the feasibility check, and the override mechanism (mandatory reason, audit row, baseline preserved — never mutated). Write table-driven Vitest tests, including this exact regression case: DE0467, PO date 2026-06-24, committed dispatch 2026-10-15, 6-day calendar week — the engine must report INFEASIBLE, short by approximately 26 working days against the 119-day standard envelope. Also test: a negative lag never allows a process to be marked COMPLETE before its predecessor, even though it can be marked IN_PROGRESS earlier — gating and scheduling are separate checks.
+> Build lib/schedule/ implementing BUILD-SPEC-v2 §1.2–§1.5: the envelope layer, the CPM layer with fitted lags, forward scheduling, backward scheduling, the feasibility check, and the override mechanism (mandatory reason, audit row, baseline preserved — never mutated). Write table-driven Vitest tests, including this exact regression case: DE0467, PO date 2026-06-24, committed dispatch 2026-10-15, 6-day calendar week — the engine must report INFEASIBLE, short by approximately 26 working days against the 119-day standard envelope. Also test: a negative lag never allows a process to be marked COMPLETE before its predecessor, even though it can be marked IN_PROGRESS earlier — gating and scheduling are separate checks. Per `docs/ARCHITECTURE.md` §6, also add table-driven **concurrency** tests here, not just sequential ones: fire simultaneous conflicting requests (`Promise.all` against a real test DB) at the same stage/unit — e.g. two scheduling overrides on the same process racing each other — and assert exactly one succeeds while the other gets a well-defined conflict, never a silent duplicate or corrupted state.
 
 Run:
 ```bash
@@ -143,9 +143,9 @@ pnpm test lib/schedule
 
 Prompt:
 
-> Implement auth (JWT in httpOnly cookies, argon2id password hashing), roles from CLAUDE.md/PRD, deny-by-default RBAC at every Server Action and Route Handler, and DepartmentScopeGuard equivalent limiting supervisors to their department's processes. Implement the audit interceptor per invariant #5 — every mutation writes an audit_log row with before/after jsonb in the same transaction; if that insert fails, the whole transaction rolls back. Write violation-case tests: a supervisor writing outside their department, a non-QC user attempting to verify, the same user attempting submit-then-verify on the same record (maker–checker, invariant #3).
+> Implement auth (JWT in httpOnly cookies, argon2id password hashing), roles from CLAUDE.md/PRD, deny-by-default RBAC at every Server Action and Route Handler, and DepartmentScopeGuard equivalent limiting supervisors to their department's processes — shaped from the start as "scope by department OR by client-association" per `docs/ARCHITECTURE.md` §3, so the Phase 2 VIEWER/TPI role doesn't require a redesign later. Implement the audit interceptor per invariant #5 — every mutation writes an audit_log row with before/after jsonb in the same transaction; if that insert fails, the whole transaction rolls back. Every stage/unit state-transition write (submit/verify/complete/hold-clear) must take a row-level lock (`SELECT ... FOR UPDATE`) on the target row and re-evaluate all gating conditions *after* acquiring it, per `docs/ARCHITECTURE.md` §6 — do this before writing the tests below, not after. Add a scheduled/CI check that `audit_log`'s "no UPDATE/DELETE" DB grant is still absent, failing the pipeline (not just logging) if it ever reappears. Write violation-case tests: a supervisor writing outside their department, a non-QC user attempting to verify, the same user attempting submit-then-verify on the same record (maker–checker, invariant #3) — **and** concurrency tests: two simultaneous submit calls on the same stage, or a submit racing a verify, asserting exactly one succeeds and the other gets a well-defined conflict, never a silent duplicate.
 
-**Check:** violation tests fail closed (403/blocked), not open. Commit: `feat: auth, RBAC, audit log`.
+**Check:** violation tests fail closed (403/blocked), not open, and concurrency tests show no double-transition under simultaneous requests. Commit: `feat: auth, RBAC, audit log`.
 
 ---
 
@@ -210,6 +210,23 @@ railway up
 Set `DATABASE_URL` and other secrets in Railway's environment settings (never commit them). Confirm the GitHub Actions pipeline (lint → typecheck → test → build → migrate → deploy) referenced in CLAUDE.md is wired to auto-deploy `main` to staging.
 
 **Check:** staging URL loads, seeded data visible, the DE0467 infeasibility case reproduces there too.
+
+---
+
+## STEP 15 — Production promotion gate
+
+This step doesn't exist by default — Step 14 only reaches Railway *staging*. Per `docs/ARCHITECTURE.md` §4/§8, production promotion needs explicit, checkable criteria, not "whoever has Railway access clicks the button." Do not promote to production until every item below is true:
+
+1. **All violation-case and concurrency tests green** (Steps 7, 8, 11) — confirm they still pass on the current commit, not just that they passed once.
+2. **Restore drill passed** — restore the latest backup to a fresh instance, replay the DE0467 regression scenario against it, confirm the numbers match. Pass/fail, not "we tried it."
+3. **Backup/DR configured to the target in `docs/ARCHITECTURE.md` §4** — continuous WAL/PITR (RPO ≤15min), not just daily `pg_dump`. Confirm this is sized into the hosting plan (may require a Railway Postgres tier upgrade — see the open confirmation in ARCHITECTURE.md).
+4. **Load/concurrency test executed** against a staging environment seeded with prod-sized data (not the tiny seed fixtures): simulate ~100 users converging in a shift-start-style burst, submitting and verifying concurrently on overlapping units. Check p95 latency holds, zero gating/maker-checker violations occur, and the connection pool doesn't exhaust.
+5. **Audit-log grant verification passes** — the CI/scheduled check from Step 8 confirms the app DB role still has no UPDATE/DELETE grant on `audit_log`.
+6. **Security review pass** — secrets rotated from any staging values (never shared between environments), encryption-at-rest confirmed for the hosting provider, dependency/SCA scan clean.
+7. **CI pipeline actually built and passing** — `lint → typecheck → test → build → migrate → deploy`, referenced in CLAUDE.md since the start but not yet a real workflow file as of Step 3. Building it is itself a prerequisite for this gate to mean anything.
+8. **Named-approver sign-off** — a specific person, not the pipeline, explicitly approves the promotion. Once the CI pipeline above exists, encode this as a GitHub Actions environment-protection rule requiring a reviewer on the production environment, rather than relying on manual discipline.
+
+**Check:** all 8 items ticked, in order, before the first production deploy. Commit/tag: `chore: production promotion gate passed — v1 go-live`.
 
 ---
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — DESPL Production Tracker
 
-Project guide for Claude Code / AI-assisted build sessions. **Read `docs/BUILD-SPEC-v2.md` first** — it supersedes the scheduling, granularity and stack sections of `docs/PRD.md` and `docs/TRD.md`. Update `progress.md` at the end of every working session.
+Project guide for Claude Code / AI-assisted build sessions. **Read `docs/BUILD-SPEC-v2.md` first** — it supersedes the scheduling, granularity and stack sections of `docs/PRD.md` and `docs/TRD.md`. Also read `docs/ARCHITECTURE.md` for production-scale data model, security, reliability and concurrency design — it's what keeps invariants #2/#3 holding under real concurrent load, not just in sequential tests. Update `progress.md` at the end of every working session.
 
 ## What this project is
 
@@ -56,7 +56,8 @@ pnpm lint && pnpm typecheck
 - Prisma: forward-only migrations, snake_case tables, enums for statuses. Never edit an applied migration.
 - Frontend: mobile-first for supervisor/QC screens; role-based landing (supervisor → "Today" priority list, MD/CEO → company dashboard). English-only strings, but ALL user-facing text goes through the i18n string table (`packages/shared/strings`) — Hindi/Gujarati arrives later as translation only.
 - Time zone: store UTC, display IST (Asia/Kolkata).
-- Tests: any change to the state machine, gating, RBAC, or audit paths requires table-driven tests for the violation cases, not just happy paths.
+- Tests: any change to the state machine, gating, RBAC, or audit paths requires table-driven tests for the violation cases, not just happy paths — AND concurrency tests (simultaneous conflicting requests via `Promise.all` against a real test DB), per `docs/ARCHITECTURE.md` §6. Sequential violation tests alone give false confidence about invariants #2/#3 under real shift-burst load.
+- **Row-level locking on every stage/unit state transition.** `submit`, `verify`, `complete`, and hold-clear writes in `StageService` must take `SELECT ... FOR UPDATE` on the target row before evaluating any gate, and re-check all gates (predecessor DAG, component-operation roll-up, hold-point clearance) *after* acquiring the lock — never trust a pre-lock read. This is the mechanism that makes invariants #2, #3, and #4 hold when two supervisors (or a supervisor and a QC verifier) race on the same row during a shift-start burst, not just in isolation. Default to `READ COMMITTED` + explicit row locks; reserve `SERIALIZABLE` for genuine cross-row invariants only. See `docs/ARCHITECTURE.md` §6 for the full race-condition analysis and testing pattern.
 
 ## Deferred to Phase 2 — do NOT build yet (but don't paint into a corner)
 
