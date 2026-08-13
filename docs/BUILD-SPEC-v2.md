@@ -71,7 +71,9 @@ elif available >= envelope.finishByMinDays[36] -> TIGHT (needs compression; list
 else -> INFEASIBLE (short by N days; must be escalated before the order is accepted)
 ```
 
-**Validated against live data:** DE0467, PO 24 Jun 2026, committed dispatch 15 Oct 2026 → 97 working days available vs 119 minimum. The engine flags this as **INFEASIBLE by ~26 working days** (~6 days if the table's "days" turn out to be calendar days — see open question C1). Either way the order was accepted on a timeline shorter than DESPL's own standard. *This is the single best demo of the tracker's value: it would have caught this at order acceptance.*
+**Validated against live data:** DE0467, PO 24 Jun 2026, committed dispatch 15 Oct 2026. That's 113 calendar days, less 16 Sundays under the default 6-day-week calendar, = 97 working days available vs 119 minimum. The engine flags this as **INFEASIBLE by 22 working days** (~6 days if the table's "days" turn out to be calendar days — see open question C1). Either way the order was accepted on a timeline shorter than DESPL's own standard. *This is the single best demo of the tracker's value: it would have caught this at order acceptance.*
+
+(An earlier draft of this figure said "~26 working days" — that was an arithmetic error, corrected 13 Aug 2026 once `lib/schedule/` was built and tested against this exact case. 119 − 97 = 22, not 26.)
 
 ### 1.6 Calendar
 
@@ -181,7 +183,7 @@ v1 is in-app only (PRD decision, 03 Aug 2026 — unchanged). Payload is stored e
 
 | # | Question | Blocks | Default in use |
 |---|---|---|---|
-| C1 | Are the table's "Days" **working days or calendar days**? Holiday list? | Every computed date; changes the DE0467 finding from 26 days to ~6 | Calendar days, 6-day week, Sun off |
+| C1 | Are the table's "Days" **working days or calendar days**? Holiday list? | Every computed date; changes the DE0467 finding from 22 days to ~6 | Calendar days, 6-day week, Sun off |
 | C2 | Confirm the concurrency the table implies (e.g. nozzle fab running while shell NDE is open) | Layer-2 lags | Fitted from the printed table |
 | C3 | Confirm procurement start points: plates after design calc (P3); pipes + bought-out after drawings (P4) | P7/P8/P9 planned dates | As derived |
 | C4 | Does the 17-week envelope hold for **40 units** (DE0463) and for **3 equipments in one order** (DE0467)? | Per-project scaling | Fixed baseline, editable |
