@@ -110,8 +110,19 @@ interface LiveJobsFile {
     dispatchDate: string;
     qty: string;
     equipmentBlocks: { blockNo: number; label: string | null; items: LiveBomItem[] }[];
-    assemblyDrawings: { name: string; drawingNo: string | null }[];
+    assemblyDrawings: {
+      name: string;
+      drawingNo: string | null;
+      approvalDate?: string | null;
+      releasedDate?: string | null;
+      revisedDate?: string | null;
+      revNo?: string | null;
+      remarks?: string | null;
+    }[];
     assemblyProcesses: { process: string }[];
+    /// Staged/partial dispatch dates, raw dd.mm.yyyy strings — only DE0463 has
+    /// these; see seed/live-jobs.json's top-level `note` for how they were found.
+    dispatchBatches?: string[];
   }[];
 }
 
@@ -179,6 +190,14 @@ interface QcpBatchTemplate {
 interface QcpBatchFile {
   templates: QcpBatchTemplate[];
   issues: { row: string; problem: string }[];
+}
+
+/// A process ROUTE derived from a QAP's activity sequence, not a lead-time
+/// document — see seed/pipe-spool-template.json's own `note` for why every
+/// process it lists is provisional.
+interface ProvisionalTemplateFile {
+  family: string;
+  processes: { seq: number; code: string; name: string; department: string; derivedFrom: string }[];
 }
 
 interface QcpTemplatesFile {
@@ -316,6 +335,7 @@ async function main() {
   const routesFile = readJson<ComponentRoutesFile>("component-routes.json");
   const qcpFile = readJson<QcpTemplatesFile>("qcp-templates.json");
   const qcpBatch2 = readJson<QcpBatchFile>("qcp-templates-batch2.json");
+  const pipeSpoolTemplate = readJson<ProvisionalTemplateFile>("pipe-spool-template.json");
   const issues = dataIssues.issues;
 
   // static sanity check before touching the DB
@@ -565,6 +585,61 @@ async function main() {
       });
       stats.templateEdges = await tx.templateEdge.count({ where: { versionId: pvV1.id } });
 
+      // ── 7b. PIPE_SPOOL process template — provisional, no lead-time doc ──
+      // Route derived from the (identical) Suction/Pressure Piping QAPs, not
+      // a lead-time document — see seed/pipe-spool-template.json's `note`.
+      // status: DRAFT (not PUBLISHED) — deliberately not ready for a real job
+      // to pin against yet, on top of the process-level `provisional` flag.
+      // PIPING_SYSTEM gets no template at all this pass: nothing in the QAPs
+      // distinguishes shop-fabricated spools from site-erected piping.
+      const psTemplate = await tx.processTemplate.create({
+        data: {
+          tenantId,
+          familyId: familyIdByCode.get(pipeSpoolTemplate.family)!,
+          name: "DESPL pipe spool — provisional route (derived from QAP, no lead-time data)",
+        },
+      });
+      const psV1 = await tx.processTemplateVersion.create({
+        data: {
+          templateId: psTemplate.id,
+          version: 1,
+          status: TemplateStatus.DRAFT,
+          notes:
+            "Derived from seed/qcp-templates-batch2.json's Suction/Pressure Piping QAPs " +
+            "(13 Aug 2026 handover), NOT a lead-time document. Every process is " +
+            "provisional: true with null durations — see pipe-spool-template.json.",
+        },
+      });
+      await tx.templateProcess.createMany({
+        data: pipeSpoolTemplate.processes.map((p) => ({
+          versionId: psV1.id,
+          seq: p.seq,
+          code: p.code,
+          name: p.name,
+          mainActivities: p.derivedFrom,
+          defaultDepartmentId: deptIdByCode.get(p.department)!,
+          workOrderStages: [],
+          provisional: true,
+        })),
+      });
+      const psProcesses = await tx.templateProcess.findMany({ where: { versionId: psV1.id } });
+      const psIdBySeq = new Map(psProcesses.map((p) => [p.seq, p.id]));
+      // strict finish-to-start chain, lagDays 0 — the honest "no known
+      // concurrency" default; see pipe-spool-template.json's `edgeNote`.
+      await tx.templateEdge.createMany({
+        data: pipeSpoolTemplate.processes
+          .filter((p) => p.seq > 1)
+          .map((p) => ({
+            versionId: psV1.id,
+            processId: psIdBySeq.get(p.seq)!,
+            predecessorId: psIdBySeq.get(p.seq - 1)!,
+            type: ProcessEdgeType.FINISH_TO_START,
+            lagDays: 0,
+          })),
+      });
+      stats.pipeSpoolTemplateProcesses = psProcesses.length;
+      stats.pipeSpoolTemplateEdges = await tx.templateEdge.count({ where: { versionId: psV1.id } });
+
       // ── 8. Component route library (25 routes) ───────────────────────
       // Previously present in seed/component-routes.json but modelled nowhere.
       let routeStepCount = 0;
@@ -628,6 +703,8 @@ async function main() {
       let componentCount = 0;
       let classifiedCount = 0;
       let componentOpCount = 0;
+      let drawingsWithDatesCount = 0;
+      let dispatchBatchCount = 0;
       // populated as each live job is created, so the batch2 QAP loader (§13)
       // can attach a template to an existing job without a second DB round trip
       const jobIdByNumber = new Map<string, number>();
@@ -687,8 +764,26 @@ async function main() {
               jobId: jobRow.id,
               drawingTypeId: drawingTypeIdByName.get(d.name)!,
               drawingNo: d.drawingNo,
+              revisionNo: d.revNo ?? null,
+              approvedDate: isoDate(d.approvalDate ?? null),
+              releasedDate: isoDate(d.releasedDate ?? null),
+              revisedDate: isoDate(d.revisedDate ?? null),
+              remarks: d.remarks ?? null,
             },
           });
+        }
+        drawingsWithDatesCount += job.assemblyDrawings.filter((d) => d.approvalDate).length;
+
+        // staged/partial dispatch dates — DE0463 only, see interface comment
+        if (job.dispatchBatches?.length) {
+          await tx.dispatchBatch.createMany({
+            data: job.dispatchBatches.map((raw, i) => ({
+              jobId: jobRow.id,
+              seq: i + 1,
+              plannedDate: firstDate(raw),
+            })),
+          });
+          dispatchBatchCount += job.dispatchBatches.length;
         }
 
         for (const block of job.equipmentBlocks) {
@@ -797,6 +892,8 @@ async function main() {
       stats.components = componentCount;
       stats.componentsClassified = classifiedCount;
       stats.componentOperations = componentOpCount;
+      stats.drawingsWithDates = drawingsWithDatesCount;
+      stats.dispatchBatches = dispatchBatchCount;
 
       // ── 11. Pilot job DESPL-320 + its QCP ────────────────────────────
       // Derived from the real QCP document header ("DESPL-320-01 to 09",

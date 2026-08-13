@@ -2,7 +2,7 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟢 **Architecture redesign adopted 13 Aug 2026 — schema rewritten, Day 1 of the 3-day prototype build complete** (tenancy + RLS, product-family process templates, route library, auth/RBAC/client scoping, tests). **Next: Day 2 — scheduling engine + visual component set.**
+**Status:** 🟢 **Architecture redesign adopted 13 Aug 2026 — schema rewritten and data-complete.** Foundation (tenancy/RLS/auth/RBAC), all seed data (PV + provisional Pipe Spool templates, 7 QCP templates, corrected BOM data), and 5 migrations are done and verified. **Nothing has been built yet against this data** — no scheduling engine, no UI beyond login + a read-only job list, no department workspaces. **Next: Day 2 — `lib/schedule/` + the visual component set.**
 **Pilot target:** DESPL-320 (9 × HP air receiver, 320SR01–09) fully tracked by Week 8
 **Near-term commitment:** working prototype tracking 3–5 equipments in 2–3 days; "full project" within a month. Solo developer.
 
@@ -10,14 +10,32 @@
 
 ## ▶ Resume point (read this first in a new session)
 
-**Day 1 of the redesigned build is done. Start Day 2: `lib/schedule/` (envelope, forward, backward, feasibility) + the reusable visual component set.**
+**All of 13 Aug 2026's work is data/schema/foundation. Day 2 proper — actually building `lib/schedule/` and UI — has not started.** Read this section, then jump straight to "What's done" / "What's remaining" below before touching code.
 
 The plan driving this is `/Users/sonusingh/.claude/plans/hazy-plotting-turing.md` (approved 13 Aug 2026). It supersedes the old IMPLEMENTATION-GUIDE step numbering — Steps 0–6 there are superseded by the schema rewrite below.
 
 **Model switched to Sonnet for Day 2 onward** (13 Aug 2026), per BUILD-SPEC-v2 §0 #9 / IMPLEMENTATION-GUIDE model discipline — architecture and spec decisions are locked, so Day 2+ is implementation against a written, approved plan. One carve-out: the scheduling engine (`lib/schedule/`) is the highest-risk logic in the product — the two-layer model is counterintuitive (invariant #10: never sum durations), negative lags must relax scheduling but never gating (invariant #11), and **the spec's own DE0467 regression figure is wrong**: BUILD-SPEC-v2 §1.5 and IMPLEMENTATION-GUIDE Step 7 assert a ~26 working-day shortfall, but 113 calendar days (24 Jun–15 Oct 2026) less 16 Sundays is 97 working days, and 119 − 97 = **22**, not 26 (this is separate from the C1 working/calendar-days question already logged below, which is a different what-if). A correct engine will report 22 and fail the documented ~26 check — fix the spec/guide assertions to 22 rather than bending the engine to match. Write the table-driven test cases for it carefully, or bring architecture questions on it back for Opus review, rather than improvising past invariant #10/#11 on a plausible-looking implementation.
 
-**Two things not yet done, flagged so they aren't lost:**
-1. Uncommitted changes remain (now including the QCP batch import below). Not committed automatically per this project's git discipline — commit when asked.
+### What's done (verified against Postgres, not just trusted seed output)
+
+- **Schema & security**: 50+ tables, 5 migrations (`init`, `rls_and_app_role`, `rls_fail_closed`, `provisional_process_durations`, `dispatch_batches`). Tenant RLS fail-closed (verified: unscoped read → 0 rows, wrong tenant → 0 rows, cross-tenant insert → rejected). Audit append-only for real (verified: INSERT allowed, UPDATE/DELETE denied for the `despl_web` non-owner role — the old `REVOKE` was a documented no-op under superuser).
+- **Auth/RBAC/client scoping**: login, argon2id, session cookie, deny-by-default middleware, `lib/authz/` with 22 unit tests (all violation cases — maker-checker, department scope, client scope). 6 Playwright e2e on the auth boundary. `/portal` access boundary exists but has no content yet (client order view is Day 3 work).
+- **Process templates**: `PRESSURE_VESSEL` v1 (36 processes, real durations, PUBLISHED) + `PIPE_SPOOL` v1 (16 processes, **provisional** — every duration null, derived from QAP activity order not a lead-time doc, DRAFT status). `PIPING_SYSTEM` and `HEAT_EXCHANGER` families exist with **no template** — no sourced basis yet.
+- **QCP data**: 7 templates total (DESPL-320 pilot + 6 from the 13 Aug docx handover — Suction Air Vessel/Suction Piping/Pressure Piping all linked to job DE0467, DE0463's own QAP, Ammonia Vaporizer + an unlabelled "Vessel" QAP with no job match). 362 items, 780 party-codes, all validated against the known code vocabulary. `RW` code definition corrected to "10% Witness" (was a guess, now sourced).
+- **BOM data cross-checked**: fresh CSV re-upload diffed programmatically against seed — 0 changes to BOM/procurement data (same underlying export). Fixed real gaps found along the way: assembly-drawing dates were extracted but silently dropped by `seed.ts`, now persisted; new `DispatchBatch` model for DE0463's 3 staged dispatch dates; 5-field mojibake encoding bug corrected.
+- Full regression clean throughout: 22 unit tests, 6 e2e, lint, typecheck.
+
+### What's remaining before this counts as "Day 2 done"
+
+1. **`lib/schedule/`** — envelope, forward, backward, feasibility, override. Currently an empty README. Nothing schedules anything yet; `ScheduleRun`/`ProcessPlan` tables exist but have zero rows.
+2. **`lib/services/`** — also an empty README. No business-rule functions exist (start process, submit, verify, file delay reason). Department workspaces and the process-update flow depend on this.
+3. **Visual component set** — progress ring, matrix heatmap, S-curve, KPI tile, milestone timeline. Not started; the homepage is still a plain HTML table.
+4. **One real department workspace** with gating/maker-checker/hold-point refusals actually firing (they exist in `lib/authz` but nothing calls them against real process data yet).
+5. **Management dashboard** and **client order view** (`/portal` content) — both read from data structures that don't exist until #1–#2 are built.
+6. **Deploy to Railway staging** — not started.
+
+**Two things not yet done, unrelated to the code:**
+1. Uncommitted changes remain across the whole 13 Aug session (schema, seed, auth, QCP import, pipe-spool template, CSV fixes). Not committed automatically per this project's git discipline — commit when asked. Given the volume, consider committing in the logical chunks this log is already organised into, rather than one giant diff.
 2. DESPL has not yet been asked for the lead-time tables + QAPs for Pipe Spool / Piping System specifically (Heat Exchanger data has now arrived — see below). The template engine is ready for the rest; this remains the critical-path blocker for those families, independent of any coding work.
 
 ### QCP batch import — 6 new QAP templates from the 13 Aug 2026 handover
@@ -44,6 +62,36 @@ DE0467's 3 templates confirms something useful: its `projectName` field — `'PR
 New/changed files: `seed/qcp-templates-batch2.json` (new, 6 templates), `seed/qcp-templates.json` (RW/R&A metadata updated), `prisma/seed.ts` (QCP-loading logic refactored into a shared `seedQcpTemplate()` used by both the original pilot template and the 6 new ones; added `jobIdByNumber` tracking during the live-jobs loop).
 
 Reseeded end to end and reverified: 7 QCP templates total, 362 items, 780 party-codes, all party-code values confirmed against the known code vocabulary (query against `qcp_code_refs`, not eyeballed). Full regression clean after: 22 unit tests, 6 Playwright e2e, lint, typecheck.
+
+### PIPE_SPOOL provisional process template
+
+User asked (fairly): doesn't the docx already give you Pipe Spool / Piping System data? Answer: partially. The QAP gives *what* gets inspected and *in what order* — genuinely useful, already sourced. It does not give *durations*, which is what "lead time" specifically means and what the two-layer envelope+CPM scheduling model needs. Confirmed the Suction Piping and Pressure Piping QAPs share one identical process route (only fitting names differ), so there is exactly one real route to derive, not two guesses.
+
+**Schema change** (`prisma/schema.prisma`, migration `20260813084535_provisional_process_durations`): `TemplateProcess`/`JobProcess` duration and envelope fields (`durationMinDays/MaxDays`, `envelopeFinishBy/StartByMin/MaxDays`) are now nullable, plus a `provisional Boolean` flag on both. This is a deliberate contract for whenever `lib/schedule/` gets built (Day 2): it **must** refuse to compute a plan for a provisional/null-duration process — a clear refusal (e.g. `SCHEDULE_DATA_MISSING`), never a silent 0-day or guessed date. RLS policies confirmed intact after the ALTER migration.
+
+**`seed/pipe-spool-template.json`** (new): a 16-step route derived from the piping QAPs' activity sequence, each step tagged `derivedFrom` — either the specific QAP section it maps to, or `INFERRED` for structurally-necessary steps the QAP doesn't checkpoint (Material Procurement, Cutting, Dispatch — the QAP inspects material *after* receipt and joints *after* fit-up, not the procurement/cutting activity itself). Strict finish-to-start chain, `lagDays: 0` throughout — the honest "no known concurrency" default, explicitly NOT the fitted-DAG model PV uses (that model exists because PV's lead-time table showed *real* fitted concurrency; no equivalent evidence exists here). `ProcessTemplateVersion.status = DRAFT`, not PUBLISHED — not yet meant for a real job to pin against.
+
+**PIPING_SYSTEM deliberately got no template.** Nothing in the source QAPs distinguishes shop-fabricated spools from site-erected piping (no hangers/supports/tie-in/field-weld checkpoints) — inventing that distinction from data that doesn't support it would be a guess, not a derivation.
+
+Verified directly against Postgres: all 16 pipe-spool rows `provisional=true` with null durations (0 rows violate this), PV's 36 rows unaffected (still real durations, `provisional=false`), PIPING_SYSTEM confirmed at 0 templates. Full regression clean: 22 unit, 6 e2e, lint, typecheck.
+
+New/changed files: `prisma/schema.prisma`, `prisma/migrations/20260813084535_provisional_process_durations/`, `seed/pipe-spool-template.json` (new), `prisma/seed.ts` (§7b added).
+
+### CSV re-check: DE0463/DE0467 fresh export vs the seeded data
+
+User provided `DESPL(DE0463) (1).csv` and `DESPL(DE0467) (1) (1).csv` and asked me to plan the integration. Before planning anything, diffed both programmatically against `seed/live-jobs.json` — every BOM item, every procurement status, across all 54 items. **Result: 0 diffs.** These are the same underlying export already behind the seed, not an update — worth recording so this doesn't get re-litigated as "new data" later.
+
+The diff did surface three real, bounded things, all now fixed:
+
+1. **Assembly-drawing approval/release/revision data was being silently dropped.** `seed/live-jobs.json` already had correct, CSV-accurate dates for every drawing (verified against the fresh CSV) — but `prisma/seed.ts`'s `LiveJobsFile` interface only declared `{name, drawingNo}`, truncating everything else before it reached the `AssemblyDrawing` table, even though the Day 1 redesign added real columns for exactly this. Widened the interface, now persisted. Zero new extraction needed — the data was already sitting in the seed JSON, just discarded on the way in.
+
+2. **`DispatchBatch` (new model).** DE0463's header row carries 3 dates beyond its "Dispatch Date" field (10.08 / 20.08 / 30.08.2026) with no column header anywhere in the source. Asked rather than guessed — user confirmed these are staged/partial dispatch dates for the 40-unit order. Modeled as a small additive table (`jobId`, `seq`, `plannedDate`, nullable `qty` — no per-batch quantity exists in the source, so it stays unknown rather than assuming an even split). `Job.deliveryDate` is unchanged and still holds the tracker's primary dispatch date (= batch 1). Migration `20260813085906_dispatch_batches`. DE0467 checked and confirmed to have no equivalent pattern — this is a DE0463-specific finding, not a general gap.
+
+3. **Encoding bug, 5 fields.** `seed/live-jobs.json` stored a Unicode replacement character (mojibake) in 5 DE0463 string fields — traced to the original 11 Aug extraction reading the source CSV with the wrong encoding (needs `cp1252`, not UTF-8). Corrected against the properly-decoded CSV: `Ø` (diameter) in 3 description fields, `°` (degree) in 2 part names. Verified the JSON diff touched exactly those 5 lines, nothing else.
+
+Reseeded and verified directly against Postgres: 4 drawings now carry real dates, 4 dispatch batches created for DE0463 (batch 1 = 2026-07-28, matching `Job.deliveryDate` exactly), all 5 corrected strings render with the right characters. Full regression clean: 22 unit, 6 e2e, lint, typecheck.
+
+New/changed files: `prisma/schema.prisma` (`DispatchBatch` model), `prisma/migrations/20260813085906_dispatch_batches/`, `seed/live-jobs.json` (5 string fixes + `dispatchBatches` + a `note` documenting both), `prisma/seed.ts` (widened `LiveJobsFile` interface, assembly-drawing persistence, `DispatchBatch` creation).
 
 ### What changed and why
 

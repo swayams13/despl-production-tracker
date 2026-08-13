@@ -40,10 +40,10 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // Application runtime: a non-owner role, so tenant RLS and the append-only
   // audit REVOKE actually apply to every query the app makes.
-  url      = env("DATABASE_URL")
+  url       = env("DATABASE_URL")
   // Migrations and seeding: the table owner, which RLS does not constrain.
   directUrl = env("DIRECT_URL")
 }
@@ -501,18 +501,28 @@ model TemplateProcess {
   code                    String
   name                    String
   mainActivities          String? @map("main_activities")
-  durationMinDays         Int     @map("duration_min_days")
-  durationMaxDays         Int     @map("duration_max_days")
+  /// Nullable + `provisional` together, deliberately: a family with a process
+  /// ROUTE but no confirmed durations (e.g. PIPE_SPOOL, derived from a QAP's
+  /// activity sequence, not a lead-time document) can exist without inventing
+  /// numbers. `lib/schedule/` MUST refuse to compute a plan — return a clear
+  /// "SCHEDULE_DATA_MISSING"-style refusal, never a 0-day or guessed date —
+  /// for any process where `provisional` is true or a duration is null.
+  durationMinDays         Int?    @map("duration_min_days")
+  durationMaxDays         Int?    @map("duration_max_days")
   cumulativePrinted       String? @map("cumulative_printed")
   defaultDepartmentId     Int     @map("default_department_id")
-  /// Crosswalk to the 25-stage work-order reporting view.
+  /// Crosswalk to the 25-stage work-order reporting view. Pressure-Vessel-
+  /// specific; empty for families with no equivalent reporting view.
   workOrderStages         Int[]   @map("work_order_stages")
-  envelopeFinishByMinDays Int     @map("envelope_finish_by_min_days")
-  envelopeFinishByMaxDays Int     @map("envelope_finish_by_max_days")
-  envelopeStartByMinDays  Int     @map("envelope_start_by_min_days")
-  envelopeStartByMaxDays  Int     @map("envelope_start_by_max_days")
+  envelopeFinishByMinDays Int?    @map("envelope_finish_by_min_days")
+  envelopeFinishByMaxDays Int?    @map("envelope_finish_by_max_days")
+  envelopeStartByMinDays  Int?    @map("envelope_start_by_min_days")
+  envelopeStartByMaxDays  Int?    @map("envelope_start_by_max_days")
   /// Conditional processes (e.g. PWHT) can be excluded per job.
   optional                Boolean @default(false)
+  /// True = process/sequence is real (sourced from a QAP or lead-time doc),
+  /// but duration is not confirmed by DESPL. Distinct from `optional`.
+  provisional             Boolean @default(false)
 
   version            ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment  Department             @relation(fields: [defaultDepartmentId], references: [id])
@@ -583,6 +593,7 @@ model Job {
   qcpTemplates    QcpTemplate[]
   drawings        AssemblyDrawing[]
   snapshots       ProgressSnapshot[]
+  dispatchBatches DispatchBatch[]
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
@@ -640,14 +651,18 @@ model JobProcess {
   code                    String
   name                    String
   departmentId            Int     @map("department_id")
-  durationMinDays         Int     @map("duration_min_days")
-  durationMaxDays         Int     @map("duration_max_days")
-  envelopeFinishByMinDays Int     @map("envelope_finish_by_min_days")
-  envelopeFinishByMaxDays Int     @map("envelope_finish_by_max_days")
+  /// Nullable + `provisional`: see TemplateProcess. A job pinned to a
+  /// provisional template materialises provisional JobProcess rows too —
+  /// `lib/schedule/` must refuse to plan around them, not guess.
+  durationMinDays         Int?    @map("duration_min_days")
+  durationMaxDays         Int?    @map("duration_max_days")
+  envelopeFinishByMinDays Int?    @map("envelope_finish_by_min_days")
+  envelopeFinishByMaxDays Int?    @map("envelope_finish_by_max_days")
   workOrderStages         Int[]   @map("work_order_stages")
   included                Boolean @default(true)
   durationOverrideDays    Int?    @map("duration_override_days")
   overrideReason          String? @map("override_reason")
+  provisional             Boolean @default(false)
 
   job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
   templateProcess    TemplateProcess? @relation(fields: [templateProcessId], references: [id])
@@ -1072,6 +1087,27 @@ model AssemblyDrawing {
   @@index([jobId])
   @@index([drawingTypeId])
   @@map("assembly_drawings")
+}
+
+/// Staged/partial dispatch dates for a single job. Found on DE0463 (QTY-40
+/// NOS.): 28.07 / 10.08 / 20.08 / 30.08.2026, printed with no column header
+/// and no per-batch quantity in the source tracker — `qty` stays nullable
+/// rather than guessing an even split. `Job.deliveryDate` is unchanged and
+/// still holds the tracker's own "Dispatch Date" field (the first batch);
+/// this table is purely additive.
+model DispatchBatch {
+  id          Int      @id @default(autoincrement())
+  jobId       Int      @map("job_id")
+  seq         Int
+  plannedDate DateTime @map("planned_date")
+  qty         Int?
+  remarks     String?
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, seq])
+  @@index([jobId])
+  @@map("dispatch_batches")
 }
 
 // ── Delay, notifications ────────────────────────────────────────────────

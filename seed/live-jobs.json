@@ -200,7 +200,7 @@
             {
               "itemNo": 3,
               "partName": "PLATE FOR BODY FLANGE",
-              "description": "\ufffd450 O.D. x \ufffd355.6 I.D. x 18 THK.",
+              "description": "Ø450 O.D. x Ø355.6 I.D. x 18 THK.",
               "material": "SA-240 TYPE304",
               "qty": "40",
               "unit": "NOS",
@@ -226,7 +226,7 @@
             {
               "itemNo": 4,
               "partName": "PLATE FOR FLAT DISH END",
-              "description": "\ufffd355.6 x 20 THK.",
+              "description": "Ø355.6 x 20 THK.",
               "material": "SA-240 TYPE304",
               "qty": "40",
               "unit": "NOS",
@@ -251,7 +251,7 @@
             },
             {
               "itemNo": 5,
-              "partName": "90\ufffd SR ELBOW FOR\nNOZZLE N1",
+              "partName": "90° SR ELBOW FOR\nNOZZLE N1",
               "description": "DN80 x SCH. 10s",
               "material": "SA-403 304",
               "qty": "40",
@@ -304,7 +304,7 @@
             {
               "itemNo": 7,
               "partName": "PLATE FOR COVER\nPLATE NOZZLE N1",
-              "description": "\ufffd100 x 6 THK.",
+              "description": "Ø100 x 6 THK.",
               "material": "SA-240 TYPE304",
               "qty": "40",
               "unit": "NOS",
@@ -329,7 +329,7 @@
             },
             {
               "itemNo": 8,
-              "partName": "180\ufffd LR U BEND FOR NOZZLE N2,N3,N4",
+              "partName": "180° LR U BEND FOR NOZZLE N2,N3,N4",
               "description": "DN 50 x SCH. 40s",
               "material": "SA-403 304",
               "qty": "120",
@@ -660,6 +660,12 @@
           "result": null,
           "status": null
         }
+      ],
+      "dispatchBatches": [
+        "28.07.2026",
+        "10.08.2026",
+        "20.08.2026",
+        "30.08.2026"
       ]
     },
     {
@@ -1777,5 +1783,6 @@
         }
       ]
     }
-  ]
+  ],
+  "note": "13 Aug 2026: re-checked against a fresh copy of both source CSVs (DESPL(DE0463) (1).csv, DESPL(DE0467) (1) (1).csv) via a full programmatic diff — 0 BOM/procurement identity or value diffs across all 54 items, confirming these are the same underlying export. Two things found and fixed: (1) five string fields under DE0463 had a mojibake artifact (U+FFFD) from the original 11 Aug extraction reading the file with the wrong encoding (needs cp1252, not UTF-8) — corrected against the properly-decoded CSV, see git history for the exact before/after values; (2) DE0463's header row carries 3 unlabeled dates beyond its 'Dispatch Date' field (10.08 / 20.08 / 30.08.2026) with no column header in the source — user-confirmed these are staged/partial dispatch batches for the 40-unit order; captured below as `dispatchBatches`, with no per-batch quantity since none exists in the source."
 }

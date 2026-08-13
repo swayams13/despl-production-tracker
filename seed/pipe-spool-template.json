@@ -1,0 +1,80 @@
+{
+  "$schema": "despl.processtemplate.provisional.v1",
+  "source": "Derived from qcp-templates-batch2.json (Suction Piping DE0455-02 and Pressure Piping DE0455-01 QAPs — production process_work flow..docx, 13 Aug 2026 handover). NOT a lead-time document.",
+  "note": "There is no lead-time/duration table for PIPE_SPOOL or PIPING_SYSTEM yet. This file was written after confirming the two piping QAPs share one identical process route (only fitting names differ — 'Reducing Tee' vs 'Straight Tee'). It captures that real, sourced SEQUENCE (order and gating dependencies) so PIPE_SPOOL jobs can exist and gate correctly — durations cannot be invented, so every process below is `provisional: true` with null durationMinDays/MaxDays/envelope fields. `lib/schedule/` MUST refuse to compute a plan for a provisional process (return a clear refusal, e.g. SCHEDULE_DATA_MISSING) rather than treat a null duration as zero. Update this file, set provisional:false and fill real durations, once DESPL supplies a Pipe Spool lead-time table — then re-seed; do not hand-patch the DB.",
+  "family": "PIPE_SPOOL",
+  "notCoveringPipingSystem": "PIPING_SYSTEM (site-erected piping, as opposed to shop-fabricated spools) is left with NO template at all — nothing in the source QAPs distinguishes shop fabrication from field erection (no hangers/supports/tie-in/field-weld checkpoints appear), so inventing a distinct PIPING_SYSTEM route from this data would not be sourced, it would be a guess.",
+  "processes": [
+    {
+      "seq": 1, "code": "PS1", "name": "PO Receipt & Order Review",
+      "department": "PROJECTS", "derivedFrom": "INFERRED — standard opening step, not a distinct QAP checkpoint but structurally necessary before design work starts."
+    },
+    {
+      "seq": 2, "code": "PS2", "name": "Design Calculation",
+      "department": "ENGINEERING", "derivedFrom": "QAP §2 (Design Calculation)."
+    },
+    {
+      "seq": 3, "code": "PS3", "name": "Drawing Approval",
+      "department": "ENGINEERING", "derivedFrom": "QAP §3 (Drawing)."
+    },
+    {
+      "seq": 4, "code": "PS4", "name": "Welding Procedure & Qualification Review (WPS/PQR)",
+      "department": "QC", "derivedFrom": "QAP §4.1/4.2 (Welding Procedure & Qualification Record, Welding Consumable Control)."
+    },
+    {
+      "seq": 5, "code": "PS5", "name": "NDE Procedure & Personnel Qualification Review",
+      "department": "QC", "derivedFrom": "QAP §5.1/5.2/5.3 (NDE Procedure, NDE Operator Qualification, QC Procedures)."
+    },
+    {
+      "seq": 6, "code": "PS6", "name": "Material Procurement (Pipe / Fittings / Flanges)",
+      "department": "PROCUREMENT",
+      "derivedFrom": "INFERRED — necessary for scheduling (material has to be ordered before it can be received), but the QAP has no checkpoint for the procurement wait itself, only for inspecting material after receipt (§6.1). Duration here is exactly the kind of number a lead-time document would supply and this one doesn't."
+    },
+    {
+      "seq": 7, "code": "PS7", "name": "Material Receipt & Identification",
+      "department": "QC", "derivedFrom": "QAP §6.1 (Pressure Parts — Pipe, Forging, Fitting etc.)."
+    },
+    {
+      "seq": 8, "code": "PS8", "name": "Cutting",
+      "department": "FABRICATION_PREP",
+      "derivedFrom": "INFERRED — pipe must be cut to length before Set-Up/Fit-Up; the QAP has no dedicated cutting checkpoint (it inspects the joint after fit-up, not the cut itself)."
+    },
+    {
+      "seq": 9, "code": "PS9", "name": "Fit-Up",
+      "department": "FABRICATION",
+      "derivedFrom": "QAP §8.1/8.4/8.7 (Set-Up of Pipe-to-Flange / Pipe-to-Tee / Tee-to-Flange) — collapsed to one process; the QAP's per-joint-type breakdown is a QC extent-of-check detail, not a distinct manufacturing stage."
+    },
+    {
+      "seq": 10, "code": "PS10", "name": "Welding",
+      "department": "FABRICATION",
+      "derivedFrom": "QAP §8.2/8.5/8.8 (Welding of Pipe-to-Flange / Pipe-to-Tee / Tee-to-Flange)."
+    },
+    {
+      "seq": 11, "code": "PS11", "name": "Weld NDE (RT)",
+      "department": "QC",
+      "derivedFrom": "QAP §8.3/8.6/8.9 (RT Examination of each joint type)."
+    },
+    {
+      "seq": 12, "code": "PS12", "name": "Final Dimensional & Visual Inspection",
+      "department": "QC", "derivedFrom": "QAP §10.1 (Final Dimension of Suction/Pressure Piping)."
+    },
+    {
+      "seq": 13, "code": "PS13", "name": "Hydrostatic / Pressure Test",
+      "department": "QC", "derivedFrom": "QAP §11.1 (Hydro Test of Complete Piping)."
+    },
+    {
+      "seq": 14, "code": "PS14", "name": "Surface Preparation & Painting",
+      "department": "SURFACE_PAINT", "derivedFrom": "QAP §12.1 (Surface Preparation & Painting of Carbon Steel External Surface)."
+    },
+    {
+      "seq": 15, "code": "PS15", "name": "Final Stamping & Documentation",
+      "department": "DOCUMENTATION", "derivedFrom": "QAP §13.1/13.2 (NCR verification, Final Documentation Dossier)."
+    },
+    {
+      "seq": 16, "code": "PS16", "name": "Dispatch Clearance & Dispatch",
+      "department": "DISPATCH",
+      "derivedFrom": "INFERRED — standard closing step, not a distinct QAP checkpoint, mirrors every other job's final stage."
+    }
+  ],
+  "edgeNote": "Strict finish-to-start chain (seq N depends on seq N-1), lagDays: 0 throughout — the honest 'no known concurrency' default. This is NOT the two-layer envelope+CPM model used for Pressure Vessel; that model exists specifically because DESPL's PV lead-time table showed real fitted concurrency (21 of 36 processes overlap). No equivalent evidence exists for piping, so none is assumed."
+}
