@@ -246,11 +246,6 @@ function firstDate(raw: string): Date {
   if (!d.length) throw new Error(`no dd.mm.yyyy date found in "${raw}"`);
   return d[0];
 }
-function lastDate(raw: string): Date {
-  const d = extractDMYDates(raw);
-  if (!d.length) throw new Error(`no dd.mm.yyyy date found in "${raw}"`);
-  return d[d.length - 1];
-}
 function isoDate(raw: string | null): Date | null {
   return raw ? new Date(`${raw}T00:00:00.000Z`) : null;
 }
@@ -723,7 +718,14 @@ async function main() {
             clientOrderNo: job.workOrderNoInFile,
             projectName: job.projectName,
             orderDate: firstDate(job.orderGenerateDate),
-            deliveryDate: lastDate(job.dispatchDate),
+            // EARLIEST of a committed window, not the latest. DE0467's source
+            // dispatch field is a range ("15.10.2026 - 25.10.2026"); read as the
+            // late end it is 14 working days short of DESPL's own lead time,
+            // read as the early end, 22. The feasibility check exists to raise
+            // that risk before an order is signed, so it must measure against
+            // the date first promised. The full raw range is preserved verbatim
+            // in `remarks` by buildJobRemarks below, so nothing is lost.
+            deliveryDate: firstDate(job.dispatchDate),
             remarks: buildJobRemarks(issues, job.job, job.orderGenerateDate, job.dispatchDate),
           },
         });

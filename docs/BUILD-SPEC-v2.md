@@ -71,7 +71,12 @@ elif available >= envelope.finishByMinDays[36] -> TIGHT (needs compression; list
 else -> INFEASIBLE (short by N days; must be escalated before the order is accepted)
 ```
 
-**Validated against live data:** DE0467, PO 24 Jun 2026, committed dispatch 15 Oct 2026 → 97 working days available vs 119 minimum. The engine flags this as **INFEASIBLE by ~26 working days** (~6 days if the table's "days" turn out to be calendar days — see open question C1). Either way the order was accepted on a timeline shorter than DESPL's own standard. *This is the single best demo of the tracker's value: it would have caught this at order acceptance.*
+**Validated against live data:** DE0467, PO 24 Jun 2026, committed dispatch 15 Oct 2026 → 97 working days available vs 119 minimum. The engine flags this as **INFEASIBLE by 22 working days**. The order was accepted on a timeline shorter than DESPL's own standard. *This is the single best demo of the tracker's value: it would have caught this at order acceptance.*
+
+> **Corrected 13 Aug 2026 (was "~26").** 24 Jun → 15 Oct 2026 is 113 calendar days containing 16 Sundays = 97 working days; 119 − 97 = **22**. The old figure was never reproducible and is now asserted as 22 in `src/lib/schedule/schedule.test.ts`. Two conventions this number depends on, both pinned by tests:
+>
+> 1. **Day 0 is the PO date itself** — working days are counted over `(PO, delivery]`. The inclusive reading gives 98 available / 21 short.
+> 2. **The delivery date is the EARLIEST of a committed window.** DE0467's source field is a range, `15.10.2026 - 25.10.2026`. Against the late end the shortfall is only **14** days. We measure against the earliest because the check exists to raise risk before the order is signed — see open question **C21**.
 
 ### 1.6 Calendar
 
@@ -181,7 +186,7 @@ v1 is in-app only (PRD decision, 03 Aug 2026 — unchanged). Payload is stored e
 
 | # | Question | Blocks | Default in use |
 |---|---|---|---|
-| C1 | Are the table's "Days" **working days or calendar days**? Holiday list? | Every computed date; changes the DE0467 finding from 26 days to ~6 | Calendar days, 6-day week, Sun off |
+| C1 | Are the table's "Days" **working days or calendar days**? Holiday list? | Every computed date; changes the DE0467 finding from 22 days to ~6 | Calendar days, 6-day week, Sun off |
 | C2 | Confirm the concurrency the table implies (e.g. nozzle fab running while shell NDE is open) | Layer-2 lags | Fitted from the printed table |
 | C3 | Confirm procurement start points: plates after design calc (P3); pipes + bought-out after drawings (P4) | P7/P8/P9 planned dates | As derived |
 | C4 | Does the 17-week envelope hold for **40 units** (DE0463) and for **3 equipments in one order** (DE0467)? | Per-project scaling | Fixed baseline, editable |
@@ -193,3 +198,6 @@ v1 is in-app only (PRD decision, 03 Aug 2026 — unchanged). Payload is stored e
 | C10 | Component-type classification for BOM lines — auto by keyword or manual? | Route assignment | Manual with keyword suggestion |
 | C11 | Edge Preparation, Grinding, generic Inspection have no column in the live tracker — track them? | Operation vocabulary | Modelled, hidden by default |
 | C12 | Ambiguous dates like `7/8/2026` in the trackers | Data accuracy | Assumed m/d/yyyy |
+| **C21** | A **dispatch date given as a window** (DE0467: `15.10.2026 - 25.10.2026`) — is the commitment the earliest or the latest date? | Feasibility verdicts; worth 8 working days on DE0467 alone (22 short vs 14) | **Earliest** — a tender-stage warning must fire against the date first promised |
+| C22 | A **revised order date** (DE0467: original 24.06.2026, revised 13.07.2026 "for Suction & Pressure Pipe") — does the clock restart, and per equipment or per job? | Schedule anchor; against the revised date DE0467 is 38 working days short, not 22 | Original PO date; revision noted in `Job.remarks` |
+| C23 | Which processes are **optional per client**? PWHT is skippable (the DESPL-320 drawing says it is not required), yet nothing is flagged `optional` in the lead-time table. | Template vs per-job deviation; the engine bypasses excluded processes and composes their lags | None flagged; all 36 included by default |

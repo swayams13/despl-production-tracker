@@ -128,14 +128,14 @@ pnpm prisma studio   # spot-check: 36 processes, 13 departments, 54 QCP items, 2
 
 This is the core of the release per BUILD-SPEC-v2 §1. Prompt:
 
-> Build lib/schedule/ implementing BUILD-SPEC-v2 §1.2–§1.5: the envelope layer, the CPM layer with fitted lags, forward scheduling, backward scheduling, the feasibility check, and the override mechanism (mandatory reason, audit row, baseline preserved — never mutated). Write table-driven Vitest tests, including this exact regression case: DE0467, PO date 2026-06-24, committed dispatch 2026-10-15, 6-day calendar week — the engine must report INFEASIBLE, short by approximately 26 working days against the 119-day standard envelope. Also test: a negative lag never allows a process to be marked COMPLETE before its predecessor, even though it can be marked IN_PROGRESS earlier — gating and scheduling are separate checks.
+> Build lib/schedule/ implementing BUILD-SPEC-v2 §1.2–§1.5: the envelope layer, the CPM layer with fitted lags, forward scheduling, backward scheduling, the feasibility check, and the override mechanism (mandatory reason, audit row, baseline preserved — never mutated). Write table-driven Vitest tests, including this exact regression case: DE0467, PO date 2026-06-24, committed dispatch 2026-10-15, 6-day calendar week — the engine must report INFEASIBLE, short by exactly 22 working days against the 119-day standard envelope. Also test: a negative lag never allows a process to be marked COMPLETE before its predecessor, even though it can be marked IN_PROGRESS earlier — gating and scheduling are separate checks.
 
 Run:
 ```bash
 pnpm test lib/schedule
 ```
 
-**Check:** the DE0467 regression test passes with the ~26-day shortfall (this is the number I hand-verified earlier — if the engine reports something very different, stop and debug before building anything on top of it). Commit: `feat: scheduling engine + tests`.
+**Check:** the DE0467 regression test passes with a **22**-day shortfall. (Corrected 13 Aug 2026 — this step previously said ~26, which is not reproducible from the dates: 113 calendar days less 16 Sundays = 97 working days, and 119 − 97 = 22. The engine reports 22; the old figure was the wrong one. See BUILD-SPEC-v2 §1.5 for the two counting conventions this depends on.) Commit: `feat: scheduling engine + tests`.
 
 ---
 

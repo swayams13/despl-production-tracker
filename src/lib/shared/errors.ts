@@ -31,6 +31,14 @@ export const ERROR_CODES = {
   OVERRIDE_REASON_REQUIRED: "OVERRIDE_REASON_REQUIRED",
   /** Waiving a witness point needs Production Head approval. */
   WAIVER_NOT_APPROVED: "WAIVER_NOT_APPROVED",
+  /**
+   * A process has no confirmed duration or envelope (it is `provisional`, or a
+   * duration is null). The engine refuses to plan rather than substituting a
+   * 0-day or guessed date — see the schema comment on TemplateProcess.
+   */
+  SCHEDULE_DATA_MISSING: "SCHEDULE_DATA_MISSING",
+  /** The process dependency graph contains a cycle, so it cannot be scheduled. */
+  SCHEDULE_CYCLE: "SCHEDULE_CYCLE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -52,6 +60,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: "That record does not exist, or you cannot see it.",
   OVERRIDE_REASON_REQUIRED: "Changing a planned date requires a reason, which is recorded.",
   WAIVER_NOT_APPROVED: "Waiving a witness point requires Production Head approval.",
+  SCHEDULE_DATA_MISSING:
+    "This equipment type has no confirmed lead times yet, so no dates can be calculated. Ask DESPL for its lead-time table.",
+  SCHEDULE_CYCLE:
+    "The process order for this job loops back on itself, so no schedule can be produced. Fix the predecessor list.",
 };
 
 /**
