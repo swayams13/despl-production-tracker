@@ -31,6 +31,8 @@ export const ERROR_CODES = {
   OVERRIDE_REASON_REQUIRED: "OVERRIDE_REASON_REQUIRED",
   /** Waiving a witness point needs Production Head approval. */
   WAIVER_NOT_APPROVED: "WAIVER_NOT_APPROVED",
+  /** Scheduling was attempted against a process with no confirmed duration/envelope (provisional template). */
+  SCHEDULE_DATA_MISSING: "SCHEDULE_DATA_MISSING",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -52,6 +54,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   NOT_FOUND: "That record does not exist, or you cannot see it.",
   OVERRIDE_REASON_REQUIRED: "Changing a planned date requires a reason, which is recorded.",
   WAIVER_NOT_APPROVED: "Waiving a witness point requires Production Head approval.",
+  SCHEDULE_DATA_MISSING:
+    "This process has no confirmed duration yet — it cannot be scheduled until DESPL provides one.",
 };
 
 /**
