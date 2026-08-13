@@ -6,6 +6,10 @@
 **Pilot target:** DESPL-320 (9 × HP air receiver, 320SR01–09) fully tracked by Week 8
 **Near-term commitment:** working prototype tracking 3–5 equipments in 2–3 days; "full project" within a month. Solo developer.
 
+**Git workflow, changed 13 Aug 2026:** new `demo` branch created from `main` (currently identical, both at `528cd44`). **From now on, push to `demo` first; merge to `main` only after the user verifies and explicitly approves the promotion** — same discipline as the EJ Production Tracker sibling project. Do not push to or merge into `main` on your own initiative.
+
+**Session ended 13 Aug 2026 — all of today's work is committed and pushed to both `main` and `demo` (`origin/main` and `origin/demo`, in sync). Working tree clean, nothing uncommitted. Next session starts Day 2 proper: `lib/schedule/`.**
+
 ---
 
 ## ▶ Resume point (read this first in a new session)
