@@ -1,103 +1,120 @@
-import Image from "next/image";
+import { redirect } from "next/navigation";
+import { getActor } from "@/lib/authz";
+import { withTenant } from "@/lib/db";
+import { logout } from "@/app/actions/auth";
 
-export default function Home() {
+/**
+ * Day 1 landing page.
+ *
+ * Deliberately plain — its job is to prove the stack end to end: a session
+ * cookie resolves to an actor, the actor's tenant scopes a database read
+ * through RLS, and real seeded DESPL data comes back. The department
+ * workspaces and dashboards land on day 3.
+ */
+export default async function Home() {
+  const actor = await getActor();
+  if (!actor) redirect("/login");
+  if (actor.clientId !== null) redirect("/portal");
+
+  const data = await withTenant(actor.tenantId, async (tx) => {
+    const jobs = await tx.job.findMany({
+      include: {
+        client: true,
+        family: true,
+        equipments: { include: { _count: { select: { units: true, bomItems: true } } } },
+        _count: { select: { processes: true } },
+      },
+      orderBy: { jobNumber: "asc" },
+    });
+    const departments = await tx.department.count();
+    const routes = await tx.routeTemplate.count();
+    return { jobs, departments, routes };
+  });
+
+  const equipmentCount = data.jobs.reduce((n, j) => n + j.equipments.length, 0);
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+    <main className="mx-auto max-w-5xl px-5 py-8">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--hairline)] pb-5">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">DESPL Production Tracker</h1>
+          <p className="mt-1 text-sm text-[var(--muted-fg)]">
+            {actor.name} · {actor.roles.join(", ")}
+            {actor.departmentIds.length > 0
+              ? ` · scoped to ${actor.departmentIds.length} department(s)`
+              : ""}
+          </p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+        <form action={logout}>
+          <button
+            type="submit"
+            className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
+          >
+            Sign out
+          </button>
+        </form>
+      </header>
+
+      <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          ["Jobs", data.jobs.length],
+          ["Equipments", equipmentCount],
+          ["Departments", data.departments],
+          ["Component routes", data.routes],
+        ].map(([label, value]) => (
+          <div
+            key={label as string}
+            className="rounded-xl border border-[var(--hairline)] bg-[var(--surface)] p-4"
+          >
+            <div className="text-xs text-[var(--muted-fg)]">{label}</div>
+            <div className="tabular mt-1 text-2xl font-semibold">{value}</div>
+          </div>
+        ))}
+      </section>
+
+      <section className="mt-6">
+        <h2 className="text-sm font-semibold">Jobs</h2>
+        <div className="mt-2 overflow-x-auto rounded-xl border border-[var(--hairline)] bg-[var(--surface)]">
+          <table className="w-full text-sm">
+            <thead className="border-b border-[var(--hairline)] text-left text-xs text-[var(--muted-fg)]">
+              <tr>
+                <th className="px-4 py-2 font-medium">Job</th>
+                <th className="px-4 py-2 font-medium">Family</th>
+                <th className="px-4 py-2 font-medium">Description</th>
+                <th className="px-4 py-2 text-right font-medium">Equip.</th>
+                <th className="px-4 py-2 text-right font-medium">Units</th>
+                <th className="px-4 py-2 text-right font-medium">BOM</th>
+                <th className="px-4 py-2 text-right font-medium">Processes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.jobs.map((job) => {
+                const units = job.equipments.reduce((n, e) => n + e._count.units, 0);
+                const bom = job.equipments.reduce((n, e) => n + e._count.bomItems, 0);
+                return (
+                  <tr key={job.id} className="border-b border-[var(--hairline)] last:border-0">
+                    <td className="px-4 py-2 font-medium">{job.jobNumber}</td>
+                    <td className="px-4 py-2 text-[var(--muted-fg)]">{job.family.name}</td>
+                    <td className="px-4 py-2 text-[var(--muted-fg)]">
+                      {job.projectName ?? "—"}
+                    </td>
+                    <td className="tabular px-4 py-2 text-right">{job.equipments.length}</td>
+                    <td className="tabular px-4 py-2 text-right">{units}</td>
+                    <td className="tabular px-4 py-2 text-right">{bom}</td>
+                    <td className="tabular px-4 py-2 text-right">{job._count.processes}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-3 text-xs text-[var(--muted-fg)]">
+          Every row above was read under tenant row-level security as{" "}
+          <code className="rounded bg-[var(--surface-sunken)] px-1">despl_web</code>, a
+          non-owner database role. Each job carries its own editable copy of the 36-process
+          spine, materialised from the pinned pressure-vessel template version.
+        </p>
+      </section>
+    </main>
   );
 }

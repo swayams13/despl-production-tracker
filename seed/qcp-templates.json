@@ -84,17 +84,17 @@
         "desc": "Document review only; no physical attendance."
       },
       "RW": {
-        "label": "Review + Witness",
+        "label": "10% Witness",
         "blocksCompletion": false,
         "requiresCall": true,
         "waivable": true,
-        "TODO": "CONFIRM WITH QC: treat as W for blocking purposes? Appears in the heat exchanger and Ammonia Vaporizer QAPs."
+        "desc": "Witness point sampled at 10% frequency, not witnessed every occurrence. CONFIRMED from the explicit legend in production process_work flow..docx (13 Aug 2026 handover): \"RW: 10 % Witness\", printed on the Suction Air Vessel / Suction Piping / Pressure Piping / DE0463 / Ammonia Vaporizer QAPs. Supersedes the earlier \"Review + Witness\" guess."
       },
       "R&A": {
         "label": "Review & Approve",
         "blocksCompletion": true,
         "requiresCall": false,
-        "TODO": "CONFIRM WITH QC: assumed blocking because approval is required before proceeding. Appears in the EIL/TPIA QAP."
+        "TODO": "Still not defined by an explicit legend anywhere. Observed in use (not just named) in the Vessel/BUSCI-TPI+EIL-TPIA QAP (13 Aug 2026 handover), always paired with DESPL:P — consistent with a blocking approval gate, but the assumption remains unconfirmed with QC."
       }
     },
     "callTracking": {

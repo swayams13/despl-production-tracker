@@ -128,3 +128,109 @@
     @apply font-sans;
   }
 }
+/* ─────────────────────────────────────────────────────────────────────────
+   DESPL design tokens
+
+   The palette is the one already reviewed with SJ's team in
+   prototype/despl-demo-prototype.html and specified in
+   docs/design-master-prompt.md — not a new invention.
+
+   Rules this encodes:
+     · Warm paper ground, not pure white. Reads calmer on a shop-floor screen.
+     · Status colour is NEVER the only signal — always paired with an icon or
+       label. Factory lighting and colour vision both make hue unreliable.
+     · Full light palette on bare :root, so a viewer with no explicit theme
+       preference still gets a complete set. Dark only overrides.
+   ───────────────────────────────────────────────────────────────────────── */
+:root {
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-sunken: #f3f3f0;
+  --ink: #0b0b0b;
+  --muted-fg: #5f5f5a;
+  --hairline: #e3e3dd;
+
+  --accent: #2a78d6;
+  --accent-ring: #2a78d633;
+  --accent-soft: #eaf2fc;
+
+  /* status — good / warning / serious / critical */
+  --good: #0ca30c;
+  --good-bg: #eaf7ea;
+  --warn: #fab219;
+  --warn-bg: #fdf4e1;
+  --serious: #ec835a;
+  --serious-bg: #fdefe8;
+  --crit: #d03b3b;
+  --crit-bg: #fbebeb;
+  --crit-border: #f0c9c9;
+  --crit-fg: #8f2626;
+
+  /* dense data surfaces */
+  --grid-line: #ececE6;
+  --radius-card: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #131312;
+    --surface: #1a1a19;
+    --surface-sunken: #101010;
+    --ink: #f2f2ef;
+    --muted-fg: #a1a19a;
+    --hairline: #2e2e2b;
+
+    --accent: #5b9ce8;
+    --accent-ring: #5b9ce844;
+    --accent-soft: #16243a;
+
+    --good: #3fc23f;
+    --good-bg: #12240f;
+    --warn: #e0a833;
+    --warn-bg: #2a2210;
+    --serious: #f09a72;
+    --serious-bg: #2e1a12;
+    --crit: #f06a6a;
+    --crit-bg: #2c1414;
+    --crit-border: #5a2626;
+    --crit-fg: #ffb3b3;
+
+    --grid-line: #262624;
+  }
+}
+
+:root[data-theme="dark"] {
+  --page: #131312;
+  --surface: #1a1a19;
+  --surface-sunken: #101010;
+  --ink: #f2f2ef;
+  --muted-fg: #a1a19a;
+  --hairline: #2e2e2b;
+
+  --accent: #5b9ce8;
+  --accent-ring: #5b9ce844;
+  --accent-soft: #16243a;
+
+  --good: #3fc23f;
+  --good-bg: #12240f;
+  --warn: #e0a833;
+  --warn-bg: #2a2210;
+  --serious: #f09a72;
+  --serious-bg: #2e1a12;
+  --crit: #f06a6a;
+  --crit-bg: #2c1414;
+  --crit-border: #5a2626;
+  --crit-fg: #ffb3b3;
+
+  --grid-line: #262624;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+}
+
+/* Numbers in tables must line up. Non-negotiable for a tracking product. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,5 +1,38 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// DESPL Production Tracker — data model
+// See docs/BUILD-SPEC-v2.md (what/why) and CLAUDE.md (invariants).
+//
+// ─────────────────────────────────────────────────────────────────────────
+// DESIGN NOTES — read before changing anything here
+//
+// 1. TENANCY. Every business table carries `tenant_id` and is protected by
+//    Postgres RLS keyed on current_setting('app.tenant_id'). One database,
+//    one deploy, isolated rows. Adding this later would touch every query.
+//
+// 2. CLIENT SCOPING is a SECOND, independent boundary. A `User` with a
+//    non-null `client_id` is an external client user and may only ever see
+//    that client's work, via ProgressSnapshot — never live tables.
+//
+// 3. PROCESS TEMPLATES are per product family and versioned. A Job pins a
+//    ProcessTemplateVersion at creation, then materialises editable
+//    JobProcess rows. "This client skips PWHT and wants 8 nozzles" is a
+//    data operation, never a migration.
+//
+// 4. ENUM POLICY. Postgres enums are used ONLY for closed state machines the
+//    code branches on. Open vocabularies that grow with product families or
+//    clients (component types, operations, NDT methods, drawing types, delay
+//    categories, QCP codes) are tenant-scoped reference TABLES. Proof this
+//    matters: the real QCP DESPL-320 uses PAUT, TOFD, MPT and LPT — none of
+//    which existed in the old 6-value TestType enum.
+//
+// 5. SERVER CLOCK ONLY. Fields marked so below are set by the service layer
+//    from the DB clock and must never appear in a request DTO (invariant #1).
+//
+// DELIBERATELY DEFERRED (all purely additive — new tables, no changes to
+// existing ones, so adding them in week 3 costs nothing):
+//   · welding module (Welder, WeldJoint, WeldLog, NdtResult) — PRD FR-W1..W5
+//   · master BOM catalog — PRD FR-B0/B1
+//   · CustomFieldDef/Value, DocumentRequirementTemplate — per-client variance
+// ─────────────────────────────────────────────────────────────────────────
 
 generator client {
   provider = "prisma-client"
@@ -8,21 +41,14 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  // Application runtime: a non-owner role, so tenant RLS and the append-only
+  // audit REVOKE actually apply to every query the app makes.
   url      = env("DATABASE_URL")
+  // Migrations and seeding: the table owner, which RLS does not constrain.
+  directUrl = env("DIRECT_URL")
 }
 
-// ─────────────────────────────────────────────────────────────────────────
-// Scope: BUILD-SPEC-v2.md §2 data model only (Client..AuditLog). Users/RBAC,
-// welding, hold-point clearances etc. are out of scope until later steps
-// (IMPLEMENTATION-GUIDE.md Step 8+) — actor fields below are plain strings
-// until a Users table exists to hang a real FK off.
-//
-// Invariant #1 (CLAUDE.md): fields marked "server-set only" below must never
-// appear in a request DTO/zod schema once Server Actions are built (Step 7+)
-// — the service layer sets them from the DB clock, not the client.
-// ─────────────────────────────────────────────────────────────────────────
-
-// ── Enums ───────────────────────────────────────────────────────────────
+// ── Enums: closed state machines only (see design note 4) ───────────────
 
 enum JobPriority {
   LOW
@@ -63,33 +89,10 @@ enum ProcessPlanStatus {
   ON_HOLD
 }
 
-enum ComponentType {
-  PLATE
-  PIPE
-  ELBOW
-  TEE
-  REDUCER
-  FLANGE
-  FORGING
-  TUBE
-  TUBE_SHEET
-  DISHED_END
-  CONE
-  SADDLE
-  SKIRT
-  LUG
-  PAD
-  FASTENER
-  PLUG
-  NIPPLE
-  UNION
-  COUPLING
-  VALVE
-  GASKET
-  STRUCTURAL_STEEL
-  PLATFORM
-  LADDER
-  OTHER
+enum TemplateStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
 }
 
 enum ProcurementStatus {
@@ -113,44 +116,17 @@ enum PmiResult {
   REJECT
 }
 
-enum CanonicalOperation {
-  RECEIPT
-  MTC_VERIFICATION
-  CUTTING
-  EDGE_PREP
-  FORMING
-  MACHINING
-  FIT_UP
-  WELDING
-  GRINDING
-  NDT
-  SURFACE_PREP
-  PAINTING
-  INSPECTION
-  THREADING
-  EXPANSION
-  ASSEMBLY_CHECK
-}
-
 enum Sourcing {
   IN_HOUSE
   OUTSOURCE
   NA
 }
 
-enum ItemOperationStatus {
+enum OperationStatus {
   NOT_STARTED
   IN_PROGRESS
+  SUBMITTED
   COMPLETE
-}
-
-enum TestType {
-  RT
-  UT
-  HT
-  PNEUMATIC
-  DP
-  VACUUM
 }
 
 enum TestResult {
@@ -164,28 +140,11 @@ enum QcpItemKind {
   CHECKPOINT
 }
 
-enum QcpCode {
-  P
-  W
-  H
-  R
-  RW
-  R_AND_A
-}
-
 enum QcpExecutionResult {
   PENDING
   ACCEPTED
   REJECTED
   NA
-}
-
-enum DrawingType {
-  GA
-  FABRICATION
-  WELD_MAP
-  PID
-  ISOMETRIC
 }
 
 enum DrawingStatus {
@@ -195,55 +154,442 @@ enum DrawingStatus {
   RELEASED
 }
 
-enum DelayCategory {
-  MATERIAL_DELAY
-  MANPOWER
-  MACHINE_BREAKDOWN
-  REWORK_QUALITY
-  CLIENT_HOLD
-  DRAWING_ENGINEERING_HOLD
-  OTHER
-}
-
 enum DelayReviewStatus {
   PENDING
   ACKNOWLEDGED
   DISPUTED
 }
 
-// ── Client / Job / Equipment / Unit ────────────────────────────────────
+enum SnapshotCadence {
+  LIVE
+  DAILY
+  WEEKLY
+}
 
+// ── Tenancy, identity, access ───────────────────────────────────────────
+
+/// A tenant. DESPL today; sibling Vedanta Group companies later.
+model Organization {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  clients          Client[]
+  users            User[]
+  roles            Role[]
+  departments      Department[]
+  productFamilies  ProductFamily[]
+  processTemplates ProcessTemplate[]
+  jobs             Job[]
+  componentTypes   ComponentTypeRef[]
+  operations       OperationRef[]
+  testTypes        TestTypeRef[]
+  drawingTypes     DrawingTypeRef[]
+  delayCategories  DelayCategoryRef[]
+  qcpCodes         QcpCodeRef[]
+  routeTemplates   RouteTemplate[]
+  calendars        WorkCalendar[]
+  snapshots        ProgressSnapshot[]
+  notifications    Notification[]
+
+  @@map("organizations")
+}
+
+/// A customer of the tenant. NOT a tenant — clients live inside an org.
 model Client {
-  id   Int     @id @default(autoincrement())
-  name String
-  code String? @unique
+  id       Int     @id @default(autoincrement())
+  tenantId Int     @map("tenant_id")
+  name     String
+  code     String?
 
-  jobs Job[]
+  tenant           Organization            @relation(fields: [tenantId], references: [id])
+  jobs             Job[]
+  users            User[]
+  visibilityPolicy ClientVisibilityPolicy?
 
+  @@unique([tenantId, code])
+  @@index([tenantId])
   @@map("clients")
 }
 
+model User {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int      @map("tenant_id")
+  /// Non-null => external client user. Scoped to this client, snapshots only.
+  clientId     Int?     @map("client_id")
+  email        String
+  passwordHash String   @map("password_hash")
+  name         String
+  employeeCode String?  @map("employee_code")
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant      Organization     @relation(fields: [tenantId], references: [id])
+  client      Client?          @relation(fields: [clientId], references: [id])
+  roles       UserRole[]
+  departments UserDepartment[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([clientId])
+  @@map("users")
+}
+
+model Role {
+  id       Int    @id @default(autoincrement())
+  tenantId Int    @map("tenant_id")
+  /// ADMIN | MANAGEMENT | PRODUCTION_HEAD | SUPERVISOR | QC | CLIENT_VIEWER
+  code     String
+  name     String
+
+  tenant Organization @relation(fields: [tenantId], references: [id])
+  users  UserRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+model UserRole {
+  userId Int @map("user_id")
+  roleId Int @map("role_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model Department {
+  id       Int     @id @default(autoincrement())
+  tenantId Int     @map("tenant_id")
+  code     String
+  name     String
+  scope    String?
+
+  tenant            Organization      @relation(fields: [tenantId], references: [id])
+  users             UserDepartment[]
+  templateProcesses TemplateProcess[]
+  jobProcesses      JobProcess[]
+  processPlans      ProcessPlan[]
+  operations        OperationRef[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("departments")
+}
+
+/// Which departments a supervisor is scoped to (DepartmentScopeGuard).
+model UserDepartment {
+  userId       Int @map("user_id")
+  departmentId Int @map("department_id")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@id([userId, departmentId])
+  @@index([departmentId])
+  @@map("user_departments")
+}
+
+// ── Reference vocabularies (see design note 4) ──────────────────────────
+
+model ComponentTypeRef {
+  id       Int     @id @default(autoincrement())
+  tenantId Int     @map("tenant_id")
+  code     String
+  name     String
+  active   Boolean @default(true)
+
+  tenant         Organization    @relation(fields: [tenantId], references: [id])
+  routeTemplates RouteTemplate[]
+  components     Component[]
+  bomItems       BomItem[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("component_type_refs")
+}
+
+/// Canonical manufacturing operation. Grows per product family
+/// (e.g. EXPANSION for heat-exchanger tubes).
+model OperationRef {
+  id                  Int     @id @default(autoincrement())
+  tenantId            Int     @map("tenant_id")
+  code                String
+  name                String
+  defaultDepartmentId Int?    @map("default_department_id")
+  /// Column name in DESPL's live tracker CSVs, where one exists.
+  sourceColumn        String? @map("source_column")
+  active              Boolean @default(true)
+
+  tenant            Organization         @relation(fields: [tenantId], references: [id])
+  defaultDepartment Department?          @relation(fields: [defaultDepartmentId], references: [id])
+  routeSteps        RouteStep[]
+  componentOps      ComponentOperation[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([defaultDepartmentId])
+  @@map("operation_refs")
+}
+
+/// NDT / test methods. RT, UT, DP, HT, PNEUMATIC, VACUUM — plus PAUT, TOFD,
+/// MPT, LPT which the real QCP uses and the old enum could not express.
+model TestTypeRef {
+  id       Int     @id @default(autoincrement())
+  tenantId Int     @map("tenant_id")
+  code     String
+  name     String
+  active   Boolean @default(true)
+
+  tenant Organization @relation(fields: [tenantId], references: [id])
+  tests  ItemTest[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("test_type_refs")
+}
+
+model DrawingTypeRef {
+  id       Int     @id @default(autoincrement())
+  tenantId Int     @map("tenant_id")
+  code     String
+  name     String
+  active   Boolean @default(true)
+
+  tenant   Organization      @relation(fields: [tenantId], references: [id])
+  drawings AssemblyDrawing[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("drawing_type_refs")
+}
+
+model DelayCategoryRef {
+  id       Int     @id @default(autoincrement())
+  tenantId Int     @map("tenant_id")
+  code     String
+  name     String
+  active   Boolean @default(true)
+
+  tenant       Organization  @relation(fields: [tenantId], references: [id])
+  delayReasons DelayReason[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("delay_category_refs")
+}
+
+/// QCP inspection code AND its gating semantics. These three flags previously
+/// lived only in seed/qcp-templates.json, which would have forced the
+/// hold-point engine to hard-code them. C7 (what RW and R&A mean) is still
+/// open with DESPL, so they must be editable without a deploy.
+model QcpCodeRef {
+  id               Int     @id @default(autoincrement())
+  tenantId         Int     @map("tenant_id")
+  code             String
+  label            String
+  blocksCompletion Boolean @default(false) @map("blocks_completion")
+  requiresCall     Boolean @default(false) @map("requires_call")
+  waivable         Boolean @default(false)
+
+  tenant     Organization       @relation(fields: [tenantId], references: [id])
+  partyCodes QcpItemPartyCode[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("qcp_code_refs")
+}
+
+// ── Calendar (C1: working vs calendar days — highest-impact open question) ─
+
+model WorkCalendar {
+  id          Int     @id @default(autoincrement())
+  tenantId    Int     @map("tenant_id")
+  code        String
+  name        String
+  /// ISO day numbers that are non-working. Default [7] = Sunday off.
+  weekOffDays Int[]   @map("week_off_days")
+  isDefault   Boolean @default(false) @map("is_default")
+
+  tenant   Organization @relation(fields: [tenantId], references: [id])
+  holidays Holiday[]
+  jobs     Job[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("work_calendars")
+}
+
+model Holiday {
+  id         Int      @id @default(autoincrement())
+  calendarId Int      @map("calendar_id")
+  date       DateTime @db.Date
+  name       String
+
+  calendar WorkCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+
+  @@unique([calendarId, date])
+  @@index([calendarId])
+  @@map("holidays")
+}
+
+// ── Product families and versioned process templates (design note 3) ────
+
+model ProductFamily {
+  id       Int     @id @default(autoincrement())
+  tenantId Int     @map("tenant_id")
+  /// PRESSURE_VESSEL | HEAT_EXCHANGER | PIPE_SPOOL | PIPING_SYSTEM
+  code     String
+  name     String
+  active   Boolean @default(true)
+
+  tenant    Organization      @relation(fields: [tenantId], references: [id])
+  templates ProcessTemplate[]
+  jobs      Job[]
+  routes    RouteTemplate[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("product_families")
+}
+
+model ProcessTemplate {
+  id       Int    @id @default(autoincrement())
+  tenantId Int    @map("tenant_id")
+  familyId Int    @map("family_id")
+  name     String
+
+  tenant   Organization             @relation(fields: [tenantId], references: [id])
+  family   ProductFamily            @relation(fields: [familyId], references: [id])
+  versions ProcessTemplateVersion[]
+
+  @@index([tenantId])
+  @@index([familyId])
+  @@map("process_templates")
+}
+
+model ProcessTemplateVersion {
+  id          Int            @id @default(autoincrement())
+  templateId  Int            @map("template_id")
+  version     Int
+  status      TemplateStatus @default(DRAFT)
+  publishedAt DateTime?      @map("published_at")
+  publishedBy Int?           @map("published_by")
+  notes       String?
+
+  template  ProcessTemplate   @relation(fields: [templateId], references: [id])
+  processes TemplateProcess[]
+  edges     TemplateEdge[]
+  jobs      Job[]
+
+  @@unique([templateId, version])
+  @@index([templateId])
+  @@map("process_template_versions")
+}
+
+/// One process in a template version. For PRESSURE_VESSEL v1 these are the
+/// 36 rows of DESPL's Lead Time table.
+model TemplateProcess {
+  id                      Int     @id @default(autoincrement())
+  versionId               Int     @map("version_id")
+  seq                     Int
+  code                    String
+  name                    String
+  mainActivities          String? @map("main_activities")
+  durationMinDays         Int     @map("duration_min_days")
+  durationMaxDays         Int     @map("duration_max_days")
+  cumulativePrinted       String? @map("cumulative_printed")
+  defaultDepartmentId     Int     @map("default_department_id")
+  /// Crosswalk to the 25-stage work-order reporting view.
+  workOrderStages         Int[]   @map("work_order_stages")
+  envelopeFinishByMinDays Int     @map("envelope_finish_by_min_days")
+  envelopeFinishByMaxDays Int     @map("envelope_finish_by_max_days")
+  envelopeStartByMinDays  Int     @map("envelope_start_by_min_days")
+  envelopeStartByMaxDays  Int     @map("envelope_start_by_max_days")
+  /// Conditional processes (e.g. PWHT) can be excluded per job.
+  optional                Boolean @default(false)
+
+  version            ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  defaultDepartment  Department             @relation(fields: [defaultDepartmentId], references: [id])
+  edgesAsProcess     TemplateEdge[]         @relation("TemplateEdgeProcess")
+  edgesAsPredecessor TemplateEdge[]         @relation("TemplateEdgePredecessor")
+  jobProcesses       JobProcess[]
+
+  @@unique([versionId, code])
+  @@index([versionId])
+  @@index([defaultDepartmentId])
+  @@map("template_processes")
+}
+
+/// lagDays < 0 means legitimate concurrent work (START_TO_START_WITH_OVERLAP),
+/// not a data error. It relaxes the SCHEDULE only — never gating (invariant #11).
+model TemplateEdge {
+  id            Int             @id @default(autoincrement())
+  versionId     Int             @map("version_id")
+  processId     Int             @map("process_id")
+  predecessorId Int             @map("predecessor_id")
+  type          ProcessEdgeType
+  lagDays       Int             @map("lag_days")
+
+  version     ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  process     TemplateProcess        @relation("TemplateEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
+  predecessor TemplateProcess        @relation("TemplateEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+
+  @@unique([processId, predecessorId])
+  @@index([versionId])
+  @@index([predecessorId])
+  @@map("template_edges")
+}
+
+// ── Job / Equipment / Unit ──────────────────────────────────────────────
+
+/// Kept as "Job" (not renamed to Project) — it matches DESPL's own vocabulary
+/// and every existing doc. `clientOrderNo` vs `jobNumber` resolves C5: both
+/// live CSVs carry Work Order DE0455-01 while the jobs are DE0463/DE0467.
 model Job {
   id                Int         @id @default(autoincrement())
-  jobNumber         String      @unique @map("job_number")
+  tenantId          Int         @map("tenant_id")
+  /// Opaque id for client-facing URLs — sequential ids leak order volume.
+  publicId          String      @unique @map("public_id")
   clientId          Int         @map("client_id")
+  familyId          Int         @map("family_id")
+  templateVersionId Int         @map("template_version_id")
+  calendarId        Int?        @map("calendar_id")
+  jobNumber         String      @map("job_number")
+  /// The client's own order number, when it differs from ours (C5).
+  clientOrderNo     String?     @map("client_order_no")
+  projectName       String?     @map("project_name")
   poRef             String?     @map("po_ref")
   designCode        String?     @map("design_code")
   orderDate         DateTime?   @map("order_date")
   deliveryDate      DateTime?   @map("delivery_date")
   priority          JobPriority @default(NORMAL)
   status            JobStatus   @default(ACTIVE)
-  // raw "Work Order No." cell from the source CSV — kept as-is, does not
-  // necessarily match jobNumber (see seed/data-issues.json JOB_NUMBER_MISMATCH)
-  workOrderNoInFile String?     @map("work_order_no_in_file")
   remarks           String?
 
-  client       Client            @relation(fields: [clientId], references: [id])
-  equipments   Equipment[]
-  schedules    ProjectSchedule[]
-  qcpTemplates QcpTemplate[]
-  drawings     AssemblyDrawing[]
+  tenant          Organization           @relation(fields: [tenantId], references: [id])
+  client          Client                 @relation(fields: [clientId], references: [id])
+  family          ProductFamily          @relation(fields: [familyId], references: [id])
+  templateVersion ProcessTemplateVersion @relation(fields: [templateVersionId], references: [id])
+  calendar        WorkCalendar?          @relation(fields: [calendarId], references: [id])
+  equipments      Equipment[]
+  processes       JobProcess[]
+  scheduleRuns    ScheduleRun[]
+  qcpTemplates    QcpTemplate[]
+  drawings        AssemblyDrawing[]
+  snapshots       ProgressSnapshot[]
 
+  @@unique([tenantId, jobNumber])
+  @@index([tenantId])
+  @@index([clientId])
+  @@index([familyId])
+  @@index([templateVersionId])
+  @@index([calendarId])
   @@map("jobs")
 }
 
@@ -251,97 +597,91 @@ model Equipment {
   id      Int     @id @default(autoincrement())
   jobId   Int     @map("job_id")
   name    String
-  // raw block number from the source CSV (equipmentBlocks[].blockNo)
   blockNo Int?    @map("block_no")
   remarks String?
 
-  job       Job               @relation(fields: [jobId], references: [id])
-  units     Unit[]
-  bomItems  BomItem[]
-  schedules ProjectSchedule[]
+  job          Job                @relation(fields: [jobId], references: [id])
+  units        Unit[]
+  bomItems     BomItem[]
+  components   Component[]
+  scheduleRuns ScheduleRun[]
+  snapshots    ProgressSnapshot[]
 
+  @@index([jobId])
   @@map("equipments")
 }
 
+/// An individual serial (320SR01…). DE0463 is 40 units of one equipment.
 model Unit {
   id          Int      @id @default(autoincrement())
   equipmentId Int      @map("equipment_id")
   serialNo    String   @map("serial_no")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  equipment     Equipment      @relation(fields: [equipmentId], references: [id])
+  equipment     Equipment          @relation(fields: [equipmentId], references: [id])
   qcpExecutions QcpExecution[]
+  processPlans  ProcessPlan[]
+  components    Component[]
+  snapshots     ProgressSnapshot[]
 
   @@unique([equipmentId, serialNo])
+  @@index([equipmentId])
   @@map("units")
 }
 
-// ── Lead-time spine (36 processes, immutable reference) ────────────────
-
-model LeadTimeProcess {
-  code                    Int     @id
+/// The job's own copy of the process spine, materialised from the pinned
+/// template version and then editable. `included = false` = this client skips
+/// it. `templateProcessId = null` = added for this job only.
+model JobProcess {
+  id                      Int     @id @default(autoincrement())
+  jobId                   Int     @map("job_id")
+  templateProcessId       Int?    @map("template_process_id")
+  seq                     Int
+  code                    String
   name                    String
-  mainActivities          String? @map("main_activities")
+  departmentId            Int     @map("department_id")
   durationMinDays         Int     @map("duration_min_days")
   durationMaxDays         Int     @map("duration_max_days")
-  cumulativePrinted       String? @map("cumulative_printed")
-  defaultDepartmentCode   String  @map("default_department_code")
-  // crosswalk to the 25-stage work-order reporting view
-  workOrderStages         Int[]   @map("work_order_stages")
   envelopeFinishByMinDays Int     @map("envelope_finish_by_min_days")
   envelopeFinishByMaxDays Int     @map("envelope_finish_by_max_days")
-  envelopeStartByMinDays  Int     @map("envelope_start_by_min_days")
-  envelopeStartByMaxDays  Int     @map("envelope_start_by_max_days")
+  workOrderStages         Int[]   @map("work_order_stages")
+  included                Boolean @default(true)
+  durationOverrideDays    Int?    @map("duration_override_days")
+  overrideReason          String? @map("override_reason")
 
-  defaultDepartment  Department           @relation("DefaultDepartment", fields: [defaultDepartmentCode], references: [code])
-  processDepartment  ProcessDepartment?
-  edgesAsProcess     ProcessEdge[]        @relation("EdgeProcess")
-  edgesAsPredecessor ProcessEdge[]        @relation("EdgePredecessor")
-  processPlans       ProjectProcessPlan[]
+  job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  templateProcess    TemplateProcess? @relation(fields: [templateProcessId], references: [id])
+  department         Department       @relation(fields: [departmentId], references: [id])
+  edgesAsProcess     JobProcessEdge[] @relation("JobEdgeProcess")
+  edgesAsPredecessor JobProcessEdge[] @relation("JobEdgePredecessor")
+  processPlans       ProcessPlan[]
+  qcpItemLinks       QcpItemProcess[]
 
-  @@map("lead_time_processes")
+  @@unique([jobId, code])
+  @@index([jobId])
+  @@index([departmentId])
+  @@index([templateProcessId])
+  @@map("job_processes")
 }
 
-model ProcessEdge {
-  processCode     Int             @map("process_code")
-  predecessorCode Int             @map("predecessor_code")
-  type            ProcessEdgeType
-  lagDays         Int             @map("lag_days")
+model JobProcessEdge {
+  id            Int             @id @default(autoincrement())
+  processId     Int             @map("process_id")
+  predecessorId Int             @map("predecessor_id")
+  type          ProcessEdgeType
+  lagDays       Int             @map("lag_days")
 
-  process     LeadTimeProcess @relation("EdgeProcess", fields: [processCode], references: [code])
-  predecessor LeadTimeProcess @relation("EdgePredecessor", fields: [predecessorCode], references: [code])
+  process     JobProcess @relation("JobEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
+  predecessor JobProcess @relation("JobEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
 
-  @@id([processCode, predecessorCode])
-  @@map("process_edges")
-}
-
-model Department {
-  code  String  @id
-  name  String
-  scope String?
-
-  defaultForProcesses LeadTimeProcess[]    @relation("DefaultDepartment")
-  ownedProcesses      ProcessDepartment[]
-  processPlans        ProjectProcessPlan[]
-
-  @@map("departments")
-}
-
-// live, admin-editable owner of a process — separate from LeadTimeProcess's
-// seeded defaultDepartmentCode
-model ProcessDepartment {
-  processCode    Int    @id @map("process_code")
-  departmentCode String @map("department_code")
-
-  process    LeadTimeProcess @relation(fields: [processCode], references: [code])
-  department Department      @relation(fields: [departmentCode], references: [code])
-
-  @@map("process_departments")
+  @@unique([processId, predecessorId])
+  @@index([predecessorId])
+  @@map("job_process_edges")
 }
 
 // ── Scheduling ──────────────────────────────────────────────────────────
 
-model ProjectSchedule {
+model ScheduleRun {
   id                   Int                  @id @default(autoincrement())
   jobId                Int                  @map("job_id")
   equipmentId          Int?                 @map("equipment_id")
@@ -350,65 +690,84 @@ model ProjectSchedule {
   projectStartDate     DateTime             @map("project_start_date")
   requiredDeliveryDate DateTime?            @map("required_delivery_date")
   feasibility          ScheduleFeasibility?
+  /// Days short when INFEASIBLE — surfaced at tender stage.
+  shortfallDays        Int?                 @map("shortfall_days")
+  isCurrent            Boolean              @default(false) @map("is_current")
   overrideReason       String?              @map("override_reason")
+  createdBy            Int?                 @map("created_by")
   createdAt            DateTime             @default(now()) @map("created_at")
 
-  job          Job                  @relation(fields: [jobId], references: [id])
-  equipment    Equipment?           @relation(fields: [equipmentId], references: [id])
-  processPlans ProjectProcessPlan[]
+  job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  equipment    Equipment?    @relation(fields: [equipmentId], references: [id])
+  processPlans ProcessPlan[]
 
   @@unique([jobId, equipmentId, version])
-  @@map("project_schedules")
+  @@index([jobId])
+  @@index([equipmentId])
+  @@map("schedule_runs")
 }
 
-model ProjectProcessPlan {
-  id                   Int               @id @default(autoincrement())
-  projectScheduleId    Int               @map("project_schedule_id")
-  processCode          Int               @map("process_code")
-  baselineStart        DateTime?         @map("baseline_start")
-  baselineFinish       DateTime?         @map("baseline_finish")
-  plannedStart         DateTime?         @map("planned_start")
-  plannedFinish        DateTime?         @map("planned_finish")
-  // server-set only (invariant #1) — never from a request DTO
-  actualStart          DateTime?         @map("actual_start")
-  // server-set only (invariant #1) — never from a request DTO
-  actualFinish         DateTime?         @map("actual_finish")
-  durationOverrideDays Int?              @map("duration_override_days")
-  overrideReason       String?           @map("override_reason")
-  status               ProcessPlanStatus @default(NOT_STARTED)
-  ownerDepartmentCode  String            @map("owner_department_code")
+/// `unitId` nullable closes the schedule↔execution grain gap: equipment-level
+/// plans before Final Assembly, per-serial plans after it (BUILD-SPEC §0 #2).
+model ProcessPlan {
+  id                Int               @id @default(autoincrement())
+  scheduleRunId     Int               @map("schedule_run_id")
+  jobProcessId      Int               @map("job_process_id")
+  unitId            Int?              @map("unit_id")
+  baselineStart     DateTime?         @map("baseline_start")
+  baselineFinish    DateTime?         @map("baseline_finish")
+  plannedStart      DateTime?         @map("planned_start")
+  plannedFinish     DateTime?         @map("planned_finish")
+  /// SERVER CLOCK ONLY (invariant #1)
+  actualStart       DateTime?         @map("actual_start")
+  /// SERVER CLOCK ONLY (invariant #1)
+  actualFinish      DateTime?         @map("actual_finish")
+  status            ProcessPlanStatus @default(NOT_STARTED)
+  submittedBy       Int?              @map("submitted_by")
+  verifiedBy        Int?              @map("verified_by")
+  ownerDepartmentId Int               @map("owner_department_id")
 
-  projectSchedule ProjectSchedule @relation(fields: [projectScheduleId], references: [id])
-  process         LeadTimeProcess @relation(fields: [processCode], references: [code])
-  ownerDepartment Department      @relation(fields: [ownerDepartmentCode], references: [code])
+  scheduleRun     ScheduleRun   @relation(fields: [scheduleRunId], references: [id], onDelete: Cascade)
+  jobProcess      JobProcess    @relation(fields: [jobProcessId], references: [id])
+  unit            Unit?         @relation(fields: [unitId], references: [id])
+  ownerDepartment Department    @relation(fields: [ownerDepartmentId], references: [id])
   delayReasons    DelayReason[]
 
-  @@unique([projectScheduleId, processCode])
-  @@map("project_process_plans")
+  @@unique([scheduleRunId, jobProcessId, unitId])
+  @@index([scheduleRunId])
+  @@index([jobProcessId])
+  @@index([unitId])
+  // drives every "due this week", notification and escalation query
+  @@index([ownerDepartmentId, plannedFinish])
+  @@index([status])
+  @@map("process_plans")
 }
 
-// ── BOM & traceability ──────────────────────────────────────────────────
+// ── BOM, components and traceability ────────────────────────────────────
 
 model BomItem {
-  id            Int            @id @default(autoincrement())
-  equipmentId   Int            @map("equipment_id")
-  itemNo        Int            @map("item_no")
-  // raw block number, denormalized from Equipment for direct CSV matching
-  blockNo       Int?           @map("block_no")
-  partName      String         @map("part_name")
-  description   String?
-  material      String?
-  qty           String
-  unit          String?
-  componentType ComponentType? @map("component_type")
-  remarks       String?
+  id              Int     @id @default(autoincrement())
+  equipmentId     Int     @map("equipment_id")
+  itemNo          Int     @map("item_no")
+  blockNo         Int?    @map("block_no")
+  partName        String  @map("part_name")
+  description     String?
+  material        String?
+  /// Raw source value — the live CSVs carry things like "40 NOS."
+  qty             String
+  unit            String?
+  componentTypeId Int?    @map("component_type_id")
+  remarks         String?
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
+  componentType           ComponentTypeRef?        @relation(fields: [componentTypeId], references: [id])
   procurement             Procurement?
   materialIdentifications MaterialIdentification[]
-  operations              ItemOperation[]
+  components              Component[]
   tests                   ItemTest[]
 
+  @@index([equipmentId])
+  @@index([componentTypeId])
   @@map("bom_items")
 }
 
@@ -424,71 +783,160 @@ model Procurement {
   receivedStatus MaterialReceivedStatus? @map("received_status")
   receivedDate   DateTime?               @map("received_date")
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+  bomItem BomItem @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
 
+  @@index([status])
   @@map("procurements")
 }
 
-// replaces the misused "Material Identification" CSV column
+/// Real traceability: heat number + MTC. Replaces the misused
+/// "Material Identification" CSV column, which held a sourcing type (C8).
 model MaterialIdentification {
   id         Int        @id @default(autoincrement())
   bomItemId  Int        @map("bom_item_id")
   heatNumber String     @map("heat_number")
   mtcRef     String?    @map("mtc_ref")
-  pmiResult  PmiResult? @map("pmi_result")
+  pmiResult  PmiResult?
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+  bomItem BomItem @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
 
+  @@index([bomItemId])
+  @@index([heatNumber])
   @@map("material_identifications")
 }
 
-model ItemOperation {
-  id        Int                 @id @default(autoincrement())
-  bomItemId Int                 @map("bom_item_id")
-  operation CanonicalOperation
-  sourcing  Sourcing?
-  startDate DateTime?           @map("start_date")
-  endDate   DateTime?           @map("end_date")
-  status    ItemOperationStatus @default(NOT_STARTED)
+// ── Component route library ─────────────────────────────────────────────
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+model RouteTemplate {
+  id              Int    @id @default(autoincrement())
+  tenantId        Int    @map("tenant_id")
+  componentTypeId Int    @map("component_type_id")
+  /// Null = applies to every family.
+  familyId        Int?   @map("family_id")
+  name            String
 
-  @@map("item_operations")
+  tenant        Organization           @relation(fields: [tenantId], references: [id])
+  componentType ComponentTypeRef       @relation(fields: [componentTypeId], references: [id])
+  family        ProductFamily?         @relation(fields: [familyId], references: [id])
+  versions      RouteTemplateVersion[]
+
+  @@unique([tenantId, componentTypeId, familyId])
+  @@index([tenantId])
+  @@index([componentTypeId])
+  @@index([familyId])
+  @@map("route_templates")
+}
+
+model RouteTemplateVersion {
+  id           Int            @id @default(autoincrement())
+  routeId      Int            @map("route_id")
+  version      Int
+  status       TemplateStatus @default(PUBLISHED)
+  /// Human-readable route from DESPL's routing document.
+  printedRoute String?        @map("printed_route")
+
+  route      RouteTemplate @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  steps      RouteStep[]
+  components Component[]
+
+  @@unique([routeId, version])
+  @@index([routeId])
+  @@map("route_template_versions")
+}
+
+model RouteStep {
+  id             Int     @id @default(autoincrement())
+  routeVersionId Int     @map("route_version_id")
+  seq            Int
+  operationId    Int     @map("operation_id")
+  printed        String?
+  optional       Boolean @default(false)
+
+  routeVersion RouteTemplateVersion @relation(fields: [routeVersionId], references: [id], onDelete: Cascade)
+  operation    OperationRef         @relation(fields: [operationId], references: [id])
+
+  @@unique([routeVersionId, seq])
+  @@index([routeVersionId])
+  @@index([operationId])
+  @@map("route_steps")
+}
+
+/// A physical thing being made. THIS is what makes "one client wants 5
+/// nozzles, another wants 8" representable: one BOM line spawns N tagged
+/// component instances, each with its own ordered operation route.
+model Component {
+  id              Int    @id @default(autoincrement())
+  equipmentId     Int    @map("equipment_id")
+  unitId          Int?   @map("unit_id")
+  bomItemId       Int?   @map("bom_item_id")
+  /// N1, N2, M1, Shell-1, Top Head…
+  tag             String
+  componentTypeId Int    @map("component_type_id")
+  routeVersionId  Int?   @map("route_version_id")
+
+  equipment     Equipment             @relation(fields: [equipmentId], references: [id])
+  unit          Unit?                 @relation(fields: [unitId], references: [id])
+  bomItem       BomItem?              @relation(fields: [bomItemId], references: [id])
+  componentType ComponentTypeRef      @relation(fields: [componentTypeId], references: [id])
+  routeVersion  RouteTemplateVersion? @relation(fields: [routeVersionId], references: [id])
+  operations    ComponentOperation[]
+
+  @@unique([equipmentId, tag])
+  @@index([equipmentId])
+  @@index([unitId])
+  @@index([bomItemId])
+  @@index([componentTypeId])
+  @@map("components")
+}
+
+/// Replaces the old ItemOperation, which had no sequence column and so could
+/// not represent route order at all.
+model ComponentOperation {
+  id          Int             @id @default(autoincrement())
+  componentId Int             @map("component_id")
+  seq         Int
+  operationId Int             @map("operation_id")
+  sourcing    Sourcing?
+  status      OperationStatus @default(NOT_STARTED)
+  /// SERVER CLOCK ONLY (invariant #1)
+  startedAt   DateTime?       @map("started_at")
+  /// SERVER CLOCK ONLY (invariant #1)
+  finishedAt  DateTime?       @map("finished_at")
+  submittedBy Int?            @map("submitted_by")
+  verifiedBy  Int?            @map("verified_by")
+
+  component Component    @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  operation OperationRef @relation(fields: [operationId], references: [id])
+
+  @@unique([componentId, seq])
+  @@index([componentId])
+  @@index([operationId])
+  @@index([status])
+  @@map("component_operations")
 }
 
 model ItemTest {
-  id        Int        @id @default(autoincrement())
-  bomItemId Int        @map("bom_item_id")
-  type      TestType
-  startDate DateTime?  @map("start_date")
-  endDate   DateTime?  @map("end_date")
-  result    TestResult @default(PENDING)
+  id         Int        @id @default(autoincrement())
+  bomItemId  Int        @map("bom_item_id")
+  testTypeId Int        @map("test_type_id")
+  startDate  DateTime?  @map("start_date")
+  endDate    DateTime?  @map("end_date")
+  result     TestResult @default(PENDING)
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id])
+  bomItem  BomItem     @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  testType TestTypeRef @relation(fields: [testTypeId], references: [id])
 
+  @@index([bomItemId])
+  @@index([testTypeId])
   @@map("item_tests")
 }
 
-// ── QCP engine (dynamic parties + full code set) ────────────────────────
-
-model InspectionParty {
-  id            Int     @id @default(autoincrement())
-  qcpTemplateId Int     @map("qcp_template_id")
-  code          String
-  name          String?
-
-  qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id])
-  itemCodes   QcpItemPartyCode[]
-
-  @@unique([qcpTemplateId, code])
-  @@map("inspection_parties")
-}
+// ── QCP / ITP engine (dynamic parties, per-project code sets) ───────────
 
 model QcpTemplate {
   id         Int     @id @default(autoincrement())
   jobId      Int?    @map("job_id")
-  // raw "job" label from the source doc — may not resolve to jobId (see
-  // seed/data-issues.json)
+  /// Raw label from the source document; may not resolve to a job.
   jobLabel   String  @map("job_label")
   vessel     String
   revision   Int     @default(0)
@@ -498,118 +946,236 @@ model QcpTemplate {
   parties InspectionParty[]
   items   QcpItem[]
 
+  @@index([jobId])
   @@map("qcp_templates")
 }
 
+/// Per-project rows, not columns. Real QAPs range from 2 parties
+/// (DESPL + BUYER_TPI) to 3 (DESPL + BUSCI_TPI + EIL_TPIA on a heat exchanger).
+model InspectionParty {
+  id            Int     @id @default(autoincrement())
+  qcpTemplateId Int     @map("qcp_template_id")
+  code          String
+  name          String?
+
+  qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
+  itemCodes   QcpItemPartyCode[]
+
+  @@unique([qcpTemplateId, code])
+  @@index([qcpTemplateId])
+  @@map("inspection_parties")
+}
+
+/// `sequence` carries the ordering; `srNo` is the raw printed value and is
+/// deliberately NOT unique — the real QCP has 62 items sharing 43 sr numbers,
+/// and the old unique constraint forced the seed to corrupt them into
+/// "4.8b"/"4.8c"/"4.8d".
 model QcpItem {
-  id                   Int         @id @default(autoincrement())
-  qcpTemplateId        Int         @map("qcp_template_id")
-  srNo                 String      @map("sr_no")
-  kind                 QcpItemKind
-  section              String?
-  activity             String
-  characteristic       String?
-  extentOfCheck        String?     @map("extent_of_check")
-  applicableDocument   String?     @map("applicable_document")
-  acceptanceCriteria   String?     @map("acceptance_criteria")
-  record               String?
-  remarks              String?
-  leadTimeProcessCodes Int[]       @map("lead_time_process_codes")
+  id                 Int         @id @default(autoincrement())
+  qcpTemplateId      Int         @map("qcp_template_id")
+  sequence           Int
+  srNo               String      @map("sr_no")
+  kind               QcpItemKind
+  section            String?
+  activity           String
+  characteristic     String?
+  extentOfCheck      String?     @map("extent_of_check")
+  applicableDocument String?     @map("applicable_document")
+  acceptanceCriteria String?     @map("acceptance_criteria")
+  record             String?
+  remarks            String?
 
-  qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id])
-  partyCodes  QcpItemPartyCode[]
-  executions  QcpExecution[]
+  qcpTemplate  QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
+  partyCodes   QcpItemPartyCode[]
+  executions   QcpExecution[]
+  processLinks QcpItemProcess[]
 
-  @@unique([qcpTemplateId, srNo])
+  @@unique([qcpTemplateId, sequence])
+  @@index([qcpTemplateId])
   @@map("qcp_items")
 }
 
-model QcpItemPartyCode {
-  qcpItemId         Int     @map("qcp_item_id")
-  inspectionPartyId Int     @map("inspection_party_id")
-  code              QcpCode
+/// Real join table replacing the unenforced Int[] crosswalk.
+model QcpItemProcess {
+  qcpItemId    Int @map("qcp_item_id")
+  jobProcessId Int @map("job_process_id")
 
-  qcpItem         QcpItem         @relation(fields: [qcpItemId], references: [id])
-  inspectionParty InspectionParty @relation(fields: [inspectionPartyId], references: [id])
+  qcpItem    QcpItem    @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
+  jobProcess JobProcess @relation(fields: [jobProcessId], references: [id], onDelete: Cascade)
+
+  @@id([qcpItemId, jobProcessId])
+  @@index([jobProcessId])
+  @@map("qcp_item_processes")
+}
+
+model QcpItemPartyCode {
+  qcpItemId         Int @map("qcp_item_id")
+  inspectionPartyId Int @map("inspection_party_id")
+  qcpCodeId         Int @map("qcp_code_id")
+
+  qcpItem         QcpItem         @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
+  inspectionParty InspectionParty @relation(fields: [inspectionPartyId], references: [id], onDelete: Cascade)
+  qcpCode         QcpCodeRef      @relation(fields: [qcpCodeId], references: [id])
 
   @@id([qcpItemId, inspectionPartyId])
+  @@index([inspectionPartyId])
+  @@index([qcpCodeId])
   @@map("qcp_item_party_codes")
 }
 
+/// `attemptNo` makes re-inspection representable. The old unique constraint on
+/// (qcpItem, unit) meant a rejected-then-re-inspected checkpoint could not be
+/// recorded at all, which broke PRD FR-Q2.
 model QcpExecution {
-  id               Int                @id @default(autoincrement())
-  qcpItemId        Int                @map("qcp_item_id")
-  unitId           Int                @map("unit_id")
-  result           QcpExecutionResult @default(PENDING)
-  callGivenOn      DateTime?          @map("call_given_on")
-  // server-set only (invariant #1) — never from a request DTO
-  callAttendedOn   DateTime?          @map("call_attended_on")
-  clearedBy        String?            @map("cleared_by")
-  waiverApprovedBy String?            @map("waiver_approved_by")
-  // server-set only (invariant #1) — never from a request DTO
-  recordedAt       DateTime           @default(now()) @map("recorded_at")
+  id                Int                @id @default(autoincrement())
+  qcpItemId         Int                @map("qcp_item_id")
+  unitId            Int                @map("unit_id")
+  attemptNo         Int                @default(1) @map("attempt_no")
+  result            QcpExecutionResult @default(PENDING)
+  callGivenOn       DateTime?          @map("call_given_on")
+  /// SERVER CLOCK ONLY (invariant #1)
+  callAttendedOn    DateTime?          @map("call_attended_on")
+  clearedBy         Int?               @map("cleared_by")
+  clearedByPartyRef String?            @map("cleared_by_party_ref")
+  waiverApprovedBy  Int?               @map("waiver_approved_by")
+  remarks           String?
+  /// SERVER CLOCK ONLY (invariant #1)
+  recordedAt        DateTime           @default(now()) @map("recorded_at")
 
-  qcpItem QcpItem @relation(fields: [qcpItemId], references: [id])
+  qcpItem QcpItem @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   unit    Unit    @relation(fields: [unitId], references: [id])
 
-  @@unique([qcpItemId, unitId])
+  @@unique([qcpItemId, unitId, attemptNo])
+  @@index([qcpItemId])
+  @@index([unitId])
+  @@index([result])
   @@map("qcp_executions")
 }
 
-// ── Drawings ─────────────────────────────────────────────────────────────
+// ── Drawings ────────────────────────────────────────────────────────────
 
 model AssemblyDrawing {
-  id           Int           @id @default(autoincrement())
-  jobId        Int           @map("job_id")
-  type         DrawingType
-  revisionNo   String?       @map("revision_no")
-  status       DrawingStatus @default(DRAFT)
-  approvedDate DateTime?     @map("approved_date")
-  releasedDate DateTime?     @map("released_date")
+  id            Int           @id @default(autoincrement())
+  jobId         Int           @map("job_id")
+  drawingTypeId Int           @map("drawing_type_id")
+  drawingNo     String?       @map("drawing_no")
+  revisionNo    String?       @map("revision_no")
+  status        DrawingStatus @default(DRAFT)
+  approvedDate  DateTime?     @map("approved_date")
+  releasedDate  DateTime?     @map("released_date")
+  revisedDate   DateTime?     @map("revised_date")
+  remarks       String?
 
-  job Job @relation(fields: [jobId], references: [id])
+  job         Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  drawingType DrawingTypeRef @relation(fields: [drawingTypeId], references: [id])
 
+  @@index([jobId])
+  @@index([drawingTypeId])
   @@map("assembly_drawings")
 }
 
-// ── Delay, notifications, audit (per PRD/TRD v1.0, unchanged) ──────────
+// ── Delay, notifications ────────────────────────────────────────────────
 
 model DelayReason {
-  id                   Int               @id @default(autoincrement())
-  projectProcessPlanId Int               @map("project_process_plan_id")
-  category             DelayCategory
-  detail               String?
-  filedBy              String            @map("filed_by")
-  filedAt              DateTime          @default(now()) @map("filed_at")
-  reviewStatus         DelayReviewStatus @default(PENDING) @map("review_status")
-  reviewedBy           String?           @map("reviewed_by")
+  id            Int               @id @default(autoincrement())
+  processPlanId Int               @map("process_plan_id")
+  categoryId    Int               @map("category_id")
+  detail        String?
+  filedBy       Int               @map("filed_by")
+  filedAt       DateTime          @default(now()) @map("filed_at")
+  reviewStatus  DelayReviewStatus @default(PENDING) @map("review_status")
+  reviewedBy    Int?              @map("reviewed_by")
 
-  projectProcessPlan ProjectProcessPlan @relation(fields: [projectProcessPlanId], references: [id])
+  processPlan ProcessPlan      @relation(fields: [processPlanId], references: [id], onDelete: Cascade)
+  category    DelayCategoryRef @relation(fields: [categoryId], references: [id])
 
+  @@index([processPlanId])
+  @@index([categoryId])
+  @@index([reviewStatus])
   @@map("delay_reasons")
 }
 
 model Notification {
-  id           Int       @id @default(autoincrement())
-  recipientRef String    @map("recipient_ref")
-  type         String
-  entityRef    String?   @map("entity_ref")
-  title        String
-  body         String?
-  readAt       DateTime? @map("read_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  id          Int       @id @default(autoincrement())
+  tenantId    Int       @map("tenant_id")
+  recipientId Int       @map("recipient_id")
+  type        String
+  entityType  String?   @map("entity_type")
+  entityId    Int?      @map("entity_id")
+  title       String
+  body        String?
+  /// Email-ready payload, stored now, delivered in Phase 2.
+  payload     Json?
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
+  tenant Organization @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+  @@index([recipientId, readAt])
   @@map("notifications")
 }
 
-// append-only: the app DB role has no UPDATE/DELETE grant on this table
-// (invariant #5) — see the REVOKE statement appended to this model's
-// migration. NOTE: while local dev connects as the Postgres superuser,
-// REVOKE has no effect (superuser bypasses grants) — this only becomes
-// load-bearing once a non-superuser app role exists (Railway deploy).
+// ── Client portal ───────────────────────────────────────────────────────
+
+/// What each client may see, per contract. Every flag is checked server-side.
+model ClientVisibilityPolicy {
+  clientId         Int             @id @map("client_id")
+  showProgress     Boolean         @default(true) @map("show_progress")
+  showStageStatus  Boolean         @default(true) @map("show_stage_status")
+  showDates        Boolean         @default(true) @map("show_dates")
+  showQcp          Boolean         @default(true) @map("show_qcp")
+  cadence          SnapshotCadence @default(WEEKLY)
+  requiresApproval Boolean         @default(true) @map("requires_approval")
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@map("client_visibility_policies")
+}
+
+/// The only thing client users read. Frozen, published, auditable — so a
+/// mis-entered figure never reaches a client before SJ sees it, and LIVE /
+/// DAILY / WEEKLY cadences share one code path. Doubles as the internal
+/// dashboard rollup, so 15M rows collapse to ~50k here.
+model ProgressSnapshot {
+  id          Int       @id @default(autoincrement())
+  tenantId    Int       @map("tenant_id")
+  jobId       Int       @map("job_id")
+  equipmentId Int?      @map("equipment_id")
+  unitId      Int?      @map("unit_id")
+  asOf        DateTime  @map("as_of")
+  overallPct  Int       @map("overall_pct")
+  /// Per-process/stage detail, plus forecast dates and current stage.
+  detail      Json?
+  publishedBy Int?      @map("published_by")
+  publishedAt DateTime? @map("published_at")
+
+  tenant    Organization @relation(fields: [tenantId], references: [id])
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  equipment Equipment?   @relation(fields: [equipmentId], references: [id])
+  unit      Unit?        @relation(fields: [unitId], references: [id])
+
+  @@index([tenantId])
+  @@index([jobId, asOf])
+  @@index([equipmentId])
+  @@index([unitId])
+  @@map("progress_snapshots")
+}
+
+// ── Audit and events ────────────────────────────────────────────────────
+
+/// Append-only (invariant #5). The app DB role has no UPDATE/DELETE grant —
+/// enforced by the REVOKE in the migration against the `despl_app` role, not
+/// against PUBLIC (a superuser bypasses PUBLIC grants entirely).
+///
+/// ponytail: plain table, not partitioned. At ~10M rows/year a well-indexed
+/// table is fine; convert to PARTITION BY RANGE(at) when it passes ~20M rows,
+/// which is cheap to do while the data is still small and by which point real
+/// query patterns will be known.
 model AuditLog {
   id         BigInt   @id @default(autoincrement())
-  actorRef   String   @map("actor_ref")
+  tenantId   Int      @map("tenant_id")
+  actorId    Int?     @map("actor_id")
   action     String
   entityType String   @map("entity_type")
   entityId   String   @map("entity_id")
@@ -619,5 +1185,25 @@ model AuditLog {
   userAgent  String?  @map("user_agent")
   at         DateTime @default(now())
 
+  @@index([tenantId, entityType, entityId, at])
+  @@index([tenantId, actorId, at])
+  @@index([tenantId, at])
   @@map("audit_log")
+}
+
+/// Append-only domain event stream. Needed for audit reconstruction today and
+/// it is what the AI agent layer will read later.
+model DomainEvent {
+  id            BigInt   @id @default(autoincrement())
+  tenantId      Int      @map("tenant_id")
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  type          String
+  payload       Json
+  actorId       Int?     @map("actor_id")
+  at            DateTime @default(now())
+
+  @@index([tenantId, aggregateType, aggregateId, at])
+  @@index([tenantId, type, at])
+  @@map("domain_events")
 }

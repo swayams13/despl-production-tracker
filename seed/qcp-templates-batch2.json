@@ -1,0 +1,3746 @@
+{
+  "$schema": "despl.qcp.batch.v1",
+  "source": "production process_work flow..docx (DESPL handover, 13 Aug 2026)",
+  "note": "Six QAP/ITP tables extracted from the source docx via structural XML table parsing (w:tbl/w:tr/w:tc, gridSpan/vMerge-aware), not manual transcription or flattened-paragraph heuristics \u2014 every code cell was validated against the known code vocabulary (P,W,H,R,RW,R&A) and any row with an unexpected cell count is listed in `issues` below rather than silently guessed. leadTimeProcesses (36-process spine links) are deliberately NOT mapped for any item here, unlike qcp-templates.json's DESPL-320 template \u2014 that mapping was manually curated in the original architecture session and doing the same for ~300 new checkpoints was out of scope for this pass.",
+  "issues": [
+    {
+      "row": "AMMONIA_VAPORIZER#16.4",
+      "problem": "expected 5 code cells, found 4",
+      "raw": [
+        "16.4",
+        "Draining & drying",
+        "Visual",
+        "Drawing",
+        "---",
+        "H",
+        "---",
+        "---",
+        "---"
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "key": "SUCTION_AIR_VESSEL",
+      "jobLabel": "DE0455-03 \u2014 Suction Air Vessel",
+      "vessel": "Suction Air Vessel",
+      "designCode": "ASME Sec. VIII Div. 1 Edition 2025",
+      "materialNo": "5526512-1",
+      "jobNumberHint": "DE0467",
+      "parties": [
+        "DESPL",
+        "CLIENT_TPI"
+      ],
+      "items": [
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "1",
+          "activity": "ITP",
+          "characteristic": null,
+          "acceptanceCriteria": "Drawings & Design Specification",
+          "record": "ITP",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2",
+          "activity": "Design Calculation",
+          "characteristic": "Design Documents",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Design Calculation",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3",
+          "activity": "Drawing",
+          "characteristic": "Relevant Drawings",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Drawing",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "4",
+          "activity": "Welding"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.1",
+          "activity": "Welding Procedure and & Qualification Record Along with Weld Plan.",
+          "characteristic": "ASME Sec. IX",
+          "acceptanceCriteria": "ASME Sec. IX",
+          "record": "WPS/PQR, WPQ & Weld Plan",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.2",
+          "activity": "Welding Consumable Control",
+          "characteristic": "Review of BTC",
+          "acceptanceCriteria": "ASME Sec. II Part C",
+          "record": "Review of BTC",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "5",
+          "activity": "NDE & QC Procedures"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.1",
+          "activity": "NDE Procedure (LPT, RT, UT)",
+          "characteristic": "Review of Procedure / Documents",
+          "acceptanceCriteria": "ASME Sec. V",
+          "record": "Procedure",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.2",
+          "activity": "NDE Operator Qualification",
+          "characteristic": "Personnel Certification",
+          "acceptanceCriteria": "DESPL Written Practice",
+          "record": "Qualification Record",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.3",
+          "activity": "QC Procedures (Hydrostatic Pressure, Pneumatic Test, Painting Procedure etc.)",
+          "characteristic": "Review of Procedures",
+          "acceptanceCriteria": null,
+          "record": "QC Procedures",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "6",
+          "activity": "Material Identification"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.1",
+          "activity": "Pressure Parts (Plate, Pipe, Forging, Fitting, RF Pad Etc.)",
+          "characteristic": "Dimensions, Visual, Mill Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Identification Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.2",
+          "activity": "Non-Pressure Parts Directly attached to Pressure Parts",
+          "characteristic": "Dimensions, Visual, Code Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.3",
+          "activity": "Non-Pressure Parts",
+          "characteristic": "Dimensions, Visual, Code Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.4",
+          "activity": "Fasteners",
+          "characteristic": "Dimensions, Visual, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.5",
+          "activity": "Gasket",
+          "characteristic": "Dimensions, Visual, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "7",
+          "activity": "Dish End (Fabricated Dish End)"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.1",
+          "activity": "Dish end after forming Final Dimension",
+          "characteristic": "Dimensional & Visual",
+          "acceptanceCriteria": "Approved Drawing, UG-79",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.2",
+          "activity": "LPT Inside and Outside Surface of Knuckle and SF areas of the Dish End",
+          "characteristic": "Visual & LPT",
+          "acceptanceCriteria": "LPT Procedure, ASME Sec. VIII Div. 1 App-8",
+          "record": "LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "8",
+          "activity": "Main Shell, Dish End Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.1",
+          "activity": "Long Seam Set-Up of:Main Shell",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.2",
+          "activity": "Long Seam Welding of:Main Shell",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. I UG-97,LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.3",
+          "activity": "Long Seam RT Examination of:Main Shell",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.4",
+          "activity": "Circumferential Seam Set-up of:Main Shell to Dish End",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.5",
+          "activity": "Circumferential Seam Welding of:Main Shell to Dish End",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. I UG-97,LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.6",
+          "activity": "Circumferential Seam RT Examination of:Main Shell to Dish End",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "9",
+          "activity": "Nozzle Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.1",
+          "activity": "Set-Up of Pipe to Flange",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.2",
+          "activity": "Welding of Pipe to Flange",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. I UG-97,LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.3",
+          "activity": "RT of Pipe to Flange",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.4",
+          "activity": "Set-Up of Nozzles to Main Shell & Dish end with RF pad",
+          "characteristic": "Dimensional Inspection \u2013 Radial Position, Elevation, Projection",
+          "acceptanceCriteria": "Approved Drawing",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.5",
+          "activity": "Welding of Nozzles to Main Shell & Dish end with RF pad",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. I UG-97,LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.6",
+          "activity": "RF Pad Pneumatic Test",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-100, No leakage",
+          "record": "Pneumatic Test Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "10",
+          "activity": "Skirt Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.1",
+          "activity": "Long Seam Set-Up of:Skirt Shell",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.2",
+          "activity": "Long Seam Welding of:Skirt Shell",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. I UG-97,LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.3",
+          "activity": "Set- Up of Skirt Shell to Flange",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.4",
+          "activity": "Welding of Skirt Shell to Flange",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. I UG-97,LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.5",
+          "activity": "Set of Skirt Shell to Main Shell",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.6",
+          "activity": "Welding of Skirt Shell to Main Shell",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. I UG-97,LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "11",
+          "activity": "Final Dimension and Visual"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.1",
+          "activity": "Final Dimension of Equipment",
+          "characteristic": "Dimensional",
+          "acceptanceCriteria": "Drawing",
+          "record": "Final Dimension Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.2",
+          "activity": "Internal Visual Inspection of Main Shell, Dish End & Nozzles",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-97, UW 35 & UW-37",
+          "record": "Visual Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.3",
+          "activity": "Inspection of All External Attachments Welds from Outside",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-97, UW-35 & UW-37",
+          "record": "Visual Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "12",
+          "activity": "Pressure Test"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.1",
+          "activity": "Hydro Test of Complete Equipment",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-99 &Pressure Test Procedure",
+          "record": "Calibration Report, Pressure Test Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "13",
+          "activity": "Surface Preparation and Painting"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.1",
+          "activity": "Surface Preparation & Painting of Carbon Steel External Surface",
+          "characteristic": "Visual, DFT",
+          "acceptanceCriteria": "Approved Drawing and Painting Procedure",
+          "record": "Paint Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "14",
+          "activity": "Final Stamping & Documentation"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.1",
+          "activity": "Verification of NCR (If Any) After Pressure Test",
+          "characteristic": "Correction or Elimination to Comply with Drawing, ASME SEC VIII Div. 1",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "NCR Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.2",
+          "activity": "Verification of Name Plate Marking",
+          "characteristic": "Name Plate Data Verification",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "Photocopy of Name Plate",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.3",
+          "activity": "Stamping of Name Plate & Attachment to The Equipment",
+          "characteristic": "Name Plate and Name Plate Attached to Equipment",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "Photocopy of Name Plate",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.4",
+          "activity": "Review of Final Documentations Dossier including coating inspection",
+          "characteristic": "Documents & ITP",
+          "acceptanceCriteria": "PO",
+          "record": "Equipment Dossier",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        }
+      ]
+    },
+    {
+      "key": "SUCTION_PIPING_10IN",
+      "jobLabel": "DE0455-02 \u2014 Suction Piping 10\" x 150 lbs",
+      "vessel": "Suction Piping 10\" x 150 lbs",
+      "designCode": "ASME Sec. VIII Div. 1 Edition 2025",
+      "materialNo": "5525785-1",
+      "jobNumberHint": "DE0467",
+      "parties": [
+        "DESPL",
+        "CLIENT_TPI"
+      ],
+      "items": [
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "1",
+          "activity": "ITP",
+          "characteristic": null,
+          "acceptanceCriteria": "Drawings & Design Specification",
+          "record": "ITP",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2",
+          "activity": "Design Calculation",
+          "characteristic": "Design Documents",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Design Calculation",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3",
+          "activity": "Drawing",
+          "characteristic": "Relevant Drawings",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Drawing",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "4",
+          "activity": "Welding"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.1",
+          "activity": "Welding Procedure and & Qualification Record Along with Weld Plan.",
+          "characteristic": "ASME Sec. IX",
+          "acceptanceCriteria": "ASME Sec. IX",
+          "record": "WPS/PQR, WPQ & Weld Plan",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.2",
+          "activity": "Welding Consumable Control",
+          "characteristic": "Review of BTC",
+          "acceptanceCriteria": "ASME Sec. II Part C",
+          "record": "Review of BTC",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "5",
+          "activity": "NDE& QC Procedures"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.1",
+          "activity": "NDE Procedure (LPT, RT)",
+          "characteristic": "Review of Procedure / Documents",
+          "acceptanceCriteria": "ASME Sec. V",
+          "record": "Procedure",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.2",
+          "activity": "NDE Operator Qualification",
+          "characteristic": "Personnel Certification",
+          "acceptanceCriteria": "DESPL Written Practice",
+          "record": "Qualification Record",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.3",
+          "activity": "QC Procedures (Hydrostatic Pressure, Painting Procedure etc.)",
+          "characteristic": "Review of Procedures",
+          "acceptanceCriteria": null,
+          "record": "QC Procedures",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "6",
+          "activity": "Material Identification"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.1",
+          "activity": "Pressure Parts (Pipe, Forging, Fitting etc.)",
+          "characteristic": "Dimensions, Visual, Mill Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Identification Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "8",
+          "activity": "Piping Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.1",
+          "activity": "Set-Up of Pipe to Flange",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.2",
+          "activity": "Welding of Pipe to Flange",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. IUG-97, LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.3",
+          "activity": "RT Examination of Pipe to Flange",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.4",
+          "activity": "Set-Up of Pipe to Reducing Tee",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.5",
+          "activity": "Welding of Pipe to Reducing Tee",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. IUG-97, LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.6",
+          "activity": "RT Examination of Pipe to Reducing Tee",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.7",
+          "activity": "Set-Up of Reducing Tee to Flange",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.8",
+          "activity": "Welding of Reducing Tee to Flange",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. IUG-97, LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.9",
+          "activity": "RT Examination of Reducing Tee to Flange",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "10",
+          "activity": "Final Dimension and Visual"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.1",
+          "activity": "Final Dimension of Suction Piping",
+          "characteristic": "Dimensional",
+          "acceptanceCriteria": "Drawing",
+          "record": "Final Dimension Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "11",
+          "activity": "Pressure Test"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.1",
+          "activity": "Hydro Test of Complete Suction Piping",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-99 &Pressure Test Procedure",
+          "record": "Calibration Report, Pressure Test Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "12",
+          "activity": "Surface Preparation and Painting"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.1",
+          "activity": "Surface Preparation &Painting of Carbon Steel External Surface",
+          "characteristic": "Visual, DFT",
+          "acceptanceCriteria": "Approved Drawing and Painting Procedure",
+          "record": "Paint Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "13",
+          "activity": "Final Stamping & Documentation"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.1",
+          "activity": "Verification of NCR (If Any) After Pressure Test",
+          "characteristic": "Correction or Elimination to Comply with Drawing, ASME SEC VIII Div. 1",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "NCR Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.2",
+          "activity": "Review of Final Documentations Dossier including coating inspection",
+          "characteristic": "Documents & ITP",
+          "acceptanceCriteria": "PO",
+          "record": "Equipment Dossier",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        }
+      ]
+    },
+    {
+      "key": "PRESSURE_PIPING_8IN",
+      "jobLabel": "DE0455-01 \u2014 Pressure Piping 8\" x 900 lbs",
+      "vessel": "Pressure Piping 8\" x 900 lbs",
+      "designCode": "ASME Sec. VIII Div. 1 Edition 2025",
+      "materialNo": null,
+      "jobNumberHint": "DE0467",
+      "parties": [
+        "DESPL",
+        "CLIENT_TPI"
+      ],
+      "items": [
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "1",
+          "activity": "ITP",
+          "characteristic": null,
+          "acceptanceCriteria": "Drawings & Design Specification",
+          "record": "ITP",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2",
+          "activity": "Design Calculation",
+          "characteristic": "Design Documents",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Design Calculation",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3",
+          "activity": "Drawing",
+          "characteristic": "Relevant Drawings",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Drawing",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "4",
+          "activity": "Welding"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.1",
+          "activity": "Welding Procedure and & Qualification Record Along with Weld Plan.",
+          "characteristic": "ASME Sec. IX",
+          "acceptanceCriteria": "ASME Sec. IX",
+          "record": "WPS/PQR, WPQ & Weld Plan",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.2",
+          "activity": "Welding Consumable Control",
+          "characteristic": "Review of BTC",
+          "acceptanceCriteria": "ASME Sec. II Part C",
+          "record": "Review of BTC",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "5",
+          "activity": "NDE& QC Procedures"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.1",
+          "activity": "NDE Procedure (LPT, RT)",
+          "characteristic": "Review of Procedure / Documents",
+          "acceptanceCriteria": "ASME Sec. V",
+          "record": "Procedure",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.2",
+          "activity": "NDE Operator Qualification",
+          "characteristic": "Personnel Certification",
+          "acceptanceCriteria": "DESPL Written Practice",
+          "record": "Qualification Record",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.3",
+          "activity": "QC Procedures (Hydrostatic Pressure, Painting Procedure etc.)",
+          "characteristic": "Review of Procedures",
+          "acceptanceCriteria": null,
+          "record": "QC Procedures",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "6",
+          "activity": "Material Identification"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.1",
+          "activity": "Pressure Parts (Pipe, Forging, Fitting etc.)",
+          "characteristic": "Dimensions, Visual, Mill Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Identification Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "8",
+          "activity": "Piping Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.1",
+          "activity": "Set-Up of Pipe to Flange",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.2",
+          "activity": "Welding of Pipe to Flange",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. IUG-97, LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.3",
+          "activity": "RT Examination of Pipe to Flange",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.4",
+          "activity": "Set-Up of Pipe to Straight Tee",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.5",
+          "activity": "Welding of Pipe to Straight Tee",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. IUG-97, LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.6",
+          "activity": "RT Examination of Pipe to Straight Tee",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.7",
+          "activity": "Set-Up of Straight Tee to Flange",
+          "characteristic": "Weld Edge Preparation, Root Gap, Offset, Visual",
+          "acceptanceCriteria": "Approved Drawing + ASME Sec VIII Div 1",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.8",
+          "activity": "Welding of Straight Tee to Flange",
+          "characteristic": "Weld Visual & LPT",
+          "acceptanceCriteria": "ASME Sec VIII Div. IUG-97, LPT Procedure",
+          "record": "Weld Visual & LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.9",
+          "activity": "RT Examination of Straight Tee to Flange",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "10",
+          "activity": "Final Dimension and Visual"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.1",
+          "activity": "Final Dimension of Pressure Piping",
+          "characteristic": "Dimensional",
+          "acceptanceCriteria": "Drawing",
+          "record": "Final Dimension Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "11",
+          "activity": "Pressure Test"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.1",
+          "activity": "Hydro Test of Complete Pressure Piping",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-99 &Pressure Test Procedure",
+          "record": "Calibration Report, Pressure Test Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "12",
+          "activity": "Surface Preparation and Painting"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.1",
+          "activity": "Surface Preparation &Painting of Carbon Steel External Surface",
+          "characteristic": "Visual, DFT",
+          "acceptanceCriteria": "Approved Drawing and Painting Procedure",
+          "record": "Paint Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "13",
+          "activity": "Final Stamping & Documentation"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.1",
+          "activity": "Verification of NCR (If Any) After Pressure Test",
+          "characteristic": "Correction or Elimination to Comply with Drawing, ASME SEC VIII Div. 1",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "NCR Report",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.2",
+          "activity": "Review of Final Documentations Dossier including coating inspection",
+          "characteristic": "Documents & ITP",
+          "acceptanceCriteria": "PO",
+          "record": "Equipment Dossier",
+          "codes": {
+            "DESPL": "H",
+            "CLIENT_TPI": "H"
+          },
+          "remarks": null
+        }
+      ]
+    },
+    {
+      "key": "DE0463_PRESSURE_VESSEL",
+      "jobLabel": "DE0463 \u2014 Pressure Vessel",
+      "vessel": "Pressure Vessel",
+      "designCode": "ASME Sec. VIII Div. 1",
+      "materialNo": null,
+      "jobNumberHint": "DE0463",
+      "parties": [
+        "DESPL",
+        "AI"
+      ],
+      "items": [
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "1",
+          "activity": "QCP",
+          "characteristic": null,
+          "acceptanceCriteria": "Drawing & Design Specification",
+          "record": "QCP",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2",
+          "activity": "Design Calculation",
+          "characteristic": "Design Documents",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Design Calculation",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3",
+          "activity": "Drawing",
+          "characteristic": "Relevant Drawings",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Drawing",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "4",
+          "activity": "Welding"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.1",
+          "activity": "Welding Procedure & Qualification Record Along with Weld Plan",
+          "characteristic": "ASME Sec. IX",
+          "acceptanceCriteria": "ASME Sec. IX",
+          "record": "WPS/PQR, WPQ & Weld Plan",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.2",
+          "activity": "Welding Consumable Control",
+          "characteristic": "Review of BTC / Marking on Box",
+          "acceptanceCriteria": "ASME Sec. II Part C",
+          "record": "Review of MTR / Marking on Box",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "5",
+          "activity": "NDE & QC Procedures"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.1",
+          "activity": "NDE Procedure",
+          "characteristic": "Review of Procedure / Documents",
+          "acceptanceCriteria": "ASME Sec. V",
+          "record": "Procedure",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.2",
+          "activity": "NDE Operator Qualification",
+          "characteristic": "Personnel Certification",
+          "acceptanceCriteria": "DESPL Written Practice",
+          "record": "Qualification Record",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.3",
+          "activity": "QC Procedures (Heat Treatment, Hydrostatic)",
+          "characteristic": "Review of Procedures",
+          "acceptanceCriteria": null,
+          "record": "QC Procedures",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "6",
+          "activity": "Material Identification"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.1",
+          "activity": "Pressure Parts (Plate, Pipe, Forging, Fitting, RF Pad etc.)",
+          "characteristic": "Dimensions, Visual, Mill Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Identification Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.2",
+          "activity": "Non-Pressure Parts Directly Attached to Pressure Parts",
+          "characteristic": "Dimensions, Visual, Code Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.3",
+          "activity": "Non-Pressure Parts",
+          "characteristic": "Dimensions, Visual, Code Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.4",
+          "activity": "Fasteners",
+          "characteristic": "Dimensions, Visual, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.5",
+          "activity": "Gasket",
+          "characteristic": "Dimensions, Visual, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.1",
+          "activity": "Cutting of Blank/Petals",
+          "characteristic": "Material Identification Verification and Visual Inspection",
+          "acceptanceCriteria": "Nonexistence of Serious Laminations, Shear Cracks and Other Imperfections",
+          "record": null,
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.2",
+          "activity": "Visual & Dimension Inspection of Body Flange & Flat Dish End after Machining",
+          "characteristic": "Dimensional, Visual & Verification of Vendor Inspection Report",
+          "acceptanceCriteria": "Drawing",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "8",
+          "activity": "Main Shell Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.1",
+          "activity": "Examination of Cut Edges Before Fabrication",
+          "characteristic": "Visual Inspection for Serious Laminations, Shear Cracks and Other Imperfections",
+          "acceptanceCriteria": "Nonexistence of Serious Laminations, Shear Cracks and Other Imperfections",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.2",
+          "activity": "Set up of Main Shell to Flat Dish End",
+          "characteristic": "Dimensional & Visual",
+          "acceptanceCriteria": "Drawing, UW-33 & Weld Plan",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.3",
+          "activity": "PT Examination of Set-up of Main Shell to Flat Dish End",
+          "characteristic": "LPT Procedure, ASME Sec. VIII Div. 1 App-8",
+          "acceptanceCriteria": "UG-93.4(d) & Visual",
+          "record": "LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.4",
+          "activity": "Welding of Main Shell to Flat Dish End",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.5",
+          "activity": "Final Welding Inspection of Main Shell to Flat Dish End",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.6",
+          "activity": "PT Examination Final Welding of Main Shell to Flat Dish End",
+          "characteristic": "LPT Procedure, ASME Sec. VIII Div. 1 App-8",
+          "acceptanceCriteria": "UG-93.4(d) & Visual",
+          "record": "LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.7",
+          "activity": "Set up of Main Shell to Body Flange",
+          "characteristic": "Dimensional & Visual",
+          "acceptanceCriteria": "Drawing, UW-33 & Weld Plan",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.8",
+          "activity": "Welding of Main Shell to Body Flange",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.9",
+          "activity": "Final Welding Inspection of Main Shell to Body Flange",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "9",
+          "activity": "Nozzle Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.1",
+          "activity": "Examination of Cut Edges Before Fabrication",
+          "characteristic": "Visual Inspection for Serious Laminations, Shear Cracks and Other Imperfections",
+          "acceptanceCriteria": "Nonexistence of Serious Laminations, Shear Cracks and Other Imperfections",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.12",
+          "activity": "Nozzles Orientation Marking",
+          "characteristic": "Dimensional Inspection \u2013 Orientation, Elevation and Size of Opening",
+          "acceptanceCriteria": "Drawing",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.13",
+          "activity": "Set-Up of Nozzles to Shell & Flat Dish End",
+          "characteristic": "Dimensional Inspection \u2013 Radial Position, Elevation, Projection",
+          "acceptanceCriteria": "Drawing",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.14",
+          "activity": "Welding of Nozzles to Shell & Dish Ends",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.16",
+          "activity": "Final Welding Inspection of Nozzles to Shell & Dish Ends",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "10",
+          "activity": "Final Assembly"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.1",
+          "activity": "All Attachments Fit Up and Welding from Inside (Non-Pressure to Pressure Parts)",
+          "characteristic": "Dimension, Parameters as Per WPS",
+          "acceptanceCriteria": "Drawing, Welding Procedure Specification",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.2",
+          "activity": "Inspection of All Internal Attachments Welds",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.3",
+          "activity": "Internal Visual Inspection of Equipment before Hydrostatic Test",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UG-97, UW-35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.11",
+          "activity": "All Attachments Fit Up and Welding from Outside (Non-Pressure to Pressure Parts), Includes Base Support Plate & its Attachments, Name Plate Bracket etc.",
+          "characteristic": "Dimension, Parameters as Per WPS",
+          "acceptanceCriteria": "Drawing, Welding Procedure Specification",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.12",
+          "activity": "Inspection of All External Attachments Welds from Outside (Non-Pressure to Pressure Parts), Includes Base Support Plate & its Attachments, Name Plate Bracket etc.",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "11",
+          "activity": "Final Dimension and Visual"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.1",
+          "activity": "Final Dimension of Equipment",
+          "characteristic": "Dimensional",
+          "acceptanceCriteria": "Drawing",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.2",
+          "activity": "Final Visual of Equipment",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "ASME Sec. VIII Div. 1",
+          "record": "Visual Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "12",
+          "activity": "Pressure Test"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.1",
+          "activity": "Verification & Closure of NCR (If Applicable)",
+          "characteristic": "Correction or Elimination to Comply with Drawing, ASME Sec VIII Div. 1",
+          "acceptanceCriteria": "Drawing, ASME Sec VIII Div. 1",
+          "record": "NCR Log, Traveller",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.2",
+          "activity": "Hydro Test of Complete Equipment",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-99 & Pressure Test Procedure",
+          "record": "Calibration Report, Pressure Test Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.3",
+          "activity": "Draining & Drying",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "Drawing",
+          "record": null,
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "13",
+          "activity": "Surface Preparation and Painting"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.1",
+          "activity": "Surface Preparation and Painting",
+          "characteristic": "Visual, Surface Profile",
+          "acceptanceCriteria": "Drawing and Data Sheet",
+          "record": "Surface Preparation and Painting Report",
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.2",
+          "activity": "Surface Preparation and Painting of Carbon Steel External Surface",
+          "characteristic": "Visual, DFT",
+          "acceptanceCriteria": "Drawing and Data Sheet",
+          "record": null,
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "14",
+          "activity": "Final Stamping & Documentation"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.1",
+          "activity": "Verification of NCR (If Any) After Pressure Test",
+          "characteristic": "Correction or Elimination to Comply with Drawing, ASME Sec VIII Div. 1",
+          "acceptanceCriteria": "Drawing, ASME Sec VIII Div. 1",
+          "record": "NCR Log, Traveller",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.2",
+          "activity": "Verification of Name Plate Marking and Authorization for Stamping",
+          "characteristic": "Name Plate Data Verification",
+          "acceptanceCriteria": "Drawing, ASME Sec VIII Div. 1",
+          "record": "Photocopy of Name Plate",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.3",
+          "activity": "Stamping of Name Plate & Attachment to the Equipment",
+          "characteristic": "Name Plate and Name Plate Attached to Equipment",
+          "acceptanceCriteria": "Drawing, ASME Sec VIII Div. 1",
+          "record": "Photocopy of Name Plate",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.4",
+          "activity": "Review of Final Documentations Dossier",
+          "characteristic": "Documents & ITP",
+          "acceptanceCriteria": "P.O. Specification and QC Manual Requirement",
+          "record": "Equipment Dossier",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.5",
+          "activity": "Preparation, Review & Manufacturer's Data Report",
+          "characteristic": "MDR as per Drawing & Design Calculation",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "U-1/U-1A Form",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H"
+          },
+          "remarks": null
+        }
+      ]
+    },
+    {
+      "key": "AMMONIA_VAPORIZER",
+      "jobLabel": "DE0398001 \u2014 Ammonia Vaporizer",
+      "vessel": "Ammonia Vaporizer",
+      "designCode": "ASME Sec. VIII Div. 1 Edition 2023; TEMA Class \"R\" 10th Edition 2019",
+      "materialNo": null,
+      "jobNumberHint": null,
+      "parties": [
+        "DESPL",
+        "AI",
+        "MVS",
+        "SCJV",
+        "OWNER"
+      ],
+      "items": [
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "1",
+          "activity": "QCP",
+          "characteristic": null,
+          "acceptanceCriteria": "Drawings & Design Specification",
+          "record": "QCP",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2",
+          "activity": "Design Calculation",
+          "characteristic": "Design Documents",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Design Calculation",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3",
+          "activity": "Drawing",
+          "characteristic": "Relevant Drawings",
+          "acceptanceCriteria": "ASME Sec VIII Div. 1",
+          "record": "Drawing",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "4",
+          "activity": "Welding"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.1",
+          "activity": "Welding Procedure and & Qualification Record Along with Weld Plan.",
+          "characteristic": "ASME Sec. IX",
+          "acceptanceCriteria": "ASME Sec. IX",
+          "record": "WPS/PQR, WPQ & Weld Plan",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.2",
+          "activity": "Welding Consumable Control",
+          "characteristic": "Review of BTC / Marking on Box",
+          "acceptanceCriteria": "ASME Sec. II Part C",
+          "record": "Review of MTR / Marking on Box",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "5",
+          "activity": "NDE& QC Procedures"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.1",
+          "activity": "NDE Procedure",
+          "characteristic": "Review of Procedure / Documents",
+          "acceptanceCriteria": "ASME Sec. V",
+          "record": "Procedure",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.2",
+          "activity": "NDE Operator Qualification",
+          "characteristic": "Personnel Certification",
+          "acceptanceCriteria": "DESPL Written Practice",
+          "record": "Qualification Record",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.3",
+          "activity": "QC Procedures (Heat Treatment, Hydrostatic Pressure etc.)",
+          "characteristic": "Review of Procedures",
+          "acceptanceCriteria": null,
+          "record": "QC Procedures",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "6",
+          "activity": "Material Identification"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.1",
+          "activity": "Pressure Parts (Plate, Pipe, Forging, Fitting, RF Pad, Tube Sheet, Tubes Etc.)",
+          "characteristic": "Dimensions, Visual, Mill Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Identification Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.2",
+          "activity": "Non-Pressure Parts Directly attached to Pressure Parts",
+          "characteristic": "Dimensions, Visual, Code Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.3",
+          "activity": "Non-Pressure Parts",
+          "characteristic": "Dimensions, Visual, Code Marking, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.4",
+          "activity": "Fasteners",
+          "characteristic": "Dimensions, Visual, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.5",
+          "activity": "Gasket",
+          "characteristic": "Dimensions, Visual, MTR Review",
+          "acceptanceCriteria": "UG-77 & UG-93",
+          "record": "Material Heat Chart",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "7",
+          "activity": "Dish End (Fabricated Dish End & Standard Cap)"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.1",
+          "activity": "Cutting of Blank/Petals for Fabricated Dish End",
+          "characteristic": "Material Identification Verification and Visual Inspection",
+          "acceptanceCriteria": "Nonexistence of Serious Laminations, Shear Cracks and Other imperfections",
+          "record": null,
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.2",
+          "activity": "Dish end & Standard Cap after forming Final Dimension",
+          "characteristic": "Dimensional, Visual & Verification of Vendor Inspection Report",
+          "acceptanceCriteria": "Drawing 79",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.3",
+          "activity": "LPT Inside and Outside Surface of Knuckle and SF areas of the Dish End & Standard Cap",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "LPT Procedure, ASME Sec. VIII Div. 1 App-8",
+          "record": "LPT Report",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.4",
+          "activity": "PFHT of Fabricated Dish End",
+          "characteristic": "Visual & Documents",
+          "acceptanceCriteria": "Drawing, HT Procedure",
+          "record": "HT Record",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": "To be performed along with Shell Side PWHT"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.5",
+          "activity": "Examination of Cut Edges Before Fabrication",
+          "characteristic": "Visual Inspection for Serious Laminations, Shear Cracks and Other Imperfections",
+          "acceptanceCriteria": "Nonexistence of Serious Laminations, Shear Cracks and Other imperfections",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "8.",
+          "activity": "Tube Sheet, Baffle & Tube Bundle Skeleton"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.1",
+          "activity": "Weld Overlay of Tube Sheet",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.2",
+          "activity": "Tube Sheet & Baffle Inspection after Drilling",
+          "characteristic": "Dimensions",
+          "acceptanceCriteria": "Drawings",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.3",
+          "activity": "Tube Bundle Skeleton Examination",
+          "characteristic": "Dimensions",
+          "acceptanceCriteria": "Drawings",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "W",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "9",
+          "activity": "Main Shell, Port Shell, Channel Shell & Eccentric Cone Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.1",
+          "activity": "Examination of Cut Edges Before Fabrication",
+          "characteristic": "Visual Inspection for Serious Laminations, Shear Cracks and Other Imperfections",
+          "acceptanceCriteria": "Nonexistence of Serious Laminations, Shear Cracks and Other Imperfections",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.2",
+          "activity": "Long Seam Set-Up of: Main Shell, Port Shell, Channel Shell & Eccentric Cone",
+          "characteristic": "Dimensional & Visual",
+          "acceptanceCriteria": "Drawing, UW-33 & Weld Plan",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.3",
+          "activity": "Long Seam Welding of: Main Shell, Port Shell, Channel Shell & Eccentric Cone",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.4",
+          "activity": "Long Seam Back Chipping of: Main Shell, Port Shell, Channel Shell & Eccentric Cone, where applicable",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "Nonexistence of Surface Imperfections",
+          "record": null,
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.5",
+          "activity": "Long Seam Final Welding Main Shell, Port Shell, Channel Shell & Eccentric Cone",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW 35 &UW 37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.6",
+          "activity": "Long Seam RT Examination of: Main Shell, Port Shell, Channel Shell & Eccentric Cone",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.7",
+          "activity": "Final Dimension of Eccentric Cone after forming",
+          "characteristic": "Dimensional, Visual & Verification of Vendor Inspection Report",
+          "acceptanceCriteria": "Drawing, UG 79",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.8",
+          "activity": "Circumferential Seam Set-up of: Main Shell to Dish End & Cone, Cone to Port Shell, Port Shell to Shell Flange, Channel Shell to Standard Cap & Channel Flange",
+          "characteristic": "Dimensional & Visual",
+          "acceptanceCriteria": "Drawing, UW-33 &Weld Plan",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.9",
+          "activity": "Circumferential Seam Welding of: Main Shell to Dish End & Cone, Cone to Port Shell, Port Shell to Shell Flange, Channel Shell to Standard Cap & Channel Flange",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.10",
+          "activity": "Circumferential Seam Back Chipping of: Main Shell to Dish End & Cone, Cone to Port Shell, Port Shell to Shell Flange, Channel Shell to Standard Cap & Channel Flange, where applicable",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "Nonexistence of Surface Imperfections",
+          "record": null,
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.11",
+          "activity": "Circumferential Seam Final Welding Inspection of: Main Shell to Dish End & Cone, Cone to Port Shell, Port Shell to Shell Flange, Channel Shell to Standard Cap & Channel Flange",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW 35 & UW 37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.12",
+          "activity": "Circumferential Seam RT Examination of: Main Shell to Dish End & Cone, Cone to Port Shell, Port Shell to Shell Flange, Channel Shell to Standard Cap & Channel Flange",
+          "characteristic": "Film Viewing",
+          "acceptanceCriteria": "UW-51, ASME Sec. VIII Div. 1, RT Procedure",
+          "record": "RT Reports",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "10",
+          "activity": "Nozzle Fabrication"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.1",
+          "activity": "Examination of Cut Edges Before Fabrication",
+          "characteristic": "Visual Inspection for Serious Laminations, Shear Cracks and Other Imperfections",
+          "acceptanceCriteria": "Nonexistence of Serious Laminations, Shear Cracks and Other Imperfections",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.2",
+          "activity": "Nozzles Orientation Marking",
+          "characteristic": "Dimensional Inspection \u2013 Orientation, Elevation and Size of Opening",
+          "acceptanceCriteria": "Drawing",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.3",
+          "activity": "Set-Up of Nozzles to Shell Side & Channel Side",
+          "characteristic": "Dimensional Inspection \u2013 Radial Position, Elevation, Projection",
+          "acceptanceCriteria": "Drawing",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.4",
+          "activity": "Welding of Nozzles to Shell Side & Channel Side",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.5",
+          "activity": "Back Chipping of Nozzles to Shell Side & Channel Side, where applicable",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "Nonexistence of Surface Imperfections",
+          "record": null,
+          "codes": {
+            "DESPL": "H"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.6",
+          "activity": "Final Welding Inspection of Nozzles to Shell Side & Channel Side",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 &UW-37",
+          "record": "Traveller",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.7",
+          "activity": "RF Pad Pneumatic Test",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-100, No leakage",
+          "record": "Pressure Test Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "11",
+          "activity": "Tube to Tube Sheet Welding"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.1",
+          "activity": "Welding of Tube-to-Tube Sheet Weld Joints",
+          "characteristic": "Parameter of Welding",
+          "acceptanceCriteria": "WPS, ASME Sec IX",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.2",
+          "activity": "Expansion of Tubes",
+          "characteristic": "% & Length of Expansion",
+          "acceptanceCriteria": "Drawing",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "12",
+          "activity": "Final Assembly"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.1",
+          "activity": "All Attachments Fit Up and Welding from Inside (Non-Pressure to Pressure Parts)",
+          "characteristic": "Dimension, Parameters as Per WPS",
+          "acceptanceCriteria": "Drawing, Welding Procedure Specification",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.2",
+          "activity": "Inspection of All Internal Attachments Welds",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.3",
+          "activity": "Internal Visual Inspection of Main Shell Side before Tube Bundle Insertion & Channel Side Before Final Assembly",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UG-97, UW 35 & UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.3",
+          "activity": "All External Attachments Fit Up and Welding from Outside (Non-Pressure to Pressure Parts), Includes Fixed & Sliding Supports & Lifting Lugs, Name Plate Bracket, Stiffener Plate etc.",
+          "characteristic": "Dimension, Parameters as Per WPS",
+          "acceptanceCriteria": "Drawing, Welding Procedure Specification",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "12.4",
+          "activity": "Inspection of All External Attachments Welds from Outside (Non-Pressure to Pressure Parts), Includes Fixed & Sliding Supports & Lifting Lugs, Name Plate Bracket, Stiffener Plate etc.",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "UW-35 &UW-37",
+          "record": "Traveller (Welding and NDE)",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "13",
+          "activity": "Final Dimension and Visual"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.1",
+          "activity": "Final Dimension of Equipment",
+          "characteristic": "Dimensional",
+          "acceptanceCriteria": "Drawing",
+          "record": "General Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "W",
+            "SCJV": "W",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "13.2",
+          "activity": "Final Visual of Equipment",
+          "characteristic": "Visual, Verification of FPW",
+          "acceptanceCriteria": "ASME Sec. VIII Div.1",
+          "record": "Visual Inspection Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "W",
+            "MVS": "W",
+            "SCJV": "W",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "14",
+          "activity": "PWHT (Shell Side & Tube Side)"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "14.1",
+          "activity": "Shell Side & Tube Side PWHT (Without Tube Bundle)",
+          "characteristic": "HT Graph & Calibration Records of Thermocouple & Temperature Recorder",
+          "acceptanceCriteria": "UCS-56 & HT Procedure",
+          "record": "HT Graph & Calibration Documents",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "15",
+          "activity": "PTC Testing"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "15.1",
+          "activity": "PTC Test Results",
+          "characteristic": "Impact Test Results",
+          "acceptanceCriteria": "UG-84(i)",
+          "record": "Test Reports",
+          "codes": {
+            "DESPL": "H",
+            "AI": "R",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "16",
+          "activity": "Pressure Test"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "16.1",
+          "activity": "Verification &Closure of NCR (If Applicable)",
+          "characteristic": "Correction Or Elimination to Comply with Drawing, ASME SEC VIII Div. 1",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "NCR Log, Traveller",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "16.2",
+          "activity": "Hydro Test of Complete Equipment \u2013 Shell Side",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-99 &Pressure Test Procedure",
+          "record": "Calibration Report, Pressure Test Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "W",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "16.3",
+          "activity": "Hydro Test of Complete Equipment \u2013 Tube Side",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "UG-99 &Pressure Test Procedure",
+          "record": "Calibration Report, Pressure Test Report",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "W",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "16.4",
+          "activity": "Draining & drying",
+          "characteristic": "Visual",
+          "acceptanceCriteria": "Drawing",
+          "record": null,
+          "codes": {},
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "17",
+          "activity": "Surface Preparation and Painting"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "17.1",
+          "activity": "Surface Preparation",
+          "characteristic": "Visual, Surface Profile",
+          "acceptanceCriteria": "Drawing And Data Sheet",
+          "record": "Surface Preparation Report",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "17.2",
+          "activity": "Painting of Carbon Steel External Surface",
+          "characteristic": "Visual, DFT",
+          "acceptanceCriteria": "Drawing And Data Sheet",
+          "record": "Visual & Painting Report",
+          "codes": {
+            "DESPL": "H",
+            "MVS": "R",
+            "SCJV": "W",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "18",
+          "activity": "Final Stamping & Documentation"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "18.1",
+          "activity": "Verification of NCR (If Any) After Pressure Test",
+          "characteristic": "Correction or Elimination to Comply with Drawing, ASME SEC VIII Div. 1",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "NCR Log, Traveller",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "18.2",
+          "activity": "Verification of Name Plate Marking and Authorization for Stamping",
+          "characteristic": "Name Plate Data Verification",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "Photocopy of Name Plate",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "18.3",
+          "activity": "Stamping of Name Plate &Attachment to The Equipment",
+          "characteristic": "Name Plate and Name Plate Attached to Equipment",
+          "acceptanceCriteria": "Drawing, ASME SEC VIII Div. 1",
+          "record": "Photocopy of Name Plate",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "18.4",
+          "activity": "Review of Final Documentations Dossier",
+          "characteristic": "Documents & ITP",
+          "acceptanceCriteria": "P.O. Specification and QC Manual Requirement",
+          "record": "Equipment Dossier",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "18.5",
+          "activity": "Preparation, Review & Manufacturer's Data Report",
+          "characteristic": "MDR as per Drawing &Design Calculation",
+          "acceptanceCriteria": "ASME SEC VIII Div. 1",
+          "record": "U-1/U-1A Form",
+          "codes": {
+            "DESPL": "H",
+            "AI": "H",
+            "MVS": "R",
+            "SCJV": "R",
+            "OWNER": "R"
+          },
+          "remarks": null
+        }
+      ]
+    },
+    {
+      "key": "VESSEL_BUSCI_EIL",
+      "jobLabel": "Vessel \u2014 BUSCI/TPI + EIL/TPIA QAP (equipment name not captured in source docx; user-confirmed as tender item 6, \"Vessel\")",
+      "vessel": "Vessel",
+      "designCode": null,
+      "materialNo": null,
+      "jobNumberHint": null,
+      "parties": [
+        "DESPL",
+        "BUSCI_TPI",
+        "EIL_TPIA"
+      ],
+      "items": [
+        {
+          "kind": "SECTION",
+          "srNo": "1",
+          "activity": "DOCUMENT APPROVAL"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "1.1",
+          "activity": "Review and Approval of QAP",
+          "characteristic": "Drawing, Specifications and Codes",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "ASME Sec. II/A/B/Sec VIII Div. 1 2023 Ed. / SPEC. / Drawings, as per applicable codes & standards",
+          "record": "QAP / ITP",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R&A",
+            "EIL_TPIA": "R&A"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "1.2",
+          "activity": "Procedure for Hydro Test and Other NDE Wherever Applicable",
+          "characteristic": "Documented Procedure",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "ASME Sec. II/A/B/Sec VIII Div. 1 2023 Ed. / SPEC. / Drawings / As per applicable codes & standards",
+          "record": "Procedure Documents",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R&A",
+            "EIL_TPIA": "R&A"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "2",
+          "activity": "MATERIALS INSPECTION"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2.1",
+          "activity": "Materials after Receipt (Pressure Parts): Pipe (LHS/RHS Channel Course & LHS/RHS End Pipe Cap Pipes (Shell/Nozzle), Forgings (Nozzle LHS/RHS Tube Sheet), Baffles, Tubes, Fittings, etc.",
+          "characteristic": "Review of Test Certificates, Markings, Visual & Dimensional Inspection, Identification, Correlation & Transfer of Identity",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "ASME Sec. II/A/B/Sec VIII Div. 1 2023 Ed. / SPEC. / Drawings / As per applicable codes & standards",
+          "record": "MTC \u2013 EN 10204-3.1 / NABL Test Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2.2",
+          "activity": "Non-Pressure Parts (Including Internals, Supports, Sliding Plate, Fasteners, Gaskets, Saddle Plate, etc.)",
+          "characteristic": "Review of Test Certificates",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "ASME Sec. II/A/B/Sec VIII Div. 1 2023 Ed. / SPEC. / Drawings / As per applicable codes & standards",
+          "record": "MTC \u2013 EN 10204-3.1 / NABL Test Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "2.3",
+          "activity": "PMI Check (as applicable)",
+          "characteristic": "Chemical Check",
+          "extentOfCheck": "Each Component",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "RW"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "3",
+          "activity": "WELDING INSPECTION (WPS/PQR/WPQ)"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3.1",
+          "activity": "WPS/PQR / Mock-Up",
+          "characteristic": "WPS / PQR Records",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "ASME Sec. IX 2023 Ed. / Spec. / As per applicable codes & standards",
+          "record": "WPS / PQR Records",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": "Review of existing WPS/PQR. New WPS/PQR will be performed under TPI and shall be submitted for review."
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3.2",
+          "activity": "WPQ",
+          "characteristic": "WPQ Record",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "ASME Sec. IX 2023 Ed. / Spec. / As per applicable codes & standards",
+          "record": "WPQ Record",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3.3",
+          "activity": "Welding Consumable",
+          "characteristic": "Chemical & Mechanical Properties",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "ASME Sec. II C 2023 Ed. / Spec. / As per applicable codes & standards",
+          "record": "MTC \u2013 EN 10204-3.1 / NABL Test Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "3.4",
+          "activity": "Weld Plan",
+          "characteristic": "Weld Plan & NDT Plan",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / Drawings / As per applicable codes & standards",
+          "record": "Weld Plan",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "4",
+          "activity": "INSPECTION DURING FABRICATION OF CHANNEL ENDS"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.1",
+          "activity": "Weld Edge Preparation & Set-Up of LHS/RHS Channel Course & End Cap (CS-1 & CS-6)",
+          "characteristic": "Visual & Dimensional Inspection, Weld Edge, Root Gap, Offset Alignment, Cleanliness etc.",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Sec. VIII Div. 1 2023 Ed. / Spec. / Drawings / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.1",
+          "activity": "PT of Weld Edges as Applicable",
+          "characteristic": "PT of Weld Edges as Applicable",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / Drawings / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.2",
+          "activity": "Weld Edge Preparation & Set-Up of LHS/RHS Channel Course & Channel Flange (C2-1 & CS-5)",
+          "characteristic": "Visual & Dimensional Inspection, Weld Edge, Root Gap, Offset Alignment, Cleanliness etc.",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / Drawings / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.2",
+          "activity": "PT of Weld Edges as Applicable",
+          "characteristic": "PT of Weld Edges as Applicable",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / Drawings / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.3",
+          "activity": "Weld Visual of Circ Seam (CS-1, CS-6, CS-2 & CS-5)",
+          "characteristic": "Weld Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "4.4",
+          "activity": "RT of Circ Seam (CS-1, CS-6, CS-2 & CS-5)",
+          "characteristic": "Joint Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per Approved Procedure",
+          "record": "Inspection Report & RT Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": "Review of RT Films"
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "5",
+          "activity": "MACHINING / DRILLING / TUBE TO TUBE SHEET"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.1",
+          "activity": "Tube Sheet",
+          "characteristic": "Hole Dia., Drift, Tube Hole Surface Finish, Groove Depth, Spacing, Ligament Check and Positional Accuracy etc.",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / Drawings, TEMA-R / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "5.2",
+          "activity": "Baffles",
+          "characteristic": "Hole Dia., Drift, Tube Hole Surface Finish, Groove Depth, Spacing, Ligament Check and Positional Accuracy etc.",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / Drawings, TEMA-R / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "6",
+          "activity": "TUBE BUNDLE ASSEMBLY / TUBE TO TUBESHEET WELD"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.1",
+          "activity": "Inspection of Tube Bundle Before Tube Insertion",
+          "characteristic": "Completeness of Assembly",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Standard / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.2",
+          "activity": "Final Assembly After Tubes Insertion",
+          "characteristic": "Alignment, Completeness of Assembly",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / Drawings / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.3",
+          "activity": "Tube to Tube Sheet Weld Joints",
+          "characteristic": "% Thinning, Length of Expansion, Finish & Visual & DPT of Welds",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per Approved Procedure",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "RW"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "6.4",
+          "activity": "Pneumatic Test of Tube-to-Tube Sheet Joint",
+          "characteristic": "Leak Test",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "7",
+          "activity": "INSPECTION DURING FABRICATION FOR NOZZLE"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.1",
+          "activity": "Shell & Tube Sheet Set-Up CS-3 & CS-4",
+          "characteristic": "Dimensions, Orientation, Weld Edge Preparation",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Sec. VIII Div. 1 2023 Ed. / TEMA-R 10th Year 2019 / Spec. / Drawings / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.1",
+          "activity": "Weld Visual of Circ Seam CS-3 & CS-4",
+          "characteristic": "Weld Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.1",
+          "activity": "DPT of Circ Seam CS-3 & CS-4",
+          "characteristic": "Joint Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.2",
+          "activity": "Nozzle to Flange Set-Up (N1 to N8)",
+          "characteristic": "Weld Edge, Offset, Root Gap, Visual",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.2",
+          "activity": "Weld of Nozzle to Flange (N1 to N8)",
+          "characteristic": "FPW, Joint Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.2",
+          "activity": "Weld Visual and RT of Pipe to Flange Joints (N1 to N8)",
+          "characteristic": "Weld / Joint Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per Approved Procedure",
+          "record": "Inspection Report & RT Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": "Review of RT Films"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.3",
+          "activity": "Marking for Nozzle on Shell and Channel (N1 to N8)",
+          "characteristic": "Dimensions, Orientation, Weld Edge Preparation",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.3",
+          "activity": "Nozzle to Shell / Channel Set-Up (N1 to N8)",
+          "characteristic": "Orientation, Dimension, Supports, Visual",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.3",
+          "activity": "Weld Visual of Nozzle to RF Pad to Shell / Channel",
+          "characteristic": "Weld Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.3",
+          "activity": "Weld Visual and LPT of Weld",
+          "characteristic": "Weld / Joint Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per Approved Procedure",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "7.4",
+          "activity": "Pneumatic Test of RF Pad",
+          "characteristic": "Leak Test",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "8",
+          "activity": "NAME PLATE / SADDLE / ETC."
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.1",
+          "activity": "Weld Lifting Lug, Saddle Frame, Earthing Lug, Supports Non-Pressure Parts etc.",
+          "characteristic": "Dimension, Orientation, Weld Edge Preparation, Offset, Visual",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "8.2",
+          "activity": "Weld Visual Lifting Lug, Saddle Frame, Earthing Lug, Supports Non-Pressure Parts etc.",
+          "characteristic": "Joint Soundness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "9",
+          "activity": "FINAL INSPECTION"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.1",
+          "activity": "Visual and Dimensional Check, Clearance for Hydro Test",
+          "characteristic": "Dimension, Orientation, Visual, NDE",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.2",
+          "activity": "PMI Check (as applicable)",
+          "characteristic": "Chemical Check",
+          "extentOfCheck": "Each Component and Weld",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "RW",
+            "EIL_TPIA": "RW"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.3",
+          "activity": "Hydrostatic Test \u2013 Shell Side and Tube Side",
+          "characteristic": "Calibration of Gauges & Range, Leak Detection, Visual",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / ASME Sec. VIII-1 / As per Approved Procedure",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": "Open bundle hydro"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "9.4",
+          "activity": "Drying of Equipment",
+          "characteristic": "Cleanliness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Drawings / Spec. / As per applicable codes & standards",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "10",
+          "activity": "PAINTING"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.1",
+          "activity": "Cleaning and Surface Preparation",
+          "characteristic": "Cleaning & Visual",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Approved Drawing & Painting Specification",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "R",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "10.2",
+          "activity": "Painting",
+          "characteristic": "Visual & Coating Thickness",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Approved Drawing & Painting Specification",
+          "record": "Inspection Report",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "W",
+            "EIL_TPIA": "W"
+          },
+          "remarks": null
+        },
+        {
+          "kind": "SECTION",
+          "srNo": "11",
+          "activity": "FINAL DOCUMENTATION"
+        },
+        {
+          "kind": "CHECKPOINT",
+          "srNo": "11.1",
+          "activity": "Final Stamping / Name Plate, Review of Inspection Documents / MDR, Issue of IRN",
+          "characteristic": "Verification & Compilation of Inspection & Test Records and Other Documents for Submission to Customer, Certificate of Completeness with Index",
+          "extentOfCheck": "100%",
+          "acceptanceCriteria": "Spec. / As per applicable codes & standards",
+          "record": "Q.C. Dossier",
+          "codes": {
+            "DESPL": "P",
+            "BUSCI_TPI": "H",
+            "EIL_TPIA": "R"
+          },
+          "remarks": null
+        }
+      ]
+    }
+  ]
+}

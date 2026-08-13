@@ -2,14 +2,80 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟢 IMPLEMENTATION-GUIDE.md Steps 0–6 done (env, git/GitHub repo, summarize-back check, Next.js scaffold, DB connection, Prisma schema, seed import). **Next: Step 7 (scheduling engine, `lib/schedule/`).**
+**Status:** 🟢 **Architecture redesign adopted 13 Aug 2026 — schema rewritten, Day 1 of the 3-day prototype build complete** (tenancy + RLS, product-family process templates, route library, auth/RBAC/client scoping, tests). **Next: Day 2 — scheduling engine + visual component set.**
 **Pilot target:** DESPL-320 (9 × HP air receiver, 320SR01–09) fully tracked by Week 8
+**Near-term commitment:** working prototype tracking 3–5 equipments in 2–3 days; "full project" within a month. Solo developer.
 
 ---
 
 ## ▶ Resume point (read this first in a new session)
 
-**Step 6 (seed script) is done. Start Step 7 (scheduling engine, `lib/schedule/`) next.**
+**Day 1 of the redesigned build is done. Start Day 2: `lib/schedule/` (envelope, forward, backward, feasibility) + the reusable visual component set.**
+
+The plan driving this is `/Users/sonusingh/.claude/plans/hazy-plotting-turing.md` (approved 13 Aug 2026). It supersedes the old IMPLEMENTATION-GUIDE step numbering — Steps 0–6 there are superseded by the schema rewrite below.
+
+**Model switched to Sonnet for Day 2 onward** (13 Aug 2026), per BUILD-SPEC-v2 §0 #9 / IMPLEMENTATION-GUIDE model discipline — architecture and spec decisions are locked, so Day 2+ is implementation against a written, approved plan. One carve-out: the scheduling engine (`lib/schedule/`) is the highest-risk logic in the product — the two-layer model is counterintuitive (invariant #10: never sum durations), negative lags must relax scheduling but never gating (invariant #11), and **the spec's own DE0467 regression figure is wrong**: BUILD-SPEC-v2 §1.5 and IMPLEMENTATION-GUIDE Step 7 assert a ~26 working-day shortfall, but 113 calendar days (24 Jun–15 Oct 2026) less 16 Sundays is 97 working days, and 119 − 97 = **22**, not 26 (this is separate from the C1 working/calendar-days question already logged below, which is a different what-if). A correct engine will report 22 and fail the documented ~26 check — fix the spec/guide assertions to 22 rather than bending the engine to match. Write the table-driven test cases for it carefully, or bring architecture questions on it back for Opus review, rather than improvising past invariant #10/#11 on a plausible-looking implementation.
+
+**Two things not yet done, flagged so they aren't lost:**
+1. Uncommitted changes remain (now including the QCP batch import below). Not committed automatically per this project's git discipline — commit when asked.
+2. DESPL has not yet been asked for the lead-time tables + QAPs for Pipe Spool / Piping System specifically (Heat Exchanger data has now arrived — see below). The template engine is ready for the rest; this remains the critical-path blocker for those families, independent of any coding work.
+
+### QCP batch import — 6 new QAP templates from the 13 Aug 2026 handover
+
+User provided `Lead Time (1).pdf` and `production process_work flow..docx`. The PDF is a straight match to the already-seeded 36-process table — no new information, good cross-check. **The docx contained 6 distinct QAP/ITP tables**, not the 3 originally assumed, spanning party counts from 2 up to 5 on one document (Ammonia Vaporizer: DESPL, AI, MVS, SCJV, OWNER) — a real-world validation that the fully-dynamic per-project party model needed zero schema changes to absorb this.
+
+**Extraction method matters here and is worth recording.** The docx was parsed via its actual `w:tbl`/`w:tr`/`w:tc` XML structure (gridSpan/vMerge-aware), not flattened paragraph text or manual transcription — QCP data drives hold-point gating, so a column-misalignment bug here would silently corrupt which party's code blocks completion. Every code cell was validated against the known 6-code vocabulary (P/W/H/R/RW/R&A); the one row where cell count didn't match the expected party count (`AMMONIA_VAPORIZER#16.4`) was left with empty codes and flagged in `seed/qcp-templates-batch2.json`'s `issues[]` rather than guessed — confirmed in the DB: that row has 0 party-code rows, not fabricated ones.
+
+**Mapping to the 6 equipments** (user-confirmed after I found the docx had no equipment name captured for 2 of the 6 sections — asked rather than guessed):
+
+| Template | Job link | Items | Parties |
+|---|---|---|---|
+| DE0455-03 — Suction Air Vessel | **DE0467** (matches its projectName exactly) | 53 | DESPL, CLIENT_TPI |
+| DE0455-02 — Suction Piping 10"×150lbs | **DE0467** | 31 | DESPL, CLIENT_TPI |
+| DE0455-01 — Pressure Piping 8"×900lbs | **DE0467** | 31 | DESPL, CLIENT_TPI |
+| DE0463 — Pressure Vessel | **DE0463** | 56 | DESPL, AI |
+| DE0398001 — Ammonia Vaporizer | *(no matching Job — jobId null, same pattern as the original pilot template)* | 77 | DESPL, AI, MVS, SCJV, OWNER |
+| Vessel (BUSCI/TPI + EIL/TPIA) | *(no matching Job)* | 52 | DESPL, BUSCI_TPI, EIL_TPIA |
+
+DE0467's 3 templates confirms something useful: its `projectName` field — `'PRESSURE PIPE 8" / SUCTION PIPE 10" / SAV 24"'` — literally names all 3 of its equipment blocks. **This is a real lead on resolving C6** (the lost sub-assembly block labels for DE0467) but block-level linkage (which `Equipment.id` is which) was NOT attempted this pass — flagged as a follow-up, not guessed by item-count matching.
+
+**RW now has a confirmed definition.** The docx's legend states *"RW: 10% Witness"* — a sampled/statistical witness point, not "Review + Witness" as previously guessed. Updated in `seed/qcp-templates.json`'s `model.codes.RW`, which is what seeds `QcpCodeRef.label`. R&A remains unconfirmed (still no explicit legend definition anywhere) but is now observed in real use, always paired with `DESPL:P`, consistent with the existing blocking-approval assumption — noted in the same file.
+
+New/changed files: `seed/qcp-templates-batch2.json` (new, 6 templates), `seed/qcp-templates.json` (RW/R&A metadata updated), `prisma/seed.ts` (QCP-loading logic refactored into a shared `seedQcpTemplate()` used by both the original pilot template and the 6 new ones; added `jobIdByNumber` tracking during the live-jobs loop).
+
+Reseeded end to end and reverified: 7 QCP templates total, 362 items, 780 party-codes, all party-code values confirmed against the known code vocabulary (query against `qcp_code_refs`, not eyeballed). Full regression clean after: 22 unit tests, 6 Playwright e2e, lint, typecheck.
+
+### What changed and why
+
+The old schema could not express what DESPL actually needs. It was single-tenant, single-product-family, and its 36-process spine was a **global singleton** with no family or version dimension — so "this client wants 8 nozzles instead of 5 and skips PWHT" was a DDL migration plus a deploy. It also had **zero non-unique indexes and no index on any of its 29 foreign keys**.
+
+Sizing showed the volume worry was misplaced: ~3,000 projects over 5 years is ~15M domain rows plus ~50M audit rows at ~33 req/s peak — a small single-Postgres workload. No sharding, no microservices, no queues. The real risk is **variability**, so the redesign makes the data model flexible and keeps the runtime boring.
+
+### Day 1 shipped
+
+- **Schema rewritten** (`prisma/schema.prisma`, 50 tables). Three clean migrations: `init`, `rls_and_app_role`, `rls_fail_closed`.
+- **Tenancy**: `Organization` + `tenant_id` + Postgres RLS on the 19 tenant-root tables. **Verified**: unscoped read returns 0 rows, correct tenant returns 3 jobs / 6 equipments, wrong tenant returns 0, cross-tenant insert is rejected.
+- **Invariant #5 now actually enforced.** The old `REVOKE ... FROM PUBLIC` was a documented no-op because the app connected as superuser. There is now a `despl_app` NOLOGIN permission bundle and a `despl_web` login role; **verified** that INSERT into `audit_log` succeeds while UPDATE and DELETE are denied.
+- **RLS is fail-closed.** The first policy treated an unset `app.tenant_id` as "show everything"; corrected in a follow-up migration so an unset tenant yields zero rows and rejected writes.
+- **Product families + versioned process templates.** The 36 processes are now `PRESSURE_VESSEL` template v1; each job materialises its own editable `JobProcess` copy.
+- **Component route library persisted** — 25 routes / 108 steps. This existed in `seed/component-routes.json` and previously reached **no table at all**.
+- **QCP code semantics are data** (`QcpCodeRef.blocksCompletion/requiresCall/waivable`), not JSON the gating engine would have to hard-code. C7 stays editable.
+- **Two correctness bugs fixed**: `QcpExecution` gained `attemptNo` (re-inspection after rejection was previously impossible, breaking PRD FR-Q2); `QcpItem` gained `sequence` so `srNo` is stored verbatim — the old unique constraint forced the seed to corrupt values into `4.8b`/`4.8c`/`4.8d`.
+- **Auth + RBAC + client scoping**: argon2id, jose session cookie, deny-by-default policy, department scoping, maker–checker, and a client-user boundary (`User.clientId`, `ClientVisibilityPolicy`, `ProgressSnapshot`).
+- **Tests**: 22 unit (authz violation cases) + 6 Playwright e2e (auth boundaries). `e2e/` previously did not exist despite `playwright.config.ts` pointing at it.
+
+### Seeded data
+
+13 departments · 6 roles · 26 component types · 16 operations · 10 test types · 6 QCP codes · 4 product families · 36 template processes · 39 edges · 25 routes / 108 steps · 3 jobs (DE0463, DE0467, DESPL-320) · 6 equipments · 54 BOM items · 54 components · 9 pilot units · 62 QCP items · 108 party codes · 338 process links · 19 users.
+
+Login accounts use the dev password `despl-dev-only` (override with `SEED_PASSWORD`): `admin@`, `md@`, `ceo@`, `sj@`, `qc@`, `sup.<department>@` (13), `client@example.local`.
+
+### Toolchain notes (do not rediscover)
+
+- **Node 20.20.2 + pnpm 9.15.9**, now pinned via `packageManager` and `engines`. Homebrew's pnpm 11 requires Node ≥22.13 and crashes on Node 20; the shell silently falls back to nvm's pnpm 9, whose store differs from the one `node_modules` was built with. Symptom is `ERR_PNPM_UNEXPECTED_STORE`; fix is `rm -rf node_modules && pnpm install`.
+- **`pnpm-workspace.yaml` was deleted.** It held pnpm-10+ only keys (`minimumReleaseAge`, `allowBuilds`) that pnpm 9 cannot read, and pnpm 9 errors on a workspace file with no `packages` key. Those settings now live under `package.json#pnpm`.
+- **vitest environment is `node`, not `jsdom`.** jsdom 30 pulls undici 8, which needs Node 22+ and crashes the whole suite on Node 20. Component tests opt in per-file with `// @vitest-environment jsdom`.
+- **Two database URLs.** `DATABASE_URL` is `despl_web` (non-owner — RLS and the audit REVOKE apply). `DIRECT_URL` is the owner, used by migrations and `prisma/seed.ts`. Never point `DATABASE_URL` at a superuser; doing so silently disables both protections.
 
 `prisma/seed.ts` parses all 5 `seed/*.json` files directly (no hand-typed data) and loads the reference spine (Department/LeadTimeProcess/ProcessEdge/ProcessDepartment), the two live jobs (Client/Job/Equipment/BomItem/Procurement/ItemOperation), and the DESPL-320 QCP template (QcpTemplate/InspectionParty/QcpItem/QcpItemPartyCode) inside one `prisma.$transaction`. `pnpm db:seed` runs it via `tsx` (added as a devDependency — neither `tsx` nor `ts-node` existed before). Verified independently against Postgres, not just trusted the build report: 13 departments, 36 processes, 39 edges, DE0463 with 20 BOM items, DE0467 with 34 — all match. All 12 `seed/data-issues.json` entries are surfaced via `findIssue`/`findIssueOptional` lookups (not copy-pasted text) onto `Job.remarks`/`Equipment.remarks`/`BomItem.remarks`; `FIELD_MISUSE` (qc.materialIdentification is a Sourcing value, not traceability data — routed onto a synthesized `MTC_VERIFICATION` ItemOperation) and `NO_PLANNED_DATES`/`NO_OWNER` (file-wide, no single row to hang them on) are surfaced as code comments instead since no schema field fits. `Client.name` is an explicit `"Unknown client — pending DESPL confirmation"` placeholder, not a fabricated company name — no client/customer name exists anywhere in `live-jobs.json`.
 
