@@ -53,12 +53,14 @@ For the visual component set: color tokens were mechanically diffed (hex-set com
 
 ### What's remaining
 
-1. **Port `bypassExcluded()` (exclusion-splicing) into the canonical `lib/schedule/`** — dropped in the 14 Aug merge (see above). Needed before C23 (optional processes like PWHT) can be represented; the DAG splicing math and the P20/P21/P22 concurrent-lag finding are preserved in the merge note above for whoever rebuilds it.
-2. **`lib/services/`** — still an empty README, and now the critical path. No business-rule functions exist (start process, submit, verify, file delay reason), and no caller turns a computed plan into `ScheduleRun`/`ProcessPlan` rows. Department workspaces and the process-update flow depend on this.
-3. **Open `/component-gallery` in an actual browser** (light + dark mode) — built and typechecked but never visually inspected by either session.
-4. **One real department workspace** with gating/maker-checker/hold-point refusals actually firing (they exist in `lib/authz`/`lib/schedule/gating.ts` but nothing calls them against real process data yet), built using the now-existing visual components against real data instead of the `/component-gallery` sample data.
-5. **Management dashboard** and **client order view** (`/portal` content) — both read from data structures that don't exist until #2 is built.
-6. **Deploy to Railway staging** — not started.
+1. **🔴 Rebuild excluded-process support in `lib/schedule/` (was `bypassExcluded()`, dropped in the 14 Aug merge).** Confirmed **CRITICAL and pilot-affecting** by the 14 Aug code review (see Blockers → Code-review findings below), not the mild follow-up it was first logged as. DESPL-320 skips PWHT (P21), and the merged engine has no `included`/`optional` handling at all: leaving PWHT in deadlocks the P22→P36 tail (`assertCanComplete` waits forever on a never-worked process); dropping it + its edges orphans P22 at day 0 and commits a dispatch date ~11 weeks early with no error; dropping it but keeping edges hard-crashes `topologicalOrder` (`cpm.ts:52`). Fix: add `included` to `ScheduleProcess`, splice excluded nodes by composing edges `(P→S, lag = lagPX + duration(X) + lagXS)` (max at each successor), drop from envelope + gating predecessor sets, add a mid-chain-exclusion test. Pairs with #2. The P20/P21/P22 concurrent-lag finding is preserved in the merge note above.
+2. **🟠 Add the two `envelopeStartBy*` columns to `JobProcess` (schema↔engine mismatch).** The engine's `ScheduleProcess` requires all four envelope offsets and `envelope.ts` refuses (`SCHEDULE_DATA_MISSING`) if `startBy*` is null — but `JobProcess` carries only the two `finishBy` columns. The instant anything computes a per-job Layer-1 envelope it throws for every non-provisional process. Latent only because no caller exists yet. Fix: `envelopeStartByMinDays/MaxDays Int?` + migration, copy them in `seed.ts`'s two `jobProcess.createMany` blocks (source JSON already has them). Do alongside #1.
+3. **🟠 Add a boot-time DB-role guard (`db.ts`).** The whole security model (fail-closed RLS + append-only audit) silently collapses if `DATABASE_URL` connects as `postgres`/table-owner — RLS is `ENABLE` not `FORCE`, so the owner bypasses it, and the audit `REVOKE` is moot. `.env.example` ships `postgres` one copy-paste away, and `CREATE USER despl_web` lives only in a migration comment, never applied. Same regression class already hit once (the no-op REVOKE). Fix: assert `current_user` is non-superuser at startup + self-test that `UPDATE audit_log` is rejected; move role creation into a checked provisioning script.
+4. **`lib/services/`** — still an empty README, and now the critical path. No business-rule functions exist (start process, submit, verify, file delay reason), and no caller turns a computed plan into `ScheduleRun`/`ProcessPlan` rows. Department workspaces and the process-update flow depend on this. **Build the medium/low review findings into this as it lands** (see Blockers → Code-review findings): duration-override must restamp Layer-1 envelope offsets; each mutation needs a same-transaction audit row + an existence test; per-mutation zod schemas that reject `actual_*`/`*_at`; row-level locking per ARCHITECTURE.md §6.
+5. **Open `/component-gallery` in an actual browser** (light + dark mode) — built and typechecked but never visually inspected by either session.
+6. **One real department workspace** with gating/maker-checker/hold-point refusals actually firing (they exist in `lib/authz`/`lib/schedule/gating.ts` but nothing calls them against real process data yet), built using the now-existing visual components against real data instead of the `/component-gallery` sample data.
+7. **Management dashboard** and **client order view** (`/portal` content) — both read from data structures that don't exist until #4 is built.
+8. **Deploy to Railway staging** — not started.
 
 **One thing not yet done, unrelated to the code:**
 1. DESPL has not yet been asked for the lead-time tables + QAPs for Pipe Spool / Piping System specifically (Heat Exchanger data has now arrived — see below). The template engine is ready for the rest; this remains the critical-path blocker for those families, independent of any coding work.
@@ -326,6 +328,37 @@ Email digests (SES/Resend, ≈₹0–1,700/mo) → WhatsApp · geo-tagged in-app
 _None blocking the build otherwise._ Fifteen open questions (C1–C12 plus **C21–C23**, added 13 Aug 2026, in BUILD-SPEC-v2 §7) each have a working default in place. **C1 — whether the lead-time table's "Days" are working or calendar days — is still the highest-impact one**: it changes every computed date, and moves the DE0467 shortfall from 22 days to ~6.
 
 The three new ones all came out of building the scheduling engine, and all three are worth real days on a single live job: **C21** (a dispatch date given as a *window* — earliest or latest? 22 days short vs 14 on DE0467), **C22** (a revised order date — does the clock restart? 22 vs 38), **C23** (which processes are optional per client — PWHT is skippable per the DESPL-320 drawing, yet nothing is flagged `optional` — this is also the motivation for the exclusion-splicing gap tracked in "What's remaining" above).
+
+### Code-review findings (14 Aug 2026, three parallel review agents: scheduling engine · auth/RBAC/audit · schema/seed/validation)
+
+Almost everything below is **latent** — the engine and the auth primitives are built and verified solid, but nothing calls them yet (`lib/services/` is an empty README), so most issues can only fire once the service layer is written. **One exception is a real bug on the v1 pilot job.** The three headliners are already promoted into "What's remaining" #1–#3 above; the rest are logged here to fix as the relevant path lands.
+
+**🔴 Critical (real, lands on DESPL-320):**
+- **Excluded-process handling unbuilt** — see "What's remaining" #1. Confirmed independently by two agents. Skipping PWHT deadlocks / orphans / crashes depending on how the mapping bridges it.
+
+**🟠 High (fix before/with the service layer):**
+- **`JobProcess` missing `envelopeStartBy*` columns** — see "What's remaining" #2.
+- **No runtime DB-role guard** — see "What's remaining" #3.
+
+**🟡 Medium:**
+- **Gating keys off lag *sign* not edge *type*** (`gating.ts:44`, `lagDays >= 0`). Coincides in v1 seed; an `SS`-overlap edge with `lag:0` would be wrongly blocked. Fix: key on `e.type === "START_TO_START_WITH_OVERLAP"`. One-liner, safe to do anytime.
+- **Duration override desyncs the two layers** — CPM (Layer 2) honors `durationOverrideDays`; the stored `envelopeFinishBy*` (Layer 1) offsets don't move, so the authoritative window and the recomputed plan silently disagree. Fix in the override service flow (restamp or mark derived-invalid).
+- **No login rate-limit / lockout** (`auth.ts:14`) — online brute-force unmitigated. Fix at auth-hardening time.
+- **Child tables have no `tenant_id`/RLS** (units, job_processes, bom_items, qcp_executions, …) — cross-tenant reads fail *open*, service-layer scoping only. Harmless at one tenant; **denormalize `tenant_id` + extend the RLS loop before tenant #2** (the migration comment already prescribes this).
+
+**🟢 Low (polish / hardening):**
+- `schemas.ts` is a stub (only `loginSchema`) — the "reject `actual_*`/`*_at`" validation truth doesn't exist yet; add per-mutation zod + a test asserting no key matches `/^actual_|_at$/` as write paths land.
+- Aggressive duration overrides can push `earlyStart` negative → `addWorkingDays(start, -2)` crashes with a bare `Error` (`cpm.ts`/`calendar.ts`); clamp to 0 or throw a coded `AppError`.
+- `audited()` is advisory — nothing forces a mutation to write its audit row (the DB `REVOKE` only stops tampering with *existing* rows, not a *missing* insert); add per-service audit-existence tests, consider triggers on the highest-value tables.
+- Invariant #6 (no destructive edits) isn't structural for `process_plans.actual_*` — no correction-version table for actuals, only audit before/after. Acceptable given audit coverage; noted.
+- Login timing side-channel — missing-user path skips argon2 (faster response), defeating the generic-error promise; always verify against a dummy hash.
+- Graph failures (cycle, dangling edge) throw bare `Error`, not a coded `AppError` — violates invariant #12; wrap in `AppError` (add e.g. `SCHEDULE_GRAPH_INVALID`).
+- Middleware doesn't length-guard `AUTH_SECRET` like `session.ts` does — fails *closed* (mass-logout, not exploitable), but masks a misconfig.
+- No `min ≤ max` / `start ≤ finish` guard on envelope offsets; **P35 in the seed is inverted** (`startByMin=118 > startByMax=117`). Add the assertion (it surfaces the bad row).
+- Calendar keys off the **UTC** civil day; an IST-midnight-stored date shifts by one. Engine is internally consistent — enforce "store civil-noon-UTC at the service boundary."
+- Seed isn't idempotent (re-run throws on unique `code` — safe, but needs a manual wipe / documented reset); the `FIELD_MISUSE` data-issue note is handled in code but never persisted (so "all 12 surfaced" is really 11-as-data + 1-in-logic).
+
+**Verified solid (not assumed):** fail-closed RLS is real in SQL; the append-only audit `REVOKE` targets a real non-owner role and actually bites; deny-by-default holds in both middleware and `requireRole`; maker-checker correctly excludes ADMIN; invariant #1 holds (no client timestamps anywhere); the engine honors #10 (never sums) and #11 (complete-in-order regardless of lag); override never mutates the baseline; CPM reproduces the printed 119-day envelope at all 36 processes.
 
 ## Findings to raise with DESPL
 
