@@ -40,9 +40,10 @@ import type { ProcessPlan, ProcessPlanStatus } from "@/generated/prisma/client";
  * audit row atomically. If any gate throws — always an AppError with a stable
  * code (#12) — nothing is written.
  *
- * Grain is JOB/EQUIPMENT: ProcessPlan.unitId is null (per-serial expansion is a
- * documented seam, not built). assertNoOpenHoldPoint is therefore a no-op here
- * until per-unit QCP executions exist — see _shared.ts.
+ * Grain is PER-UNIT: ProcessPlan.unitId is the serial (per-serial expansion
+ * has landed — loadGate threads plan.unitId through). Job/equipment grain
+ * with unitId null remains a supported fallback for unit-less jobs.
+ * assertNoOpenHoldPoint actively enforces per unit — see _shared.ts.
  */
 
 // ── Pure state machine (exported so the transition matrix is unit-testable) ──

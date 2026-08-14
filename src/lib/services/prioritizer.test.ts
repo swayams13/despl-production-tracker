@@ -3,7 +3,7 @@ import { prioritize, type PrioritizeInput } from "./prioritizer";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const plan = (o: Partial<any>) => ({
-  id: o.id, jobProcessId: o.jobProcessId, unitId: 1, ownerDepartmentId: o.dept ?? 10,
+  id: o.id, jobProcessId: o.jobProcessId, unitId: o.unitId ?? 1, ownerDepartmentId: o.dept ?? 10,
   status: o.status ?? "NOT_STARTED", plannedStart: null,
   plannedFinish: o.plannedFinish ?? null, scheduleRunId: 1,
   baselineStart: null, baselineFinish: null, actualStart: null, actualFinish: null,
@@ -42,4 +42,27 @@ test("blocked plan names its incomplete predecessor", () => {
   const blocked = ranked.find((r) => r.plan.id === 2)!;
   expect(blocked.state).toBe("BLOCKED");
   expect(blocked.reasonText).toContain("Shell rolling");
+});
+
+test("readiness keys predecessor status by (jobProcessId, unitId), not jobProcessId alone", () => {
+  const input: PrioritizeInput = {
+    today: new Date("2026-08-14"),
+    plans: [
+      // Unit 1: process 1 complete -> process 1's same-unit predecessor is satisfied.
+      plan({ id: 1, jobProcessId: 1, unitId: 1, status: "COMPLETE" }),
+      plan({ id: 2, jobProcessId: 2, unitId: 1, status: "NOT_STARTED" }),
+      // Unit 2: process 1 not started -> process 2 on unit 2 must stay blocked,
+      // even though unit 1's copy of process 1 is COMPLETE.
+      plan({ id: 3, jobProcessId: 1, unitId: 2, status: "NOT_STARTED" }),
+      plan({ id: 4, jobProcessId: 2, unitId: 2, status: "NOT_STARTED" }),
+    ],
+    edges: [{ processId: 2, predecessorId: 1, type: "FINISH_TO_START", lagDays: 0 }],
+    floatByProcessId: new Map([[1, { totalFloat: 0, isCritical: false }], [2, { totalFloat: 0, isCritical: false }]]),
+    processNameById: new Map([[1, "Shell rolling"], [2, "Long-seam weld"]]),
+  };
+  const ranked = prioritize(input).get(10)!;
+  const unit1Proc2 = ranked.find((r) => r.plan.id === 2)!;
+  const unit2Proc2 = ranked.find((r) => r.plan.id === 4)!;
+  expect(unit1Proc2.state).toBe("READY");
+  expect(unit2Proc2.state).toBe("BLOCKED");
 });
