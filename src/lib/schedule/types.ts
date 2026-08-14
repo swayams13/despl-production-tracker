@@ -24,6 +24,10 @@ export interface ScheduleProcess {
   envelopeStartByMaxDays: number | null;
   /** See TemplateProcess.provisional in schema.prisma. */
   provisional: boolean;
+  /** JobProcess.included — false = this client skips the process; it is spliced
+   *  out of the DAG (its predecessors bridged to its successors), never dropped
+   *  naively. Undefined/true = included. */
+  included?: boolean;
 }
 
 /**
