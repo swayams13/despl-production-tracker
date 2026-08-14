@@ -313,3 +313,185 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     expect(await auditCount(planC)).toBe(before + 2);
   });
 });
+
+/**
+ * Grain P0.3: loadGate now threads plan.unitId into loadPredecessorStates, so
+ * a unit waits on its OWN predecessors, and assertNoOpenHoldPoint (already
+ * unitId-aware) stops being a no-op. Runs against the real DESPL-320 seed
+ * (36 processes × 9 units + its actual QCP wiring) rather than the ad-hoc
+ * fixture above — the ad-hoc fixture has no QCP data and no per-unit plans,
+ * so it cannot exercise either invariant.
+ *
+ * Every generateSchedule call below uses a projectStartDate 30 days out so no
+ * plannedFinish in the run is ever overdue — that keeps assertNoUnfiledDelayBlock
+ * (invariant #7, unrelated to this task) out of the way; it is exercised
+ * elsewhere (see planC above).
+ *
+ * Investigation for the hold-point test (see task-3-report.md for the full
+ * query + result): DESPL-320's seeded QCP template DOES link a blocking ("H",
+ * blocksCompletion=true) checkpoint to schedulable job processes — e.g.
+ * QcpItem 4 blocks seq 1+2 (PO Receipt, Kick-Off) and QcpItem 8/9 block seq 10
+ * (Material Receipt & Incoming Inspection). Both branches below are real, not
+ * fabricated: seq 1's own checkpoint is cleared (via a real QcpExecution row)
+ * so the chain can legitimately reach seq 10, whose DIFFERENT checkpoint is
+ * left genuinely open.
+ */
+describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, grain P0.3)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { generateSchedule } = await import("./schedule.service");
+  const { startProcess, submitProcess, verifyProcess } = await import("./process.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  function planner(tenantId: number): Actor {
+    return {
+      userId: 1,
+      tenantId,
+      clientId: null,
+      name: "PH",
+      email: "ph@x",
+      roles: [ROLES.PRODUCTION_HEAD],
+      departmentIds: [],
+    };
+  }
+
+  async function despl320(): Promise<{ jobId: number; tenantId: number }> {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+    if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
+    return { jobId: job.id, tenantId: job.tenantId };
+  }
+
+  /** Look up a DESPL-320 job process by its stable template seq (1..36), not
+   * its DB primary key — the seed's insertion order can shift across reseeds. */
+  async function procId(jobId: number, seq: number): Promise<number> {
+    const jp = await owner.jobProcess.findFirstOrThrow({ where: { jobId, seq } });
+    return jp.id;
+  }
+
+  /** Every currently-linked blocking (blocksCompletion=true) QCP checkpoint
+   * on a job process — looked up live, never hardcoded (grain P0.4's hold-point
+   * clearance flow is what would normally do this; here we insert the
+   * QcpExecution row directly, like the delay-reason DB tests above insert a
+   * DelayReason row directly). */
+  async function blockingQcpItemIds(jobProcessId: number): Promise<number[]> {
+    const items = await owner.qcpItem.findMany({
+      where: {
+        processLinks: { some: { jobProcessId } },
+        partyCodes: { some: { qcpCode: { blocksCompletion: true } } },
+      },
+      select: { id: true },
+    });
+    return items.map((i) => i.id);
+  }
+
+  // Idempotent (upsert, not create): both tests below share the seed DB with
+  // no per-test cleanup (matching the existing "no cleanup" pattern in this
+  // file), and the suite must stay green on a rerun (Step 4 runs it twice).
+  async function clearHold(jobProcessId: number, unitId: number): Promise<void> {
+    const itemIds = await blockingQcpItemIds(jobProcessId);
+    for (const qcpItemId of itemIds) {
+      await owner.qcpExecution.upsert({
+        where: { qcpItemId_unitId_attemptNo: { qcpItemId, unitId, attemptNo: 1 } },
+        create: { qcpItemId, unitId, result: "ACCEPTED", attemptNo: 1 },
+        update: { result: "ACCEPTED" },
+      });
+    }
+  }
+
+  const future = new Date(Date.now() + 30 * 864e5);
+
+  it("per-unit gating isolation: unit A's completion never gates unit B open", async () => {
+    const { jobId, tenantId } = await despl320();
+    const a = planner(tenantId);
+    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
+
+    const units = await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } });
+    const [unitA, unitB] = units;
+    const planId = (jobProcessId: number, unitId: number) =>
+      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unitId)!.id;
+
+    // P = seq 1 (PO Receipt & Order Review, root — no predecessors of its
+    // own), S = seq 2 (Kick-Off / Pre-Inspection Meeting): a real
+    // FINISH_TO_START edge in the seeded spine.
+    const pId = await procId(jobId, 1);
+    const sId = await procId(jobId, 2);
+
+    // P carries a real blocking checkpoint (seeded QcpItem 4); clear it for
+    // unit A only so P can legitimately reach COMPLETE there.
+    await clearHold(pId, unitA.id);
+
+    const maker = a;
+    const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
+
+    await startProcess(maker, { processPlanId: planId(pId, unitA.id) });
+    await submitProcess(maker, { processPlanId: planId(pId, unitA.id) });
+    const verifiedP = await verifyProcess(checker, { processPlanId: planId(pId, unitA.id) });
+    expect(verifiedP.status).toBe("COMPLETE");
+
+    // Core proof: unit A's own predecessor plan is COMPLETE, so S starts.
+    const startedA = await startProcess(maker, { processPlanId: planId(sId, unitA.id) });
+    expect(startedA.status).toBe("IN_PROGRESS");
+
+    // Unit B's predecessor plan for the SAME job process was never touched
+    // (still NOT_STARTED) — S must be refused on unit B. Before Task 3 this
+    // passed incorrectly (loadPredecessorStates ignored unitId, so completing
+    // P on ANY unit unblocked S on ALL units).
+    const err = await startProcess(maker, { processPlanId: planId(sId, unitB.id) }).catch((e) => e);
+    expect(isAppError(err) && err.code).toBe(ERROR_CODES.GATING_BLOCKED);
+  });
+
+  it("verify refuses at a genuinely uncleared hold point", async () => {
+    const { jobId, tenantId } = await despl320();
+    const a = planner(tenantId);
+    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
+
+    const unit = (
+      await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" }, take: 1 })
+    )[0];
+    const planId = (jobProcessId: number) =>
+      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unit.id)!.id;
+
+    const maker = a;
+    const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
+
+    async function complete(jobProcessId: number) {
+      const id = planId(jobProcessId);
+      await startProcess(maker, { processPlanId: id });
+      await submitProcess(maker, { processPlanId: id });
+      return verifyProcess(checker, { processPlanId: id });
+    }
+
+    // seq 1's checkpoint (QcpItem 4) also covers seq 2 (both link to the same
+    // item) — clear it once so the real dependency chain to seq 10 can
+    // legitimately reach COMPLETE: 2<-1 (F2S), 3<-2, 4<-3 (overlap, but
+    // completion still requires COMPLETE per invariant #11), 7<-3, 8<-4, 9<-4
+    // (F2S), 10<-7,8,9. seq 5 (Client Drawing Approval) and seq 6 (BOM & MTO
+    // Finalization) are NOT on this path — skipped.
+    const seq1Id = await procId(jobId, 1);
+    await clearHold(seq1Id, unit.id);
+
+    for (const seq of [1, 2, 3, 4, 7, 8, 9]) {
+      const id = await procId(jobId, seq);
+      const p = await complete(id);
+      expect(p.status).toBe("COMPLETE");
+    }
+
+    // seq 10 (Material Receipt & Incoming Inspection) gates open now — its
+    // predecessors (seq 7 Plates, seq 8 Pipes/Forgings/Fittings, seq 9
+    // Bought-Out Items) are all COMPLETE — so start+submit succeed.
+    const seq10Id = await procId(jobId, 10);
+    const blocking = await blockingQcpItemIds(seq10Id);
+    expect(blocking.length).toBeGreaterThan(0); // sanity: a real blocking checkpoint IS linked here
+
+    await startProcess(maker, { processPlanId: planId(seq10Id) });
+    await submitProcess(maker, { processPlanId: planId(seq10Id) });
+
+    // ...but its OWN checkpoint (a different QcpItem than seq 1's) has no
+    // QcpExecution recorded for this unit — verify must refuse.
+    const err = await verifyProcess(checker, { processPlanId: planId(seq10Id) }).catch((e) => e);
+    expect(isAppError(err) && err.code).toBe(ERROR_CODES.HOLD_POINT_OPEN);
+  });
+});

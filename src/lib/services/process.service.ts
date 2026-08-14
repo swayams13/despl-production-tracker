@@ -89,7 +89,7 @@ async function loadGate(
   plan: ProcessPlan,
 ): Promise<{ edges: ScheduleEdge[]; states: PredecessorState[] }> {
   const rawEdges = await tx.jobProcessEdge.findMany({ where: { processId: plan.jobProcessId } });
-  const states = await loadPredecessorStates(tx, plan.scheduleRunId, plan.jobProcessId);
+  const states = await loadPredecessorStates(tx, plan.scheduleRunId, plan.jobProcessId, plan.unitId);
   return { edges: rawEdges.map(jobEdgeToScheduleEdge), states };
 }
 
