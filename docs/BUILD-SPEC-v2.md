@@ -71,16 +71,16 @@ elif available >= envelope.finishByMinDays[36] -> TIGHT (needs compression; list
 else -> INFEASIBLE (short by N days; must be escalated before the order is accepted)
 ```
 
-**Validated against live data:** DE0467, PO 24 Jun 2026, committed dispatch 15 Oct 2026 → 97 working days available vs 119 minimum. The engine flags this as **INFEASIBLE by 22 working days**. The order was accepted on a timeline shorter than DESPL's own standard. *This is the single best demo of the tracker's value: it would have caught this at order acceptance.*
+**Validated against live data:** DE0467, PO 24 Jun 2026, committed dispatch 15 Oct 2026. That's 113 calendar days, less 16 Sundays under the default 6-day-week calendar, = 97 working days available vs 119 minimum. The engine flags this as **INFEASIBLE by 22 working days** (~6 days if the table's "days" turn out to be calendar days — see open question C1). Either way the order was accepted on a timeline shorter than DESPL's own standard. *This is the single best demo of the tracker's value: it would have caught this at order acceptance.*
 
-> **Corrected 13 Aug 2026 (was "~26").** 24 Jun → 15 Oct 2026 is 113 calendar days containing 16 Sundays = 97 working days; 119 − 97 = **22**. The old figure was never reproducible and is now asserted as 22 in `src/lib/schedule/schedule.test.ts`. Two conventions this number depends on, both pinned by tests:
+> **Corrected 13 Aug 2026 (was "~26").** 24 Jun → 15 Oct 2026 is 113 calendar days containing 16 Sundays = 97 working days; 119 − 97 = **22**. The old figure was never reproducible and is now asserted as 22 in `src/lib/schedule/cpm.test.ts`. Two further conventions this number depends on:
 >
 > 1. **Day 0 is the PO date itself** — working days are counted over `(PO, delivery]`. The inclusive reading gives 98 available / 21 short.
 > 2. **The delivery date is the EARLIEST of a committed window.** DE0467's source field is a range, `15.10.2026 - 25.10.2026`. Against the late end the shortfall is only **14** days. We measure against the earliest because the check exists to raise risk before the order is signed — see open question **C21**.
 
 ### 1.6 Calendar
 
-Default: **calendar days, 6-day week, Sunday off, no holiday list.** Isolated in one module (`lib/calendar.ts`) because C1 will change it.
+Default: **calendar days, 6-day week, Sunday off, no holiday list.** Isolated in one module (`lib/schedule/calendar.ts`) because C1 will change it.
 
 ---
 

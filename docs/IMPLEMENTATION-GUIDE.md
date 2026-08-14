@@ -135,7 +135,7 @@ Run:
 pnpm test lib/schedule
 ```
 
-**Check:** the DE0467 regression test passes with a **22**-day shortfall. (Corrected 13 Aug 2026 — this step previously said ~26, which is not reproducible from the dates: 113 calendar days less 16 Sundays = 97 working days, and 119 − 97 = 22. The engine reports 22; the old figure was the wrong one. See BUILD-SPEC-v2 §1.5 for the two counting conventions this depends on.) Commit: `feat: scheduling engine + tests`.
+**Check:** the DE0467 regression test passes with a **22**-day shortfall (113 calendar days between the two dates, less 16 Sundays, is 97 working days available; 119 − 97 = 22 — hand-verify this arithmetic yourself before trusting either the doc or the engine, since an earlier draft of this doc had it wrong at "~26 days"). See BUILD-SPEC-v2 §1.5 for the two counting conventions this depends on. If the engine reports something very different from 22, stop and debug before building anything on top of it. Commit: `feat: scheduling engine + tests`.
 
 ---
 
