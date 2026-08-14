@@ -744,6 +744,8 @@ async function main() {
             durationMaxDays: tp.durationMaxDays,
             envelopeFinishByMinDays: tp.envelopeFinishByMinDays,
             envelopeFinishByMaxDays: tp.envelopeFinishByMaxDays,
+            envelopeStartByMinDays: tp.envelopeStartByMinDays,
+            envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
             workOrderStages: tp.workOrderStages,
           })),
         });
@@ -932,6 +934,8 @@ async function main() {
           durationMaxDays: tp.durationMaxDays,
           envelopeFinishByMinDays: tp.envelopeFinishByMinDays,
           envelopeFinishByMaxDays: tp.envelopeFinishByMaxDays,
+          envelopeStartByMinDays: tp.envelopeStartByMinDays,
+          envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
           workOrderStages: tp.workOrderStages,
         })),
       });

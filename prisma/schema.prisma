@@ -658,6 +658,8 @@ model JobProcess {
   durationMaxDays         Int?    @map("duration_max_days")
   envelopeFinishByMinDays Int?    @map("envelope_finish_by_min_days")
   envelopeFinishByMaxDays Int?    @map("envelope_finish_by_max_days")
+  envelopeStartByMinDays  Int?    @map("envelope_start_by_min_days")
+  envelopeStartByMaxDays  Int?    @map("envelope_start_by_max_days")
   workOrderStages         Int[]   @map("work_order_stages")
   included                Boolean @default(true)
   durationOverrideDays    Int?    @map("duration_override_days")
