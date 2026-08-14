@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { loadPrioritizedJob, loadOpenHoldPoints } from "./workspace.read";
+import { loadPrioritizedJob, loadOpenHoldPoints, loadJobKpis } from "./workspace.read";
 import { ROLES, type Actor } from "@/lib/authz";
 
 /**
@@ -63,6 +63,31 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
       expect(typeof row.serialNo).toBe("string");
     }
     expect(open.some((r) => r.qcpItemId === 8 || r.qcpItemId === 9)).toBe(true);
+  });
+
+  it("aggregates JobKpis from real plan data (Task 13)", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+    if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
+
+    const actor: Actor = {
+      userId: 1,
+      tenantId: job.tenantId,
+      clientId: null,
+      name: "SJ",
+      email: "sj@despl.test",
+      roles: [ROLES.PRODUCTION_HEAD],
+      departmentIds: [],
+    };
+
+    const kpis = await loadJobKpis(actor, job.id);
+
+    expect(kpis).not.toBeNull();
+    expect(kpis!.totalPlans).toBe(324); // P4.0 bootstrap plan count
+    expect(kpis!.percentComplete).toBeGreaterThanOrEqual(0);
+    expect(kpis!.percentComplete).toBeLessThanOrEqual(100);
+    expect(kpis!.deptMatrix.length).toBeGreaterThan(0);
+    // byState buckets every plan exactly once — no double-counting, none dropped.
+    expect(Object.values(kpis!.byState).reduce((a, b) => a + b, 0)).toBe(324);
   });
 
   it("closes on ACCEPTED, reopens on a later REJECTED — proves latest-attempt read, not \"any ACCEPTED exists\"", async () => {
