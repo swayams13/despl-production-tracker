@@ -36,6 +36,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
     expect(result!.rankedByDept.size).toBeGreaterThan(0);
     expect(result!.departments.length).toBeGreaterThan(0);
     expect(result!.processNameById.size).toBeGreaterThan(0);
+    expect(result!.delayCategories.length).toBeGreaterThan(0);
   });
 
   it("lists open blocking hold points (QcpItem 8/9 on seq 10, per Task 3/7)", async () => {

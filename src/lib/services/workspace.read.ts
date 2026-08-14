@@ -3,7 +3,7 @@ import { assertClientScope, type Actor } from "@/lib/authz";
 import { computeCpm } from "@/lib/schedule";
 import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
 import { prioritize, type RankedPlan } from "./prioritizer";
-import type { Department } from "@/generated/prisma/client";
+import type { Department, DelayCategoryRef } from "@/generated/prisma/client";
 
 /**
  * The current run's per-department prioritized view — the shared read behind
@@ -16,6 +16,7 @@ export interface PrioritizedJob {
   rankedByDept: Map<number, RankedPlan[]>;
   departments: Department[];
   processNameById: Map<number, string>;
+  delayCategories: DelayCategoryRef[];
 }
 
 export async function loadPrioritizedJob(actor: Actor, jobId: number): Promise<PrioritizedJob | null> {
@@ -42,7 +43,8 @@ export async function loadPrioritizedJob(actor: Actor, jobId: number): Promise<P
     });
 
     const departments = await tx.department.findMany();
-    return { runId: run.id, rankedByDept, departments, processNameById };
+    const delayCategories = await tx.delayCategoryRef.findMany({ where: { active: true } });
+    return { runId: run.id, rankedByDept, departments, processNameById, delayCategories };
   });
 }
 

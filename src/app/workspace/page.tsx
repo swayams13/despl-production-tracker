@@ -4,6 +4,7 @@ import { withTenant } from "@/lib/db";
 import { loadPrioritizedJob, loadOpenHoldPoints } from "@/lib/services/workspace.read";
 import { PlanRow } from "./plan-row";
 import { QcpClear } from "./qcp-clear";
+import { DelayForm } from "./delay-form";
 
 async function pilotJobId(tenantId: number): Promise<number | null> {
   return withTenant(tenantId, async (tx) => {
@@ -51,6 +52,7 @@ export default async function Workspace() {
                         <td className="px-4 py-2">
                           <div className="font-medium">{data.processNameById.get(r.plan.jobProcessId)}</div>
                           <div className="text-xs text-[var(--muted-fg)]">Unit {r.plan.unitId} · {r.reasonText}{r.criticalPath ? " · critical" : ""}</div>
+                        {r.overdue && <div className="mt-1"><DelayForm planId={r.plan.id} categories={data.delayCategories} /></div>}
                         </td>
                         <td className="px-4 py-2 text-right"><PlanRow planId={r.plan.id} state={r.state} canVerify /></td>
                       </tr>
@@ -98,6 +100,7 @@ export default async function Workspace() {
                       <td className="px-4 py-2">
                         <div className="font-medium">{data.processNameById.get(r.plan.jobProcessId)}</div>
                         <div className="text-xs text-[var(--muted-fg)]">Unit {r.plan.unitId} · {r.reasonText}{r.criticalPath ? " · critical" : ""}</div>
+                        {r.overdue && <div className="mt-1"><DelayForm planId={r.plan.id} categories={data.delayCategories} /></div>}
                       </td>
                       <td className="px-4 py-2 text-right"><PlanRow planId={r.plan.id} state={r.state} canVerify={isQc} /></td>
                     </tr>
