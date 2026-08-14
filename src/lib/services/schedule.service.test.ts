@@ -92,6 +92,18 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
       expect(p.baselineFinish?.getTime()).toBe(p.plannedFinish?.getTime());
     }
 
+    // DE0463 has no seeded units (only DESPL-320 does — prisma/seed.ts's one
+    // `tx.unit.createMany` call), so this run exercises the 0-unit fallback
+    // (`unitIds = [null]` in generateSchedule): one plan per included process,
+    // all job-grain (unitId null), not ×N units.
+    const includedProcessCount = await owner.jobProcess.count({
+      where: { jobId: job.id, included: { not: false } },
+    });
+    expect(run2.processPlans.length).toBe(includedProcessCount);
+    for (const p of run2.processPlans) {
+      expect(p.unitId).toBeNull();
+    }
+
     // Exactly one audit row per generateSchedule call. Scoped to these two run
     // ids — a tenant-wide count is inflated by any parallel writer in the shared
     // seed tenant (the override test file schedules in the same tenant).
@@ -150,10 +162,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
     expect(distinctUnitIds.size).toBe(9);
   });
 
-  // ponytail: the 0-unit fallback (unitIds = [null] in schedule.service.ts) has
-  // no schedulable unit-less job in the seed to exercise it against — DE0463/
-  // DE0467 (provisional piping jobs) refuse up front with SCHEDULE_DATA_MISSING
-  // before reaching unit expansion, and no other unit-less job has a
-  // non-provisional spine + dates. Left unverified by integration rather than
-  // fabricating seed data; the branch itself is a one-line ternary, low risk.
+  // The 0-unit fallback (unitIds = [null] in generateSchedule) IS covered: per
+  // prisma/seed.ts, DESPL-320 is the only seeded job with units (its one
+  // `tx.unit.createMany` call) — DE0463 is a schedulable, non-provisional
+  // PRESSURE_VESSEL job with no units, so the "versions up, flips isCurrent…"
+  // test above already exercises the fallback branch and now asserts on it
+  // (unitId null, plan count == included process count).
 });

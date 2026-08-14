@@ -159,9 +159,10 @@ export type ScheduleRunWithPlans = ScheduleRun & { processPlans: ProcessPlan[] }
 /**
  * Persist a new schedule as the next version for (jobId, equipmentId): demote
  * every current sibling run, insert this one as isCurrent, write its
- * ProcessPlan rows (unitId null, status NOT_STARTED), and audit it — all in
- * the caller's transaction. Never mutates a prior run's rows (invariant #6):
- * an override is a NEW version, the old baseline stays intact.
+ * ProcessPlan rows (unitId per the input PlanInput — null at job/equipment
+ * grain, per-serial when the caller expands per unit; status NOT_STARTED),
+ * and audit it — all in the caller's transaction. Never mutates a prior run's
+ * rows (invariant #6): an override is a NEW version, the old baseline stays intact.
  */
 export async function persistScheduleRun(
   tx: Tx,
