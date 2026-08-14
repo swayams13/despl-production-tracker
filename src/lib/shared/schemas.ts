@@ -63,6 +63,17 @@ export type VerifyProcessInput = z.infer<typeof verifyProcessSchema>;
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
 export type HoldProcessInput = z.infer<typeof holdProcessSchema>;
 
+/** QC records a checkpoint result for a unit → clears/opens the hold point (#4). */
+export const recordQcpExecutionSchema = z
+  .object({
+    qcpItemId: id,
+    unitId: id,
+    result: z.enum(["ACCEPTED", "REJECTED", "NA"]),
+    remarks: z.string().trim().optional(),
+  })
+  .strict();
+export type RecordQcpExecutionInput = z.infer<typeof recordQcpExecutionSchema>;
+
 /** File the categorised delay reason invariant #7 requires to unblock a dept. */
 export const fileDelayReasonSchema = z
   .object({ processPlanId: id, categoryId: id, detail: z.string().trim().optional() })
