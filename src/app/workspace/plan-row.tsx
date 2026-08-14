@@ -1,11 +1,11 @@
 "use client";
 import { useState, useTransition } from "react";
-import { startAction, submitAction, holdAction, resumeAction } from "@/app/actions/process";
+import { startAction, submitAction, holdAction, resumeAction, verifyAction } from "@/app/actions/process";
 import type { ActionResult } from "@/app/actions/_action";
 
-type Props = { planId: number; state: string };
+type Props = { planId: number; state: string; canVerify?: boolean };
 
-export function PlanRow({ planId, state }: Props) {
+export function PlanRow({ planId, state, canVerify }: Props) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -27,6 +27,7 @@ export function PlanRow({ planId, state }: Props) {
           <button disabled={pending} className={btn} onClick={() => call(() => holdAction(planId, "Held from workspace"))}>Hold</button>
         </>}
         {state === "ON_HOLD" && <button disabled={pending} className={btn} onClick={() => call(() => resumeAction(planId))}>Resume</button>}
+        {state === "SUBMITTED" && canVerify && <button disabled={pending} className={btn} onClick={() => call(() => verifyAction(planId))}>Verify</button>}
       </div>
       {error && <p className="text-xs text-[var(--danger-fg,#b91c1c)]">{error}</p>}
     </div>

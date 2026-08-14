@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { loadPrioritizedJob } from "./workspace.read";
+import { loadPrioritizedJob, loadOpenHoldPoints } from "./workspace.read";
 import { ROLES, type Actor } from "@/lib/authz";
 
 /**
@@ -36,5 +36,31 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
     expect(result!.rankedByDept.size).toBeGreaterThan(0);
     expect(result!.departments.length).toBeGreaterThan(0);
     expect(result!.processNameById.size).toBeGreaterThan(0);
+  });
+
+  it("lists open blocking hold points (QcpItem 8/9 on seq 10, per Task 3/7)", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+    if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
+
+    const actor: Actor = {
+      userId: 1,
+      tenantId: job.tenantId,
+      clientId: null,
+      name: "QC",
+      email: "qc@despl.test",
+      roles: [ROLES.QC],
+      departmentIds: [],
+    };
+
+    const open = await loadOpenHoldPoints(actor, job.id);
+
+    expect(open.length).toBeGreaterThan(0);
+    for (const row of open) {
+      expect(typeof row.qcpItemId).toBe("number");
+      expect(typeof row.activity).toBe("string");
+      expect(typeof row.unitId).toBe("number");
+      expect(typeof row.serialNo).toBe("string");
+    }
+    expect(open.some((r) => r.qcpItemId === 8 || r.qcpItemId === 9)).toBe(true);
   });
 });

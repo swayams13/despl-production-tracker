@@ -45,3 +45,69 @@ export async function loadPrioritizedJob(actor: Actor, jobId: number): Promise<P
     return { runId: run.id, rankedByDept, departments, processNameById };
   });
 }
+
+export interface OpenHoldPoint {
+  qcpItemId: number;
+  activity: string;
+  unitId: number;
+  serialNo: string;
+}
+
+/**
+ * Open blocking hold points across the job's units — the same
+ * blocking/latest-attempt logic as `assertNoOpenHoldPoint` in `_shared.ts`,
+ * but fanned out over every (blocking QcpItem × job unit) pair instead of a
+ * single process/unit, so the QC "clear a hold point" list agrees with what
+ * the gate will actually refuse.
+ */
+export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<OpenHoldPoint[]> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
+    if (!job) return [];
+    assertClientScope(actor, job.clientId);
+
+    const units = await tx.unit.findMany({
+      where: { equipment: { jobId } },
+      select: { id: true, serialNo: true },
+    });
+    if (units.length === 0) return [];
+
+    const blockingItems = await tx.qcpItem.findMany({
+      where: {
+        processLinks: { some: { jobProcess: { jobId } } },
+        partyCodes: { some: { qcpCode: { blocksCompletion: true } } },
+      },
+      select: { id: true, activity: true },
+    });
+    if (blockingItems.length === 0) return [];
+
+    const itemIds = blockingItems.map((i) => i.id);
+    const unitIds = units.map((u) => u.id);
+    const execs = await tx.qcpExecution.findMany({
+      where: { unitId: { in: unitIds }, qcpItemId: { in: itemIds } },
+      orderBy: { attemptNo: "desc" },
+      select: { qcpItemId: true, unitId: true, result: true },
+    });
+
+    // Latest attempt per (item, unit) — mirrors assertNoOpenHoldPoint's per-item map.
+    const latestByKey = new Map<string, string>();
+    for (const e of execs) {
+      const k = `${e.qcpItemId}:${e.unitId}`;
+      if (!latestByKey.has(k)) latestByKey.set(k, e.result);
+    }
+
+    const activityByItem = new Map(blockingItems.map((i) => [i.id, i.activity]));
+    const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
+
+    const open: OpenHoldPoint[] = [];
+    for (const itemId of itemIds) {
+      for (const unitId of unitIds) {
+        const r = latestByKey.get(`${itemId}:${unitId}`);
+        if (r !== "ACCEPTED" && r !== "NA") { // undefined (no exec), PENDING, REJECTED all block
+          open.push({ qcpItemId: itemId, activity: activityByItem.get(itemId)!, unitId, serialNo: serialByUnit.get(unitId)! });
+        }
+      }
+    }
+    return open;
+  });
+}
