@@ -169,6 +169,27 @@
   /* dense data surfaces */
   --grid-line: #ececE6;
   --radius-card: 12px;
+
+  /*
+   * Sequential ramp (magnitude — heatmap cells, meter tracks): one hue,
+   * light→dark, same blue family as --accent. Steps and hexes per the
+   * data-viz skill's validated reference palette (references/palette.md),
+   * light column. Not every step is used everywhere; keep the unused ones
+   * for future charts rather than trimming to today's callers.
+   */
+  --seq-100: #cde2fb;
+  --seq-150: #b7d3f6;
+  --seq-200: #9ec5f4;
+  --seq-250: #86b6ef;
+  --seq-300: #6da7ec;
+  --seq-350: #5598e7;
+  --seq-400: #3987e5;
+  --seq-450: #2a78d6; /* == --accent */
+  --seq-500: #256abf;
+  --seq-550: #1c5cab;
+  --seq-600: #184f95;
+  --seq-650: #104281;
+  --seq-700: #0d366b;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -196,6 +217,26 @@
     --crit-fg: #ffb3b3;
 
     --grid-line: #262624;
+
+    /*
+     * Same 13 steps as light mode — unlike the categorical table, palette.md's
+     * sequential ramp isn't split into light/dark columns; only which end you
+     * draw from is mode-constrained (see its ordinal-ramp note). Repeated
+     * verbatim here rather than computed, so this block stays self-contained.
+     */
+    --seq-100: #cde2fb;
+    --seq-150: #b7d3f6;
+    --seq-200: #9ec5f4;
+    --seq-250: #86b6ef;
+    --seq-300: #6da7ec;
+    --seq-350: #5598e7;
+    --seq-400: #3987e5; /* == --accent (dark) */
+    --seq-450: #2a78d6;
+    --seq-500: #256abf;
+    --seq-550: #1c5cab;
+    --seq-600: #184f95;
+    --seq-650: #104281;
+    --seq-700: #0d366b;
   }
 }
 
@@ -223,6 +264,20 @@
   --crit-fg: #ffb3b3;
 
   --grid-line: #262624;
+
+  --seq-100: #cde2fb;
+  --seq-150: #b7d3f6;
+  --seq-200: #9ec5f4;
+  --seq-250: #86b6ef;
+  --seq-300: #6da7ec;
+  --seq-350: #5598e7;
+  --seq-400: #3987e5;
+  --seq-450: #2a78d6;
+  --seq-500: #256abf;
+  --seq-550: #1c5cab;
+  --seq-600: #184f95;
+  --seq-650: #104281;
+  --seq-700: #0d366b;
 }
 
 body {

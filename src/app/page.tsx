@@ -45,14 +45,22 @@ export default async function Home() {
               : ""}
           </p>
         </div>
-        <form action={logout}>
-          <button
-            type="submit"
+        <div className="flex items-center gap-2">
+          <a
+            href="/component-gallery"
             className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
           >
-            Sign out
-          </button>
-        </form>
+            Component gallery
+          </a>
+          <form action={logout}>
+            <button
+              type="submit"
+              className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </header>
 
       <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
