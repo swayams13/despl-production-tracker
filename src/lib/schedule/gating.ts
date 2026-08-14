@@ -34,24 +34,33 @@ const STARTED_STATUSES: ProcessPlanStatusInput[] = ["IN_PROGRESS", "SUBMITTED", 
  * still concurrent work (the predecessor need only have started), so keying on
  * `lagDays >= 0` would wrongly demand the predecessor be COMPLETE for it.
  */
-export function assertCanStart(
+/** Non-throwing form of assertCanStart: which predecessors (if any) block a start. */
+export function startReadiness(
   edges: ScheduleEdge[],
   predecessorStates: PredecessorState[],
-): void {
+): { ready: boolean; blockingPredecessorIds: number[] } {
   const statusById = new Map(predecessorStates.map((s) => [s.predecessorId, s.status]));
   const blocking = edges.filter((e) => {
     const status = statusById.get(e.predecessorId);
     if (status == null) {
-      throw new Error(`assertCanStart: no status given for predecessor ${e.predecessorId}`);
+      throw new Error(`startReadiness: no status given for predecessor ${e.predecessorId}`);
     }
     const required =
       e.type === "FINISH_TO_START" ? status === "COMPLETE" : STARTED_STATUSES.includes(status);
     return !required;
   });
-  if (blocking.length > 0) {
+  return { ready: blocking.length === 0, blockingPredecessorIds: blocking.map((e) => e.predecessorId) };
+}
+
+export function assertCanStart(
+  edges: ScheduleEdge[],
+  predecessorStates: PredecessorState[],
+): void {
+  const { ready, blockingPredecessorIds } = startReadiness(edges, predecessorStates);
+  if (!ready) {
     throw new AppError(ERROR_CODES.GATING_BLOCKED, {
       reason: "predecessor(s) not sufficiently advanced to start",
-      predecessorIds: blocking.map((e) => e.predecessorId),
+      predecessorIds: blockingPredecessorIds,
     });
   }
 }

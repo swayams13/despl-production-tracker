@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { assertCanComplete, assertCanStart, type PredecessorState } from "./gating";
+import { describe, expect, it, test } from "vitest";
+import { assertCanComplete, assertCanStart, startReadiness, type PredecessorState } from "./gating";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { ScheduleEdge } from "./types";
 
@@ -160,4 +160,16 @@ describe("assertCanComplete — the invariant #11 regression case", () => {
       expect((e as AppError).detail?.predecessorIds).toEqual([7, 8]);
     }
   });
+});
+
+test("startReadiness: ready when all FTS predecessors complete", () => {
+  const edges: ScheduleEdge[] = [{ processId: 2, predecessorId: 1, type: "FINISH_TO_START", lagDays: 0 }];
+  const r = startReadiness(edges, [{ predecessorId: 1, status: "COMPLETE" }]);
+  expect(r).toEqual({ ready: true, blockingPredecessorIds: [] });
+});
+
+test("startReadiness: blocked names the incomplete predecessor", () => {
+  const edges: ScheduleEdge[] = [{ processId: 2, predecessorId: 1, type: "FINISH_TO_START", lagDays: 0 }];
+  const r = startReadiness(edges, [{ predecessorId: 1, status: "IN_PROGRESS" }]);
+  expect(r).toEqual({ ready: false, blockingPredecessorIds: [1] });
 });

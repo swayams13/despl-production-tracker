@@ -16,7 +16,7 @@ export {
   type BackwardSchedule,
 } from "./cpm";
 
-export { assertCanStart, assertCanComplete, type PredecessorState } from "./gating";
+export { assertCanStart, assertCanComplete, startReadiness, type PredecessorState } from "./gating";
 
 export { checkFeasibility, type ScheduleFeasibility, type FeasibilityResult } from "./feasibility";
 
