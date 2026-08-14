@@ -170,6 +170,11 @@ export async function applyDurationOverride(
       return {
         jobProcessId: n.processId,
         ownerDepartmentId: deptByPid.get(n.processId)!,
+        // ponytail: override stays job/equipment grain (unitId null) for now — it
+        // has no UI caller in this prototype. Must expand per-unit (like
+        // generateSchedule) before override is wired to a screen, or it would
+        // demote the per-unit run and mix grains.
+        unitId: null,
         // Baseline := the prior run's baseline (preserved). A process with no
         // prior plan seeds its baseline from its own recomputed planned dates.
         baselineStart: carried?.baselineStart ?? plannedStart,

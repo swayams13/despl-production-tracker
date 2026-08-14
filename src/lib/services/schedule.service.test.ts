@@ -117,4 +117,43 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
     }).catch((e) => e);
     expect(isAppError(err) && err.code).toBe(ERROR_CODES.SCHEDULE_DATA_MISSING);
   });
+
+  // Per-unit grain (grain P0.2): one plan per (included process × unit).
+  // DESPL-320 seeds 9 units (320SR01–09) on its one equipment. Its order date
+  // is NULL by design (test above), so pass projectStartDate explicitly to
+  // clear the SCHEDULE_DATA_MISSING refusal and actually exercise persistence.
+  it("expands DESPL-320 into 36 processes × 9 units, all NOT_STARTED", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+    if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
+    const a = actor({ tenantId: job.tenantId, clientId: null });
+
+    const run = await generateSchedule(a, {
+      jobId: job.id,
+      mode: "FORWARD",
+      projectStartDate: new Date("2026-01-01"),
+    });
+
+    const includedProcessCount = await owner.jobProcess.count({
+      where: { jobId: job.id, included: { not: false } },
+    });
+    const unitCount = await owner.unit.count({ where: { equipment: { jobId: job.id } } });
+    expect(unitCount).toBe(9);
+    expect(includedProcessCount).toBe(36);
+
+    expect(run.processPlans.length).toBe(includedProcessCount * unitCount);
+    expect(run.processPlans.length).toBe(36 * 9);
+    for (const p of run.processPlans) {
+      expect(p.status).toBe("NOT_STARTED");
+      expect(p.unitId).not.toBeNull();
+    }
+    const distinctUnitIds = new Set(run.processPlans.map((p) => p.unitId));
+    expect(distinctUnitIds.size).toBe(9);
+  });
+
+  // ponytail: the 0-unit fallback (unitIds = [null] in schedule.service.ts) has
+  // no schedulable unit-less job in the seed to exercise it against — DE0463/
+  // DE0467 (provisional piping jobs) refuse up front with SCHEDULE_DATA_MISSING
+  // before reaching unit expansion, and no other unit-less job has a
+  // non-provisional spine + dates. Left unverified by integration rather than
+  // fabricating seed data; the branch itself is a one-line ternary, low risk.
 });

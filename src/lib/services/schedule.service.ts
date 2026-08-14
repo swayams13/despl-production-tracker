@@ -122,14 +122,33 @@ export async function generateSchedule(
     // pilot min==max so it is moot; if a family ever ships a real min/max spread
     // and DESPL wants the optimistic edge planned instead, switch to *Min here.
     const deptByProc = new Map(spine.rawProcesses.map((p) => [p.id, p.departmentId]));
-    const plans: PlanInput[] = envelope.map((e) => ({
-      jobProcessId: e.processId,
-      ownerDepartmentId: deptByProc.get(e.processId)!,
-      baselineStart: e.plannedStartMax,
-      baselineFinish: e.plannedFinishMax,
-      plannedStart: e.plannedStartMax,
-      plannedFinish: e.plannedFinishMax,
-    }));
+
+    // Per-unit grain: one plan per (included process × unit). A job with no units
+    // (e.g. provisional piping jobs) falls back to a single unitId-null plan/process.
+    // ponytail: all units share the equipment envelope dates in v1 — per-serial
+    // stagger is a Phase-2 sequencing concern, not modelled here.
+    const units = await tx.unit.findMany({
+      where: {
+        equipment:
+          parsed.equipmentId != null
+            ? { id: parsed.equipmentId, jobId: parsed.jobId }
+            : { jobId: parsed.jobId },
+      },
+      select: { id: true },
+    });
+    const unitIds: (number | null)[] = units.length > 0 ? units.map((u) => u.id) : [null];
+
+    const plans: PlanInput[] = unitIds.flatMap((unitId) =>
+      envelope.map((e) => ({
+        jobProcessId: e.processId,
+        ownerDepartmentId: deptByProc.get(e.processId)!,
+        unitId,
+        baselineStart: e.plannedStartMax,
+        baselineFinish: e.plannedFinishMax,
+        plannedStart: e.plannedStartMax,
+        plannedFinish: e.plannedFinishMax,
+      })),
+    );
 
     return persistScheduleRun(tx, actor, {
       jobId: parsed.jobId,
