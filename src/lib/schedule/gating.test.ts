@@ -37,6 +37,25 @@ const startToStartOverlap: ScheduleEdge = {
   lagDays: -1,
 };
 
+// Regression pin: an overlap edge with lagDays === 0 is still concurrent work.
+// Gating must key off `type`, not `lagDays >= 0` — the latter would wrongly
+// require the predecessor to be COMPLETE before this can start.
+const startToStartOverlapZeroLag: ScheduleEdge = {
+  processId: 5,
+  predecessorId: 4,
+  type: "START_TO_START_WITH_OVERLAP",
+  lagDays: 0,
+};
+
+// Mirror: a FINISH_TO_START edge with lagDays === 0 still demands COMPLETE —
+// proving the check is type-keyed, not sign-keyed, in both directions.
+const finishToStartZeroLag: ScheduleEdge = {
+  processId: 6,
+  predecessorId: 4,
+  type: "FINISH_TO_START",
+  lagDays: 0,
+};
+
 describe("assertCanStart", () => {
   const cases: { name: string; edge: ScheduleEdge; predecessorStatus: string; expected: string | null }[] = [
     { name: "FINISH_TO_START, predecessor COMPLETE", edge: finishToStart, predecessorStatus: "COMPLETE", expected: null },
@@ -64,6 +83,18 @@ describe("assertCanStart", () => {
       name: "START_TO_START_WITH_OVERLAP, predecessor ON_HOLD is not \"started\" for gating purposes",
       edge: startToStartOverlap,
       predecessorStatus: "ON_HOLD",
+      expected: ERROR_CODES.GATING_BLOCKED,
+    },
+    {
+      name: "START_TO_START_WITH_OVERLAP with lagDays 0, predecessor only IN_PROGRESS — type-keyed, so this is still legitimate concurrency",
+      edge: startToStartOverlapZeroLag,
+      predecessorStatus: "IN_PROGRESS",
+      expected: null,
+    },
+    {
+      name: "FINISH_TO_START with lagDays 0, predecessor IN_PROGRESS — still demands COMPLETE (proves not sign-keyed)",
+      edge: finishToStartZeroLag,
+      predecessorStatus: "IN_PROGRESS",
       expected: ERROR_CODES.GATING_BLOCKED,
     },
   ];

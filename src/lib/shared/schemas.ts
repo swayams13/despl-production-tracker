@@ -15,3 +15,68 @@ export const loginSchema = z.object({
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
+
+/**
+ * Per-mutation request schemas for lib/services.
+ *
+ * Every one is `.strict()` — not decoration. Invariant #1 forbids any
+ * `actual_*` or `*_at` field on a request, and `.strict()` makes that
+ * structural: an unknown key (including a smuggled `actualStart` or
+ * `started_at`) fails validation instead of being silently dropped. The
+ * server sets actual timestamps from the DB clock, never the client.
+ *
+ * These carry only ids, enums, reason text and category ids. Planning dates
+ * that a planner legitimately chooses at tender stage (projectStartDate,
+ * requiredDeliveryDate) are NOT actuals and are allowed on the generate
+ * schema; they are optional because the service falls back to Job.orderDate /
+ * Job.deliveryDate when omitted.
+ */
+
+const id = z.number().int().positive();
+const reason = z.string().trim().min(1, "A reason is required");
+
+/** FORWARD/BACKWARD schedule generation for a job (equipment-level optional). */
+export const generateScheduleSchema = z
+  .object({
+    jobId: id,
+    equipmentId: id.nullish(),
+    mode: z.enum(["FORWARD", "BACKWARD"]),
+    projectStartDate: z.coerce.date().optional(),
+    requiredDeliveryDate: z.coerce.date().optional(),
+  })
+  .strict();
+export type GenerateScheduleInput = z.infer<typeof generateScheduleSchema>;
+
+/** Mark a process plan IN_PROGRESS (gating checked server-side). */
+export const startProcessSchema = z.object({ processPlanId: id }).strict();
+export type StartProcessInput = z.infer<typeof startProcessSchema>;
+
+/** Submit a process plan for QC verification (maker step). */
+export const submitProcessSchema = z.object({ processPlanId: id }).strict();
+export type SubmitProcessInput = z.infer<typeof submitProcessSchema>;
+
+/** QC verifies a submitted plan → COMPLETE (checker step, maker≠checker). */
+export const verifyProcessSchema = z.object({ processPlanId: id }).strict();
+export type VerifyProcessInput = z.infer<typeof verifyProcessSchema>;
+
+/** Put a process plan ON_HOLD with a recorded reason. */
+export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
+export type HoldProcessInput = z.infer<typeof holdProcessSchema>;
+
+/** File the categorised delay reason invariant #7 requires to unblock a dept. */
+export const fileDelayReasonSchema = z
+  .object({ processPlanId: id, categoryId: id, detail: z.string().trim().optional() })
+  .strict();
+export type FileDelayReasonInput = z.infer<typeof fileDelayReasonSchema>;
+
+/** Override a process duration → new ScheduleRun version, mandatory reason. */
+export const applyDurationOverrideSchema = z
+  .object({
+    jobId: id,
+    equipmentId: id.nullish(),
+    jobProcessId: id,
+    durationOverrideDays: z.number().int().positive(),
+    reason,
+  })
+  .strict();
+export type ApplyDurationOverrideInput = z.infer<typeof applyDurationOverrideSchema>;

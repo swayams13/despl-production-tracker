@@ -33,6 +33,10 @@ export const ERROR_CODES = {
   WAIVER_NOT_APPROVED: "WAIVER_NOT_APPROVED",
   /** Scheduling was attempted against a process with no confirmed duration/envelope (provisional template). */
   SCHEDULE_DATA_MISSING: "SCHEDULE_DATA_MISSING",
+  /** A process was asked to move to a state it cannot reach from its current one. */
+  INVALID_STATE_TRANSITION: "INVALID_STATE_TRANSITION",
+  /** The job's process graph is malformed (cycle, dangling edge) and cannot be scheduled. */
+  SCHEDULE_GRAPH_INVALID: "SCHEDULE_GRAPH_INVALID",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -56,6 +60,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   WAIVER_NOT_APPROVED: "Waiving a witness point requires Production Head approval.",
   SCHEDULE_DATA_MISSING:
     "This process has no confirmed duration yet — it cannot be scheduled until DESPL provides one.",
+  INVALID_STATE_TRANSITION: "This process cannot move to that state from its current one.",
+  SCHEDULE_GRAPH_INVALID: "The process graph for this job is invalid and cannot be scheduled.",
 };
 
 /**

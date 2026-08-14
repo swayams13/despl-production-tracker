@@ -26,10 +26,13 @@ const STARTED_STATUSES: ProcessPlanStatusInput[] = ["IN_PROGRESS", "SUBMITTED", 
 /**
  * May this process be marked IN_PROGRESS?
  *
- * - FINISH_TO_START edge (lagDays >= 0): predecessor must be COMPLETE.
- * - START_TO_START_WITH_OVERLAP edge (lagDays < 0): predecessor need only
- *   have STARTED — the whole point of a negative lag is that the two
- *   processes run concurrently.
+ * - FINISH_TO_START edge: predecessor must be COMPLETE.
+ * - START_TO_START_WITH_OVERLAP edge: predecessor need only have STARTED — the
+ *   whole point of an overlap edge is that the two processes run concurrently.
+ *
+ * Keyed off `type`, NOT `lagDays` sign: an overlap edge with lagDays === 0 is
+ * still concurrent work (the predecessor need only have started), so keying on
+ * `lagDays >= 0` would wrongly demand the predecessor be COMPLETE for it.
  */
 export function assertCanStart(
   edges: ScheduleEdge[],
@@ -41,7 +44,8 @@ export function assertCanStart(
     if (status == null) {
       throw new Error(`assertCanStart: no status given for predecessor ${e.predecessorId}`);
     }
-    const required = e.lagDays >= 0 ? status === "COMPLETE" : STARTED_STATUSES.includes(status);
+    const required =
+      e.type === "FINISH_TO_START" ? status === "COMPLETE" : STARTED_STATUSES.includes(status);
     return !required;
   });
   if (blocking.length > 0) {
