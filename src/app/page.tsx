@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getActor } from "@/lib/authz";
+import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { logout } from "@/app/actions/auth";
 
@@ -15,6 +15,9 @@ export default async function Home() {
   const actor = await getActor();
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
+  if (hasRole(actor, ROLES.MANAGEMENT)) redirect("/dashboard");
+  if (hasRole(actor, ROLES.SUPERVISOR, ROLES.QC)) redirect("/workspace");
+  // ADMIN / PRODUCTION_HEAD fall through to the existing overview below.
 
   const data = await withTenant(actor.tenantId, async (tx) => {
     const jobs = await tx.job.findMany({
@@ -46,6 +49,18 @@ export default async function Home() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <a
+            href="/workspace"
+            className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
+          >
+            Workspace
+          </a>
+          <a
+            href="/dashboard"
+            className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
+          >
+            Dashboard
+          </a>
           <a
             href="/component-gallery"
             className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
