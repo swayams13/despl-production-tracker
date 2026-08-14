@@ -1,4 +1,5 @@
 import { addWorkingDays, subtractWorkingDays } from "./calendar";
+import { bypassExcluded } from "./exclude";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { ScheduleEdge, ScheduleProcess, WorkCalendarInput } from "./types";
 
@@ -87,6 +88,10 @@ export function computeCpm(
   edges: ScheduleEdge[],
   opts: { durationDaysByProcessId?: Map<number, number>; projectEndOverride?: number } = {},
 ): CpmNode[] {
+  const spliced = bypassExcluded(processes, edges);
+  processes = spliced.processes;
+  edges = spliced.edges;
+
   const order = topologicalOrder(processes, edges);
   const byId = new Map(processes.map((p) => [p.id, p]));
   const duration = new Map(order.map((id) => [id, resolveDuration(byId.get(id)!, opts.durationDaysByProcessId)]));

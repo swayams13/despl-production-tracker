@@ -1,6 +1,7 @@
 import { addWorkingDays } from "./calendar";
+import { bypassExcluded } from "./exclude";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import type { ScheduleProcess, WorkCalendarInput } from "./types";
+import type { ScheduleEdge, ScheduleProcess, WorkCalendarInput } from "./types";
 
 /**
  * Layer 1 — the printed envelope (BUILD-SPEC-v2 §1.2). Authoritative: this is
@@ -46,12 +47,20 @@ function assertSchedulable(p: ScheduleProcess): void {
  * seed/lead-time-model.json — so it is read directly rather than re-derived,
  * which would silently diverge from the printed table if a future duration
  * edit didn't also update the envelope.)
+ *
+ * `edges` is optional — this layer never does graph/lag arithmetic, so
+ * `bypassExcluded` is called here purely to drop `included === false`
+ * processes (e.g. an excluded PWHT must not get a planned date of its own);
+ * the composed edges it returns are irrelevant to a per-process offset read
+ * and go unused. Omit `edges` when nothing on the job is excluded.
  */
 export function computeEnvelope(
   processes: ScheduleProcess[],
   projectStartDate: Date,
   calendar: WorkCalendarInput,
+  edges: ScheduleEdge[] = [],
 ): EnvelopeDates[] {
+  processes = bypassExcluded(processes, edges).processes;
   return processes.map((p) => {
     assertSchedulable(p);
     return {

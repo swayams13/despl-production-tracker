@@ -4,6 +4,8 @@ export { isWorkingDay, addWorkingDays, subtractWorkingDays, workingDaysBetween, 
 
 export { computeEnvelope, type EnvelopeDates } from "./envelope";
 
+export { bypassExcluded } from "./exclude";
+
 export {
   computeCpm,
   scheduleForward,
