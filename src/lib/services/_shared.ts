@@ -131,10 +131,11 @@ export async function loadJobSpine(tx: Tx, jobId: number): Promise<JobSpine> {
 
 // ── ScheduleRun persistence ──────────────────────────────────────────────
 
-/** One ProcessPlan to write; unitId is always null at the job/equipment grain. */
+/** One ProcessPlan to write; unitId null = job/equipment grain, else per-serial. */
 export interface PlanInput {
   jobProcessId: number;
   ownerDepartmentId: number;
+  unitId: number | null;
   baselineStart: Date | null;
   baselineFinish: Date | null;
   plannedStart: Date | null;
@@ -205,7 +206,7 @@ export async function persistScheduleRun(
       processPlans: {
         create: input.plans.map((p) => ({
           jobProcessId: p.jobProcessId,
-          unitId: null,
+          unitId: p.unitId,
           baselineStart: p.baselineStart,
           baselineFinish: p.baselineFinish,
           plannedStart: p.plannedStart,
@@ -352,17 +353,16 @@ export async function assertNoOpenHoldPoint(
 
 /**
  * The engine's PredecessorState[] for a process's incoming edges, read from
- * source ProcessPlan rows in this run (job-level grain, unitId null). A
- * predecessor with no plan row yet counts as NOT_STARTED (blocks, never
- * throws). Feed straight into assertCanStart/assertCanComplete.
- *
- * // ponytail: unitId null — job/equipment grain only. Per-serial gating reads
- * // per-unit predecessor plans; add the unitId param when that grain lands.
+ * source ProcessPlan rows in this run for the given unit (unitId null =
+ * job/equipment grain). A predecessor with no plan row yet counts as
+ * NOT_STARTED (blocks, never throws). Feed straight into
+ * assertCanStart/assertCanComplete.
  */
 export async function loadPredecessorStates(
   tx: Tx,
   scheduleRunId: number,
   jobProcessId: number,
+  unitId: number | null,
 ): Promise<PredecessorState[]> {
   const edges = await tx.jobProcessEdge.findMany({
     where: { processId: jobProcessId },
@@ -372,7 +372,7 @@ export async function loadPredecessorStates(
 
   const predIds = edges.map((e) => e.predecessorId);
   const plans = await tx.processPlan.findMany({
-    where: { scheduleRunId, jobProcessId: { in: predIds }, unitId: null },
+    where: { scheduleRunId, jobProcessId: { in: predIds }, unitId: unitId ?? null },
     select: { jobProcessId: true, status: true },
   });
   const statusByProc = new Map(plans.map((p) => [p.jobProcessId, p.status]));

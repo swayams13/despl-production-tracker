@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   jobProcessToScheduleProcess,
@@ -178,5 +178,84 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("DB-backed helpers (service suites ex
     ]) {
       expect(typeof fn).toBe("function");
     }
+  });
+});
+
+/**
+ * Per-unit predecessor isolation (grain P0.1). Uses the real DESPL-320 seed
+ * spine (9 units, 36-process edges) — there is no ScheduleRun seeded for it,
+ * so this test creates its own run + two ProcessPlan rows for the same
+ * predecessor process against two different real units, inside the
+ * withTenant transaction the app role writes through. Asserts
+ * loadPredecessorStates resolves each unit's predecessor status from ITS OWN
+ * plan row, not a shared job/equipment-grain one.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadPredecessorStates — per-unit isolation (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { withTenant } = await import("@/lib/db");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("unitA sees the predecessor COMPLETE while unitB sees NOT_STARTED", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+    if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
+
+    const edge = await owner.jobProcessEdge.findFirst({ where: { process: { jobId: job.id } } });
+    if (!edge) throw new Error("seed missing DESPL-320 process edges — run pnpm db:seed");
+    const predProcess = await owner.jobProcess.findUniqueOrThrow({ where: { id: edge.predecessorId } });
+
+    const equipment = await owner.equipment.findFirstOrThrow({ where: { jobId: job.id } });
+    const units = await owner.unit.findMany({
+      where: { equipmentId: equipment.id },
+      orderBy: { serialNo: "asc" },
+      take: 2,
+    });
+    if (units.length < 2) throw new Error("seed missing DESPL-320 units — run pnpm db:seed");
+    const [unitA, unitB] = units;
+
+    await withTenant(job.tenantId, async (tx) => {
+      const prevMax = await tx.scheduleRun.aggregate({
+        _max: { version: true },
+        where: { jobId: job.id, equipmentId: equipment.id },
+      });
+      const run = await tx.scheduleRun.create({
+        data: {
+          jobId: job.id,
+          equipmentId: equipment.id,
+          version: (prevMax._max.version ?? 0) + 1,
+          mode: "FORWARD",
+          projectStartDate: new Date(),
+          isCurrent: false,
+        },
+      });
+
+      await tx.processPlan.create({
+        data: {
+          scheduleRunId: run.id,
+          jobProcessId: predProcess.id,
+          unitId: unitA.id,
+          ownerDepartmentId: predProcess.departmentId,
+          status: "COMPLETE",
+        },
+      });
+      await tx.processPlan.create({
+        data: {
+          scheduleRunId: run.id,
+          jobProcessId: predProcess.id,
+          unitId: unitB.id,
+          ownerDepartmentId: predProcess.departmentId,
+          status: "NOT_STARTED",
+        },
+      });
+
+      const statesA = await loadPredecessorStates(tx, run.id, edge.processId, unitA.id);
+      const statesB = await loadPredecessorStates(tx, run.id, edge.processId, unitB.id);
+
+      expect(statesA.find((s) => s.predecessorId === edge.predecessorId)?.status).toBe("COMPLETE");
+      expect(statesB.find((s) => s.predecessorId === edge.predecessorId)?.status).toBe("NOT_STARTED");
+    });
   });
 });
