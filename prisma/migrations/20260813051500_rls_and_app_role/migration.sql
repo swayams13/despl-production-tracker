@@ -3,10 +3,8 @@
 -- ROLE MODEL
 --   despl_app   NOLOGIN permission bundle. Safe to commit — carries no password.
 --   <env login> Each environment creates its own login role and is GRANTed
---               despl_app, e.g.:
---                 CREATE USER despl_web LOGIN PASSWORD '<from secret store>';
---                 GRANT despl_app TO despl_web;
---               Never put a password in a migration.
+--               despl_app by running scripts/provision-db-role.sql as the
+--               table owner. Never put a password in a migration.
 --
 -- WHY THIS MATTERS: the previous schema's `REVOKE ... FROM PUBLIC` was a
 -- documented no-op, because the app connected as the postgres superuser and

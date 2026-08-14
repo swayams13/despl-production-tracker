@@ -10,6 +10,9 @@ import { PrismaClient } from "@/generated/prisma/client";
  *
  * Never point DATABASE_URL at a superuser — a superuser bypasses both, which
  * is exactly how the previous schema's protections became a silent no-op.
+ * `despl_web` is provisioned by scripts/provision-db-role.sql, and
+ * `assertDbRole` (src/lib/db-guard.ts, run from src/instrumentation.ts at
+ * server startup) enforces this at boot instead of just documenting it.
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
