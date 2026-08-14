@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "format": "prettier --write .",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:bootstrap": "tsx scripts/bootstrap-schedule.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
