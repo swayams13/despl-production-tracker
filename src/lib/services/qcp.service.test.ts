@@ -130,7 +130,10 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
 
   it("client user is rejected — read-only, no exceptions (#1 access rule)", async () => {
     const { tenantId } = await despl320();
-    const clientActor: Actor = { ...planner(tenantId), clientId: 1 };
+    // roles: [QC] so the ONLY thing that can throw FORBIDDEN here is
+    // assertNotClientUser — if it were ever deleted, requireRole would still
+    // pass and this test would catch the regression instead of masking it.
+    const clientActor: Actor = { ...planner(tenantId), clientId: 1, roles: [ROLES.QC] };
     await expectCode(
       recordQcpExecution(clientActor, { qcpItemId: 1, unitId: 1, result: "ACCEPTED" }),
       ERROR_CODES.FORBIDDEN,
