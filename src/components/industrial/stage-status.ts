@@ -42,6 +42,8 @@ export interface StageSegment {
   overdue?: boolean;
   /** has a rejected QC submission in history → distinct marker (not a fill colour) */
   rejected?: boolean;
+  /** earliest not-complete backing plan (§11.3) — the action CTA routes here */
+  governingPlanId?: number;
 }
 
 /** Should this segment show the secondary overdue pip? (overdue, but fill isn't overdue) */

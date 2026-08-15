@@ -29,6 +29,14 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // API clients want a JSON 401, not an HTML redirect they'd silently follow.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json(
+      { error: { code: "UNAUTHENTICATED", message: "Please sign in." } },
+      { status: 401 },
+    );
+  }
+
   const url = request.nextUrl.clone();
   url.pathname = "/login";
   url.searchParams.set("next", pathname);
