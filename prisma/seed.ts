@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { hash } from "@node-rs/argon2";
-import { PrismaClient } from "../src/generated/prisma/client";
+import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import {
   ProcessEdgeType,
   ProcurementStatus,
@@ -323,43 +323,122 @@ function suggestComponentType(item: LiveBomItem, codes: string[]): string | null
   return hits[0] ?? null;
 }
 
-async function main() {
-  const leadTime = readJson<LeadTimeModel>("lead-time-model.json");
-  const dataIssues = readJson<DataIssuesFile>("data-issues.json");
-  const liveJobs = readJson<LiveJobsFile>("live-jobs.json");
-  const routesFile = readJson<ComponentRoutesFile>("component-routes.json");
-  const qcpFile = readJson<QcpTemplatesFile>("qcp-templates.json");
-  const qcpBatch2 = readJson<QcpBatchFile>("qcp-templates-batch2.json");
-  const pipeSpoolTemplate = readJson<ProvisionalTemplateFile>("pipe-spool-template.json");
-  const issues = dataIssues.issues;
+// A transaction handle — the reference and demo phases share one atomic tx.
+type Tx = Prisma.TransactionClient;
 
-  // static sanity check before touching the DB
-  const departmentCodes = new Set(leadTime.departments.map((d) => d.code));
-  for (const [opCode, meta] of Object.entries(routesFile.canonicalOperations)) {
-    if (!departmentCodes.has(meta.dept)) {
-      throw new Error(`canonicalOperations.${opCode}.dept "${meta.dept}" is not a known department`);
-    }
+// The reference-data ids the demo phase needs to hang live jobs off. Returned
+// by seedReference whether it just created them or found them already seeded,
+// so the demo phase never re-queries.
+interface RefIds {
+  tenantId: number;
+  deptIdByCode: Map<string, number>;
+  roleIdByCode: Map<string, number>;
+  familyIdByCode: Map<string, number>;
+  componentTypeIdByCode: Map<string, number>;
+  operationIdByCode: Map<string, number>;
+  drawingTypeIdByName: Map<string, number>;
+  qcpCodeIdByCode: Map<string, number>;
+  calendarId: number;
+  pvVersionId: number;
+  templateProcesses: Awaited<ReturnType<Tx["templateProcess"]["findMany"]>>;
+  routeVersionIdByType: Map<string, number>;
+}
+
+interface Sources {
+  leadTime: LeadTimeModel;
+  liveJobs: LiveJobsFile;
+  routesFile: ComponentRoutesFile;
+  qcpFile: QcpTemplatesFile;
+  qcpBatch2: QcpBatchFile;
+  pipeSpoolTemplate: ProvisionalTemplateFile;
+  issues: DataIssue[];
+}
+
+/// Loads the reference ids the demo phase needs from an already-seeded tenant.
+/// Used by BOTH seedReference paths (fresh create and idempotent skip) so the
+/// RefIds shape is built in exactly one place.
+async function loadRefIds(tx: Tx, tenantId: number): Promise<RefIds> {
+  const [departments, roles, families, componentTypes, operations, drawingTypeRows, qcpCodes] =
+    await Promise.all([
+      tx.department.findMany({ where: { tenantId } }),
+      tx.role.findMany({ where: { tenantId } }),
+      tx.productFamily.findMany({ where: { tenantId } }),
+      tx.componentTypeRef.findMany({ where: { tenantId } }),
+      tx.operationRef.findMany({ where: { tenantId } }),
+      tx.drawingTypeRef.findMany({ where: { tenantId } }),
+      tx.qcpCodeRef.findMany({ where: { tenantId } }),
+    ]);
+  const familyIdByCode = new Map(families.map((f) => [f.code, f.id]));
+
+  const calendar = await tx.workCalendar.findFirstOrThrow({
+    where: { tenantId, isDefault: true },
+  });
+
+  // the PUBLISHED v1 of the PRESSURE_VESSEL template is the spine live jobs pin to
+  const pvTemplate = await tx.processTemplate.findFirstOrThrow({
+    where: { tenantId, familyId: familyIdByCode.get("PRESSURE_VESSEL")! },
+  });
+  const pvVersion = await tx.processTemplateVersion.findFirstOrThrow({
+    where: { templateId: pvTemplate.id, version: 1 },
+  });
+  const templateProcesses = await tx.templateProcess.findMany({
+    where: { versionId: pvVersion.id },
+  });
+
+  const componentTypeIdByCode = new Map(componentTypes.map((c) => [c.code, c.id]));
+  const idToComponentTypeCode = new Map(componentTypes.map((c) => [c.id, c.code]));
+  const routeTemplates = await tx.routeTemplate.findMany({
+    where: { tenantId },
+    include: { versions: { where: { version: 1 } } },
+  });
+  const routeVersionIdByType = new Map<string, number>();
+  for (const rt of routeTemplates) {
+    const typeCode = idToComponentTypeCode.get(rt.componentTypeId);
+    const rv = rt.versions[0];
+    if (typeCode && rv) routeVersionIdByType.set(typeCode, rv.id);
   }
 
-  const devPassword = process.env.SEED_PASSWORD ?? "despl-dev-only";
-  if (!process.env.SEED_PASSWORD) {
-    console.warn(
-      "! SEED_PASSWORD not set — seeding users with the well-known dev password " +
-        `"${devPassword}". Never run this seed against a deployed environment.`,
-    );
+  return {
+    tenantId,
+    deptIdByCode: new Map(departments.map((d) => [d.code, d.id])),
+    roleIdByCode: new Map(roles.map((r) => [r.code, r.id])),
+    familyIdByCode,
+    componentTypeIdByCode,
+    operationIdByCode: new Map(operations.map((o) => [o.code, o.id])),
+    drawingTypeIdByName: new Map(drawingTypeRows.map((d) => [d.name, d.id])),
+    qcpCodeIdByCode: new Map(qcpCodes.map((c) => [c.code, c.id])),
+    calendarId: calendar.id,
+    pvVersionId: pvVersion.id,
+    templateProcesses,
+    routeVersionIdByType,
+  };
+}
+
+/// Production-safe reference seed: organizations, departments, roles, the
+/// reference vocabularies, work calendar, product families, the PRESSURE_VESSEL
+/// + PIPE_SPOOL process templates, and the 25-route library. NO live-job or
+/// user data (users carry the dev password — those belong to seedDemo).
+///
+/// Idempotent: `Organization.code` is @unique and every reference row is scoped
+/// to that tenant, so an org-existence guard makes re-running a no-op — matching
+/// the production flow `prisma migrate deploy && prisma db seed` run any number
+/// of times. Reference/template *changes* propagate via a migration or a
+/// dedicated update path, never by piling on another copy here.
+async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>): Promise<RefIds> {
+  const { leadTime, liveJobs, routesFile, qcpFile, pipeSpoolTemplate } = src;
+
+  // ── 1. Tenant (idempotency sentinel) ─────────────────────────────
+  const existing = await tx.organization.findUnique({ where: { code: "DESPL" } });
+  if (existing) {
+    console.log("Reference data already present (org DESPL exists) — skipping reference seed.");
+    return loadRefIds(tx, existing.id);
   }
-  const passwordHash = await hash(devPassword);
+  const org = await tx.organization.create({
+    data: { code: "DESPL", name: "Dhruv EPC Solutions Pvt. Ltd." },
+  });
+  const tenantId = org.id;
 
-  const stats: Record<string, number> = {};
-
-  await prisma.$transaction(
-    async (tx) => {
-      // ── 1. Tenant ────────────────────────────────────────────────────
-      const org = await tx.organization.create({
-        data: { code: "DESPL", name: "Dhruv EPC Solutions Pvt. Ltd." },
-      });
-      const tenantId = org.id;
-
+  {
       // ── 2. Departments ───────────────────────────────────────────────
       await tx.department.createMany({
         data: leadTime.departments.map((d) => ({
@@ -385,9 +464,7 @@ async function main() {
       await tx.role.createMany({
         data: roleDefs.map(([code, name]) => ({ tenantId, code, name })),
       });
-      const roles = await tx.role.findMany({ where: { tenantId } });
-      const roleIdByCode = new Map(roles.map((r) => [r.code, r.id]));
-      stats.roles = roles.length;
+      stats.roles = await tx.role.count({ where: { tenantId } });
 
       // ── 4. Reference vocabularies ────────────────────────────────────
       // component types: the 25 routed types from component-routes.json, plus
@@ -452,9 +529,7 @@ async function main() {
       await tx.drawingTypeRef.createMany({
         data: drawingTypes.map((d) => ({ tenantId, ...d })),
       });
-      const drawingTypeRows = await tx.drawingTypeRef.findMany({ where: { tenantId } });
-      const drawingTypeIdByName = new Map(drawingTypeRows.map((d) => [d.name, d.id]));
-      stats.drawingTypes = drawingTypeRows.length;
+      stats.drawingTypes = await tx.drawingTypeRef.count({ where: { tenantId } });
 
       // delay categories (PRD FR-D2)
       const delayCategories = [
@@ -485,9 +560,7 @@ async function main() {
           waivable: meta.waivable ?? false,
         })),
       });
-      const qcpCodes = await tx.qcpCodeRef.findMany({ where: { tenantId } });
-      const qcpCodeIdByCode = new Map(qcpCodes.map((c) => [c.code, c.id]));
-      stats.qcpCodes = qcpCodes.length;
+      stats.qcpCodes = await tx.qcpCodeRef.count({ where: { tenantId } });
 
       // ── 5. Work calendar (C1 — still the highest-impact open question) ──
       const weekOffMap: Record<string, number> = {
@@ -499,7 +572,7 @@ async function main() {
         SAT: 6,
         SUN: 7,
       };
-      const calendar = await tx.workCalendar.create({
+      await tx.workCalendar.create({
         data: {
           tenantId,
           code: leadTime.calendarBasis.value,
@@ -669,7 +742,48 @@ async function main() {
       }
       stats.routeTemplates = routesFile.routes.length;
       stats.routeSteps = routeStepCount;
+  }
 
+  return loadRefIds(tx, tenantId);
+}
+
+/// Dev-only demo data: the "Unknown client" placeholder, live jobs DE0463/DE0467
+/// (BOM, procurement, components, operations, drawings, dispatch batches), the
+/// DESPL-320 pilot job + units + its QCP, the batch2 QAP templates, and the
+/// per-role / per-department demo users (well-known dev password). NEVER run
+/// against production — production users are provisioned through a real
+/// credential flow, and real jobs are created through the app, not seeded.
+///
+/// Guarded on DE0463 so re-running in dev can't pile on duplicate jobs.
+async function seedDemo(
+  tx: Tx,
+  refs: RefIds,
+  src: Sources,
+  passwordHash: string,
+  stats: Record<string, number>,
+) {
+  const { leadTime, liveJobs, routesFile, qcpFile, qcpBatch2, issues } = src;
+  const {
+    tenantId,
+    deptIdByCode,
+    roleIdByCode,
+    familyIdByCode,
+    componentTypeIdByCode,
+    operationIdByCode,
+    drawingTypeIdByName,
+    qcpCodeIdByCode,
+    routeVersionIdByType,
+    templateProcesses,
+  } = refs;
+  const calendar = { id: refs.calendarId };
+  const pvV1 = { id: refs.pvVersionId };
+
+  if (await tx.job.findFirst({ where: { tenantId, jobNumber: "DE0463" } })) {
+    console.log("Demo data already present (job DE0463 exists) — skipping demo seed.");
+    return;
+  }
+
+  {
       // ── 9. Client ────────────────────────────────────────────────────
       // No client/customer name exists anywhere in live-jobs.json. Do not
       // fabricate one (CLAUDE.md: flag, don't fabricate).
@@ -1149,11 +1263,58 @@ async function main() {
       }
       await mkUser("client@example.local", "Client Viewer", ["CLIENT_VIEWER"], [], client.id);
       stats.users = await tx.user.count({ where: { tenantId } });
+  }
+}
+
+async function main() {
+  const src: Sources = (() => {
+    const leadTime = readJson<LeadTimeModel>("lead-time-model.json");
+    const routesFile = readJson<ComponentRoutesFile>("component-routes.json");
+    // static sanity check before touching the DB
+    const departmentCodes = new Set(leadTime.departments.map((d) => d.code));
+    for (const [opCode, meta] of Object.entries(routesFile.canonicalOperations)) {
+      if (!departmentCodes.has(meta.dept)) {
+        throw new Error(`canonicalOperations.${opCode}.dept "${meta.dept}" is not a known department`);
+      }
+    }
+    return {
+      leadTime,
+      routesFile,
+      liveJobs: readJson<LiveJobsFile>("live-jobs.json"),
+      qcpFile: readJson<QcpTemplatesFile>("qcp-templates.json"),
+      qcpBatch2: readJson<QcpBatchFile>("qcp-templates-batch2.json"),
+      pipeSpoolTemplate: readJson<ProvisionalTemplateFile>("pipe-spool-template.json"),
+      issues: readJson<DataIssuesFile>("data-issues.json").issues,
+    };
+  })();
+
+  // SEED_REFERENCE_ONLY=1 is the production path: reference data only, no demo
+  // jobs and no dev-password users. Default (unset) seeds both for dev.
+  const referenceOnly = process.env.SEED_REFERENCE_ONLY === "1";
+
+  let passwordHash = "";
+  if (!referenceOnly) {
+    const devPassword = process.env.SEED_PASSWORD ?? "despl-dev-only";
+    if (!process.env.SEED_PASSWORD) {
+      console.warn(
+        "! SEED_PASSWORD not set — seeding demo users with the well-known dev password " +
+          `"${devPassword}". Never run the demo seed against a deployed environment.`,
+      );
+    }
+    passwordHash = await hash(devPassword);
+  }
+
+  const stats: Record<string, number> = {};
+
+  await prisma.$transaction(
+    async (tx) => {
+      const refs = await seedReference(tx, src, stats);
+      if (!referenceOnly) await seedDemo(tx, refs, src, passwordHash, stats);
     },
     { timeout: 180_000, maxWait: 15_000 },
   );
 
-  console.log("Seed complete:");
+  console.log(referenceOnly ? "Reference seed complete:" : "Seed complete:");
   for (const [k, v] of Object.entries(stats)) console.log(`  ${k.padEnd(24)} ${v}`);
 }
 

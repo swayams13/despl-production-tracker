@@ -17,6 +17,7 @@
     "e2e": "playwright test",
     "format": "prettier --write .",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:reference": "SEED_REFERENCE_ONLY=1 tsx prisma/seed.ts",
     "db:bootstrap": "tsx scripts/bootstrap-schedule.ts"
   },
   "prisma": {
