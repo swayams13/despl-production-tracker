@@ -325,6 +325,8 @@ Notes that make this deterministic:
   "in progress". Every other row requires the stage to be incomplete.
 - **Hold outranks overdue outranks submitted** — a stage that is both overdue and on
   hold shows hold, because a hold point is a hard block that needs action first.
+  *(Open question **C26** for SJ — display precedence only; flip hold↔overdue here if he
+  wants slippage surfaced over the blocker. Counts are unaffected — see §11.4.)*
 - `rejected` is **not** a spine color (there is no rejected token). It surfaces in the
   StageSheet history/reason panel and as a small corner marker on the matrix cell; the
   underlying plan's live status still drives the segment color.
