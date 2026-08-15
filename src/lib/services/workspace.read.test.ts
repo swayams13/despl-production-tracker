@@ -88,6 +88,44 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
     expect(kpis!.deptMatrix.length).toBeGreaterThan(0);
     // byState buckets every plan exactly once — no double-counting, none dropped.
     expect(Object.values(kpis!.byState).reduce((a, b) => a + b, 0)).toBe(324);
+
+    // §4.2 dashboard fields — structural + directional checks (the shared
+    // no-cleanup fixture makes exact values test-order-dependent; these pin
+    // shape and invariants, not specific numbers).
+    expect(kpis!.jobNumber).toBe("DESPL-320");
+    expect(kpis!.unitCount).toBe(9);
+    expect(kpis!.deliveryDate).toBeNull(); // DESPL-320's contractual date is deliberately unset (pending DESPL)
+    expect(kpis!.forecastVarianceDays).toBeNull(); // no contractual date → no variance to compute
+    // deptMatrix rows now carry a departmentId + onTimePct alongside the counts.
+    for (const row of kpis!.deptMatrix) {
+      expect(typeof row.departmentId).toBe("number");
+      if (row.onTimePct !== null) {
+        expect(row.onTimePct).toBeGreaterThanOrEqual(0);
+        expect(row.onTimePct).toBeLessThanOrEqual(100);
+      }
+    }
+    // first-pass yield is a percentage (or null if nothing's ever been submitted).
+    if (kpis!.stats.firstPassYieldPct !== null) {
+      expect(kpis!.stats.firstPassYieldPct).toBeGreaterThanOrEqual(0);
+      expect(kpis!.stats.firstPassYieldPct).toBeLessThanOrEqual(100);
+    }
+    expect(kpis!.stats.reasonsPending).toBeGreaterThanOrEqual(0);
+    expect(kpis!.stats.activeUsersToday).toBeGreaterThanOrEqual(0);
+    expect(kpis!.stats.activeUsersToday).toBeLessThanOrEqual(kpis!.stats.activeUsersTotal);
+    // throughput is always exactly 7 weekly buckets, oldest → newest.
+    expect(kpis!.throughputByWeek.length).toBe(7);
+    expect(kpis!.throughputByWeek.every((w) => w.count >= 0)).toBe(true);
+    // cycle-time offenders only ever list processes running LONG (never negative/zero delta).
+    expect(kpis!.cycleTimeOffenders.every((o) => o.deltaDays > 0)).toBe(true);
+    expect(kpis!.cycleTimeOffenders.length).toBeLessThanOrEqual(5);
+    // critical-path panel is always overdue+critical, top 5, sorted worst-first.
+    expect(kpis!.criticalPathBlocking.length).toBeLessThanOrEqual(5);
+    for (let i = 1; i < kpis!.criticalPathBlocking.length; i++) {
+      expect(kpis!.criticalPathBlocking[i].daysOverdue).toBeLessThanOrEqual(kpis!.criticalPathBlocking[i - 1].daysOverdue);
+    }
+    // hold points top-5 is a subset of, and no larger than, the full open list.
+    expect(kpis!.holdPointsTop.length).toBeLessThanOrEqual(5);
+    expect(kpis!.holdPointsTop.length).toBeLessThanOrEqual(kpis!.openHoldPoints);
   });
 
   it("closes on ACCEPTED, reopens on a later REJECTED — proves latest-attempt read, not \"any ACCEPTED exists\"", async () => {

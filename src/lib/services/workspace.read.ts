@@ -1,6 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { assertClientScope, hasRole, ROLES, type Actor } from "@/lib/authz";
-import { computeCpm } from "@/lib/schedule";
+import { computeCpm, workingDaysBetween } from "@/lib/schedule";
 import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
 import { prioritize, type PlanState, type RankedPlan } from "./prioritizer";
 import type { Department, DelayCategoryRef, ProcessPlan } from "@/generated/prisma/client";
@@ -53,6 +53,17 @@ export interface OpenHoldPoint {
   activity: string;
   unitId: number;
   serialNo: string;
+  /** QcpItem.srNo — the checklist reference (e.g. "3.1"), for display. */
+  srNo: string;
+  /** The blocking party code (H/W/R/RW/…) — the mockup's class glyph. */
+  classCode: string;
+  /** true when the blocking code requires a TPI call and none has been attempted yet. */
+  awaitingTpi: boolean;
+  /** Human status for the row: "Awaiting TPI" · "Pending" · "QC review" · "Reinspect". */
+  status: string;
+  /** Calendar days since the last attempt was recorded, or since the linked
+   * process's planned start if never attempted — see `loadOpenHoldPoints`. */
+  ageDays: number;
 }
 
 /**
@@ -79,7 +90,18 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
         processLinks: { some: { jobProcess: { jobId } } },
         partyCodes: { some: { qcpCode: { blocksCompletion: true } } },
       },
-      select: { id: true, activity: true },
+      select: {
+        id: true,
+        srNo: true,
+        activity: true,
+        partyCodes: { where: { qcpCode: { blocksCompletion: true } }, select: { qcpCode: { select: { code: true, requiresCall: true } } } },
+        // Earliest-by-seq linked process, for the "no attempt yet" age reference.
+        processLinks: {
+          select: { jobProcess: { select: { id: true, seq: true } } },
+          orderBy: { jobProcess: { seq: "asc" } },
+          take: 1,
+        },
+      },
     });
     if (blockingItems.length === 0) return [];
 
@@ -88,26 +110,67 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
     const execs = await tx.qcpExecution.findMany({
       where: { unitId: { in: unitIds }, qcpItemId: { in: itemIds } },
       orderBy: { attemptNo: "desc" },
-      select: { qcpItemId: true, unitId: true, result: true },
+      select: { qcpItemId: true, unitId: true, result: true, recordedAt: true },
     });
 
     // Latest attempt per (item, unit) — mirrors assertNoOpenHoldPoint's per-item map.
-    const latestByKey = new Map<string, string>();
+    const latestByKey = new Map<string, { result: string; recordedAt: Date }>();
     for (const e of execs) {
       const k = `${e.qcpItemId}:${e.unitId}`;
-      if (!latestByKey.has(k)) latestByKey.set(k, e.result);
+      if (!latestByKey.has(k)) latestByKey.set(k, { result: e.result, recordedAt: e.recordedAt });
     }
 
-    const activityByItem = new Map(blockingItems.map((i) => [i.id, i.activity]));
+    // Reference plannedStart per (item, unit) — from the item's earliest-linked
+    // process's current-run plan, used as the age reference when no attempt exists.
+    const linkedProcessId = new Map(blockingItems.map((i) => [i.id, i.processLinks[0]?.jobProcess.id ?? null]));
+    const plans = await tx.processPlan.findMany({
+      where: { unitId: { in: unitIds }, jobProcessId: { in: [...linkedProcessId.values()].filter((x): x is number => x != null) }, scheduleRun: { isCurrent: true } },
+      select: { jobProcessId: true, unitId: true, plannedStart: true },
+    });
+    const plannedStartByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p.plannedStart]));
+
+    const itemById = new Map(blockingItems.map((i) => [i.id, i]));
     const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
+    const now = new Date();
 
     const open: OpenHoldPoint[] = [];
     for (const itemId of itemIds) {
+      const item = itemById.get(itemId)!;
+      const blockingCode = item.partyCodes[0]?.qcpCode;
+      const classCode = blockingCode?.code ?? "?";
+      const requiresCall = blockingCode?.requiresCall ?? false;
+      const jpId = linkedProcessId.get(itemId);
+
       for (const unitId of unitIds) {
-        const r = latestByKey.get(`${itemId}:${unitId}`);
-        if (r !== "ACCEPTED" && r !== "NA") { // undefined (no exec), PENDING, REJECTED all block
-          open.push({ qcpItemId: itemId, activity: activityByItem.get(itemId)!, unitId, serialNo: serialByUnit.get(unitId)! });
+        const attempt = latestByKey.get(`${itemId}:${unitId}`);
+        const r = attempt?.result;
+        if (r === "ACCEPTED" || r === "NA") continue; // cleared
+
+        let status: string;
+        let ageRef: Date | null;
+        if (!attempt) {
+          status = requiresCall ? "Awaiting TPI" : "Pending";
+          ageRef = jpId != null ? (plannedStartByKey.get(`${jpId}:${unitId}`) ?? null) : null;
+        } else if (r === "REJECTED") {
+          status = "Reinspect";
+          ageRef = attempt.recordedAt;
+        } else {
+          status = "QC review"; // PENDING attempt already recorded, awaiting decision
+          ageRef = attempt.recordedAt;
         }
+        const ageDays = ageRef ? Math.max(0, Math.floor((now.getTime() - ageRef.getTime()) / 864e5)) : 0;
+
+        open.push({
+          qcpItemId: itemId,
+          activity: item.activity,
+          unitId,
+          serialNo: serialByUnit.get(unitId)!,
+          srNo: item.srNo,
+          classCode,
+          awaitingTpi: status === "Awaiting TPI",
+          status,
+          ageDays,
+        });
       }
     }
     return open;
@@ -413,23 +476,68 @@ function buildSCurve(
 }
 
 export interface JobKpis {
+  jobNumber: string;
+  equipmentName: string | null;
+  designCode: string | null;
+  unitCount: number;
+  /** Contractual dispatch date (null for jobs DESPL hasn't confirmed yet — e.g. the DESPL-320 pilot). */
+  deliveryDate: string | null;
+  /** The schedule engine's own computed makespan: max(plannedFinish) across the
+   * current run's plans. Not a live re-forecast from actual progress — that's
+   * Phase 2 (would need to re-run CPM from today using remaining durations). */
+  forecastDispatch: string | null;
+  /** forecastDispatch − deliveryDate, calendar days. Null when there's no contractual date to compare against. */
+  forecastVarianceDays: number | null;
   totalPlans: number;
   percentComplete: number;
   byState: Record<string, number>;
   overdue: number;
   openHoldPoints: number;
   delaysByCategory: { category: string; count: number }[];
-  deptMatrix: { department: string; counts: Record<string, number> }[];
+  deptMatrix: { departmentId: number; department: string; counts: Record<string, number>; onTimePct: number | null }[];
   sCurve: { label: string; planned: number; actual: number | null }[];
+  stats: {
+    /** (submitted-ever − rejected-ever) ÷ submitted-ever, over the job's plans. Null if nothing's been submitted yet. */
+    firstPassYieldPct: number | null;
+    /** Avg (actual working days − standard working days) over COMPLETE plans with both known. Positive = running long. */
+    avgCycleVsStandardDays: number | null;
+    stagesVerified7d: number;
+    stagesVerified7dDelta: number;
+    /** Overdue plans with zero DelayReason filed yet (invariant #7 still owed). */
+    reasonsPending: number;
+    activeUsersToday: number;
+    activeUsersTotal: number;
+  };
+  criticalPathBlocking: { planId: number; processName: string; departmentId: number; deptName: string; serialNo: string; daysOverdue: number }[];
+  throughputByWeek: { label: string; count: number }[];
+  /** Plans/week needed to hit the contractual date from today. Null with no deliveryDate. */
+  throughputTargetPerWeek: number | null;
+  cycleTimeOffenders: { processName: string; deptName: string; standardDays: number; avgActualDays: number; deltaDays: number }[];
+  overdueAgingByDept: { departmentId: number; department: string; d1to3: number; d3to7: number; d7plus: number }[];
+  holdPointsTop: OpenHoldPoint[];
+  oldestHoldAgeDays: number | null;
+  awaitingTpiCount: number;
+}
+
+/** Bucket a job's ProcessVerified events into weekly counts, oldest → newest, ending this week. */
+function buildThroughput(verifiedAt: Date[], weeks: number, now: Date): { label: string; count: number }[] {
+  const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+  const points: { label: string; count: number }[] = [];
+  for (let w = weeks - 1; w >= 0; w--) {
+    const weekEnd = new Date(now.getTime() - w * msPerWeek);
+    const weekStart = new Date(weekEnd.getTime() - msPerWeek);
+    const count = verifiedAt.filter((d) => d > weekStart && d <= weekEnd).length;
+    points.push({ label: `W-${w}`, count });
+  }
+  return points;
 }
 
 /**
- * Cross-department KPI aggregate behind `/dashboard` (Task 13) — MD/CEO/SJ's
+ * Cross-department KPI aggregate behind `/dashboard` (§4.2) — MD/CEO/SJ's
  * "leadership sees the workflow working" screen. Reuses the same spine/CPM/
  * prioritize pipeline `loadPrioritizedJob` runs (one tx, no new engine work),
- * then folds the ranked plans + raw ProcessPlan rows + delay reasons into
- * plain, serialisable primitives for the viz components (no Prisma
- * Dates/Maps leaking to the client).
+ * then folds the ranked plans + raw ProcessPlan rows + delay reasons + the
+ * domain-event stream into plain, serialisable primitives.
  */
 export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis | null> {
   // Its own tx (same as the workspace page's QC section) — the small race
@@ -438,7 +546,10 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
   const openHoldPoints = await loadOpenHoldPoints(actor, jobId);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
+    const job = await tx.job.findUnique({
+      where: { id: jobId },
+      select: { clientId: true, jobNumber: true, designCode: true, deliveryDate: true },
+    });
     if (!job) return null;
     assertClientScope(actor, job.clientId);
 
@@ -449,6 +560,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     const cpm = computeCpm(spine.processes, spine.edges);
     const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
+    const durationMaxById = new Map(spine.rawProcesses.map((p) => [p.id, p.durationMaxDays]));
 
     const rankedByDept = prioritize({
       plans: run.processPlans,
@@ -474,15 +586,27 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     const departments = await tx.department.findMany();
     const deptNameById = new Map(departments.map((d) => [d.id, d.name]));
     const matrixByDept = new Map<number, Record<string, number>>();
+    const onTimeByDept = new Map<number, { onTime: number; total: number }>();
     for (const p of run.processPlans) {
       const counts = matrixByDept.get(p.ownerDepartmentId) ?? emptyStatusCounts();
       counts[p.status] = (counts[p.status] ?? 0) + 1;
       matrixByDept.set(p.ownerDepartmentId, counts);
+      if (p.status === "COMPLETE" && p.actualFinish && p.plannedFinish) {
+        const bucket = onTimeByDept.get(p.ownerDepartmentId) ?? { onTime: 0, total: 0 };
+        bucket.total++;
+        if (p.actualFinish <= p.plannedFinish) bucket.onTime++;
+        onTimeByDept.set(p.ownerDepartmentId, bucket);
+      }
     }
-    const deptMatrix = Array.from(matrixByDept, ([deptId, counts]) => ({
-      department: deptNameById.get(deptId) ?? `#${deptId}`,
-      counts,
-    }));
+    const deptMatrix = Array.from(matrixByDept, ([deptId, counts]) => {
+      const ot = onTimeByDept.get(deptId);
+      return {
+        departmentId: deptId,
+        department: deptNameById.get(deptId) ?? `#${deptId}`,
+        counts,
+        onTimePct: ot && ot.total > 0 ? Math.round((ot.onTime / ot.total) * 100) : null,
+      };
+    });
 
     const delayRows = await tx.delayReason.findMany({
       where: { processPlan: { scheduleRunId: run.id } },
@@ -494,7 +618,142 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     }
     const delaysByCategory = Array.from(delayCountByCategory, ([category, count]) => ({ category, count }));
 
+    // ── Forecast (§4.2): the schedule engine's own computed makespan ────────
+    const finishDates = run.processPlans.map((p) => p.plannedFinish).filter((d): d is Date => d != null);
+    const forecastDispatch = finishDates.length ? new Date(Math.max(...finishDates.map((d) => d.getTime()))) : null;
+    const forecastVarianceDays =
+      forecastDispatch && job.deliveryDate
+        ? Math.round((forecastDispatch.getTime() - job.deliveryDate.getTime()) / 864e5)
+        : null;
+
+    // ── Domain-event stream: submit/reject/verify counts for this run's plans ─
+    const planIds = run.processPlans.map((p) => String(p.id));
+    const eventCounts = await tx.$queryRaw<
+      { verified_7d: number; verified_prior_7d: number; submitted_ever: number; rejected_ever: number }[]
+    >`
+      SELECT
+        count(*) FILTER (WHERE type = 'ProcessVerified' AND at >= now() - interval '7 days')::int AS verified_7d,
+        count(*) FILTER (WHERE type = 'ProcessVerified' AND at >= now() - interval '14 days' AND at < now() - interval '7 days')::int AS verified_prior_7d,
+        count(DISTINCT aggregate_id) FILTER (WHERE type = 'ProcessSubmitted')::int AS submitted_ever,
+        count(DISTINCT aggregate_id) FILTER (WHERE type = 'ProcessRejected')::int AS rejected_ever
+      FROM domain_events
+      WHERE aggregate_type = 'ProcessPlan' AND aggregate_id = ANY(${planIds}::text[])
+    `;
+    const ec = eventCounts[0];
+    const submittedEver = ec?.submitted_ever ?? 0;
+    const rejectedEver = ec?.rejected_ever ?? 0;
+    const firstPassYieldPct = submittedEver > 0 ? Math.round(((submittedEver - rejectedEver) / submittedEver) * 100) : null;
+    const stagesVerified7d = ec?.verified_7d ?? 0;
+    const stagesVerified7dDelta = stagesVerified7d - (ec?.verified_prior_7d ?? 0);
+
+    const verifiedRows = await tx.$queryRaw<{ at: Date }[]>`
+      SELECT at FROM domain_events
+      WHERE aggregate_type = 'ProcessPlan' AND aggregate_id = ANY(${planIds}::text[]) AND type = 'ProcessVerified'
+        AND at >= now() - interval '7 weeks'
+    `;
+    const throughputByWeek = buildThroughput(verifiedRows.map((r) => r.at), 7, new Date());
+
+    let throughputTargetPerWeek: number | null = null;
+    if (job.deliveryDate) {
+      const remaining = totalPlans - completeCount;
+      const weeksUntilDue = Math.max(1, Math.ceil((job.deliveryDate.getTime() - Date.now()) / (7 * 864e5)));
+      throughputTargetPerWeek = remaining > 0 ? Math.ceil(remaining / weeksUntilDue) : 0;
+    }
+
+    // ── Avg cycle vs standard + cycle-time offenders (§4.2 stat strip + panel) ─
+    const cycleByProcess = new Map<number, number[]>(); // jobProcessId -> deltas (working days)
+    for (const p of run.processPlans) {
+      if (p.status !== "COMPLETE" || !p.actualStart || !p.actualFinish) continue;
+      const standard = durationMaxById.get(p.jobProcessId);
+      if (standard == null) continue;
+      const actualDays = workingDaysBetween(p.actualStart, p.actualFinish, spine.calendar);
+      const delta = actualDays - standard;
+      if (!cycleByProcess.has(p.jobProcessId)) cycleByProcess.set(p.jobProcessId, []);
+      cycleByProcess.get(p.jobProcessId)!.push(delta);
+    }
+    const allDeltas = Array.from(cycleByProcess.values()).flat();
+    const avgCycleVsStandardDays = allDeltas.length
+      ? Math.round((allDeltas.reduce((a, b) => a + b, 0) / allDeltas.length) * 10) / 10
+      : null;
+
+    const deptIdByProcess = new Map(spine.rawProcesses.map((p) => [p.id, p.departmentId]));
+    const cycleTimeOffenders = Array.from(cycleByProcess, ([jpId, deltas]) => {
+      const avgActual = deltas.reduce((a, b) => a + b, 0) / deltas.length + (durationMaxById.get(jpId) ?? 0);
+      return {
+        processName: processNameById.get(jpId) ?? `#${jpId}`,
+        deptName: deptNameById.get(deptIdByProcess.get(jpId) ?? -1) ?? "—",
+        standardDays: durationMaxById.get(jpId) ?? 0,
+        avgActualDays: Math.round(avgActual * 10) / 10,
+        deltaDays: Math.round((deltas.reduce((a, b) => a + b, 0) / deltas.length) * 10) / 10,
+      };
+    })
+      .filter((o) => o.deltaDays > 0)
+      .sort((a, b) => b.deltaDays - a.deltaDays)
+      .slice(0, 5);
+
+    // ── Critical path panel + overdue aging (§4.2) ───────────────────────────
+    const units = await tx.unit.findMany({ where: { equipment: { jobId } }, select: { id: true, serialNo: true } });
+    const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
+    const today = new Date();
+
+    const criticalPathBlocking = Array.from(rankedByDept.values())
+      .flat()
+      .filter((r) => r.overdue && r.criticalPath && r.plan.plannedFinish)
+      .map((r) => ({
+        planId: r.plan.id,
+        processName: processNameById.get(r.plan.jobProcessId) ?? `#${r.plan.jobProcessId}`,
+        departmentId: r.plan.ownerDepartmentId,
+        deptName: deptNameById.get(r.plan.ownerDepartmentId) ?? "—",
+        serialNo: r.plan.unitId != null ? serialByUnit.get(r.plan.unitId) ?? `#${r.plan.unitId}` : "—",
+        daysOverdue: Math.max(0, Math.floor((today.getTime() - r.plan.plannedFinish!.getTime()) / 864e5)),
+      }))
+      .sort((a, b) => b.daysOverdue - a.daysOverdue)
+      .slice(0, 5);
+
+    const agingByDept = new Map<number, { d1to3: number; d3to7: number; d7plus: number }>();
+    const overduePlanIds: number[] = [];
+    for (const r of Array.from(rankedByDept.values()).flat()) {
+      if (!r.overdue || !r.plan.plannedFinish) continue;
+      overduePlanIds.push(r.plan.id);
+      const days = Math.max(0, Math.floor((today.getTime() - r.plan.plannedFinish.getTime()) / 864e5));
+      const bucket = agingByDept.get(r.plan.ownerDepartmentId) ?? { d1to3: 0, d3to7: 0, d7plus: 0 };
+      if (days > 7) bucket.d7plus++;
+      else if (days > 3) bucket.d3to7++;
+      else bucket.d1to3++;
+      agingByDept.set(r.plan.ownerDepartmentId, bucket);
+    }
+    const overdueAgingByDept = Array.from(agingByDept, ([deptId, b]) => ({
+      departmentId: deptId,
+      department: deptNameById.get(deptId) ?? `#${deptId}`,
+      ...b,
+    })).sort((a, b) => b.d7plus + b.d3to7 + b.d1to3 - (a.d7plus + a.d3to7 + a.d1to3));
+
+    // ── Reasons pending (§4.2 stat strip) ────────────────────────────────────
+    const reasonedPlanIds = overduePlanIds.length
+      ? new Set((await tx.delayReason.findMany({ where: { processPlanId: { in: overduePlanIds } }, select: { processPlanId: true } })).map((d) => d.processPlanId))
+      : new Set<number>();
+    const reasonsPending = overduePlanIds.filter((id) => !reasonedPlanIds.has(id)).length;
+
+    // ── Active users today (§4.2 stat strip) — tenant-wide, staff only ───────
+    const activeUsersTotal = await tx.user.count({ where: { active: true, clientId: null } });
+    const activeTodayRows = await tx.$queryRaw<{ n: number }[]>`
+      SELECT count(DISTINCT actor_id)::int AS n FROM domain_events
+      WHERE at >= date_trunc('day', now()) AND at < date_trunc('day', now()) + interval '1 day'
+    `;
+    const activeUsersToday = activeTodayRows[0]?.n ?? 0;
+
+    // ── Header (equipment name, unit count) ──────────────────────────────────
+    const equipment = await tx.equipment.findFirst({ where: { jobId }, orderBy: { id: "asc" }, select: { name: true } });
+    const unitCount = units.length;
+
     return {
+      jobNumber: job.jobNumber,
+      equipmentName: equipment?.name ?? null,
+      designCode: job.designCode,
+      unitCount,
+      deliveryDate: job.deliveryDate ? job.deliveryDate.toISOString() : null,
+      forecastDispatch: forecastDispatch ? forecastDispatch.toISOString() : null,
+      forecastVarianceDays,
       totalPlans,
       percentComplete,
       byState,
@@ -503,6 +762,23 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
       delaysByCategory,
       deptMatrix,
       sCurve: buildSCurve(run.processPlans, run.projectStartDate),
+      stats: {
+        firstPassYieldPct,
+        avgCycleVsStandardDays,
+        stagesVerified7d,
+        stagesVerified7dDelta,
+        reasonsPending,
+        activeUsersToday,
+        activeUsersTotal,
+      },
+      criticalPathBlocking,
+      throughputByWeek,
+      throughputTargetPerWeek,
+      cycleTimeOffenders,
+      overdueAgingByDept,
+      holdPointsTop: [...openHoldPoints].sort((a, b) => b.ageDays - a.ageDays).slice(0, 5),
+      oldestHoldAgeDays: openHoldPoints.length ? Math.max(...openHoldPoints.map((h) => h.ageDays)) : null,
+      awaitingTpiCount: openHoldPoints.filter((h) => h.awaitingTpi).length,
     };
   });
 }
