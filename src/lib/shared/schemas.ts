@@ -78,6 +78,17 @@ export const recordQcpExecutionSchema = z
   .strict();
 export type RecordQcpExecutionInput = z.infer<typeof recordQcpExecutionSchema>;
 
+/** QC records/updates a heat number + MTC ref + PMI result for a BOM item (§4.3 "MTC status editable by QC"). */
+export const recordMtcSchema = z
+  .object({
+    bomItemId: id,
+    heatNumber: z.string().trim().min(1, "Heat number is required"),
+    mtcRef: z.string().trim().optional(),
+    pmiResult: z.enum(["NA", "PENDING", "ACCEPT", "REJECT"]),
+  })
+  .strict();
+export type RecordMtcInput = z.infer<typeof recordMtcSchema>;
+
 /** File the categorised delay reason invariant #7 requires to unblock a dept. */
 export const fileDelayReasonSchema = z
   .object({ processPlanId: id, categoryId: id, detail: z.string().trim().optional() })

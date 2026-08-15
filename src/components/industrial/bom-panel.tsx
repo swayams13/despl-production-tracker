@@ -1,0 +1,208 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
+import { StatusChip } from "./status-chip";
+import { STAGE_STATUS } from "./stage-status";
+import { recordMtcAction } from "@/app/actions/bom";
+import type { BomTree, BomItemRow } from "@/lib/services/bom.read";
+
+function fmtDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
+export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
+  const router = useRouter();
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(bom.groups[0] ? [bom.groups[0].name] : []));
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Derived from the current `bom` prop (not a stored snapshot) so a
+  // router.refresh() after a mutation (e.g. Record MTC) reflects immediately
+  // instead of showing the pre-mutation object.
+  const selected = selectedId != null ? bom.groups.flatMap((g) => g.items).find((it) => it.id === selectedId) ?? null : null;
+
+  if (bom.equipments.length === 0) {
+    return <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>;
+  }
+
+  const toggle = (name: string) =>
+    setOpenGroups((s) => {
+      const next = new Set(s);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  const totalItems = bom.groups.reduce((n, g) => n + g.items.length, 0);
+
+  return (
+    <div className="grid-2">
+      <div className="card">
+        <div className="hd">
+          <h3>Bill of materials — {bom.equipmentName}</h3>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{totalItems} items</span>
+          {bom.equipments.length > 1 && (
+            <select
+              className="btn"
+              style={{ marginLeft: 8 }}
+              value={bom.equipmentId}
+              onChange={(e) => router.push(`/jobs/${jobId}?tab=bom&equipment=${e.target.value}`)}
+              aria-label="Equipment"
+            >
+              {bom.equipments.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+            </select>
+          )}
+        </div>
+        <div>
+          {totalItems === 0 ? (
+            <p className="note" style={{ margin: "16px 0" }}>No BOM items recorded for this equipment.</p>
+          ) : (
+            bom.groups.map((g) => (
+              <div key={g.name} className={`bom-grp${openGroups.has(g.name) ? " open" : ""}`}>
+                <div className="bom-hd" onClick={() => toggle(g.name)}>
+                  <span className="car">▶</span>{g.name}<span className="cnt">{g.items.length} items</span>
+                </div>
+                <div className="bom-items">
+                  {g.items.map((it) => {
+                    const comp = it.components[0];
+                    return (
+                      <div
+                        key={it.id}
+                        className={`bom-item${selected?.id === it.id ? " selected" : ""}`}
+                        onClick={() => setSelectedId(it.id)}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <span>
+                          {it.partName}
+                          <div className="mat">{it.material ?? "—"}{it.mtc[0] ? ` · ${it.mtc[0].heatNumber}` : ""}</div>
+                        </span>
+                        <span className="spine-mini">
+                          {(comp?.operations.length ? comp.operations.map((op) => op.status) : ["NOT_STARTED"]).map((status, k) => (
+                            <i key={k} style={{ background: STAGE_STATUS[mapOpStatus(status)].colorVar }} />
+                          ))}
+                        </span>
+                        <StatusChip status={comp?.displayStatus ?? "idle"} />
+                        <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); setSelectedId(it.id); }}>→</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="hd">
+          <h3>{selected ? `Component — ${selected.partName}` : "Select an item"}</h3>
+          {selected?.components[0] && <StatusChip status={selected.components[0].displayStatus} />}
+        </div>
+        {selected ? <ComponentDetail jobId={jobId} item={selected} /> : (
+          <p className="note" style={{ margin: "16px 0" }}>Click a BOM item on the left to view its component detail.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function mapOpStatus(status: string): "idle" | "progress" | "submitted" | "complete" {
+  if (status === "COMPLETE") return "complete";
+  if (status === "SUBMITTED") return "submitted";
+  if (status === "IN_PROGRESS") return "progress";
+  return "idle";
+}
+
+function ComponentDetail({ jobId, item }: { jobId: number; item: BomItemRow }) {
+  const comp = item.components[0];
+  const [recording, setRecording] = useState(false);
+  const [heatNumber, setHeatNumber] = useState("");
+  const [mtcRef, setMtcRef] = useState("");
+  const [pmiResult, setPmiResult] = useState<"NA" | "PENDING" | "ACCEPT" | "REJECT">("PENDING");
+  const [pending, start] = useTransition();
+  const router = useRouter();
+
+  const mtc = item.mtc[0] ?? null;
+
+  const submitMtc = () => {
+    if (!heatNumber.trim()) return toast.error("Heat number is required.");
+    start(async () => {
+      const r = await recordMtcAction(jobId, item.id, heatNumber.trim(), pmiResult, mtcRef.trim() || undefined);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("MTC recorded.");
+        setRecording(false);
+        setHeatNumber("");
+        setMtcRef("");
+        router.refresh();
+      }
+    });
+  };
+
+  return (
+    <div style={{ padding: "14px 16px" }}>
+      <div className="sh-kv">
+        <dt>Material</dt><dd>{item.material ?? "—"}</dd>
+        <dt>Qty</dt><dd>{item.qty}</dd>
+        <dt>Heat no.</dt><dd className="mono">{mtc?.heatNumber ?? "—"}</dd>
+        <dt>MTC</dt>
+        <dd>
+          {mtc ? (
+            <span className={`chip ${mtc.pmiResult === "ACCEPT" ? "c-complete" : mtc.pmiResult === "REJECT" ? "c-overdue" : "c-idle"}`}>
+              <i />{mtc.pmiResult === "ACCEPT" ? "Verified" : mtc.pmiResult === "REJECT" ? "Rejected" : mtc.pmiResult}
+              {mtc.mtcRef ? ` · ${mtc.mtcRef}` : ""}
+            </span>
+          ) : (
+            <span style={{ color: "var(--muted)" }}>Not recorded</span>
+          )}
+        </dd>
+      </div>
+
+      {recording ? (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          <input className="ws-detail" placeholder="Heat number" value={heatNumber} onChange={(e) => setHeatNumber(e.target.value)} style={{ flex: 1, minWidth: 120 }} autoFocus />
+          <input className="ws-detail" placeholder="MTC ref (optional)" value={mtcRef} onChange={(e) => setMtcRef(e.target.value)} style={{ flex: 1, minWidth: 120 }} />
+          <select className="btn" value={pmiResult} onChange={(e) => setPmiResult(e.target.value as typeof pmiResult)} aria-label="PMI result">
+            <option value="PENDING">PMI pending</option>
+            <option value="ACCEPT">PMI accept</option>
+            <option value="REJECT">PMI reject</option>
+            <option value="NA">PMI N/A</option>
+          </select>
+          <button className="btn btn-accent" disabled={pending} onClick={submitMtc}>Save</button>
+          <button className="btn" disabled={pending} onClick={() => setRecording(false)}>Cancel</button>
+        </div>
+      ) : (
+        <button className="btn" style={{ marginBottom: 14 }} onClick={() => setRecording(true)}>Record MTC…</button>
+      )}
+
+      <div className="sh-sec">Component process spine</div>
+      {comp && comp.operations.length > 0 ? (
+        <div className="sh-pos">
+          {comp.operations.map((op) => (
+            <i key={op.seq} style={{ background: STAGE_STATUS[mapOpStatus(op.status)].colorVar }} title={op.operationName} />
+          ))}
+        </div>
+      ) : (
+        <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
+      )}
+
+      <div className="sh-sec">Process log</div>
+      {comp && comp.operations.some((o) => o.startedAt || o.finishedAt) ? (
+        <div className="sh-hist">
+          {comp.operations
+            .filter((o) => o.startedAt || o.finishedAt)
+            .map((o, i) => (
+              <div key={i}>
+                {o.operationName} — {o.status === "COMPLETE" ? "complete" : o.status === "IN_PROGRESS" ? "in progress" : o.status.toLowerCase()}
+                <small>{o.finishedAt ? fmtDate(o.finishedAt) : o.startedAt ? `started ${fmtDate(o.startedAt)}` : ""}</small>
+              </div>
+            ))}
+        </div>
+      ) : (
+        <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No activity yet.</p>
+      )}
+    </div>
+  );
+}

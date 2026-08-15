@@ -83,8 +83,27 @@ const NAV: { group: string; items: { href: string; label: string; icon: ReactNod
   },
 ];
 
-export function AppShell({ children }: { children: ReactNode }) {
+const ROLE_LABEL: Record<string, string> = {
+  ADMIN: "Admin",
+  MANAGEMENT: "Management",
+  PRODUCTION_HEAD: "Production Head",
+  SUPERVISOR: "Supervisor",
+  QC: "QC / QA",
+  CLIENT_VIEWER: "Client",
+};
+
+export function AppShell({
+  children,
+  userName,
+  userRole,
+}: {
+  children: ReactNode;
+  userName: string;
+  userRole: string;
+}) {
   const pathname = usePathname();
+  const initials = userName.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
+  const roleLabel = ROLE_LABEL[userRole] ?? userRole;
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
 
@@ -114,10 +133,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         ))}
         <div className="user">
-          <div className="avatar">SJ</div>
+          <div className="avatar">{initials}</div>
           <div>
-            <b style={{ fontWeight: 500 }}>S. Jadhav</b>
-            <small>Production Head</small>
+            <b style={{ fontWeight: 500 }}>{userName}</b>
+            <small>{roleLabel}</small>
           </div>
         </div>
       </aside>

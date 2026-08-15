@@ -8,6 +8,9 @@ import { StageSpine } from "@/components/industrial/stage-spine";
 import { StageSheet } from "@/components/industrial/stage-sheet";
 import { StatusChip } from "@/components/industrial/status-chip";
 import { STAGE_STATUS, showsOverduePip, showsRejectedMarker, type StageSegment } from "@/components/industrial/stage-status";
+import { JobGantt } from "@/components/industrial/job-gantt";
+import { BomPanel } from "@/components/industrial/bom-panel";
+import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { startAction, submitAction, verifyAction, rejectAction } from "@/app/actions/process";
 import { fileDelayBulkAction } from "@/app/actions/delay";
 import type { ActionResult } from "@/app/actions/_action";
@@ -15,6 +18,9 @@ import type { JobHeader } from "@/lib/services/job-detail.read";
 import type { UnitSpine } from "@/lib/services/spine.read";
 import type { ActivityEvent } from "@/lib/services/events.read";
 import type { StageDetail, StageBackingPlan } from "@/lib/services/stage-detail.read";
+import type { JobGanttData } from "@/lib/services/gantt-layout";
+import type { BomTree } from "@/lib/services/bom.read";
+import type { QcpGrid as QcpGridData } from "@/lib/services/qcp-grid.read";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -35,6 +41,9 @@ export function JobDetailClient({
   unitSpines,
   jobRollup,
   events,
+  gantt,
+  bom,
+  qcp,
   tab,
 }: {
   jobId: number;
@@ -42,7 +51,10 @@ export function JobDetailClient({
   unitSpines: UnitSpine[];
   jobRollup: StageSegment[];
   events: ActivityEvent[];
-  tab: "overview" | "activity";
+  gantt: JobGanttData | null;
+  bom: BomTree | null;
+  qcp: QcpGridData | null;
+  tab: "overview" | "gantt" | "bom" | "qcp" | "activity";
 }) {
   const [sheet, setSheet] = useState<{ open: boolean; loading: boolean; detail: StageDetail | null }>({
     open: false,
@@ -113,10 +125,19 @@ export function JobDetailClient({
 
       <div className="tabs">
         <Link href={`/jobs/${jobId}?tab=overview`} className={`tab${tab === "overview" ? " on" : ""}`}>Overview</Link>
+        <Link href={`/jobs/${jobId}?tab=gantt`} className={`tab${tab === "gantt" ? " on" : ""}`}>Timeline (Gantt)</Link>
+        <Link href={`/jobs/${jobId}?tab=bom`} className={`tab${tab === "bom" ? " on" : ""}`}>BOM &amp; Components</Link>
+        <Link href={`/jobs/${jobId}?tab=qcp`} className={`tab${tab === "qcp" ? " on" : ""}`}>QCP / Hold points</Link>
         <Link href={`/jobs/${jobId}?tab=activity`} className={`tab${tab === "activity" ? " on" : ""}`}>Activity</Link>
       </div>
 
-      {tab === "overview" ? (
+      {tab === "gantt" ? (
+        gantt ? <JobGantt data={gantt} onOpenStage={openStage} /> : <p className="note" style={{ margin: "16px 0" }}>No current schedule for this job.</p>
+      ) : tab === "bom" ? (
+        bom ? <BomPanel jobId={jobId} bom={bom} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
+      ) : tab === "qcp" ? (
+        qcp ? <QcpGrid jobId={jobId} data={qcp} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
+      ) : tab === "overview" ? (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="hd">
