@@ -300,8 +300,11 @@ they were supposed to implement.
 
 Every process row carries the stages it belongs to: `JobProcess.workOrderStages Int[]`
 (mirrored on `TemplateProcess`, sourced from `seed/lead-time-model.json`). Stage names
-come from `workOrderStageNames.names` (1→"Project Kick-Off" … 25→"Dispatch"). Verified
-facts about this map:
+come from `workOrderStageNames.names` (1→"Project Kick-Off" … 25→"Dispatch"). **Name
+caveat (C27):** the mockup uses a different, more fabrication-detailed 25-name scheme;
+the seed names are pinned canonical here *only until SJ confirms* — the stage *numbers*
+and crosswalk are unaffected either way, so this is a label swap, not a structural one.
+Verified facts about this map:
 
 - All 25 stages are covered by the 36 processes; none is empty.
 - 12 stages are backed by **multiple** processes (e.g. stage 5 "Material Procurement"

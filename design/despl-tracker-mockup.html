@@ -158,6 +158,9 @@ tr.row:hover td{background:var(--surface-2)}
 .spine{display:flex;gap:2px;margin:4px 0 6px}
 .spine i{flex:1;height:14px;border-radius:2px;cursor:pointer;transition:transform .1s}
 .spine i:hover{outline:1px solid var(--text);transform:scaleY(1.25)}
+/* secondary overdue marker: hold leads as fill, overdue follows as a corner pip (C26) */
+.spine i.pip-od{position:relative}
+.spine i.pip-od::after{content:"";position:absolute;top:1px;right:1px;width:4px;height:4px;border-radius:50%;background:var(--s-overdue);box-shadow:0 0 0 1px var(--bg)}
 .spine-lab{display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px}
 .uxs{overflow-x:auto;padding:14px 16px}
 .uxs table{border-collapse:separate;border-spacing:3px;width:auto}
@@ -443,7 +446,7 @@ input[type=text]::placeholder{color:#565b63}
           <div class="legend"><span class="chip c-complete"><i></i>Done</span><span class="chip c-progress"><i></i>Active</span><span class="chip c-submitted"><i></i>QC</span><span class="chip c-overdue"><i></i>Blocked</span><span class="chip c-idle"><i></i>Idle</span></div></div>
         <div style="padding:16px">
           <div class="spine" id="bigSpine"></div>
-          <div class="spine-lab"><span>1 · Kick-off</span><span>6 · Material inspection</span><span>10 · Shell fabrication</span><span>19 · Hydro test</span><span>25 · Dispatch</span></div>
+          <div class="spine-lab"><span>1 · PO receipt</span><span>9 · Material inspection</span><span>17 · Circ seam welding</span><span>22 · Hydro test</span><span>25 · Dispatch</span></div>
         </div>
       </div>
       <div class="grid-2">
@@ -638,7 +641,9 @@ input[type=text]::placeholder{color:#565b63}
 const S={done:'var(--s-complete)',prog:'var(--s-progress)',sub:'var(--s-submitted)',od:'var(--s-overdue)',hold:'var(--s-hold)',idle:'var(--s-idle)'};
 const CHIP={done:['c-complete','Complete'],prog:['c-progress','In progress'],sub:['c-submitted','Awaiting QC'],od:['c-overdue','Overdue'],hold:['c-hold','On hold'],idle:['c-idle','Not started']};
 const stageNames=['PO receipt & order review','Design review','Drawing approval','BOM release','WPS / PQR approval','Material requisition','PO to vendors','Material receipt & MTC','Material inspection','Marking','Cutting','Rolling','Fit-up long seam','Welding long seam','NDT long seam','Fit-up circ seam','Welding circ seam','Nozzle fit-up & welding','Full NDT','PWHT','Internal inspection','Hydro test','Painting & surface','Final inspection / TPI','Dispatch & documentation'];
-const spine=['done','done','done','done','od','done','od','prog','prog','sub','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle'];
+const spine=['done','done','done','done','od','done','od','prog','hold','sub','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle'];
+// demo: stage 9 is both on-hold and overdue → hold fill + overdue pip (see C26 / DESIGN_SPEC §11.2)
+const pipOverdue={8:true};
 const deptOfStage=['Projects / PMO','Design & Detail Engg.','Design & Detail Engg.','Planning / PPC','Welding','Planning / PPC','Procurement','Stores','Quality Control / QA','Fabrication Prep','Fabrication Prep','Fabrication','Fabrication','Welding','NDT','Fabrication','Welding','Welding','NDT','Fabrication','Quality Control / QA','Quality Control / QA','Surface & Painting','Quality Control / QA','Hydro Test & Dispatch'];
 
 /* ---------- navigation ---------- */
@@ -679,7 +684,7 @@ function runCounters(){
 
 /* ---------- top + big spine ---------- */
 document.getElementById('topSpine').innerHTML=spine.map(s=>'<i style="background:'+S[s]+'"></i>').join('');
-document.getElementById('bigSpine').innerHTML=spine.map((s,i)=>'<i style="background:'+S[s]+'" onclick="openSheet('+i+',null)" data-tip="Stage '+(i+1)+' · '+stageNames[i]+'|'+CHIP[s][1]+' · '+deptOfStage[i]+'"></i>').join('');
+document.getElementById('bigSpine').innerHTML=spine.map((s,i)=>'<i class="'+(pipOverdue[i]?'pip-od':'')+'" style="background:'+S[s]+'" onclick="openSheet('+i+',null)" data-tip="Stage '+(i+1)+' · '+stageNames[i]+'|'+CHIP[s][1]+(pipOverdue[i]?' · Overdue 4d':'')+' · '+deptOfStage[i]+'"></i>').join('');
 
 /* ---------- critical path ---------- */
 const cp=[
