@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESPL Production Tracker — Design Mockup v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0B0C0E; --surface:#141619; --surface-2:#1C1F24; --border:#262A30;
+  --text:#E7E9EC; --muted:#8B919A; --accent:#FF7A1A;
+  --s-complete:#3FB950; --s-progress:#4C8DFF; --s-submitted:#A371F7;
+  --s-hold:#D9A62E; --s-overdue:#F0524D; --s-idle:#4A4F57;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scrollbar-color:#33383f var(--bg)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#2c3138;border-radius:5px;border:2px solid var(--bg)}
+::-webkit-scrollbar-track{background:var(--bg)}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:13px;-webkit-font-smoothing:antialiased}
+.mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+button{font-family:inherit}
+
+/* ---------- shell ---------- */
+.app{display:flex;min-height:100vh}
+.sidebar{width:236px;min-width:236px;border-right:1px solid var(--border);background:var(--bg);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;z-index:20}
+.logo{padding:16px;border-bottom:1px solid var(--border)}
+.logo b{font-size:15px;letter-spacing:.5px}
+.logo span{display:block;color:var(--muted);font-size:10.5px;margin-top:2px;text-transform:uppercase;letter-spacing:1px}
+.navgrp{padding:13px 8px 3px}
+.navgrp h6{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;padding:0 10px 6px;font-weight:600}
+.nav-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:6px;color:var(--muted);cursor:pointer;font-weight:500;border-left:2px solid transparent;margin-bottom:1px;transition:background .15s,color .15s}
+.nav-item svg{width:15px;height:15px;stroke-width:1.8;flex:none}
+.nav-item:hover{background:var(--surface);color:var(--text)}
+.nav-item.active{background:var(--surface-2);color:var(--text);border-left:2px solid var(--accent);border-radius:0 6px 6px 0}
+.nav-item .badge{margin-left:auto;background:rgba(240,82,77,.14);color:var(--s-overdue);font-size:10.5px;padding:1px 6px;border-radius:8px;font-weight:600}
+.sidebar .user{margin-top:auto;border-top:1px solid var(--border);padding:12px 14px;display:flex;gap:10px;align-items:center}
+.avatar{width:28px;height:28px;border-radius:6px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--accent);flex:none}
+.user small{display:block;color:var(--muted);font-size:10.5px}
+
+.main{flex:1;min-width:0}
+.topbar{height:48px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:14px;padding:0 20px;position:sticky;top:0;background:rgba(11,12,14,.92);backdrop-filter:blur(6px);z-index:15}
+.crumb{color:var(--muted)}
+.crumb b{color:var(--text);font-weight:500}
+.jobswitch{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer;position:relative;transition:background .15s}
+.jobswitch:hover{background:var(--surface-2)}
+.spine-mini{display:flex;gap:1px}
+.spine-mini i{width:4px;height:10px;border-radius:1px;display:block}
+.topbar .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+.kbd{border:1px solid var(--border);background:var(--surface);border-radius:4px;padding:3px 8px;color:var(--muted);font-size:11px;cursor:pointer;transition:background .15s}
+.kbd:hover{background:var(--surface-2);color:var(--text)}
+.bell{position:relative;cursor:pointer;color:var(--muted);display:flex;padding:4px;border-radius:5px}
+.bell:hover{background:var(--surface-2);color:var(--text)}
+.bell em{position:absolute;top:-2px;right:-3px;background:var(--accent);color:#000;font-style:normal;font-size:9px;font-weight:700;border-radius:7px;padding:0 4px}
+.drop{position:absolute;top:calc(100% + 6px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;min-width:290px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none;z-index:40;overflow:hidden}
+.drop.on{display:block;animation:pop .16s ease}
+.drop .d-row{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;font-size:12px}
+.drop .d-row:last-child{border-bottom:none}
+.drop .d-row:hover{background:var(--surface-2)}
+.drop .d-row small{display:block;color:var(--muted);margin-top:2px;font-size:11px}
+@keyframes pop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+.page{padding:22px 24px 48px;display:none}
+.page.on{display:block;animation:pgIn .3s ease}
+@keyframes pgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.page-h{display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.page-h h1{font-size:20px;font-weight:600}
+.page-h .sub{color:var(--muted)}
+
+/* ---------- primitives ---------- */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:6px}
+.card .hd{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card .hd h3{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;padding:2px 8px;border-radius:10px;white-space:nowrap}
+.chip i{width:5px;height:5px;border-radius:50%;display:block}
+.c-complete{background:rgba(63,185,80,.12);color:var(--s-complete)} .c-complete i{background:var(--s-complete)}
+.c-progress{background:rgba(76,141,255,.12);color:var(--s-progress)} .c-progress i{background:var(--s-progress)}
+.c-submitted{background:rgba(163,113,247,.12);color:var(--s-submitted)} .c-submitted i{background:var(--s-submitted)}
+.c-hold{background:rgba(217,166,46,.12);color:var(--s-hold)} .c-hold i{background:var(--s-hold)}
+.c-overdue{background:rgba(240,82,77,.12);color:var(--s-overdue)} .c-overdue i{background:var(--s-overdue)}
+.c-idle{background:rgba(74,79,87,.25);color:#9aa0a8} .c-idle i{background:var(--s-idle)}
+.delta{font-size:11px;font-weight:600}
+.d-good{color:var(--s-complete)} .d-bad{color:var(--s-overdue)}
+.btn{border:1px solid var(--border);background:var(--surface-2);color:var(--text);border-radius:4px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;transition:border-color .15s,background .15s}
+.btn:hover{border-color:#3a3f47}
+.btn-accent{background:var(--accent);border-color:var(--accent);color:#000;font-weight:600}
+.btn-accent:hover{background:#ff8c3d;border-color:#ff8c3d}
+.btn-ghost{background:transparent}
+select.btn{color:var(--muted)}
+table{width:100%;border-collapse:collapse}
+th{font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600;text-align:left;padding:8px 12px;border-bottom:1px solid var(--border)}
+td{padding:0 12px;height:36px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr.row{cursor:default;transition:background .12s}
+tr.row:hover td{background:var(--surface-2)}
+.num{text-align:right}
+.clicky{cursor:pointer}
+
+/* ---------- dashboard ---------- */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:10px}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px 16px;position:relative;overflow:hidden;transition:border-color .15s}
+.kpi.clicky:hover{border-color:#3a3f47}
+.kpi.alert{border-top:2px solid var(--s-overdue)}
+.kpi h6{font-size:10.5px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;margin-bottom:8px}
+.kpi .v{font-size:28px;font-weight:600;line-height:1}
+.kpi .v small{font-size:14px;color:var(--muted);font-weight:500}
+.kpi .sub{margin-top:8px;font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.kpi svg.spark{position:absolute;right:10px;bottom:10px;opacity:.9}
+.pbar{height:3px;background:var(--surface-2);border-radius:2px;margin-top:9px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--accent);border-radius:2px;transition:width .8s cubic-bezier(.2,.8,.2,1)}
+.statstrip{display:flex;gap:0;border:1px solid var(--border);border-radius:6px;background:var(--surface);margin-bottom:14px;overflow-x:auto}
+.stat{flex:1;padding:10px 16px;border-right:1px solid var(--border);min-width:140px}
+.stat:last-child{border-right:none}
+.stat h6{font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-weight:600;margin-bottom:4px;white-space:nowrap}
+.stat .v{font-size:15px;font-weight:600}
+.stat .v small{font-size:11px;color:var(--muted);font-weight:500;margin-left:4px}
+
+.grid-2{display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:14px}
+.grid-h{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.legend{display:flex;gap:14px;margin-left:auto;font-size:11px;color:var(--muted);align-items:center;flex-wrap:wrap}
+.legend i{width:14px;height:2px;display:inline-block;margin-right:5px;vertical-align:middle}
+
+.cp-row{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
+.cp-row:hover{background:var(--surface-2)}
+.cp-row:last-child{border-bottom:none}
+.cp-row .t{flex:1;min-width:0}
+.cp-row .t b{font-weight:500;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cp-row .t span{color:var(--muted);font-size:11px}
+.cp-days{color:var(--s-overdue);font-weight:600;font-size:12px;white-space:nowrap}
+.dept-tag{font-size:10px;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:1px 7px;white-space:nowrap}
+
+.matrix td,.matrix th{padding:0 8px}
+.mx-cell{display:flex;align-items:center;justify-content:center;height:26px;border-radius:3px;font-size:12px;font-weight:500;min-width:44px;cursor:pointer;transition:outline .1s}
+.mx-cell:hover{outline:1px solid var(--text)}
+.mx-zero{color:#565b63;cursor:default}
+.mx-zero:hover{outline:none}
+.otbar{display:flex;align-items:center;gap:8px}
+.otbar .bar{flex:1;height:3px;background:var(--surface-2);border-radius:2px;overflow:hidden;min-width:60px}
+.otbar .bar i{display:block;height:100%;border-radius:2px}
+
+.agebar{display:flex;height:14px;border-radius:2px;overflow:hidden}
+.agebar i{display:block;height:100%}
+.age-row{display:grid;grid-template-columns:150px 1fr 46px;align-items:center;gap:10px;padding:7px 16px}
+.hp-row{display:grid;grid-template-columns:86px 26px 1fr auto auto;gap:10px;align-items:center;padding:9px 16px;border-bottom:1px solid var(--border);font-size:12px}
+.hp-row:last-child{border-bottom:none}
+.hclass{width:20px;height:20px;border-radius:4px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--s-hold)}
+.bars{display:flex;align-items:flex-end;gap:8px;height:120px;padding:0 4px}
+.bars .b{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;justify-content:flex-end;height:100%}
+.bars .b i{width:100%;max-width:34px;border-radius:3px 3px 0 0;background:var(--s-progress);display:block;transition:height .7s cubic-bezier(.2,.8,.2,1)}
+.bars .b span{font-size:10px;color:var(--muted)}
+.gbar-row{display:grid;grid-template-columns:170px 1fr 70px;gap:10px;align-items:center;padding:6px 16px;font-size:12px}
+.gbar{height:12px;border-radius:2px;background:var(--surface-2);position:relative;overflow:hidden}
+.gbar i{position:absolute;top:0;left:0;height:100%;border-radius:2px}
+.gbar i.std{background:#3a3f47;height:4px;top:4px}
+
+/* ---------- job detail ---------- */
+.spine{display:flex;gap:2px;margin:4px 0 6px}
+.spine i{flex:1;height:14px;border-radius:2px;cursor:pointer;transition:transform .1s}
+.spine i:hover{outline:1px solid var(--text);transform:scaleY(1.25)}
+.spine-lab{display:flex;justify-content:space-between;color:var(--muted);font-size:10.5px}
+.uxs{overflow-x:auto;padding:14px 16px}
+.uxs table{border-collapse:separate;border-spacing:3px;width:auto}
+.uxs td{border:none;height:auto;padding:0}
+.uxs .cell{width:16px;height:16px;border-radius:2px;cursor:pointer;transition:transform .1s}
+.uxs .cell:hover{outline:1px solid var(--text);transform:scale(1.2)}
+.uxs .ulab{font-size:11px;color:var(--muted);padding-right:8px;white-space:nowrap}
+.feed-row{display:flex;gap:10px;padding:9px 16px;border-bottom:1px solid var(--border);font-size:12px;align-items:flex-start}
+.feed-row:last-child{border-bottom:none}
+.feed-row .when{margin-left:auto;color:var(--muted);font-size:11px;white-space:nowrap}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px;overflow-x:auto}
+.tab{padding:8px 14px;color:var(--muted);cursor:pointer;font-weight:500;border-bottom:2px solid transparent;white-space:nowrap;transition:color .15s}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--text);border-bottom-color:var(--accent)}
+.jtab{display:none}
+.jtab.on{display:block;animation:pgIn .25s ease}
+
+/* gantt */
+.gantt{padding:10px 16px 18px;overflow-x:auto}
+.g-months{display:flex;margin-left:190px;color:var(--muted);font-size:10px;border-bottom:1px solid var(--border);padding-bottom:4px;position:relative}
+.g-months span{flex:1}
+.g-row{display:flex;align-items:center;height:32px;border-bottom:1px solid rgba(38,42,48,.5);cursor:pointer}
+.g-row:hover{background:var(--surface-2)}
+.g-name{width:190px;min-width:190px;font-size:11.5px;color:var(--muted);padding-right:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.g-track{flex:1;position:relative;height:100%;min-width:420px}
+.g-target{position:absolute;top:13px;height:5px;background:#33383f;border-radius:2px}
+.g-actual{position:absolute;top:9px;height:13px;border-radius:3px;display:flex;align-items:center;overflow:hidden}
+.g-actual b{font-size:9px;color:rgba(0,0,0,.75);padding-left:5px;font-weight:600}
+.g-today{position:absolute;top:0;bottom:0;width:1px;background:var(--text);opacity:.5}
+.g-wrap{position:relative}
+.g-todaylab{position:absolute;top:-2px;transform:translateX(-50%);font-size:9px;color:var(--text);opacity:.7;background:var(--bg);padding:0 4px}
+
+/* bom */
+.bom-grp{border-bottom:1px solid var(--border)}
+.bom-grp:last-child{border-bottom:none}
+.bom-hd{display:flex;align-items:center;gap:8px;padding:10px 16px;cursor:pointer;font-weight:500;transition:background .12s}
+.bom-hd:hover{background:var(--surface-2)}
+.bom-hd .car{transition:transform .2s;color:var(--muted);font-size:10px}
+.bom-grp.open .car{transform:rotate(90deg)}
+.bom-hd .cnt{margin-left:auto;color:var(--muted);font-size:11px}
+.bom-items{display:none}
+.bom-grp.open .bom-items{display:block}
+.bom-item{display:grid;grid-template-columns:1fr auto auto auto;gap:12px;align-items:center;padding:8px 16px 8px 34px;font-size:12px;border-top:1px solid rgba(38,42,48,.5)}
+.bom-item .mat{color:var(--muted);font-size:11px}
+
+/* ---------- workspace ---------- */
+.sumchips{display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap}
+.filterchip{display:inline-flex;align-items:center;gap:7px;background:rgba(255,122,26,.1);border:1px solid rgba(255,122,26,.4);color:var(--accent);border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600}
+.filterchip b{cursor:pointer;font-weight:700}
+.ws-card{margin-bottom:14px}
+.ws-card .hd b{font-size:13px;font-weight:600;color:var(--text)}
+.ws-card .hd .meta{color:var(--muted);font-size:11.5px}
+.ws-card .hd .actions{margin-left:auto;display:flex;gap:8px}
+input[type=text]{background:var(--surface-2);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:5px 9px;font-size:12px;font-family:inherit;width:150px}
+input[type=text]::placeholder{color:#565b63}
+
+/* ---------- departments / welding ---------- */
+.dept-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.dept-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px 16px;cursor:pointer;transition:border-color .15s}
+.dept-card:hover{border-color:#3a3f47}
+.dept-card h4{font-size:13px;font-weight:600;margin-bottom:2px}
+.dept-card .rep{color:var(--muted);font-size:11px;margin-bottom:10px}
+.dept-nums{display:flex;gap:16px;font-size:11px;color:var(--muted)}
+.dept-nums b{display:block;font-size:16px;font-weight:600;color:var(--text)}
+.weld-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin-bottom:14px}
+.weld-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:14px 16px;position:relative}
+.weld-card.warn{border-top:2px solid var(--s-overdue)}
+.weld-card h4{font-weight:600;margin-bottom:2px}
+.weld-card .role{color:var(--muted);font-size:11px;margin-bottom:10px}
+.weld-stats{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;font-size:11px;color:var(--muted)}
+.weld-stats b{display:block;font-size:15px;font-weight:600;color:var(--text)}
+
+/* ---------- sheet ---------- */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .25s;z-index:30}
+.overlay.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;top:0;right:0;bottom:0;width:460px;max-width:92vw;background:var(--surface);border-left:1px solid var(--border);transform:translateX(102%);transition:transform .28s cubic-bezier(.2,.8,.2,1);z-index:31;display:flex;flex-direction:column}
+.sheet.on{transform:none}
+.sheet .sh-hd{padding:16px 20px;border-bottom:1px solid var(--border)}
+.sheet .sh-hd h2{font-size:15px;font-weight:600;margin:4px 0 8px}
+.sheet .sh-body{flex:1;overflow-y:auto;padding:16px 20px}
+.sh-kv{display:grid;grid-template-columns:130px 1fr;gap:8px 12px;font-size:12px;margin-bottom:18px}
+.sh-kv dt{color:var(--muted)}
+.sh-sec{font-size:10.5px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:600;margin:16px 0 8px}
+.sh-hist{border:1px solid var(--border);border-radius:6px;font-size:12px}
+.sh-hist>div{padding:9px 12px;border-bottom:1px solid var(--border)}
+.sh-hist>div:last-child{border-bottom:none}
+.sh-hist small{color:var(--muted);display:block;margin-top:2px}
+.sheet .sh-ft{padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+.sh-x{float:right;cursor:pointer;color:var(--muted);font-size:16px;padding:2px 6px;border-radius:4px}
+.sh-x:hover{background:var(--surface-2);color:var(--text)}
+.sh-pos{display:flex;gap:1.5px;margin-top:10px}
+.sh-pos i{flex:1;height:6px;border-radius:1px}
+
+/* ---------- cmdk ---------- */
+.cmdk{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:50;padding-top:12vh;justify-content:center}
+.cmdk.on{display:flex}
+.cmdk-box{width:560px;max-width:92vw;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;height:fit-content;box-shadow:0 20px 60px rgba(0,0,0,.6);animation:pop .18s ease}
+.cmdk-box input{width:100%;background:transparent;border:none;outline:none;color:var(--text);font-size:14px;padding:15px 18px;border-bottom:1px solid var(--border);font-family:inherit}
+.cmdk-list{max-height:320px;overflow-y:auto;padding:6px}
+.ck-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:6px;cursor:pointer;font-size:13px}
+.ck-row:hover,.ck-row.sel{background:var(--surface-2)}
+.ck-row .kind{margin-left:auto;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
+.ck-empty{padding:20px;text-align:center;color:var(--muted);font-size:12px}
+
+/* tooltip */
+.tip{position:fixed;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:11px;pointer-events:none;z-index:60;display:none;box-shadow:0 6px 20px rgba(0,0,0,.4);max-width:240px}
+.tip b{display:block;font-weight:600;margin-bottom:2px}
+.tip span{color:var(--muted)}
+
+.note{color:var(--muted);font-size:11px;margin-top:20px;text-align:center}
+#toast{position:fixed;bottom:20px;right:20px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:10px 14px;font-size:12px;display:none;z-index:70;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+@media(max-width:1100px){.kpis{grid-template-columns:repeat(2,1fr)}.grid-2,.grid-h{grid-template-columns:1fr}.sidebar{display:none}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ======= SIDEBAR ======= -->
+<aside class="sidebar">
+  <div class="logo"><b>DESPL</b><span>Production Tracker</span></div>
+  <div class="navgrp"><h6>Overview</h6>
+    <div class="nav-item active" data-nav="dash" onclick="go('dash')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>Dashboard</div>
+    <div class="nav-item" data-nav="job" onclick="go('job')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h10"/></svg>Jobs</div>
+  </div>
+  <div class="navgrp"><h6>Execution</h6>
+    <div class="nav-item" data-nav="ws" onclick="go('ws')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>My Workspace<span class="badge">8</span></div>
+    <div class="nav-item" data-nav="dept" onclick="go('dept')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Departments</div>
+    <div class="nav-item" onclick="toast('QC & Hold Points — full page in development scope')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z"/></svg>QC &amp; Hold Points</div>
+    <div class="nav-item" data-nav="weld" onclick="go('weld')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 19l7-14 7 14M8 13h8"/></svg>Welding</div>
+  </div>
+  <div class="navgrp"><h6>Records</h6>
+    <div class="nav-item" onclick="toast('BOM & Components — see Job → BOM tab for the pattern')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 7l9-4 9 4-9 4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4"/></svg>BOM &amp; Components</div>
+    <div class="nav-item" onclick="toast('Reports & daily digest — in development scope')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z"/></svg>Reports</div>
+  </div>
+  <div class="user"><div class="avatar">SJ</div><div><b style="font-weight:500">S. Jadhav</b><small>Production Head</small></div></div>
+</aside>
+
+<!-- ======= MAIN ======= -->
+<div class="main">
+  <div class="topbar">
+    <span class="crumb" id="crumb">Overview / <b>Dashboard</b></span>
+    <div class="jobswitch" onclick="tgl('jobDrop',event)"><span class="mono" style="font-size:12px">DESPL-320</span><span style="color:var(--muted);font-size:12px">HP Air Receiver</span>
+      <span class="spine-mini" id="topSpine"></span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8B919A" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      <div class="drop" id="jobDrop" style="left:0;right:auto;min-width:320px">
+        <div class="d-row" onclick="toast('Job switching wired in development')"><span class="mono">DESPL-320</span> · HP Air Receiver<small>9 units · 18.2% · forecast +4d</small></div>
+        <div class="d-row" onclick="toast('Job switching wired in development')"><span class="mono">DE0467</span> · Pressure Pipe 8" / Suction 10" / SAV 24"<small>3 units · 41.0% · on schedule</small></div>
+        <div class="d-row" onclick="toast('Job switching wired in development')"><span class="mono">DE0463</span> · SS Tank<small>2 units · 63.5% · forecast −2d</small></div>
+      </div>
+    </div>
+    <div class="right">
+      <span class="kbd" onclick="openCmdk()">⌘K &nbsp;Search</span>
+      <span class="bell" onclick="tgl('bellDrop',event)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg><em>3</em>
+        <div class="drop" id="bellDrop">
+          <div class="d-row"><span class="chip c-overdue" style="margin-right:6px"><i></i>Overdue</span>PO Receipt crossed 7d — Units 2, 3<small>Reason required · 08:00</small></div>
+          <div class="d-row"><span class="chip c-submitted" style="margin-right:6px"><i></i>QC</span>Marking · Unit 1 awaiting your verification<small>Submitted by R. Kadam · 08:02</small></div>
+          <div class="d-row"><span class="chip c-hold" style="margin-right:6px"><i></i>Hold</span>ITP-320-04 open 6 days — TPI visit not booked<small>Hydro test witness · Unit 2</small></div>
+        </div>
+      </span>
+    </div>
+  </div>
+
+  <!-- ================= DASHBOARD ================= -->
+  <section class="page on" id="pg-dash">
+    <div class="page-h"><h1>Dashboard</h1><span class="sub">DESPL-320 · HP Air Receiver · ASME VIII Div 1 · 9 units</span>
+      <span style="margin-left:auto" class="sub">Sat 15 Aug 2026 · updated <span class="mono">08:12</span></span></div>
+
+    <div class="kpis">
+      <div class="kpi"><h6>Overall completion</h6><div class="v mono"><span data-count="18.2" data-dec="1">0</span><small>%</small></div>
+        <div class="sub"><span class="mono">59 of 324</span> plans complete</div><div class="pbar"><i id="pb1" style="width:0%"></i></div></div>
+      <div class="kpi clicky" onclick="go('ws')"><h6>On track</h6><div class="v mono" data-count="262">0</div>
+        <div class="sub"><span class="delta d-good">▲ +6</span> vs last week</div>
+        <svg class="spark" width="72" height="24" viewBox="0 0 72 24"><polyline points="0,18 12,16 24,17 36,13 48,12 60,9 72,6" fill="none" stroke="#4C8DFF" stroke-width="1.5"/></svg></div>
+      <div class="kpi alert clicky" onclick="goFiltered('At-risk / overdue')"><h6>At-risk / overdue</h6><div class="v mono" style="color:var(--s-overdue)" data-count="62">0</div>
+        <div class="sub"><span class="delta d-good">▼ −4</span> vs last week · click to review</div>
+        <svg class="spark" width="72" height="24" viewBox="0 0 72 24"><polyline points="0,8 12,10 24,9 36,12 48,11 60,14 72,15" fill="none" stroke="#F0524D" stroke-width="1.5"/></svg></div>
+      <div class="kpi"><h6>Open hold points</h6><div class="v mono" data-count="35">0</div>
+        <div class="sub">oldest open <b class="mono" style="color:var(--s-hold)">6d</b> · 4 await TPI</div></div>
+      <div class="kpi"><h6>Forecast dispatch</h6><div class="v mono" style="font-size:22px;padding-top:4px">24 Oct</div>
+        <div class="sub"><span class="delta d-bad">+4d</span> vs contractual <span class="mono">20 Oct</span></div></div>
+    </div>
+
+    <div class="statstrip">
+      <div class="stat"><h6>First-pass yield (QC)</h6><div class="v mono">91.4<small>%</small></div></div>
+      <div class="stat"><h6>Avg cycle vs standard</h6><div class="v mono" style="color:var(--s-overdue)">+0.8<small>d / stage</small></div></div>
+      <div class="stat"><h6>Stages completed · 7d</h6><div class="v mono">14<small>▲ +3</small></div></div>
+      <div class="stat"><h6>Reasons pending</h6><div class="v mono" style="color:var(--s-hold)">8</div></div>
+      <div class="stat"><h6>NDT repair rate</h6><div class="v mono">4.6<small>%</small></div></div>
+      <div class="stat"><h6>Active users today</h6><div class="v mono">23<small>of 47</small></div></div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="hd"><h3>Schedule S-curve — planned vs actual</h3>
+          <div class="legend"><span><i style="background:#8B919A"></i>Planned</span><span><i style="background:var(--accent)"></i>Actual</span><span><i style="background:rgba(240,82,77,.5)"></i>Variance −9.3%</span></div></div>
+        <div style="padding:16px">
+          <svg width="100%" height="230" viewBox="0 0 640 230" preserveAspectRatio="none">
+            <g stroke="#262A30" stroke-dasharray="3 4">
+              <line x1="50" y1="20" x2="620" y2="20"/><line x1="50" y1="65" x2="620" y2="65"/>
+              <line x1="50" y1="110" x2="620" y2="110"/><line x1="50" y1="155" x2="620" y2="155"/><line x1="50" y1="200" x2="620" y2="200"/>
+            </g>
+            <g fill="#8B919A" font-size="10" font-family="'JetBrains Mono',monospace">
+              <text x="18" y="24">100%</text><text x="24" y="69">75%</text><text x="24" y="114">50%</text><text x="24" y="159">25%</text><text x="30" y="204">0%</text>
+              <text x="50" y="222">Jun</text><text x="185" y="222">Jul</text><text x="320" y="222">Aug</text><text x="455" y="222">Sep</text><text x="580" y="222">Oct</text>
+            </g>
+            <path d="M50,200 C160,196 230,178 320,140 C410,102 500,55 620,24" fill="none" stroke="#8B919A" stroke-width="1.5" stroke-dasharray="5 4"/>
+            <path d="M50,200 C120,198 190,192 260,178 L305,167 L305,200 L50,200 Z" fill="rgba(240,82,77,.10)"/>
+            <path class="draw" d="M50,200 C120,198 190,192 260,178 L305,167" fill="none" stroke="#FF7A1A" stroke-width="2"/>
+            <circle cx="305" cy="167" r="3.5" fill="#FF7A1A"/>
+            <line x1="305" y1="16" x2="305" y2="205" stroke="#E7E9EC" stroke-width="1" stroke-dasharray="2 3" opacity=".55"/>
+            <text x="311" y="26" fill="#E7E9EC" font-size="10" font-family="'JetBrains Mono',monospace" opacity=".8">Today · 18.2% vs 27.5% plan</text>
+          </svg>
+        </div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Critical path — blocking dispatch</h3><span class="chip c-overdue" style="margin-left:auto"><i></i>5 items</span></div>
+        <div id="cpList"></div>
+        <div style="padding:10px 16px;border-top:1px solid var(--border)"><button class="btn btn-ghost" onclick="go('ws')">Open in workspace →</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="hd"><h3>Department × status</h3><span class="sub" style="margin-left:auto;color:var(--muted);font-size:11px">click a cell to filter workspace</span></div>
+      <div style="padding:4px 8px 10px;overflow-x:auto">
+        <table class="matrix">
+          <thead><tr><th style="min-width:180px">Department</th><th>Not started</th><th>In progress</th><th>Submitted</th><th>Complete</th><th>On hold</th><th style="min-width:150px">On-time %</th></tr></thead>
+          <tbody id="mxBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid-h">
+      <div class="card">
+        <div class="hd"><h3>Throughput — stages completed / week</h3><span class="sub" style="margin-left:auto;color:var(--muted);font-size:11px">target 18 / wk to recover +4d</span></div>
+        <div style="padding:16px 12px 10px"><div class="bars" id="tpBars"></div></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Cycle time vs standard — worst offenders</h3>
+          <div class="legend"><span><i style="background:#33383f;height:4px"></i>Standard</span><span><i style="background:#F0524D"></i>Actual over</span><span><i style="background:#3FB950"></i>Actual under</span></div></div>
+        <div style="padding:8px 0" id="ctBody"></div>
+      </div>
+    </div>
+
+    <div class="grid-h">
+      <div class="card">
+        <div class="hd"><h3>Overdue aging by department</h3>
+          <div class="legend"><span><i style="background:#D9A62E"></i>1–3d</span><span><i style="background:#E07B2E"></i>3–7d</span><span><i style="background:#F0524D"></i>7d+</span></div></div>
+        <div style="padding:8px 0" id="ageBody"></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Open hold points — QCP / ITP</h3><button class="btn btn-ghost" style="margin-left:auto" onclick="toast('Full QC page in development scope')">View all 35</button></div>
+        <div>
+          <div class="hp-row"><span class="mono" style="color:var(--muted)">ITP-320-04</span><span class="hclass">H</span><span>Hydro test witness · Unit 2</span><span class="chip c-hold"><i></i>Awaiting TPI</span><span class="mono" style="color:var(--s-overdue)">6d</span></div>
+          <div class="hp-row"><span class="mono" style="color:var(--muted)">ITP-320-02</span><span class="hclass">W</span><span>Fit-up long seam · Unit 1</span><span class="chip c-hold"><i></i>Awaiting TPI</span><span class="mono" style="color:var(--s-overdue)">4d</span></div>
+          <div class="hp-row"><span class="mono" style="color:var(--muted)">ITP-320-01</span><span class="hclass">H</span><span>Material identification · Unit 3</span><span class="chip c-submitted"><i></i>QC review</span><span class="mono">2d</span></div>
+          <div class="hp-row"><span class="mono" style="color:var(--muted)">ITP-320-07</span><span class="hclass">W</span><span>RT film review · Unit 1</span><span class="chip c-submitted"><i></i>QC review</span><span class="mono">1d</span></div>
+          <div class="hp-row"><span class="mono" style="color:var(--muted)">ITP-320-03</span><span class="hclass">H</span><span>WPS qualification record</span><span class="chip c-complete"><i></i>Cleared</span><span class="mono" style="color:var(--muted)">—</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= JOB DETAIL ================= -->
+  <section class="page" id="pg-job">
+    <div class="page-h"><h1 class="mono" style="font-size:20px">DESPL-320</h1><span class="sub">HP Air Receiver · Pressure Vessels · 9 units</span>
+      <span class="chip c-progress"><i></i>In progress</span>
+      <span style="margin-left:auto" class="sub">Due <b class="mono" style="color:var(--text)">20 Oct</b> · forecast <b class="mono" style="color:var(--s-overdue)">24 Oct (+4d)</b></span>
+      <button class="btn" onclick="toast('Daily digest preview in development scope')">Daily digest</button></div>
+
+    <div class="tabs" id="jtabs">
+      <span class="tab on" data-jt="ov" onclick="jtab('ov')">Overview</span>
+      <span class="tab" data-jt="gn" onclick="jtab('gn')">Timeline (Gantt)</span>
+      <span class="tab" data-jt="bm" onclick="jtab('bm')">BOM &amp; Components</span>
+      <span class="tab" data-jt="qc" onclick="jtab('qc')">QCP / Hold points</span>
+      <span class="tab" data-jt="ac" onclick="jtab('ac')">Activity</span>
+    </div>
+
+    <!-- Overview -->
+    <div class="jtab on" id="jt-ov">
+      <div class="card" style="margin-bottom:14px">
+        <div class="hd"><h3>Stage spine — 25-stage work order</h3>
+          <div class="legend"><span class="chip c-complete"><i></i>Done</span><span class="chip c-progress"><i></i>Active</span><span class="chip c-submitted"><i></i>QC</span><span class="chip c-overdue"><i></i>Blocked</span><span class="chip c-idle"><i></i>Idle</span></div></div>
+        <div style="padding:16px">
+          <div class="spine" id="bigSpine"></div>
+          <div class="spine-lab"><span>1 · Kick-off</span><span>6 · Material inspection</span><span>10 · Shell fabrication</span><span>19 · Hydro test</span><span>25 · Dispatch</span></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="hd"><h3>Units × stage matrix</h3><span class="sub" style="margin-left:auto;color:var(--muted);font-size:11px">hover for detail · click opens stage panel</span></div>
+          <div class="uxs"><table id="uxsTable"></table></div>
+        </div>
+        <div class="card">
+          <div class="hd"><h3>Activity</h3></div>
+          <div id="feedShort"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gantt -->
+    <div class="jtab" id="jt-gn">
+      <div class="card">
+        <div class="hd"><h3>Unit 1 — target vs actual</h3>
+          <div class="legend"><span><i style="background:#33383f;height:4px"></i>Target window</span><span><i style="background:#3FB950"></i>Done</span><span><i style="background:#4C8DFF"></i>Active</span><span><i style="background:#F0524D"></i>Overdue</span></div>
+          <select class="btn" style="margin-left:8px" onchange="toast('Unit switching wired in development')"><option>Unit 1</option><option>Unit 2</option><option>Unit 3</option></select></div>
+        <div class="gantt">
+          <div class="g-months"><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span></div>
+          <div class="g-wrap" id="ganttBody"></div>
+        </div>
+      </div>
+      <p class="note" style="text-align:left;margin-top:10px">Development version uses SVAR React Gantt: collapsible per-unit groups, finish-to-start dependencies, zoom, and drag disabled (dates change only via the delay-reason flow).</p>
+    </div>
+
+    <!-- BOM -->
+    <div class="jtab" id="jt-bm">
+      <div class="grid-2">
+        <div class="card">
+          <div class="hd"><h3>Bill of materials — Unit 1</h3><span class="sub" style="margin-left:auto;color:var(--muted);font-size:11px">from master BOM · 34 items</span></div>
+          <div id="bomTree"></div>
+        </div>
+        <div class="card">
+          <div class="hd"><h3>Component — Shell Course 1</h3><span class="chip c-progress" style="margin-left:auto"><i></i>In progress</span></div>
+          <div style="padding:14px 16px">
+            <div class="sh-kv">
+              <dt>Material</dt><dd>SA 516 Gr.70 · 16 mm</dd>
+              <dt>Heat no.</dt><dd class="mono">H2341</dd>
+              <dt>MTC</dt><dd><span class="chip c-complete"><i></i>Verified</span></dd>
+              <dt>Current process</dt><dd>Rolling — Fabrication</dd>
+            </div>
+            <div class="sh-sec">Component process spine</div>
+            <div class="sh-pos" id="compSpine"></div>
+            <div class="sh-sec">Process log</div>
+            <div class="sh-hist">
+              <div>Cutting complete — verified P. Mehta<small>12 Aug · actual 1d 4h vs std 1d</small></div>
+              <div>Marking complete — verified P. Mehta<small>11 Aug · actual 0d 6h vs std 1d</small></div>
+              <div>Plate issued from stores<small>10 Aug · GRN-320-014</small></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- QCP -->
+    <div class="jtab" id="jt-qc">
+      <div class="card">
+        <div class="hd"><h3>QCP / ITP — DESPL-320-01 to 09</h3>
+          <div class="legend"><span class="hclass" style="display:inline-flex">H</span><span>Hold</span><span class="hclass" style="display:inline-flex">W</span><span>Witness</span><span class="hclass" style="display:inline-flex">R</span><span>Review</span></div></div>
+        <table>
+          <thead><tr><th>Ref</th><th>Activity</th><th>Class</th><th>Acceptance ref</th><th>QC</th><th>TPI</th><th>Status</th><th class="num">Age</th></tr></thead>
+          <tbody id="qcpBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Activity -->
+    <div class="jtab" id="jt-ac">
+      <div class="card">
+        <div class="hd"><h3>Full activity log</h3>
+          <select class="btn" style="margin-left:auto"><option>All departments</option><option>QC / QA</option><option>Fabrication</option><option>Procurement</option></select></div>
+        <div id="feedFull"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= WORKSPACE ================= -->
+  <section class="page" id="pg-ws">
+    <div class="page-h"><h1>My Workspace</h1><span class="sub">Today · Sat 15 Aug</span></div>
+    <div class="sumchips">
+      <span class="chip c-overdue"><i></i>8 overdue</span>
+      <span class="chip c-hold"><i></i>3 due today</span>
+      <span class="chip c-submitted"><i></i>2 awaiting QC</span>
+      <span id="wsFilter"></span>
+      <span style="margin-left:auto"><select class="btn"><option>Sort: critical path first</option><option>Sort: most overdue</option><option>Sort: due date</option></select></span>
+    </div>
+
+    <div class="card ws-card">
+      <div class="hd"><b>PO Receipt &amp; Order Review</b><span class="meta">DESPL-320 · Stage 1 of 25 · Projects / PMO</span>
+        <span class="chip c-overdue"><i></i>8 overdue · critical path</span>
+        <div class="actions"><button class="btn" onclick="toast('Reason applied to 8 units — logged with your name & timestamp')">Apply reason to all overdue</button><button class="btn btn-accent" onclick="toast('8 stages started — timers running against standard durations')">Start all</button></div></div>
+      <table>
+        <thead><tr><th style="width:70px">Unit</th><th>Due</th><th class="num">Overdue</th><th style="width:190px">Delay reason</th><th style="width:170px">Detail</th><th style="width:80px"></th></tr></thead>
+        <tbody id="wsBody"></tbody>
+      </table>
+    </div>
+
+    <div class="card ws-card">
+      <div class="hd"><b>Material Inspection &amp; MTC</b><span class="meta">DESPL-320 · Stage 9 · Quality Control / QA</span>
+        <span class="chip c-hold"><i></i>due today</span></div>
+      <table><tbody>
+        <tr class="row"><td class="mono" style="color:var(--muted)">Unit 1</td><td>Shell plate H2341 · dished ends pending vendor</td><td class="num" style="width:120px"><button class="btn btn-accent" onclick="openSheet(8,1)">Open</button></td></tr>
+      </tbody></table>
+    </div>
+
+    <div class="card ws-card">
+      <div class="hd"><b>Awaiting your verification</b><span class="meta">QC gate · maker / checker</span><span class="chip c-submitted"><i></i>2 items</span></div>
+      <table><tbody>
+        <tr class="row"><td class="mono" style="color:var(--muted)">Unit 1</td><td>Marking — submitted by R. Kadam, <span class="mono">08:02</span></td><td class="num" style="width:180px"><button class="btn" onclick="toast('Reject requires a reason — dialog in development')">Reject…</button> <button class="btn btn-accent" onclick="toast('Verified — stage gate opened for Cutting')">Verify</button></td></tr>
+        <tr class="row"><td class="mono" style="color:var(--muted)">Unit 3</td><td>Material identification — submitted by S. Patil, <span class="mono">Yesterday</span></td><td class="num"><button class="btn" onclick="toast('Reject requires a reason — dialog in development')">Reject…</button> <button class="btn btn-accent" onclick="toast('Verified — ITP-320-01 cleared')">Verify</button></td></tr>
+      </tbody></table>
+    </div>
+    <p class="note">Nothing else due. Next item: Design review · Unit 2 · due 18 Aug.</p>
+  </section>
+
+  <!-- ================= DEPARTMENTS ================= -->
+  <section class="page" id="pg-dept">
+    <div class="page-h"><h1>Departments</h1><span class="sub">13 departments · load, on-time performance, overdue</span></div>
+    <div class="dept-grid" id="deptGrid"></div>
+  </section>
+
+  <!-- ================= WELDING ================= -->
+  <section class="page" id="pg-weld">
+    <div class="page-h"><h1>Welding</h1><span class="sub">DESPL-320 · butt-weld joints tracked per welder · NDT linked</span>
+      <span style="margin-left:auto" class="sub">Team avg <b class="mono" style="color:var(--text)">27.5</b> joints · repair rate <b class="mono" style="color:var(--text)">4.6%</b></span></div>
+    <div class="weld-grid" id="weldGrid"></div>
+    <div class="grid-h" style="margin-top:0">
+      <div class="card">
+        <div class="hd"><h3>Open joints per welder — balance workload</h3></div>
+        <div style="padding:8px 0" id="wjBody"></div>
+      </div>
+      <div class="card">
+        <div class="hd"><h3>Recent NDT results</h3></div>
+        <table>
+          <thead><tr><th>Joint</th><th>Unit</th><th>Welder</th><th>Method</th><th>Result</th><th class="num">Date</th></tr></thead>
+          <tbody id="ndtBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <p class="note" style="padding:0 24px 30px">Design mockup v2 for approval — data illustrative · ⌘K search · click spine segments, matrix cells, gantt rows and critical-path items to open the stage panel.</p>
+</div>
+</div>
+
+<!-- ======= STAGE SHEET ======= -->
+<div class="overlay" id="ovl" onclick="closeSheet()"></div>
+<aside class="sheet" id="sheet">
+  <div class="sh-hd">
+    <span class="sh-x" onclick="closeSheet()">✕</span>
+    <span class="chip" id="shChip"></span>
+    <h2 id="shTitle">Stage</h2>
+    <span class="sub" style="color:var(--muted);font-size:12px" id="shSub"></span>
+    <div class="sh-pos" id="shPos"></div>
+  </div>
+  <div class="sh-body">
+    <div class="sh-kv">
+      <dt>Owner</dt><dd id="shOwner">—</dd>
+      <dt>Target</dt><dd class="mono" id="shTarget">—</dd>
+      <dt>Actual</dt><dd class="mono" id="shActual">—</dd>
+      <dt>Variance</dt><dd class="mono" id="shVar">—</dd>
+      <dt>Std duration</dt><dd class="mono" id="shStd">—</dd>
+      <dt>Linked hold point</dt><dd id="shHp">—</dd>
+    </div>
+    <div class="sh-sec">Delay reason history</div>
+    <div class="sh-hist" id="shHist"></div>
+    <div class="sh-sec">Maker / checker</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.5" id="shMk"></div>
+  </div>
+  <div class="sh-ft">
+    <button class="btn" onclick="toast('Full activity trail in development scope')">Open full activity</button>
+    <button class="btn" id="shBtn2" onclick="toast('Reason dialog in development')">File reason…</button>
+    <button class="btn btn-accent" id="shBtn1" onclick="toast('Action wired in development — logged with user & timestamp')">Start stage</button>
+  </div>
+</aside>
+
+<!-- ======= CMDK ======= -->
+<div class="cmdk" id="cmdk" onclick="if(event.target===this)closeCmdk()">
+  <div class="cmdk-box">
+    <input id="ckInput" placeholder="Jump to job, unit, stage, department… " autocomplete="off">
+    <div class="cmdk-list" id="ckList"></div>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+<div id="toast"></div>
+
+<script>
+const S={done:'var(--s-complete)',prog:'var(--s-progress)',sub:'var(--s-submitted)',od:'var(--s-overdue)',hold:'var(--s-hold)',idle:'var(--s-idle)'};
+const CHIP={done:['c-complete','Complete'],prog:['c-progress','In progress'],sub:['c-submitted','Awaiting QC'],od:['c-overdue','Overdue'],hold:['c-hold','On hold'],idle:['c-idle','Not started']};
+const stageNames=['PO receipt & order review','Design review','Drawing approval','BOM release','WPS / PQR approval','Material requisition','PO to vendors','Material receipt & MTC','Material inspection','Marking','Cutting','Rolling','Fit-up long seam','Welding long seam','NDT long seam','Fit-up circ seam','Welding circ seam','Nozzle fit-up & welding','Full NDT','PWHT','Internal inspection','Hydro test','Painting & surface','Final inspection / TPI','Dispatch & documentation'];
+const spine=['done','done','done','done','od','done','od','prog','prog','sub','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle','idle'];
+const deptOfStage=['Projects / PMO','Design & Detail Engg.','Design & Detail Engg.','Planning / PPC','Welding','Planning / PPC','Procurement','Stores','Quality Control / QA','Fabrication Prep','Fabrication Prep','Fabrication','Fabrication','Welding','NDT','Fabrication','Welding','Welding','NDT','Fabrication','Quality Control / QA','Quality Control / QA','Surface & Painting','Quality Control / QA','Hydro Test & Dispatch'];
+
+/* ---------- navigation ---------- */
+const crumbs={dash:'Overview / <b>Dashboard</b>',job:'Jobs / <b>DESPL-320</b>',ws:'Execution / <b>My Workspace</b>',dept:'Execution / <b>Departments</b>',weld:'Execution / <b>Welding</b>'};
+function go(id){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
+  document.getElementById('pg-'+id).classList.add('on');
+  document.querySelectorAll('.nav-item[data-nav]').forEach(n=>n.classList.toggle('active',n.dataset.nav===id));
+  document.getElementById('crumb').innerHTML=crumbs[id];
+  if(id!=='ws')setFilter('');
+  window.scrollTo({top:0});
+  if(id==='dash')runCounters();
+}
+function goFiltered(label){go('ws');setFilter(label);}
+function setFilter(label){
+  document.getElementById('wsFilter').innerHTML=label?'<span class="filterchip">Filter: '+label+' <b onclick="setFilter(\'\')">✕</b></span>':'';
+}
+function jtab(id){
+  document.querySelectorAll('#jtabs .tab').forEach(t=>t.classList.toggle('on',t.dataset.jt===id));
+  document.querySelectorAll('.jtab').forEach(t=>t.classList.remove('on'));
+  document.getElementById('jt-'+id).classList.add('on');
+}
+function toast(msg){const t=document.getElementById('toast');t.innerHTML='<span class="chip c-complete" style="margin-right:8px"><i></i>OK</span>'+msg;t.style.display='block';clearTimeout(t._x);t._x=setTimeout(()=>t.style.display='none',2200);}
+function tgl(id,e){e.stopPropagation();const d=document.getElementById(id);const on=d.classList.contains('on');document.querySelectorAll('.drop').forEach(x=>x.classList.remove('on'));if(!on)d.classList.add('on');}
+document.addEventListener('click',()=>document.querySelectorAll('.drop').forEach(x=>x.classList.remove('on')));
+
+/* ---------- animated counters ---------- */
+let counted=false;
+function runCounters(){
+  if(counted)return;counted=true;
+  document.querySelectorAll('[data-count]').forEach(el=>{
+    const target=parseFloat(el.dataset.count),dec=parseInt(el.dataset.dec||0),t0=performance.now();
+    function step(t){const p=Math.min(1,(t-t0)/850),e=1-Math.pow(1-p,3);el.textContent=(target*e).toFixed(dec);if(p<1)requestAnimationFrame(step);}
+    requestAnimationFrame(step);
+  });
+  setTimeout(()=>{document.getElementById('pb1').style.width='18.2%';},80);
+}
+
+/* ---------- top + big spine ---------- */
+document.getElementById('topSpine').innerHTML=spine.map(s=>'<i style="background:'+S[s]+'"></i>').join('');
+document.getElementById('bigSpine').innerHTML=spine.map((s,i)=>'<i style="background:'+S[s]+'" onclick="openSheet('+i+',null)" data-tip="Stage '+(i+1)+' · '+stageNames[i]+'|'+CHIP[s][1]+' · '+deptOfStage[i]+'"></i>').join('');
+
+/* ---------- critical path ---------- */
+const cp=[
+ [0,'Units 2–9','Projects / PMO',7],[7,'Unit 1','Quality Control / QA',5],[6,'All units','Procurement',4],[4,'Job level','Welding',3],[2,'Unit 1 · nozzle N4','Design & Detail Engg.',2]];
+document.getElementById('cpList').innerHTML=cp.map(c=>
+ '<div class="cp-row" onclick="openSheet('+c[0]+',null)"><div class="t"><b>'+stageNames[c[0]]+'</b><span>'+c[1]+' · Stage '+(c[0]+1)+' of 25</span></div><span class="dept-tag">'+c[2]+'</span><span class="cp-days mono">'+c[3]+'d</span></div>').join('');
+
+/* ---------- dept matrix ---------- */
+const depts=[
+ ['Projects / PMO','A. Kulkarni',8,6,2,8,1,92],['Design & Detail Engg.','N. Rao',12,9,3,12,2,88],['Planning / PPC','K. Iyer',3,4,1,6,0,95],
+ ['Procurement','A. Nair',14,8,2,6,4,71],['Stores','D. Chavan',5,3,1,4,0,90],['Fabrication Prep','M. Pawar',10,6,2,4,1,84],
+ ['Fabrication','R. Kadam',22,9,3,2,3,76],['Welding','V. Yadav',18,11,4,3,5,69],['Machining','T. Kale',9,4,1,2,1,82],
+ ['NDT','I. Shaikh',18,6,5,2,6,74],['Quality Control / QA','P. Mehta',34,12,8,6,9,66],['Surface & Painting','B. More',12,2,0,0,2,80],['Hydro Test & Dispatch','G. Joshi',14,3,1,0,1,85]];
+const statusNames=['Not started','In progress','Submitted','Complete','On hold'];
+const cols=[[74,79,87],[76,141,255],[163,113,247],[63,185,80],[217,166,46]];
+document.getElementById('mxBody').innerHTML=depts.map((d,di)=>{
+  const cells=d.slice(2,7).map((v,i)=>{
+    if(v===0)return '<td><div class="mx-cell mx-zero">0</div></td>';
+    const a=Math.max(.08,Math.min(.55,v/34*.9));
+    return '<td><div class="mx-cell mono" style="background:rgba('+cols[i]+','+a.toFixed(2)+');color:rgb('+cols[i].map(c=>Math.min(255,c+70))+')" onclick="goFiltered(\''+d[0]+' · '+statusNames[i]+'\')">'+v+'</div></td>';
+  }).join('');
+  const ot=d[7],barC=ot>=85?'var(--s-complete)':ot>=75?'var(--s-hold)':'var(--s-overdue)';
+  return '<tr><td>'+d[0]+'</td>'+cells+'<td><div class="otbar"><div class="bar"><i style="width:'+ot+'%;background:'+barC+'"></i></div><span class="mono" style="font-size:11.5px;color:'+barC+'">'+ot+'%</span></div></td></tr>';
+}).join('');
+
+/* ---------- throughput bars ---------- */
+const tp=[['W27',8],['W28',11],['W29',9],['W30',13],['W31',10],['W32',12],['W33',14]];
+document.getElementById('tpBars').innerHTML=tp.map((w,i)=>{
+  const h=w[1]/18*100,last=i===tp.length-1;
+  return '<div class="b"><span class="mono" style="color:'+(last?'var(--text)':'var(--muted)')+';font-size:10.5px">'+w[1]+'</span><i style="height:'+h+'%;'+(last?'background:var(--accent)':'')+'"></i><span>'+w[0]+'</span></div>';
+}).join('');
+
+/* ---------- cycle time vs standard ---------- */
+const ct=[['PO receipt & review',7,14],['WPS / PQR approval',12,15],['Drawing approval',10,11],['Cutting',1,.7],['Marking',1,.6]];
+document.getElementById('ctBody').innerHTML=ct.map(c=>{
+  const max=16,std=c[1]/max*100,act=c[2]/max*100,over=c[2]>c[1];
+  const d=(c[2]-c[1]);
+  return '<div class="gbar-row"><span style="color:var(--muted)">'+c[0]+'</span><div class="gbar"><i class="std" style="width:'+std+'%"></i><i style="width:'+act+'%;background:'+(over?'rgba(240,82,77,.75)':'rgba(63,185,80,.75)')+'"></i></div><span class="mono num" style="color:'+(over?'var(--s-overdue)':'var(--s-complete)')+'">'+(d>0?'+':'')+d.toFixed(1)+'d</span></div>';
+}).join('');
+
+/* ---------- aging ---------- */
+const aging=[['Quality Control / QA',5,4,3],['Welding',4,3,2],['Procurement',3,2,3],['Fabrication',4,2,1],['NDT',3,2,1],['Projects / PMO',1,1,2]];
+const ageC=['#D9A62E','#E07B2E','#F0524D'];
+document.getElementById('ageBody').innerHTML=aging.map(a=>{
+  const tot=a[1]+a[2]+a[3];
+  const segs=[1,2,3].map(i=>'<i style="width:'+(a[i]/12*100)+'%;background:'+ageC[i-1]+'"></i>').join('');
+  return '<div class="age-row"><span style="color:var(--muted);font-size:12px">'+a[0]+'</span><div class="agebar">'+segs+'</div><span class="mono num" style="font-size:12px">'+tot+'</span></div>';
+}).join('');
+
+/* ---------- units × stage matrix ---------- */
+const unitProg=[9,5,5,3,3,3,3,3,3];
+let uxsHtml='<tr><td class="ulab"></td>'+Array.from({length:25},(_,i)=>'<td style="text-align:center;color:#565b63;font-size:9px" class="mono">'+(i+1)+'</td>').join('')+'</tr>';
+const uxsState=[];
+for(let u=1;u<=9;u++){
+  const prog=unitProg[u-1];const row=[];
+  let html='<tr><td class="ulab">Unit '+u+'</td>';
+  for(let s=0;s<25;s++){
+    let st='idle';
+    if(u===1){ if(s<prog-2)st='done';else if(s===prog-2)st='sub';else if(s===prog-1)st='prog'; }
+    else { if(s===0)st='od'; else if(s<prog-1&&s>0)st='done'; else if(s===prog-1)st=(u===7?'hold':'prog'); }
+    row.push(st);
+    html+='<td><div class="cell" style="background:'+S[st]+'" onclick="openSheet('+s+','+u+')" data-tip="Unit '+u+' · Stage '+(s+1)+'|'+stageNames[s]+' — '+CHIP[st][1]+'"></div></td>';
+  }
+  uxsState.push(row);uxsHtml+=html+'</tr>';
+}
+document.getElementById('uxsTable').innerHTML=uxsHtml;
+
+/* ---------- gantt (unit 1, first 10 stages) ---------- */
+const TOTAL=152, TODAY=75; // Jun 1 = 0 … Oct 31
+const gantt=[
+ [0,0,7,0,9,'done'],[1,7,18,9,21,'done'],[2,18,28,21,32,'done'],[3,28,33,32,39,'done'],
+ [4,33,45,40,TODAY,'od'],[5,45,50,55,62,'done'],[6,50,60,62,TODAY,'od'],[7,60,80,68,TODAY,'prog'],
+ [8,80,86,-1,-1,'idle'],[9,86,90,70,75,'sub']];
+document.getElementById('ganttBody').innerHTML=
+ '<div class="g-today" style="left:calc(190px + '+(TODAY/TOTAL*100)+'% * (1 - 190px/100%))"></div>'+
+ gantt.map(g=>{
+  const ts=g[1]/TOTAL*100,tw=(g[2]-g[1])/TOTAL*100;
+  let bar='';
+  if(g[3]>=0){const as=g[3]/TOTAL*100,aw=Math.max(1.5,(g[4]-g[3])/TOTAL*100);
+    bar='<div class="g-actual" style="left:'+as+'%;width:'+aw+'%;background:'+S[g[5]]+'"><b>'+(g[5]==='od'?'+'+(TODAY-g[2])+'d':'')+'</b></div>';}
+  return '<div class="g-row" onclick="openSheet('+g[0]+',1)"><div class="g-name">'+(g[0]+1)+' · '+stageNames[g[0]]+'</div><div class="g-track"><div class="g-today" style="left:'+(TODAY/TOTAL*100)+'%"></div><div class="g-target" style="left:'+ts+'%;width:'+tw+'%"></div>'+bar+'</div></div>';
+}).join('');
+
+/* ---------- BOM tree ---------- */
+const bom=[
+ ['Shell',[['Shell Course 1','SA 516 Gr.70 · 16mm · H2341','prog'],['Shell Course 2','SA 516 Gr.70 · 16mm · H2341','idle']]],
+ ['Heads',[['Dished End 2:1 Ellip. ×2','SA 516 Gr.70 · vendor: PV Forms','hold']]],
+ ['Nozzles',[['N1 Inlet 4" · SA 106 Gr.B','w/ WNRF flange 300#','idle'],['N2 Outlet 4"','w/ WNRF flange 300#','idle'],['N3 Drain 1"','SA 105 coupling','idle'],['Manway 18"','w/ davit & cover','idle']]],
+ ['Supports',[['Saddle supports ×2','IS 2062 E250','done']]],
+ ['Bought-out',[['Safety valve 24"','vendor: SAV — PO open','od'],['Gaskets & fasteners (lot)','per BOM sheet 3','idle']]]];
+document.getElementById('bomTree').innerHTML=bom.map((g,i)=>
+ '<div class="bom-grp'+(i===0?' open':'')+'"><div class="bom-hd" onclick="this.parentNode.classList.toggle(\'open\')"><span class="car">▶</span>'+g[0]+'<span class="cnt">'+g[1].length+' items</span></div><div class="bom-items">'+
+ g[1].map(it=>'<div class="bom-item"><span>'+it[0]+'<div class="mat">'+it[1]+'</div></span><span class="spine-mini">'+[0,1,2,3,4].map(k=>'<i style="width:5px;height:8px;background:'+(it[2]==='done'?S.done:it[2]==='prog'&&k<2?S.done:it[2]==='prog'&&k===2?S.prog:it[2]==='od'&&k===0?S.od:it[2]==='hold'&&k===0?S.hold:S.idle)+'"></i>').join('')+'</span><span class="chip '+CHIP[it[2]][0]+'"><i></i>'+CHIP[it[2]][1]+'</span><button class="btn btn-ghost" onclick="toast(\'Component drill-down on the right panel\')">→</button></div>').join('')+'</div></div>').join('');
+document.getElementById('compSpine').innerHTML=[S.done,S.done,S.prog,S.idle,S.idle,S.idle].map(c=>'<i style="background:'+c+'"></i>').join('');
+
+/* ---------- QCP table ---------- */
+const qcp=[
+ ['ITP-320-01','Material identification','H','ASME II-A','P. Mehta','—','sub','2d'],
+ ['ITP-320-02','Fit-up long seam · U1','W','DWG-320-F02','P. Mehta','Awaiting','hold','4d'],
+ ['ITP-320-03','WPS qualification record','H','ASME IX','P. Mehta','Cleared','done','—'],
+ ['ITP-320-04','Hydro test witness · U2','H','UG-99','—','Awaiting','hold','6d'],
+ ['ITP-320-05','PWHT chart review','R','UCS-56','—','—','idle','—'],
+ ['ITP-320-06','MPI dished end','W','ASME V Art.7','I. Shaikh','—','idle','—'],
+ ['ITP-320-07','RT film review · U1','W','ASME V Art.2','I. Shaikh','—','sub','1d'],
+ ['ITP-320-08','Final dimension check','H','GA drawing','—','—','idle','—']];
+document.getElementById('qcpBody').innerHTML=qcp.map(q=>
+ '<tr class="row"><td class="mono" style="color:var(--muted)">'+q[0]+'</td><td>'+q[1]+'</td><td><span class="hclass">'+q[2]+'</span></td><td class="mono" style="color:var(--muted);font-size:11.5px">'+q[3]+'</td><td>'+q[4]+'</td><td>'+q[5]+'</td><td><span class="chip '+CHIP[q[6]][0]+'"><i></i>'+CHIP[q[6]][1]+'</span></td><td class="num mono" style="color:'+(q[7].includes('d')&&parseInt(q[7])>3?'var(--s-overdue)':'var(--muted)')+'">'+q[7]+'</td></tr>').join('');
+
+/* ---------- feeds ---------- */
+const feed=[
+ ['RK','R. Kadam','Fabrication','submitted <b>Marking · Unit 1</b>','c-submitted','Awaiting QC','08:02'],
+ ['PM','P. Mehta','QC','verified <b>Cutting plan · Unit 1</b>','c-complete','Verified','07:41'],
+ ['AN','A. Nair','Procurement','filed delay reason on <b>Dished end PO</b> — <i>"vendor quote revision"</i>','','','Yesterday'],
+ ['PM','P. Mehta','QC','rejected <b>Shell plate MTC · Unit 2</b> — <i>"heat no. mismatch"</i>','c-overdue','Rejected','Yesterday'],
+ ['VY','V. Yadav','Welding','logged 3 joints · <b>LS-U1</b> — sent to NDT','','','Yesterday'],
+ ['KI','K. Iyer','Planning','released BOM rev.2 for <b>Units 4–9</b>','c-complete','Released','13 Aug']];
+function feedHtml(n){return feed.slice(0,n).map(f=>
+ '<div class="feed-row"><div class="avatar" style="width:24px;height:24px;font-size:10px">'+f[0]+'</div><div><b style="font-weight:500">'+f[1]+'</b> <span style="color:var(--muted)">('+f[2]+')</span> '+f[3]+(f[4]?'<br><span class="chip '+f[4]+'" style="margin-top:4px"><i></i>'+f[5]+'</span>':'')+'</div><span class="when">'+f[6]+'</span></div>').join('');}
+document.getElementById('feedShort').innerHTML=feedHtml(4);
+document.getElementById('feedFull').innerHTML=feedHtml(6);
+
+/* ---------- workspace grouped table ---------- */
+const units=[[2,'08 Aug',7],[3,'08 Aug',7],[4,'09 Aug',6],[5,'09 Aug',6],[6,'11 Aug',4],[7,'11 Aug',4],[8,'13 Aug',2],[9,'13 Aug',2]];
+document.getElementById('wsBody').innerHTML=units.map(u=>
+ '<tr class="row"><td class="mono" style="color:var(--muted)">Unit '+u[0]+'</td><td class="mono">'+u[1]+'</td>'+
+ '<td class="num mono" style="color:var(--s-overdue);font-weight:600">'+u[2]+'d</td>'+
+ '<td><select class="btn" style="width:100%"><option>Select reason…</option><option>Material delay</option><option>Vendor delay</option><option>Drawing revision</option><option>Manpower</option><option>Client hold</option></select></td>'+
+ '<td><input type="text" placeholder="detail (optional)"></td>'+
+ '<td class="num"><button class="btn btn-accent" onclick="toast(\'Stage started — Unit '+u[0]+'\')">Start</button></td></tr>').join('');
+
+/* ---------- departments ---------- */
+const sparks=['0,16 14,14 28,15 42,11 56,12 70,8','0,14 14,15 28,12 42,13 56,10 70,9','0,10 14,11 28,9 42,10 56,8 70,7'];
+document.getElementById('deptGrid').innerHTML=depts.map((d,i)=>{
+  const ot=d[7],c=ot>=85?'var(--s-complete)':ot>=75?'var(--s-hold)':'var(--s-overdue)';
+  const load=d[2]+d[3]+d[4],odv=Math.round(d[6]*0.6);
+  return '<div class="dept-card" onclick="goFiltered(\''+d[0]+'\')"><h4>'+d[0]+'</h4><div class="rep">'+d[1]+' · representative</div>'+
+  '<div class="dept-nums"><span><b class="mono">'+load+'</b>open</span><span><b class="mono" style="color:'+c+'">'+ot+'%</b>on-time</span><span><b class="mono" style="color:'+(odv>3?'var(--s-overdue)':'var(--text)')+'">'+odv+'</b>overdue</span>'+
+  '<svg width="70" height="20" viewBox="0 0 70 20" style="margin-left:auto;align-self:flex-end"><polyline points="'+sparks[i%3]+'" fill="none" stroke="'+c+'" stroke-width="1.5" opacity=".8"/></svg></div></div>';
+}).join('');
+
+/* ---------- welding ---------- */
+const welders=[
+ ['M. Sharma','Welder Gr.1 · 6G',34,'+18%','d-good',2.9,false,'0,15 14,13 28,12 42,9 56,8 70,5'],
+ ['V. Yadav','Welder Gr.1 · 6G',29,'+5%','d-good',4.1,false,'0,13 14,12 28,13 42,10 56,9 70,8'],
+ ['R. Gill','Welder Gr.2',25,'−4%','d-bad',3.4,false,'0,11 14,12 28,10 42,11 56,10 70,9'],
+ ['S. Ansari','Welder Gr.2',22,'−12%','d-bad',8.7,true,'0,9 14,10 28,12 42,11 56,13 70,14']];
+document.getElementById('weldGrid').innerHTML=welders.map(w=>
+ '<div class="weld-card'+(w[6]?' warn':'')+'"><h4>'+w[0]+'</h4><div class="role">'+w[1]+'</div>'+
+ '<div class="weld-stats"><span><b class="mono">'+w[2]+'</b>joints · job</span><span><b class="mono"><span class="delta '+w[4]+'">'+w[3]+'</span></b>vs team avg</span>'+
+ '<span><b class="mono" style="color:'+(w[5]>6?'var(--s-overdue)':'var(--text)')+'">'+w[5]+'%</b>NDT repair rate</span>'+
+ '<span><svg width="70" height="20" viewBox="0 0 70 20"><polyline points="'+w[7]+'" fill="none" stroke="'+(w[6]?'#F0524D':'#4C8DFF')+'" stroke-width="1.5"/></svg><span style="font-size:10px">14-day output</span></span></div>'+
+ (w[6]?'<div style="margin-top:10px"><span class="chip c-overdue"><i></i>Repair rate above 6% — review WPS adherence</span></div>':'')+'</div>').join('');
+const wj=[['V. Yadav',8],['R. Gill',7],['M. Sharma',6],['S. Ansari',4]];
+document.getElementById('wjBody').innerHTML=wj.map(w=>
+ '<div class="gbar-row"><span style="color:var(--muted)">'+w[0]+'</span><div class="gbar"><i style="width:'+(w[1]/10*100)+'%;background:rgba(76,141,255,.75)"></i></div><span class="mono num">'+w[1]+' open</span></div>').join('');
+const ndt=[
+ ['LS-U1-01','1','M. Sharma','RT','done','12 Aug'],['CS-U1-02','1','S. Ansari','RT','od','12 Aug'],
+ ['LS-U1-02','1','M. Sharma','RT','done','11 Aug'],['N2-U1-W1','1','V. Yadav','DP','sub','11 Aug'],['LS-U2-01','2','R. Gill','RT','done','10 Aug']];
+const ndtChip={done:['c-complete','Accept'],od:['c-overdue','Repair'],sub:['c-submitted','Pending']};
+document.getElementById('ndtBody').innerHTML=ndt.map(n=>
+ '<tr class="row"><td class="mono" style="color:var(--muted)">'+n[0]+'</td><td class="mono">'+n[1]+'</td><td>'+n[2]+'</td><td class="mono">'+n[3]+'</td><td><span class="chip '+ndtChip[n[4]][0]+'"><i></i>'+ndtChip[n[4]][1]+'</span></td><td class="num mono" style="color:var(--muted)">'+n[5]+'</td></tr>').join('');
+
+/* ---------- stage sheet ---------- */
+function openSheet(s,u){
+  const st=(u&&uxsState[u-1])?uxsState[u-1][s]:spine[s];
+  document.getElementById('shChip').className='chip '+CHIP[st][0];
+  document.getElementById('shChip').innerHTML='<i></i>'+CHIP[st][1];
+  document.getElementById('shTitle').textContent='Stage '+(s+1)+' · '+stageNames[s];
+  document.getElementById('shSub').textContent='DESPL-320 · '+(u?('Unit '+u):'Units 2–9')+' · '+deptOfStage[s];
+  document.getElementById('shPos').innerHTML=spine.map((x,i)=>'<i style="background:'+(i===s?'var(--accent)':S[x])+'"></i>').join('');
+  document.getElementById('shOwner').textContent=deptOfStage[s]+' — supervisor';
+  const od=st==='od';
+  document.getElementById('shTarget').textContent=od?'01 Aug → 08 Aug':'12 Aug → 16 Aug';
+  document.getElementById('shActual').textContent=st==='idle'?'not started':(od?'01 Aug → in progress':'12 Aug → in progress');
+  const v=document.getElementById('shVar');v.textContent=od?'+7d overdue':'on schedule';v.style.color=od?'var(--s-overdue)':'var(--s-complete)';
+  document.getElementById('shStd').textContent=od?'7d standard · 14d elapsed':'4d standard · 2d elapsed';
+  document.getElementById('shHp').innerHTML=(s===21||s===12)?'<span class="chip c-hold"><i></i>ITP linked</span>':'none';
+  document.getElementById('shHist').innerHTML=od?
+    '<div>Vendor delay — <i>"quote revision awaited"</i><small>A. Nair · 13 Aug 17:40</small></div><div>Material delay — <i>"plate allocation pending"</i><small>A. Nair · 09 Aug 10:12</small></div>':
+    '<div style="color:var(--muted)">No delay reasons filed.</div>';
+  document.getElementById('shMk').innerHTML='Supervisor <b style="color:var(--text)">submits</b> → QC <b style="color:var(--text)">verifies</b> before the next department is unlocked. Every action is logged with user, timestamp'+(od?' — and this stage currently <b style="color:var(--s-overdue)">blocks the gate</b> for all later stages.':'.');
+  document.getElementById('shBtn1').textContent=st==='sub'?'Verify':(st==='prog'?'Submit for QC':'Start stage');
+  document.getElementById('ovl').classList.add('on');
+  document.getElementById('sheet').classList.add('on');
+}
+function closeSheet(){document.getElementById('ovl').classList.remove('on');document.getElementById('sheet').classList.remove('on');}
+
+/* ---------- cmdk ---------- */
+const ckData=[
+ ['DESPL-320 · HP Air Receiver','Job',()=>go('job')],['DE0467 · Pressure Pipe','Job',()=>toast('Job switching wired in development')],
+ ['DE0463 · SS Tank','Job',()=>toast('Job switching wired in development')],
+ ['Dashboard','Page',()=>go('dash')],['My Workspace','Page',()=>go('ws')],['Departments','Page',()=>go('dept')],['Welding','Page',()=>go('weld')],
+ ['Unit 4 · current stage','Unit',()=>{go('job');openSheet(2,4)}],['Unit 2 · PO receipt (overdue)','Unit',()=>{go('job');openSheet(0,2)}],
+ ['Stage: Hydro test','Stage',()=>{go('job');openSheet(21,1)}],['Stage: WPS / PQR approval','Stage',()=>{go('job');openSheet(4,1)}],
+ ['Quality Control / QA','Dept',()=>goFiltered('Quality Control / QA')],['Welding dept','Dept',()=>goFiltered('Welding')],
+ ['File delay reason (8 pending)','Action',()=>go('ws')],['Verify submitted items (2)','Action',()=>go('ws')]];
+function openCmdk(){document.getElementById('cmdk').classList.add('on');const i=document.getElementById('ckInput');i.value='';renderCk('');i.focus();}
+function closeCmdk(){document.getElementById('cmdk').classList.remove('on');}
+function renderCk(q){
+  const list=ckData.filter(d=>d[0].toLowerCase().includes(q.toLowerCase()));
+  document.getElementById('ckList').innerHTML=list.length?list.map((d,i)=>'<div class="ck-row'+(i===0?' sel':'')+'" onclick="ckGo('+ckData.indexOf(d)+')">'+d[0]+'<span class="kind">'+d[1]+'</span></div>').join(''):'<div class="ck-empty">No matches.</div>';
+}
+function ckGo(i){closeCmdk();ckData[i][2]();}
+document.getElementById('ckInput').addEventListener('input',e=>renderCk(e.target.value));
+document.getElementById('ckInput').addEventListener('keydown',e=>{if(e.key==='Enter'){const f=document.querySelector('.ck-row.sel');if(f)f.click();}});
+document.addEventListener('keydown',e=>{
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openCmdk();}
+  if(e.key==='Escape'){closeCmdk();closeSheet();}
+});
+
+/* ---------- tooltip ---------- */
+const tip=document.getElementById('tip');
+document.addEventListener('mouseover',e=>{
+  const t=e.target.closest('[data-tip]');
+  if(t){const p=t.dataset.tip.split('|');tip.innerHTML='<b>'+p[0]+'</b><span>'+(p[1]||'')+'</span>';tip.style.display='block';}
+  else tip.style.display='none';
+});
+document.addEventListener('mousemove',e=>{
+  if(tip.style.display==='block'){
+    const x=Math.min(e.clientX+14,window.innerWidth-250),y=Math.min(e.clientY+14,window.innerHeight-60);
+    tip.style.left=x+'px';tip.style.top=y+'px';
+  }
+});
+
+runCounters();
+</script>
+</body>
+</html>

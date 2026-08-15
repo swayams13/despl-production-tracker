@@ -71,3 +71,77 @@ Now tracked as C1–C12 in `docs/BUILD-SPEC-v2.md` §7 with the default in use f
 ## Session discipline
 
 End every session by updating `progress.md`: what shipped, decisions made, blockers, next steps. Keep the demo script (`docs/demo.md`, once created) in sync — the demo to MD/CEO includes deliberately attempting violations and showing the refusals.
+
+---
+
+## Frontend & Design System
+
+> Frontend/demo-ready build guide (merged from the design pack, 15 Aug 2026). The invariants and conventions above are still binding — this section governs the visual/UX layer only. `docs/DESIGN_SPEC.md` is the full execution contract; `design/despl-tracker-mockup.html` is the pixel reference.
+
+**Current milestone: DEMO ROLLOUT.** The whole team will click through this build and give feedback. Therefore: every module reachable from the sidebar must be FUNCTIONAL — real data, real actions that persist. Judgment call rule: a smaller number of fully working modules beats a larger number of half-working ones, but the target is all of them per DESIGN_SPEC.md.
+
+### Pixel reference
+
+`design/despl-tracker-mockup.html` (the approved v2 mockup) is the visual source of truth. When in doubt about spacing, color, density, or an interaction, open the mockup and match it. Do not "improve" the approved design without being asked.
+
+### Functional-first rules (demo mandate)
+
+1. **No dead controls.** Every button, link, dropdown, and cell either performs a real action (persisted via API) or does not exist. Never ship a control that only toasts "coming soon". If a feature is out of scope, remove its control.
+2. **Real data only.** All screens render from the database via API routes — no hardcoded arrays in components. Demo realism comes from the seed script (see DESIGN_SPEC.md §1), never from mock data inside the UI.
+3. **Actions round-trip.** Start / Submit / Verify / Reject / File reason / Clear hold must write to Postgres, re-render optimistically, toast the result, and appear in the activity log and notifications. If the demo laptop refreshes, state survives.
+4. **Gates are enforced server-side.** A stage cannot start until the previous stage is verified; QC verify/reject only for QC roles; reject requires a reason. The demo WILL include someone trying to break this — return a clean error, not a crash.
+5. **Every page ships with** loading skeletons (match final layout, no full-page spinners), an empty state (one sentence + one action), an error state (what failed + retry), visible keyboard focus, and reduced-motion support.
+
+### Aesthetic direction (non-negotiable)
+
+Industrial control-room aesthetic. Density and precision of Linear / Vercel dashboard / Palantir Foundry. Dark theme only in v1. Data density over whitespace. Zero decorative gradients, zero glassmorphism. Instrumentation, not marketing.
+
+**Signature element:** the *Stage Spine* — a horizontal segmented bar of the 25 work-order stages, color-coded by status. Mini (4px) on every job row and in the job switcher; full-size interactive on the job page. One reusable component: `<StageSpine />`.
+
+### Design tokens
+
+Colors (CSS variables in `globals.css`):
+
+- `--bg` #0B0C0E · `--surface` #141619 · `--surface-2` #1C1F24 · `--border` #262A30
+- `--text` #E7E9EC · `--muted` #8B919A
+- `--accent` #FF7A1A — high-vis industrial orange. Primary buttons, active nav rail, "actual" S-curve line, filter chips, focus rings. Sparingly: >3 orange elements on one screen means remove some.
+
+Status colors (the ONLY way status is communicated — never plain grey text):
+
+- `--s-complete` #3FB950 · `--s-progress` #4C8DFF · `--s-submitted` #A371F7 (awaiting QC)
+- `--s-hold` #D9A62E · `--s-overdue` #F0524D · `--s-idle` #4A4F57
+
+Status renders as `<StatusChip />`: pill, 10.5px uppercase, 12%-opacity tinted bg, solid dot. Heatmap/matrix cells use the same hues, opacity scaled by value, and ALWAYS print the number inside the cell (zero = plain muted "0", no tint).
+
+### Typography
+
+- UI/body: **Inter** via `next/font` (fallback Geist Sans). If a browser-default serif ever renders, treat it as a P0 bug.
+- All numeric data: **JetBrains Mono** with `font-variant-numeric: tabular-nums`. Numbers align vertically in every table.
+- Scale: page title 20/600 · section header 11/600 uppercase tracked muted · body 13 · caption 10.5–11 · KPI value 28/600 mono. Nothing larger than 28px.
+
+### Layout
+
+236px sidebar (collapsible to icon rail) + 48px sticky topbar with breadcrumb, job switcher (with mini spine), ⌘K, notification bell. No page outside the shell except /login. 8px grid, card padding 16px, table rows 36px, radius 6px cards / 4px inputs.
+
+### Interaction primitives (all mandatory, build once, reuse)
+
+- `<StageSheet />` — 460px right sheet, opens from ANY stage reference (spine segment, matrix cell, gantt row, critical-path row, workspace row). Shows owner, target vs actual, variance, std duration vs elapsed, delay-reason history, linked hold points, and the role-correct action (Start / Submit / Verify / Reject).
+- `<CommandPalette />` — cmdk on ⌘K: jobs, units, stages, departments, pages, pending actions ("File delay reason (8)"). Enter executes.
+- **Cross-filter navigation** — KPI cards and matrix cells deep-link to the Workspace with a dismissible orange filter chip. URL-driven (`/workspace?dept=…&status=…`) so it survives refresh and back-button.
+- Custom tooltips (styled div, not `title=`), animated count-up on dashboard KPIs (once per visit), 250–300ms page/tab fade-up transitions, sonner toasts bottom-right.
+
+### Copy rules
+
+Plain verbs, sentence case. Buttons say what happens ("Submit for QC", not "Submit"). Humanize all enums (`PRODUCTION_HEAD` → "Production Head"). Never show DB roles, RLS notes, table names, or developer commentary in the UI. Errors state what went wrong and how to fix it; empty states invite action.
+
+### Hard bans
+
+Browser-default serif · raw enums in UI · dev commentary in UI · N identical repeated cards (always aggregate into grouped tables / matrices with bulk actions) · status as plain text · matrix cells without printed values · unlabeled chart axes · decorative gradients, glow, emoji, stock imagery · dead "coming soon" controls · mock data inside components · localStorage for app state.
+
+### Workflow for the agent (Antigravity / Claude Code)
+
+- Read `DESIGN_SPEC.md` fully before any session; it is the execution contract. Use the `frontend-design` skill for any new visual surface.
+- Work in the session order in DESIGN_SPEC.md §9. One module per session. Do not start a new module until the previous one passes its acceptance checks.
+- End every session by: (1) running the app and clicking every control you built, (2) checking the Demo Readiness checklist items for that module (§8), (3) listing which hard bans you verified.
+- Never invent schema — extend the existing Postgres schema via migrations, keep RLS intact, and keep all writes going through API routes with server-side role checks.
+- If mockup and spec conflict, the spec wins; note the conflict in your summary.
