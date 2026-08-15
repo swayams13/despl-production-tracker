@@ -28,6 +28,17 @@ Shipped, spec+plan at `docs/SPEC-department-workspaces-v1.md` / `docs/PLAN-depar
 
 **⚠️ Demo-enablement caveat (env, not a code defect):** the local dev DB has accumulated **33 `Organization` rows** from repeated non-idempotent `pnpm db:seed` over the project's life, and `resolveTenantForLogin` fail-closes unless exactly one org exists — so **every login currently fails** on this machine regardless of password. Before the live click-through demo, run **`pnpm prisma migrate reset --force && pnpm db:bootstrap`** (migrate reset needs your hands — it's human-consent gated) to get a clean single-org DB seeded with the default `despl-dev-only` password. The feature code is unaffected (the 288 DB tests run under explicit `withTenant` scoping, bypassing login).
 
+### Next session — TODO
+
+1. **🟠 Production-safe seeding (do before Railway deploy).** Root cause of the dev-DB pollution (33 `Organization` rows) is that `prisma/seed.ts` uses `createMany` and is **not idempotent** — every `pnpm db:seed` piles on another full copy. This is harmless in dev (just `migrate reset` to clean) but must be fixed before a production database exists:
+   - Split a **reference-data seed** (organizations, roles, departments, product-family/QCP templates, delay categories, code vocab) that is **idempotent** — `upsert` on natural keys or a seed-once guard — so re-running can never duplicate.
+   - Keep **demo/live-job data** (DE0463/DE0467/DESPL-320, units, BOM, QCP instances) in a separate dev-only seed path, not run against production.
+   - **Never run `pnpm db:bootstrap` against production** — it is a *demo* schedule generator (mid-flight dated DESPL-320 plans). Real production schedules are generated per real job via the `generateSchedule` service through the UI.
+   - Production migration flow is `prisma migrate deploy` (no reset, no data loss) — `migrate reset` stays dev-only. Belongs with the "Deploy to Railway staging" milestone.
+2. **Live demo prep (env, not code):** before demoing, `pnpm prisma migrate reset --force && pnpm db:bootstrap` for a clean single-org DB (login `despl-dev-only`). Optional enhancement offered but not built: a small demo-seed that drives a few units to COMPLETE so `/dashboard` shows a partially-done board on first load instead of all-NOT_STARTED.
+3. **DESPL inputs:** confirm C24 (batch-level processes per-unit?) and C25 (worklist grouped by unit vs process); and — the unlock for the workforce-aware auto-scheduler — request **per-department capacity / headcount / shift / throughput** data (the specific input Phase 2's optimizer needs).
+4. **Deferred Phase-2 seams** (all inert for the pilot): per-serial schedule stagger, TPI call-given/attended + witness-waiver flow, `reviewDelayReason` (PH acknowledge/dispute). Two cosmetic UI polish items from the final review: MANAGEMENT sees inert transition buttons on `/workspace`; the delay form renders (and fails FORBIDDEN) on out-of-department QC-queue rows — both server-guarded, safe to ship.
+
 ---
 
 ## ▶ Resume point (read this first in a new session)
