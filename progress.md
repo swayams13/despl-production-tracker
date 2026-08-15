@@ -35,7 +35,13 @@ docker `despl-pg` up · 6 migrations applied, schema up to date · RLS roles `de
 ### Deps added
 `sonner` (toasts) + `@radix-ui/react-dialog` (StageSheet + future dialogs). Deferred to their sessions: `cmdk`, `recharts`, `@tanstack/react-table`, SVAR React Gantt. **No `next-themes`** — dark-only per spec.
 
-### Session 1 (§9.1: tokens + fonts + shell + StatusChip + StageSpine + StageSheet shell) — IN PROGRESS
+### Session 1 (§9.1: tokens + fonts + shell + StatusChip + StageSpine + StageSheet shell) — ✅ COMPLETE & VERIFIED
+
+**Finished the session (all 6 remaining items built, verified in-browser, committed).** `/kit` (the new-system review surface, route `/kit`, auth-gated) renders the full industrial shell: dark theme (scoped), 236px sidebar nav (Overview/Execution/Records), topbar with job-switcher + mini-spine + ⌘K/bell stubs, all 6 StatusChips with correct colours, StageSpine **full (clickable) + mini** with the **C26 hold-fill+overdue-pip on Stage 9**, and the StageSheet sliding in with both reasons (why-on-hold + why-overdue "reason required" pending state) — its tokens resolve through the radix portal via a re-declared `.theme-industrial` class. Legacy warm-paper root/dashboard/workspace confirmed **still readable** (scoped transition holds). **Verify: `pnpm typecheck` + `lint` clean; `pnpm build` clean (11 routes, `/kit` prerenders, middleware 48.3kB); live browser pass as `sj@despl.local`.** One real bug found & fixed live: the full spine's clickable `<button>` segments were invisible because the CSS targeted `.spine i` — changed to `.spine > *` so it styles both the mini's `<i>` and the full spine's `<button>`.
+Files added: `src/components/industrial/{stage-spine,stage-sheet,app-shell,_demo}.tsx|ts`, `src/app/(app)/layout.tsx`, `src/app/(app)/kit/page.tsx`. `_demo.ts` is throwaway session-1 demo data — delete when StageSpine reads real rolled-up plan data.
+**Next session = §9.2:** seed script + SQL views (incl. `v_unit_stage_status` §11) + `/api/*` route handlers for jobs/stages/events — the data layer the real pages need. Then §9.3 Workspace (first real page, migrates into `(app)` + reskin, removing the legacy `/workspace`).
+
+<details><summary>Original session-1 build plan (for reference)</summary>
 **DONE (uncommitted):**
 - `src/app/globals.css` — appended a scoped `.theme-industrial` block (tokens + shell + primitives + chip + spine + sheet + motion + `prefers-reduced-motion`), ported 1:1 from the mockup. Legacy `:root` warm tokens untouched.
 - `src/app/layout.tsx` — Inter + JetBrains Mono via `next/font` → `--font-inter` / `--font-jbmono` on `<html>`.
@@ -51,6 +57,7 @@ docker `despl-pg` up · 6 migrations applied, schema up to date · RLS roles `de
 6. **Verify:** `pnpm typecheck && pnpm lint && pnpm build`; boot dev against `despl_demo` (`pnpm dev`); screenshot `/kit` and `/login`. Then commit Session 1 on `demo`.
 
 **Resume specifics:** `.env` already → `despl_demo`. DB container `despl-pg` is up. Run `pnpm dev` (env now correct, no inline override needed). Logins: `sj@ qc@ md@ sup.<dept>@`, password `despl-dev-only`. Do the remaining 6 items, verify, THEN commit. Legacy `/dashboard` `/workspace` are expected to look unstyled-but-readable (warm theme) until their own sessions — that's the scoped-transition plan, not a bug.
+</details>
 
 
 ## Session — live browser verification pass + stale-refusal fix, 15 Aug 2026

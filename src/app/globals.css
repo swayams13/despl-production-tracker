@@ -370,14 +370,15 @@ body {
 
 /* stage spine (signature element) */
 .theme-industrial .spine { display: flex; gap: 2px; margin: 4px 0 6px; }
-.theme-industrial .spine i { flex: 1; height: 14px; border-radius: 2px; cursor: pointer; transition: transform .1s; border: none; padding: 0; }
-.theme-industrial .spine i:hover { outline: 1px solid var(--text); transform: scaleY(1.25); }
+/* `> *` so it styles both the mini's <i> and the full spine's clickable <button> */
+.theme-industrial .spine > * { flex: 1; height: 14px; border-radius: 2px; cursor: pointer; transition: transform .1s; border: none; padding: 0; display: block; appearance: none; -webkit-appearance: none; min-width: 0; }
+.theme-industrial .spine > *:hover { outline: 1px solid var(--text); transform: scaleY(1.25); }
 .theme-industrial .spine-lab { display: flex; justify-content: space-between; color: var(--muted); font-size: 10.5px; }
 .theme-industrial .spine-mini { display: flex; gap: 1px; }
 .theme-industrial .spine-mini i { width: 4px; height: 10px; border-radius: 1px; display: block; }
 /* secondary overdue marker: hold leads as fill, overdue follows as a corner pip (C26) */
-.theme-industrial .spine i.pip-od, .theme-industrial .spine-mini i.pip-od { position: relative; }
-.theme-industrial .spine i.pip-od::after { content: ""; position: absolute; top: 1px; right: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--s-overdue); box-shadow: 0 0 0 1px var(--bg); }
+.theme-industrial .spine > *.pip-od, .theme-industrial .spine-mini i.pip-od { position: relative; }
+.theme-industrial .spine > *.pip-od::after { content: ""; position: absolute; top: 1px; right: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--s-overdue); box-shadow: 0 0 0 1px var(--bg); }
 .theme-industrial .spine-mini i.pip-od::after { content: ""; position: absolute; top: -1px; right: -1px; width: 3px; height: 3px; border-radius: 50%; background: var(--s-overdue); box-shadow: 0 0 0 1px var(--bg); }
 
 /* stage sheet (portaled — element re-declares .theme-industrial, so tokens resolve) */
