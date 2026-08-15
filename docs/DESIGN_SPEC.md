@@ -162,6 +162,19 @@ action targets a real ProcessPlan: the primary CTA drives the *governing process
 its own status + role-correct action. Never render a "start stage" control that has no
 process to write to (functional rule #1).**
 
+**Both reasons, always attributed to a process (SJ requirement).** A stage that is on
+hold *and* overdue must show *both* causes, each tied to the specific backing process:
+- **Why on hold** — the open hold point (ITP ref, H/W/R class, what's awaited, e.g.
+  "awaiting TPI attendance"), from the process's linked QCP items.
+- **Why overdue** — the categorized delay reason filed under invariant #7 (category,
+  free-text detail, who filed it, when). If none is filed yet, show the explicit
+  **pending** state: "Overdue Nd · reason required" — not blank (invariant #7 blocks
+  further progress until it's filed, so pending is a real, expected state, not an error).
+- These are **linked but distinct records** (the hold is the QC mechanism; the delay
+  reason is the schedule categorization; the hold is often the *cause* of the overdue).
+  One line of explainer copy where both are present: "Overdue — the open hold point is
+  the likely cause; file the matching reason."
+
 ### 4.6 `/departments` + `/departments/[id]`
 Cards (13): name, representative, open count, on-time % (colored by threshold),
 overdue count, 6-week trend sparkline. Card click → department detail: DataGrid of
@@ -308,10 +321,14 @@ overlays computed at read time (never stored):
 - `overdue` ≝ `status ≠ COMPLETE AND plannedFinish < now()`
 - `rejected` ≝ the plan has ≥1 rejected QC submission in history (from events/audit).
 
-Map each backing `ProcessPlan` to a display state, then collapse the set for one
-(unit, stage) with **first match wins**, top to bottom:
+A stage renders **two signals**: a **fill colour** (the primary status) and up to one
+**secondary marker** (a small pip/corner glyph), so a stage that is more than one thing
+shows both at a glance without opening the sheet.
 
-| # | Condition over the stage's backing plans | Stage display status | Token |
+**Fill colour** — map each backing `ProcessPlan` to a display state, then collapse the
+set for one (unit, stage) with **first match wins**, top to bottom:
+
+| # | Condition over the stage's backing plans | Fill status | Token |
 |---|---|---|---|
 | 1 | **All** plans are `COMPLETE` | complete | `--s-complete` |
 | 2 | any plan `ON_HOLD` | on hold | `--s-hold` |
@@ -320,18 +337,29 @@ Map each backing `ProcessPlan` to a display state, then collapse the set for one
 | 5 | any plan `IN_PROGRESS`, **or** some (not all) `COMPLETE` | in progress | `--s-progress` |
 | 6 | all plans `NOT_STARTED` | idle | `--s-idle` |
 
+**Secondary markers** — rendered *in addition to* the fill, only when true and not
+already the fill:
+- **Overdue pip** (`--s-overdue`): shown when any backing plan is overdue **and** the
+  fill is not already `overdue`. The only reachable case is **hold fill + overdue pip**
+  (amber segment / cell, small red pip) — because hold outranks overdue in the fill
+  ladder, a hold stage that is also late shows amber-with-red-pip rather than hiding the
+  slippage. **This is the resolved answer to C26** (SJ, confirmed): hold leads as the
+  fill, overdue follows as the secondary marker — both visible, neither lost.
+- **Rejected marker** (distinct glyph, e.g. top-corner notch): shown when any backing
+  plan has a rejected QC submission in history. `rejected` is **not** a fill colour
+  (there is no rejected token); it is history, surfaced here as a marker and in full in
+  the StageSheet reason panel.
+
 Notes that make this deterministic:
 - **Complete is checked first** so a fully-done stage reads green even though nothing is
-  "in progress". Every other row requires the stage to be incomplete.
-- **Hold outranks overdue outranks submitted** — a stage that is both overdue and on
-  hold shows hold, because a hold point is a hard block that needs action first.
-  *(Open question **C26** for SJ — display precedence only; flip hold↔overdue here if he
-  wants slippage surfaced over the blocker. Counts are unaffected — see §11.4.)*
-- `rejected` is **not** a spine color (there is no rejected token). It surfaces in the
-  StageSheet history/reason panel and as a small corner marker on the matrix cell; the
-  underlying plan's live status still drives the segment color.
-- A single-process stage collapses to exactly that process's state — the rule degenerates
-  correctly.
+  "in progress". Every other fill row requires the stage to be incomplete.
+- The two markers are independent and may both appear (e.g. a hold stage that is overdue
+  *and* has a prior rejection); place them at different corners per the mockup so they
+  don't collide. Fill + markers are the complete visual contract for a segment/cell.
+- A single-process stage collapses to exactly that process's fill state — the rule
+  degenerates correctly, and its markers are just that one plan's overdue/rejected flags.
+- Full reasons for every signal (why on hold, why overdue, rejection history) live in the
+  StageSheet, attributed per backing process — see §4.5 and §11.3.
 
 ### 11.3 The governing process (for actions)
 
@@ -366,9 +394,12 @@ Put the rule in a SQL view so dashboard, job detail, workspace, and reports can 
 disagree (matches §5's "aggregations live in SQL views"):
 
 ```
--- v_unit_stage_status(job_id, unit_id, stage_no, stage_name, status, governing_plan_id)
--- one row per (unit, stage). `status` implements the §11.2 CASE ladder over the
--- unit's plans whose job_process.work_order_stages @> ARRAY[stage_no].
+-- v_unit_stage_status(job_id, unit_id, stage_no, stage_name,
+--                     fill_status, is_overdue, is_rejected, governing_plan_id)
+-- one row per (unit, stage). `fill_status` implements the §11.2 CASE ladder;
+-- `is_overdue`/`is_rejected` are the secondary-marker booleans (rendered as pips only
+-- when true and not already the fill). All over the unit's plans whose
+-- job_process.work_order_stages @> ARRAY[stage_no].
 ```
 
 Expose it as `GET /api/jobs/:id/spine` (per-unit stage rows + governing_plan_id) and
