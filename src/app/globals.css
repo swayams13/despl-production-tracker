@@ -380,6 +380,10 @@ body {
 .theme-industrial .spine > *.pip-od, .theme-industrial .spine-mini i.pip-od { position: relative; }
 .theme-industrial .spine > *.pip-od::after { content: ""; position: absolute; top: 1px; right: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--s-overdue); box-shadow: 0 0 0 1px var(--bg); }
 .theme-industrial .spine-mini i.pip-od::after { content: ""; position: absolute; top: -1px; right: -1px; width: 3px; height: 3px; border-radius: 50%; background: var(--s-overdue); box-shadow: 0 0 0 1px var(--bg); }
+/* rejected-history marker (§11.2): opposite corner from the overdue pip so both can show at once */
+.theme-industrial .spine > *.pip-rej, .theme-industrial .spine-mini i.pip-rej { position: relative; }
+.theme-industrial .spine > *.pip-rej::before { content: ""; position: absolute; bottom: 1px; left: 1px; width: 4px; height: 4px; background: var(--text); box-shadow: 0 0 0 1px var(--bg); }
+.theme-industrial .spine-mini i.pip-rej::before { content: ""; position: absolute; bottom: -1px; left: -1px; width: 3px; height: 3px; background: var(--text); box-shadow: 0 0 0 1px var(--bg); }
 
 /* stage sheet (portaled — element re-declares .theme-industrial, so tokens resolve) */
 .stage-sheet-ov { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 30; }
@@ -473,6 +477,23 @@ body {
 .theme-industrial .d-good { color: var(--s-complete); }
 .theme-industrial .d-bad { color: var(--s-overdue); }
 .theme-industrial .clicky { cursor: pointer; }
+
+/* job detail (§4.3) — ported 1:1 from the mockup */
+.theme-industrial .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
+.theme-industrial .tab { padding: 8px 14px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; white-space: nowrap; text-decoration: none; }
+.theme-industrial a.tab { cursor: pointer; }
+.theme-industrial .tab.on { color: var(--text); border-bottom-color: var(--accent); }
+.theme-industrial .uxs { overflow-x: auto; padding: 14px 16px; }
+.theme-industrial .uxs table { border-collapse: separate; border-spacing: 3px; width: auto; }
+.theme-industrial .uxs td { border: none; height: auto; padding: 0; }
+.theme-industrial .uxs .cell { width: 16px; height: 16px; border-radius: 2px; cursor: pointer; transition: transform .1s; border: none; padding: 0; display: block; position: relative; }
+.theme-industrial .uxs .cell:hover { outline: 1px solid var(--text); transform: scale(1.2); }
+.theme-industrial .uxs .cell.pip-od::after { content: ""; position: absolute; top: -1px; right: -1px; width: 4px; height: 4px; border-radius: 50%; background: var(--s-overdue); box-shadow: 0 0 0 1px var(--bg); }
+.theme-industrial .uxs .cell.pip-rej::before { content: ""; position: absolute; bottom: -1px; left: -1px; width: 4px; height: 4px; background: var(--text); box-shadow: 0 0 0 1px var(--bg); }
+.theme-industrial .uxs .ulab { font-size: 11px; color: var(--muted); padding-right: 8px; white-space: nowrap; }
+.theme-industrial .feed-row { display: flex; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--border); font-size: 12px; align-items: flex-start; }
+.theme-industrial .feed-row:last-child { border-bottom: none; }
+.theme-industrial .feed-row .when { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
 @media (max-width: 1100px) {
   .theme-industrial .kpis { grid-template-columns: repeat(3, 1fr); }
   .theme-industrial .grid-2, .theme-industrial .grid-h { grid-template-columns: 1fr; }

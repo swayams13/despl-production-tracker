@@ -1,25 +1,36 @@
 import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
+import { loadJobSpines, rollupJobSpine } from "./spine.read";
+import { loadOpenHoldPoints } from "./workspace.read";
+import type { StageSegment } from "@/components/industrial/stage-status";
 
 /**
- * Job list with header stats — backs `GET /api/jobs`. Plan tallies come from
- * each job's current schedule run in one grouped aggregate (no N+1); %complete
- * and overdue are computed at the 36-process plan grain per DESIGN_SPEC §11.4
- * (never by averaging the 25-stage rollup). Client scope is enforced by tenant
- * RLS plus the actor's own client filter for portal/viewer users.
+ * Job list with header stats — backs `GET /api/jobs` and `/jobs` (§4.3). Plan
+ * tallies + forecast + last-activity come from each job's current schedule
+ * run / event stream in grouped aggregates (no N+1); %complete and overdue
+ * are computed at the 36-process plan grain per DESIGN_SPEC §11.4 (never by
+ * averaging the 25-stage rollup). Client scope is enforced by tenant RLS plus
+ * the actor's own client filter for portal/viewer users.
  */
 export interface JobListItem {
   id: number;
   jobNumber: string;
   projectName: string | null;
+  familyName: string;
   status: string;
   deliveryDate: string | null;
+  forecastDispatch: string | null;
+  forecastVarianceDays: number | null;
   equipmentCount: number;
   unitCount: number;
   totalPlans: number;
   completePlans: number;
   overduePlans: number;
   percentComplete: number;
+  openHoldPoints: number;
+  lastActivityAt: string | null;
+  /** Job-level (cross-unit) mini-spine, empty when no schedule has been generated yet. */
+  unitRollup: StageSegment[];
 }
 
 interface TallyRow {
@@ -27,10 +38,16 @@ interface TallyRow {
   total: number;
   complete: number;
   overdue: number;
+  forecast: Date | null;
+}
+
+interface ActivityRow {
+  job_id: number;
+  last_at: Date;
 }
 
 export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
-  return withTenant(actor.tenantId, async (tx) => {
+  const base = await withTenant(actor.tenantId, async (tx) => {
     const jobs = await tx.job.findMany({
       // Client-scoped users see only their own client's jobs; staff see all.
       where: actor.clientId != null ? { clientId: actor.clientId } : undefined,
@@ -40,12 +57,14 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
         projectName: true,
         status: true,
         deliveryDate: true,
+        family: { select: { name: true } },
         equipments: { select: { _count: { select: { units: true } } } },
       },
       orderBy: { jobNumber: "asc" },
     });
     if (jobs.length === 0) return [];
 
+    const jobIds = jobs.map((j) => j.id);
     const tallies = await tx.$queryRaw<TallyRow[]>`
       SELECT sr.job_id,
              count(*)::int AS total,
@@ -54,30 +73,87 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
                WHERE pp.status <> 'COMPLETE'
                  AND pp.planned_finish IS NOT NULL
                  AND pp.planned_finish < (now() AT TIME ZONE 'UTC')
-             )::int AS overdue
+             )::int AS overdue,
+             max(pp.planned_finish) AS forecast
       FROM process_plans pp
       JOIN schedule_runs sr ON sr.id = pp.schedule_run_id AND sr.is_current = true
+      WHERE sr.job_id = ANY(${jobIds}::int[])
       GROUP BY sr.job_id
     `;
     const tallyByJob = new Map(tallies.map((t) => [t.job_id, t]));
+
+    const activity = await tx.$queryRaw<ActivityRow[]>`
+      SELECT jp.job_id, max(de.at) AS last_at
+      FROM domain_events de
+      JOIN process_plans pp ON pp.id = de.aggregate_id::int
+      JOIN job_processes jp ON jp.id = pp.job_process_id
+      WHERE de.aggregate_type = 'ProcessPlan' AND jp.job_id = ANY(${jobIds}::int[])
+      GROUP BY jp.job_id
+
+      UNION ALL
+
+      SELECT jp.job_id, max(de.at) AS last_at
+      FROM domain_events de
+      JOIN delay_reasons dr ON dr.id = de.aggregate_id::int
+      JOIN process_plans pp ON pp.id = dr.process_plan_id
+      JOIN job_processes jp ON jp.id = pp.job_process_id
+      WHERE de.aggregate_type = 'DelayReason' AND jp.job_id = ANY(${jobIds}::int[])
+      GROUP BY jp.job_id
+    `;
+    // Two rows per job possible (one per UNION branch) — keep the later timestamp.
+    const activityByJob = new Map<number, Date>();
+    for (const a of activity) {
+      const prev = activityByJob.get(a.job_id);
+      if (!prev || a.last_at > prev) activityByJob.set(a.job_id, a.last_at);
+    }
 
     return jobs.map((j) => {
       const t = tallyByJob.get(j.id);
       const total = t?.total ?? 0;
       const complete = t?.complete ?? 0;
+      const forecastDispatch = t?.forecast ?? null;
       return {
         id: j.id,
         jobNumber: j.jobNumber,
         projectName: j.projectName,
+        familyName: j.family.name,
         status: j.status,
-        deliveryDate: j.deliveryDate ? j.deliveryDate.toISOString() : null,
+        deliveryDate: j.deliveryDate,
+        forecastDispatch,
+        forecastVarianceDays:
+          forecastDispatch && j.deliveryDate ? Math.round((forecastDispatch.getTime() - j.deliveryDate.getTime()) / 864e5) : null,
         equipmentCount: j.equipments.length,
         unitCount: j.equipments.reduce((n, e) => n + e._count.units, 0),
         totalPlans: total,
         completePlans: complete,
         overduePlans: t?.overdue ?? 0,
         percentComplete: total > 0 ? Math.round((complete / total) * 100) : 0,
+        lastActivityAt: activityByJob.get(j.id) ?? null,
       };
     });
+  });
+  if (base.length === 0) return [];
+
+  // Per-job extras that open their own transaction (hold points, spine rollup)
+  // — called sequentially-after the main tx above, never nested inside it.
+  const extras = await Promise.all(
+    base.map(async (j) => ({
+      jobId: j.id,
+      openHoldPoints: (await loadOpenHoldPoints(actor, j.id)).length,
+      unitRollup: rollupJobSpine((await loadJobSpines(actor, j.id)) ?? []),
+    })),
+  );
+  const extrasByJob = new Map(extras.map((e) => [e.jobId, e]));
+
+  return base.map((j) => {
+    const extra = extrasByJob.get(j.id)!;
+    return {
+      ...j,
+      deliveryDate: j.deliveryDate ? j.deliveryDate.toISOString() : null,
+      forecastDispatch: j.forecastDispatch ? j.forecastDispatch.toISOString() : null,
+      lastActivityAt: j.lastActivityAt ? j.lastActivityAt.toISOString() : null,
+      openHoldPoints: extra.openHoldPoints,
+      unitRollup: extra.unitRollup,
+    };
   });
 }

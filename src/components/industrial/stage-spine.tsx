@@ -1,6 +1,11 @@
 "use client";
 
-import { STAGE_STATUS, showsOverduePip, type StageSegment } from "./stage-status";
+import { STAGE_STATUS, showsOverduePip, showsRejectedMarker, type StageSegment } from "./stage-status";
+
+function pipClass(seg: StageSegment): string | undefined {
+  const classes = [showsOverduePip(seg) && "pip-od", showsRejectedMarker(seg) && "pip-rej"].filter(Boolean);
+  return classes.length ? classes.join(" ") : undefined;
+}
 
 /**
  * StageSpine — the signature element. A horizontal segmented bar of the 25
@@ -30,7 +35,7 @@ export function StageSpine({
         {segments.map((seg, i) => (
           <i
             key={i}
-            className={showsOverduePip(seg) ? "pip-od" : undefined}
+            className={pipClass(seg)}
             style={{ background: STAGE_STATUS[seg.status].colorVar }}
           />
         ))}
@@ -46,11 +51,11 @@ export function StageSpine({
             key={i}
             type="button"
             role="listitem"
-            className={showsOverduePip(seg) ? "pip-od" : undefined}
+            className={pipClass(seg)}
             style={{ background: STAGE_STATUS[seg.status].colorVar }}
             title={`Stage ${seg.stageNo} · ${seg.stageName} — ${STAGE_STATUS[seg.status].label}${
               showsOverduePip(seg) ? " · overdue" : ""
-            }`}
+            }${showsRejectedMarker(seg) ? " · has a prior rejection" : ""}`}
             aria-label={`Stage ${seg.stageNo}, ${seg.stageName}, ${STAGE_STATUS[seg.status].label}`}
             onClick={onSegmentClick ? () => onSegmentClick(seg, i) : undefined}
           />

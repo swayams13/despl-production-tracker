@@ -64,3 +64,66 @@ export async function loadJobSpines(actor: Actor, jobId: number): Promise<UnitSp
     return Array.from(byUnit.values());
   });
 }
+
+/**
+ * Job-level (cross-unit) spine — the single big StageSpine at the top of the
+ * job Overview page (§4.3), which the per-unit `v_unit_stage_status` view
+ * doesn't itself produce (§11 is defined per-unit only; the §9.2 session log
+ * flagged this rollup as deferred to its first UI consumer, which is this one).
+ *
+ * Collapse rule: the same §11.2 first-match-wins ladder, applied across units
+ * instead of across backing plans — complete only if EVERY unit is complete at
+ * that stage; otherwise hold > overdue > submitted > progress > idle, first
+ * match across the unit set wins. The "winning" unit (the one whose status
+ * produced the collapsed result) supplies `governingPlanId`/`unitId`/
+ * `serialNo`, so a click on this spine still resolves to one real StageSheet
+ * target instead of an unclickable multi-unit summary.
+ */
+export function rollupJobSpine(units: UnitSpine[]): StageSegment[] {
+  if (units.length === 0) return [];
+  const stageCount = units[0].segments.length;
+  const out: StageSegment[] = [];
+  for (let i = 0; i < stageCount; i++) {
+    const cells = units.map((u) => ({ unit: u, seg: u.segments[i] }));
+    out.push(collapseAcrossUnits(cells));
+  }
+  return out;
+}
+
+function collapseAcrossUnits(cells: { unit: UnitSpine; seg: StageSegment }[]): StageSegment {
+  const first = cells[0].seg;
+  const findByStatus = (status: StageDisplayStatus) => cells.find((c) => c.seg.status === status);
+
+  let status: StageDisplayStatus;
+  let winner: { unit: UnitSpine; seg: StageSegment };
+  if (cells.every((c) => c.seg.status === "complete")) {
+    status = "complete";
+    winner = cells[cells.length - 1]; // all done — last unit, mirroring §11.3's all-complete convention
+  } else if (findByStatus("hold")) {
+    status = "hold";
+    winner = findByStatus("hold")!;
+  } else if (findByStatus("overdue")) {
+    status = "overdue";
+    winner = findByStatus("overdue")!;
+  } else if (findByStatus("submitted")) {
+    status = "submitted";
+    winner = findByStatus("submitted")!;
+  } else if (findByStatus("progress") || findByStatus("complete")) {
+    status = "progress";
+    winner = findByStatus("progress") ?? findByStatus("complete")!;
+  } else {
+    status = "idle";
+    winner = cells[0];
+  }
+
+  return {
+    stageNo: first.stageNo,
+    stageName: first.stageName,
+    status,
+    overdue: cells.some((c) => c.seg.overdue),
+    rejected: cells.some((c) => c.seg.rejected),
+    governingPlanId: winner.seg.governingPlanId,
+    unitId: winner.unit.unitId,
+    serialNo: winner.unit.serialNo,
+  };
+}

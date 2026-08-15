@@ -44,6 +44,15 @@ export interface StageSegment {
   rejected?: boolean;
   /** earliest not-complete backing plan (§11.3) — the action CTA routes here */
   governingPlanId?: number;
+  /** the unit this segment's status/governingPlanId came from — set on job-level
+   * (cross-unit) rollups so a click can still resolve to one real StageSheet target. */
+  unitId?: number;
+  serialNo?: string;
+}
+
+/** Should this segment show the rejected marker (distinct from the fill/overdue pip)? */
+export function showsRejectedMarker(seg: Pick<StageSegment, "rejected">): boolean {
+  return Boolean(seg.rejected);
 }
 
 /** Should this segment show the secondary overdue pip? (overdue, but fill isn't overdue) */

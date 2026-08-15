@@ -27,6 +27,7 @@ const TYPE_LABELS: Record<string, string> = {
   ProcessVerified: "verified",
   ProcessHeld: "put on hold",
   ProcessResumed: "resumed",
+  ProcessRejected: "rejected",
 };
 
 interface Row {
@@ -36,6 +37,7 @@ interface Row {
   actor_name: string | null;
   process_name: string | null;
   serial_no: string | null;
+  category_name: string | null;
 }
 
 export async function loadEvents(
@@ -50,12 +52,17 @@ export async function loadEvents(
       assertClientScope(actor, job.clientId);
     }
 
-    // aggregate_id holds the ProcessPlan id as text; cast to join the context.
+    // aggregate_id holds the ProcessPlan (or, for DelayReasonFiled, the
+    // DelayReason) id as text; cast to join each event type's own context.
+    // Two branches, not one join, because the two aggregate types reach
+    // process/unit context through different foreign keys (pp.id directly vs
+    // dr.process_plan_id).
     const rows = await tx.$queryRaw<Row[]>`
       SELECT de.id, de.type, de.at,
              usr.name    AS actor_name,
              jp.name     AS process_name,
-             u.serial_no AS serial_no
+             u.serial_no AS serial_no,
+             NULL::text  AS category_name
       FROM domain_events de
       LEFT JOIN process_plans pp ON pp.id = de.aggregate_id::int
       LEFT JOIN job_processes jp ON jp.id = pp.job_process_id
@@ -63,14 +70,35 @@ export async function loadEvents(
       LEFT JOIN users usr        ON usr.id = de.actor_id
       WHERE de.aggregate_type = 'ProcessPlan'
         AND (${opts.jobId ?? null}::int IS NULL OR jp.job_id = ${opts.jobId ?? null}::int)
-      ORDER BY de.at DESC, de.id DESC
+
+      UNION ALL
+
+      SELECT de.id, de.type, de.at,
+             usr.name    AS actor_name,
+             jp.name     AS process_name,
+             u.serial_no AS serial_no,
+             dc.name     AS category_name
+      FROM domain_events de
+      JOIN delay_reasons dr           ON dr.id = de.aggregate_id::int
+      LEFT JOIN delay_category_refs dc ON dc.id = dr.category_id
+      LEFT JOIN process_plans pp      ON pp.id = dr.process_plan_id
+      LEFT JOIN job_processes jp      ON jp.id = pp.job_process_id
+      LEFT JOIN units u               ON u.id = pp.unit_id
+      LEFT JOIN users usr             ON usr.id = de.actor_id
+      WHERE de.aggregate_type = 'DelayReason'
+        AND (${opts.jobId ?? null}::int IS NULL OR jp.job_id = ${opts.jobId ?? null}::int)
+
+      ORDER BY at DESC, id DESC
       LIMIT ${limit}
     `;
 
     return rows.map((r) => ({
       id: r.id.toString(),
       type: r.type,
-      label: TYPE_LABELS[r.type] ?? r.type,
+      label:
+        r.type === "DelayReasonFiled"
+          ? `filed a delay reason${r.category_name ? ` — ${r.category_name}` : ""}`
+          : (TYPE_LABELS[r.type] ?? r.type),
       at: r.at.toISOString(),
       actorName: r.actor_name,
       processName: r.process_name,
