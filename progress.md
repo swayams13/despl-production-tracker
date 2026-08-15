@@ -11,7 +11,19 @@
 
 **Git workflow, changed 13 Aug 2026:** new `demo` branch created from `main`. **Push to `demo` first; merge to `main` only after the user verifies and explicitly approves the promotion** — same discipline as the EJ Production Tracker sibling project. Do not push to or merge into `main` on your own initiative. (One session on 13 Aug ran on a harness-assigned branch, `claude/progress-status-check-8ttvkj`, and merged its PR straight to `main` on the user's direct in-conversation instruction, skipping `demo` — that history is now reconciled into `demo` by this merge.)
 
-**Working on the `demo` branch. `lib/schedule/`, `lib/services/`, AND the first end-to-end UI (department workspaces + prioritizer + dashboard) are done and verified. Next: a clean-DB live demo pass (see caveat below) and DESPL pilot-family lead-time data.**
+**Working on the `demo` branch. `lib/schedule/`, `lib/services/`, the first end-to-end UI (department workspaces + prioritizer + dashboard), AND production-safe idempotent seeding are done and verified. Next: Railway staging deploy + clean-DB live demo pass, then DESPL pilot-family lead-time data.**
+
+## Session — production-safe idempotent seeding + vault setup, 15 Aug 2026
+
+Committed on `demo` as `36fb184` (`feat(seed): production-safe idempotent seed split`).
+
+- **Seed split (TODO #1, done).** `prisma/seed.ts` restructured into two guarded phases in ONE atomic transaction:
+  - `seedReference(tx, src, stats)` — org, departments, roles, reference vocabularies, work calendar, product families, PRESSURE_VESSEL + PIPE_SPOOL templates, 25-route library. **Idempotent via an `Organization.code` existence guard** (code is `@unique`): if org `DESPL` exists it loads the ref ids through the new `loadRefIds(tx, tenantId)` and writes nothing. Returns a `RefIds` bundle the demo phase consumes in-memory (no re-query). **No user rows** — those carry the dev password.
+  - `seedDemo(tx, refs, src, passwordHash, stats)` — "Unknown client", live jobs DE0463/DE0467 (BOM/procurement/components/ops/drawings/dispatch), DESPL-320 pilot + units + QCP, batch2 QAPs, per-role/dept demo users. Guarded on DE0463 so a dev re-run can't duplicate.
+  - `pnpm db:seed:reference` (`SEED_REFERENCE_ONLY=1`) is the production path after `prisma migrate deploy`; `pnpm db:seed` runs both for dev. Root cause of the org-row pollution (non-idempotent `createMany`, no org guard) is fixed for good.
+  - **Verified:** typecheck + lint clean; re-ran `pnpm db:seed` against the live (polluted) dev DB — both guards fired, `loadRefIds` executed against real data, **org count stayed 35** (the old bug would have made it 36). Fresh-create + reference-only paths were NOT exercised on a clean DB this session (needs the human-gated `migrate reset`) — logic is the original working seed, only reorganized.
+- **Still-open follow-up from this task:** **production admin-user provisioning** — the reference seed intentionally creates no users, so a real credential flow (not the dev password) is needed to bootstrap the first admin on a production DB. Belongs with the Railway milestone.
+- **Vault docs.** The DESPL Production Tracker had no Obsidian vault context pack (only the ASME "PRESSURE VESSEL" project and the sibling EJ tracker did). Created the full 16-doc pack at `SWAYAM OS/4_Projects/Client Work/DESPL/DESPL TRACKER/` (folder named to match the on-disk dir so `link_vault.py`'s `source_path()` resolves), added the MASTER_INDEX row, ran `link_vault.py`. Added a pointer line in the repo `CLAUDE.md` (repo `progress.md` is canonical; vault mirrors it). **The vault was never version-controlled** — set it up as its own git repo and pushed to a **private** remote `github.com/swayams13/swayam-os` (initial baseline `e37de14`, 271 files).
 
 ## Session — dept workspaces + auto-prioritizer (per-unit grain), 14 Aug 2026
 
