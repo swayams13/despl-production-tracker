@@ -11,7 +11,47 @@
 
 **Git workflow, changed 13 Aug 2026:** new `demo` branch created from `main`. **Push to `demo` first; merge to `main` only after the user verifies and explicitly approves the promotion** — same discipline as the EJ Production Tracker sibling project. Do not push to or merge into `main` on your own initiative. (One session on 13 Aug ran on a harness-assigned branch, `claude/progress-status-check-8ttvkj`, and merged its PR straight to `main` on the user's direct in-conversation instruction, skipping `demo` — that history is now reconciled into `demo` by this merge.)
 
-**Working on the `demo` branch. `lib/schedule/`, `lib/services/`, the first end-to-end UI (department workspaces + prioritizer + dashboard), production-safe idempotent seeding are done and verified — AND the full production lifecycle was now driven end-to-end through the running app in a real browser (login → start → submit → hold-point clearance → verify → COMPLETE, with 3 integrity invariants refusing live). Next: Railway staging deploy, then DESPL pilot-family lead-time data.**
+**Working on the `demo` branch. `lib/schedule/`, `lib/services/`, the first end-to-end UI (department workspaces + prioritizer + dashboard), production-safe idempotent seeding are done and verified — AND the full production lifecycle was now driven end-to-end through the running app in a real browser (login → start → submit → hold-point clearance → verify → COMPLETE, with 3 integrity invariants refusing live). NOW STARTING: the demo-ready UI rebuild to the industrial control-room design (DESIGN_SPEC.md + design/despl-tracker-mockup.html), §9 session order. Session 1 in progress (uncommitted WIP). Next model: Opus 5 after claude-code upgrade.**
+
+## Session — UI build kickoff (design pack + C26/C27 + connectivity + Session 1 started), 15 Aug 2026
+
+**Ended mid-Session-1 at the user's request (resuming on Opus 5 after a claude-code upgrade). Session-1 code is UNCOMMITTED WIP on `demo`.** Design/doc work IS committed (`e6707c3`, `b8873e3`, `d0e4364`, `4c953b7`).
+
+### Decisions & docs (committed)
+- **Design pack landed + merged.** The demo/frontend design guide was folded into `CLAUDE.md` as a `## Frontend & Design System` section (original backend invariants/conventions kept intact above it). Added `docs/DESIGN_SPEC.md` (the execution contract) + `design/despl-tracker-mockup.html` (approved v2 pixel reference — the visual source of truth).
+- **36→25 stage rollup speced canonically — `DESIGN_SPEC.md` §11.** Verified against the seed: the crosswalk is `JobProcess.workOrderStages Int[]` (already seeded from `seed/lead-time-model.json`; all 25 stages covered, 12 stages backed by multiple processes, 2 processes span 2 stages). §11 pins: the **fill precedence ladder** (all-complete → hold → overdue → submitted → in-progress → idle), **secondary markers**, the **governing-process rule** (actions always target a real ProcessPlan, never a synthetic "start stage"), the **count-stays-at-36-grain guard** (status rolls up to 25; %/counts stay at 36 so matrix totals = KPI totals), and a canonical SQL view **`v_unit_stage_status(job_id,unit_id,stage_no,stage_name,fill_status,is_overdue,is_rejected,governing_plan_id)`** — **NOT built yet** (it's §9 session 2 work).
+- **C26 RESOLVED (SJ).** A stage that is both on-hold and overdue shows **both**: hold as the primary **fill colour** (it's the actionable blocker, blocks completion per invariant #4) **+ a red overdue secondary pip**. Full per-process reasons live in the StageSheet, with an explicit **"Overdue Nd · reason required"** pending state (invariant #7 blocks progress until the delay reason is filed). Mockup demonstrates it (Stage 9 = hold fill + pip). BUILD-SPEC-v2 §7 C26 row marked ✅.
+- **C27 FLAGGED (open, for SJ).** The seed's 25 `workOrderStageNames` and the mockup's own fabrication-detailed 25 names disagree (e.g. seed stage 17 = "NDT" vs mockup "Welding circ seam"). **Labels only — stage numbers and the 36→25 crosswalk are identical either way.** Seed names pinned canonical *provisionally* in §11.1; SJ to confirm the authoritative list (likely the shop-floor one). An earlier waypoint-label "fix" to the mockup was reverted because it broke the mockup's internal self-consistency.
+
+### Theme migration strategy (user chose: SCOPED TRANSITION)
+New industrial-dark theme is scoped under a `.theme-industrial` class, applied ONLY inside the new `(app)` route group. The legacy **warm-paper** pages (`/dashboard`, `/workspace`, root `page.tsx`, all `src/components/viz/*` + `viz/status.ts`) stay on their old theme and **remain readable** until each is reskinned in its own §9 session. Old tokens get retired at the end. **Do NOT flip `globals.css :root` to dark, and do NOT move legacy pages into `(app)` before reskinning them** — either would break them.
+
+### Connectivity verified end-to-end (live this session, not trusted from the log)
+docker `despl-pg` up · 6 migrations applied, schema up to date · RLS roles `despl_app`(nologin)/`despl_web`(login,non-super) present · **RLS fail-closed** (0 jobs unscoped → 3 scoped as `despl_web`) · **audit_log UPDATE denied** for `despl_web` · **app data path** (`prisma` + `withTenant(1)`) returns 3 jobs × 36 processes from `despl_demo` · `pnpm typecheck` + `lint` clean · dev server serves `/login /  /dashboard /workspace` all **200**, login renders, no errors in log.
+- **FOUND & FIXED: `.env` pointed at the polluted `despl` DB (35 orgs → login fail-closes on the single-org rule).** Repointed `DATABASE_URL`/`DIRECT_URL` to **`despl_demo`** (clean: 1 org / 3 jobs / 9 units / 324 plans / 19 users). This was the one blocker to a working login demo. `despl` was left untouched.
+- **Gap (expected, not broken):** the new UI's `/api/*` route handlers (DESIGN_SPEC §5) and the SQL views (§11) **do not exist yet** — the current app reads via RSC + server actions (`src/app/actions/{auth,delay,process,qcp}.ts`). Building that data layer is §9 **session 2**.
+- **Still open (known):** production admin-user provisioning (reference seed makes no users); Railway deploy.
+
+### Deps added
+`sonner` (toasts) + `@radix-ui/react-dialog` (StageSheet + future dialogs). Deferred to their sessions: `cmdk`, `recharts`, `@tanstack/react-table`, SVAR React Gantt. **No `next-themes`** — dark-only per spec.
+
+### Session 1 (§9.1: tokens + fonts + shell + StatusChip + StageSpine + StageSheet shell) — IN PROGRESS
+**DONE (uncommitted):**
+- `src/app/globals.css` — appended a scoped `.theme-industrial` block (tokens + shell + primitives + chip + spine + sheet + motion + `prefers-reduced-motion`), ported 1:1 from the mockup. Legacy `:root` warm tokens untouched.
+- `src/app/layout.tsx` — Inter + JetBrains Mono via `next/font` → `--font-inter` / `--font-jbmono` on `<html>`.
+- `src/components/industrial/stage-status.ts` — the 6-value `StageDisplayStatus` vocabulary (chipClass/colorVar/label), `StageSegment` type, `showsOverduePip()`.
+- `src/components/industrial/status-chip.tsx` — `StatusChip`.
+
+**REMAINING in Session 1 (build next, in this order):**
+1. `src/components/industrial/stage-spine.tsx` — mini + full variants; renders `.spine`/`.spine-mini` with per-segment fill = `STAGE_STATUS[status].colorVar`; adds `pip-od` class when `showsOverduePip(seg)`; optional `onSegmentClick`. ("use client" for onClick.)
+2. `src/components/industrial/stage-sheet.tsx` — radix `Dialog` as a right sheet. **Give `Dialog.Content` className `"theme-industrial stage-sheet"`** so the token vars resolve through the portal (it renders outside the `(app)` wrapper); overlay uses `.stage-sheet-ov`; slide-in via `[data-state="open"]` (already in globals.css). Session-1 = shell/structure + open/close + slots; real content wired in later sessions.
+3. `src/components/industrial/app-shell.tsx` — "use client". 236px sidebar (nav groups Overview / Execution / Records via `next/link`, active state from `usePathname`, overdue `.badge`), 48px topbar (breadcrumb, job-switcher **stub** with mini-spine, `⌘K` **stub** button, bell **stub** drop). Match mockup markup (sidebar/topbar HTML captured from mockup lines ~112–155).
+4. `src/app/(app)/layout.tsx` — wrap children: `<div className="theme-industrial"><AppShell>{children}</AppShell><Toaster/></div>` (sonner Toaster, bottom-right).
+5. `src/app/(app)/kit/page.tsx` — Session-1 review surface (the new-system analogue of the old `/component-gallery`): all 6 `StatusChip`s, `StageSpine` mini + full **including the hold+overdue pip demo**, a button that opens `StageSheet`. Route `/kit`.
+6. **Verify:** `pnpm typecheck && pnpm lint && pnpm build`; boot dev against `despl_demo` (`pnpm dev`); screenshot `/kit` and `/login`. Then commit Session 1 on `demo`.
+
+**Resume specifics:** `.env` already → `despl_demo`. DB container `despl-pg` is up. Run `pnpm dev` (env now correct, no inline override needed). Logins: `sj@ qc@ md@ sup.<dept>@`, password `despl-dev-only`. Do the remaining 6 items, verify, THEN commit. Legacy `/dashboard` `/workspace` are expected to look unstyled-but-readable (warm theme) until their own sessions — that's the scoped-transition plan, not a bug.
+
 
 ## Session — live browser verification pass + stale-refusal fix, 15 Aug 2026
 
