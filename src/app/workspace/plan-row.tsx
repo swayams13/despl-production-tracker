@@ -1,19 +1,11 @@
 "use client";
-import { useState, useTransition } from "react";
 import { startAction, submitAction, holdAction, resumeAction, verifyAction } from "@/app/actions/process";
-import type { ActionResult } from "@/app/actions/_action";
+import { useActionError } from "./use-action-error";
 
 type Props = { planId: number; state: string; canVerify?: boolean };
 
 export function PlanRow({ planId, state, canVerify }: Props) {
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-
-  const call = (fn: () => Promise<ActionResult>) =>
-    start(async () => {
-      const r = await fn();
-      setError(r.ok ? null : r.message);
-    });
+  const { pending, error, run: call } = useActionError();
 
   const btn = "rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)] disabled:opacity-50";
 

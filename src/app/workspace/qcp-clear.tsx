@@ -1,13 +1,12 @@
 "use client";
-import { useState, useTransition } from "react";
 import { recordQcpAction } from "@/app/actions/qcp";
+import { useActionError } from "./use-action-error";
 
 export function QcpClear({ qcpItemId, unitId }: { qcpItemId: number; unitId: number }) {
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, run } = useActionError();
   const btn = "rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-2 py-1 text-xs hover:bg-[var(--surface-sunken)] disabled:opacity-50";
   const call = (result: "ACCEPTED" | "REJECTED" | "NA") =>
-    start(async () => { const r = await recordQcpAction(qcpItemId, unitId, result); setError(r.ok ? null : r.message); });
+    run(() => recordQcpAction(qcpItemId, unitId, result));
   return (
     <div className="flex items-center gap-2">
       <button disabled={pending} className={btn} onClick={() => call("ACCEPTED")}>Accept</button>

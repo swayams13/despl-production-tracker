@@ -1,15 +1,15 @@
 "use client";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { fileDelayAction } from "@/app/actions/delay";
+import { useActionError } from "./use-action-error";
 
 export function DelayForm({ planId, categories }: { planId: number; categories: { id: number; name: string }[] }) {
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, run } = useActionError();
   const [categoryId, setCategoryId] = useState(categories[0]?.id ?? 0);
   const [detail, setDetail] = useState("");
   return (
     <form className="flex flex-wrap items-center gap-2"
-      action={() => start(async () => { const r = await fileDelayAction(planId, categoryId, detail || undefined); setError(r.ok ? null : r.message); })}>
+      action={() => run(() => fileDelayAction(planId, categoryId, detail || undefined))}>
       <select className="rounded border border-[var(--hairline)] bg-[var(--surface)] px-2 py-1 text-xs" value={categoryId} onChange={(e) => setCategoryId(Number(e.target.value))}>
         {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
       </select>
