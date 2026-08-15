@@ -31,7 +31,8 @@ pnpm install
 pnpm dev          # web :3000, api :4000 (turbo)
 pnpm db:migrate   # prisma migrate dev (apps/api)
 pnpm db:seed      # seed roles, departments, PV template, demo data
-pnpm test         # vitest unit + supertest API
+pnpm test         # vitest unit + supertest API (pure tests only, no DB)
+pnpm test:db      # DB-gated tests against the dedicated despl_test DB — never run RUN_DB_TESTS against despl_demo
 pnpm e2e          # playwright
 pnpm lint && pnpm typecheck
 ```

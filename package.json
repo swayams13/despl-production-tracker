@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db": "set -a && . ./.env.test && set +a && RUN_DB_TESTS=1 vitest run",
     "e2e": "playwright test",
     "format": "prettier --write .",
     "db:seed": "tsx prisma/seed.ts",
