@@ -29,7 +29,6 @@
 //
 // DELIBERATELY DEFERRED (all purely additive — new tables, no changes to
 // existing ones, so adding them in week 3 costs nothing):
-//   · welding module (Welder, WeldJoint, WeldLog, NdtResult) — PRD FR-W1..W5
 //   · master BOM catalog — PRD FR-B0/B1
 //   · CustomFieldDef/Value, DocumentRequirementTemplate — per-client variance
 // ─────────────────────────────────────────────────────────────────────────
@@ -192,6 +191,7 @@ model Organization {
   calendars        WorkCalendar[]
   snapshots        ProgressSnapshot[]
   notifications    Notification[]
+  welders          Welder[]
 
   @@map("organizations")
 }
@@ -276,6 +276,7 @@ model Department {
   jobProcesses      JobProcess[]
   processPlans      ProcessPlan[]
   operations        OperationRef[]
+  welders           Welder[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -346,8 +347,9 @@ model TestTypeRef {
   name     String
   active   Boolean @default(true)
 
-  tenant Organization @relation(fields: [tenantId], references: [id])
-  tests  ItemTest[]
+  tenant     Organization @relation(fields: [tenantId], references: [id])
+  tests      ItemTest[]
+  ndtResults NdtResult[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -594,6 +596,8 @@ model Job {
   drawings        AssemblyDrawing[]
   snapshots       ProgressSnapshot[]
   dispatchBatches DispatchBatch[]
+  weldJoints      WeldJoint[]
+  weldLogs        WeldLog[]
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
@@ -634,6 +638,7 @@ model Unit {
   processPlans  ProcessPlan[]
   components    Component[]
   snapshots     ProgressSnapshot[]
+  weldJoints    WeldJoint[]
 
   @@unique([equipmentId, serialNo])
   @@index([equipmentId])
@@ -946,6 +951,124 @@ model ItemTest {
   @@index([bomItemId])
   @@index([testTypeId])
   @@map("item_tests")
+}
+
+// ── Welding module (PRD FR-W1..W5) ───────────────────────────────────────
+// Purely additive per design note 30 — no changes to any existing table.
+// Welder is tenant-root data (a registry spanning jobs, like Department);
+// WeldJoint/WeldLog/NdtResult are child rows reachable only via jobId (a
+// tenant-scoped parent) and carry no tenant_id of their own, matching every
+// other job-child table in this schema (BomItem, Component, ItemTest, …).
+//
+// ponytail: no jobProcessId/StageSheet link on WeldJoint — FR-W2 asks for an
+// operational joint/welder/NDT log, not a gated stage action, and the 36→25
+// rollup has no dedicated welding stage to attach it to (welding is folded
+// into the FABRICATION department across several stages). Add the link only
+// if DESPL asks for per-stage weld traceability inside the gating spine.
+
+/// FR-W1: name, employee code, active/inactive, home department. Welders do
+/// not log in — logging is done BY a supervisor/QC user, ABOUT a welder.
+model Welder {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int      @map("tenant_id")
+  name         String
+  employeeCode String   @map("employee_code")
+  active       Boolean  @default(true)
+  departmentId Int?     @map("department_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant     Organization      @relation(fields: [tenantId], references: [id])
+  department Department?       @relation(fields: [departmentId], references: [id])
+  joints     WeldJointWelder[]
+  logs       WeldLog[]
+
+  @@unique([tenantId, employeeCode])
+  @@index([tenantId])
+  @@index([departmentId])
+  @@map("welders")
+}
+
+/// FR-W2: one butt-weld joint/seam, welder(s) + date + size/type. Joint
+/// number is the printed weld-map id (e.g. LS-1, CS-2, N4-W1) — free text,
+/// not unique, since re-numbering across jobs is a real-world fact of life.
+model WeldJoint {
+  id        Int      @id @default(autoincrement())
+  jobId     Int      @map("job_id")
+  unitId    Int?     @map("unit_id")
+  jointNo   String   @map("joint_no")
+  jointType String   @map("joint_type")
+  weldSize  String?  @map("weld_size")
+  /// §4.7 dialog field: Welding Procedure Specification reference.
+  wpsRef    String?  @map("wps_ref")
+  loggedBy  Int      @map("logged_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job        Job               @relation(fields: [jobId], references: [id])
+  unit       Unit?             @relation(fields: [unitId], references: [id])
+  welders    WeldJointWelder[]
+  ndtResults NdtResult[]
+
+  @@index([jobId])
+  @@index([unitId])
+  @@map("weld_joints")
+}
+
+/// A joint may name more than one welder (spec: "welder(s)").
+model WeldJointWelder {
+  weldJointId Int @map("weld_joint_id")
+  welderId    Int @map("welder_id")
+
+  weldJoint WeldJoint @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
+  welder    Welder    @relation(fields: [welderId], references: [id])
+
+  @@id([weldJointId, welderId])
+  @@index([welderId])
+  @@map("weld_joint_welders")
+}
+
+/// FR-W2: fillet/misc work logged as a day-total per welder (hours or a raw
+/// output quantity) rather than one row per joint.
+model WeldLog {
+  id        Int      @id @default(autoincrement())
+  welderId  Int      @map("welder_id")
+  jobId     Int      @map("job_id")
+  logDate   DateTime @map("log_date") @db.Date
+  hours     Decimal? @db.Decimal(5, 2)
+  outputQty Int?     @map("output_qty")
+  note      String?
+  loggedBy  Int      @map("logged_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  welder Welder @relation(fields: [welderId], references: [id])
+  job    Job    @relation(fields: [jobId], references: [id])
+
+  @@index([welderId])
+  @@index([jobId])
+  @@map("weld_logs")
+}
+
+/// FR-W3: RT/UT/PT/MT result per joint, recorded by QC, attributed to the
+/// joint's welder(s) → per-welder repair rate. Reuses TestTypeRef (design
+/// note 4 — NDT methods are an open, tenant-scoped vocabulary, not an enum)
+/// and TestResult (design note: PENDING/ACCEPT/REJECT already matches this
+/// shape 1:1 — the UI humanizes REJECT as "Repair" rather than adding a
+/// second enum with identical values).
+model NdtResult {
+  id          Int        @id @default(autoincrement())
+  weldJointId Int        @map("weld_joint_id")
+  testTypeId  Int        @map("test_type_id")
+  result      TestResult @default(PENDING)
+  recordedBy  Int?       @map("recorded_by")
+  /// SERVER CLOCK ONLY (invariant #1)
+  recordedAt  DateTime?  @map("recorded_at")
+  createdAt   DateTime   @default(now()) @map("created_at")
+
+  weldJoint WeldJoint   @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
+  testType  TestTypeRef @relation(fields: [testTypeId], references: [id])
+
+  @@index([weldJointId])
+  @@index([testTypeId])
+  @@map("ndt_results")
 }
 
 // ── QCP / ITP engine (dynamic parties, per-project code sets) ───────────

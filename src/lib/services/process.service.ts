@@ -31,7 +31,9 @@ import {
   jobEdgeToScheduleEdge,
   lockProcessPlanForUpdate,
   loadPredecessorStates,
+  loadPlanNotifyContext,
 } from "./_shared";
+import { notify, userIdsWithRole } from "./notifications.service";
 import type { ProcessPlan, ProcessPlanStatus } from "@/generated/prisma/client";
 
 /**
@@ -162,7 +164,7 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
       unitId: plan.unitId,
     });
 
-    return audited(tx, actor, async () => {
+    const updated = await audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({
         where: { id: plan.id },
         data: { status: to, submittedBy: actor.userId },
@@ -180,6 +182,26 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
         },
       };
     });
+
+    // §6: "item submitted → QC" — same transaction, so a failed notify rolls
+    // back the whole submit rather than leaving a silent gap.
+    const qcIds = await userIdsWithRole(tx, actor.tenantId, "QC");
+    const ctx = await loadPlanNotifyContext(tx, updated);
+    await notify(
+      tx,
+      actor.tenantId,
+      qcIds.map((recipientId) => ({
+        recipientId,
+        type: "ITEM_SUBMITTED",
+        entityType: "ProcessPlan",
+        entityId: updated.id,
+        title: `${ctx.processName} awaiting your verification${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}`,
+        body: `Submitted by ${actor.name} · ${ctx.jobNumber}`,
+        payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo },
+      })),
+    );
+
+    return updated;
   });
 }
 
@@ -240,7 +262,8 @@ export async function rejectProcess(actor: Actor, input: RejectProcessInput): Pr
     assertMakerChecker(actor, plan.submittedBy);
     const to = assertTransition("reject", plan.status);
 
-    return audited(tx, actor, async () => {
+    const maker = plan.submittedBy;
+    const updated = await audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({
         where: { id: plan.id },
         data: { status: to, submittedBy: null },
@@ -258,6 +281,24 @@ export async function rejectProcess(actor: Actor, input: RejectProcessInput): Pr
         },
       };
     });
+
+    // §6: "reject → maker" — same transaction as the state change.
+    if (maker != null) {
+      const ctx = await loadPlanNotifyContext(tx, updated);
+      await notify(tx, actor.tenantId, [
+        {
+          recipientId: maker,
+          type: "ITEM_REJECTED",
+          entityType: "ProcessPlan",
+          entityId: updated.id,
+          title: `${ctx.processName} rejected${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}`,
+          body: `${reason} · ${actor.name}`,
+          payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo },
+        },
+      ]);
+    }
+
+    return updated;
   });
 }
 

@@ -352,6 +352,39 @@ export async function assertNoOpenHoldPoint(
   }
 }
 
+// ── Notification context ────────────────────────────────────────────────
+
+/** Enough context to build a human-readable notification title/deep-link for a plan. */
+export interface PlanNotifyContext {
+  jobId: number;
+  jobNumber: string;
+  unitId: number | null;
+  serialNo: string | null;
+  stageNo: number;
+  processName: string;
+  deptName: string;
+}
+
+export async function loadPlanNotifyContext(tx: Tx, plan: ProcessPlan): Promise<PlanNotifyContext> {
+  const [jp, dept, unit] = await Promise.all([
+    tx.jobProcess.findUniqueOrThrow({
+      where: { id: plan.jobProcessId },
+      select: { name: true, workOrderStages: true, job: { select: { id: true, jobNumber: true } } },
+    }),
+    tx.department.findUniqueOrThrow({ where: { id: plan.ownerDepartmentId }, select: { name: true } }),
+    plan.unitId != null ? tx.unit.findUnique({ where: { id: plan.unitId }, select: { serialNo: true } }) : Promise.resolve(null),
+  ]);
+  return {
+    jobId: jp.job.id,
+    jobNumber: jp.job.jobNumber,
+    unitId: plan.unitId,
+    serialNo: unit?.serialNo ?? null,
+    stageNo: jp.workOrderStages[0] ?? 0,
+    processName: jp.name,
+    deptName: dept.name,
+  };
+}
+
 /**
  * The engine's PredecessorState[] for a process's incoming edges, read from
  * source ProcessPlan rows in this run for the given unit (unitId null =

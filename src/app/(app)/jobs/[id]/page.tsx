@@ -41,6 +41,8 @@ export default async function JobDetail({
   const tab: Tab = (TABS as readonly string[]).includes(tabParam ?? "") ? (tabParam as Tab) : "overview";
   const unitParam = toInt(sp.unit);
   const equipmentParam = toInt(sp.equipment);
+  const openUnit = toInt(sp.openUnit);
+  const openStage = toInt(sp.openStage);
 
   const [header, unitSpines, events, gantt, bom, qcp] = await Promise.all([
     loadJobHeader(actor, jobId),
@@ -66,6 +68,8 @@ export default async function JobDetail({
       bom={bom}
       qcp={qcp}
       tab={tab}
+      openUnit={openUnit}
+      openStage={openStage}
     />
   );
 }

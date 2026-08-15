@@ -1263,6 +1263,25 @@ async function seedDemo(
       }
       await mkUser("client@example.local", "Client Viewer", ["CLIENT_VIEWER"], [], client.id);
       stats.users = await tx.user.count({ where: { tenantId } });
+
+      // ── 13. Welders (FR-W1) ─────────────────────────────────────────
+      // No welder list has been provided by DESPL yet (CLAUDE.md "Pending
+      // inputs" — still outstanding). A small registry is seeded as a
+      // functional stand-in, same honestly-noted substitution as the
+      // department "representative" field (§9.7 progress.md) — so the
+      // /welding log-joint dialog has real welders to pick instead of an
+      // empty control. Replace with DESPL's actual list once it arrives.
+      const fabricationDeptId = deptIdByCode.get("FABRICATION")!;
+      await tx.welder.createMany({
+        data: [
+          { tenantId, name: "M. Sharma", employeeCode: "W-101", departmentId: fabricationDeptId },
+          { tenantId, name: "V. Yadav", employeeCode: "W-102", departmentId: fabricationDeptId },
+          { tenantId, name: "R. Gill", employeeCode: "W-103", departmentId: fabricationDeptId },
+          { tenantId, name: "S. Ansari", employeeCode: "W-104", departmentId: fabricationDeptId },
+          { tenantId, name: "K. Bhosale", employeeCode: "W-105", departmentId: fabricationDeptId },
+        ],
+      });
+      stats.welders = await tx.welder.count({ where: { tenantId } });
   }
 }
 

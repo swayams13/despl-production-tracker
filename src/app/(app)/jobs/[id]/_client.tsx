@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { StageSpine } from "@/components/industrial/stage-spine";
 import { StatusChip } from "@/components/industrial/status-chip";
@@ -38,6 +39,8 @@ export function JobDetailClient({
   bom,
   qcp,
   tab,
+  openUnit,
+  openStage: openStageParam,
 }: {
   jobId: number;
   header: JobHeader;
@@ -48,9 +51,21 @@ export function JobDetailClient({
   bom: BomTree | null;
   qcp: QcpGridData | null;
   tab: "overview" | "gantt" | "bom" | "qcp" | "activity";
+  /** Deep-link from a notification (`?openUnit=&openStage=`) — auto-opens the StageSheet once on mount. */
+  openUnit?: number;
+  openStage?: number;
 }) {
   const { sheet, openStage, refreshStage, closeSheet } = useStageSheetLauncher();
   const openStageInJob = (unitId: number | undefined, stageNo: number) => openStage(jobId, unitId, stageNo);
+
+  useEffect(() => {
+    if (openUnit != null && openStageParam != null) openStageInJob(openUnit, openStageParam);
+    // Re-fire on a changed deep-link (e.g. a second notification click while
+    // this job page stays mounted across a search-param-only navigation) —
+    // openStageInJob itself is intentionally excluded, it's a new closure
+    // every render and isn't what should gate this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openUnit, openStageParam]);
 
   const forecastVariance = header.forecastVarianceDays;
 

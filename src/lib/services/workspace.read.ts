@@ -782,3 +782,23 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     };
   });
 }
+
+/**
+ * Cross-job overdue count for the sidebar "My Workspace" badge — scoped to
+ * the actor's own departments (PH/admin/management see every department's
+ * overdue count, matching requireDepartmentScope's own bypass rule).
+ */
+export async function loadMyOverdueCount(actor: Actor): Promise<number> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const scoped = !hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT);
+    if (scoped && actor.departmentIds.length === 0) return 0;
+    return tx.processPlan.count({
+      where: {
+        status: { not: "COMPLETE" },
+        plannedFinish: { lt: new Date() },
+        scheduleRun: { isCurrent: true },
+        ...(scoped ? { ownerDepartmentId: { in: actor.departmentIds } } : {}),
+      },
+    });
+  });
+}
