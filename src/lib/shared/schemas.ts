@@ -95,6 +95,75 @@ export const fileDelayReasonSchema = z
   .strict();
 export type FileDelayReasonInput = z.infer<typeof fileDelayReasonSchema>;
 
+/** FR-W2: log a butt-weld joint, attributed to one or more welders. */
+export const logWeldJointSchema = z
+  .object({
+    jobId: id,
+    unitId: id.nullish(),
+    jointNo: z.string().trim().min(1, "Joint number is required"),
+    jointType: z.string().trim().min(1, "Joint type is required"),
+    weldSize: z.string().trim().optional(),
+    wpsRef: z.string().trim().optional(),
+    welderIds: z.array(id).min(1, "At least one welder is required"),
+  })
+  .strict();
+export type LogWeldJointInput = z.infer<typeof logWeldJointSchema>;
+
+/** FR-W3: QC records an NDT result for a joint (RT/UT/PT/MT…), attributed to its welder(s). */
+export const recordNdtResultSchema = z
+  .object({
+    weldJointId: id,
+    testTypeId: id,
+    result: z.enum(["PENDING", "ACCEPT", "REJECT"]),
+  })
+  .strict();
+export type RecordNdtResultInput = z.infer<typeof recordNdtResultSchema>;
+
+/** §4.10 Admin: create a user (create user + role + dept). No self-signup anywhere. */
+export const createUserSchema = z
+  .object({
+    name: z.string().trim().min(1, "Name is required"),
+    email: z.string().trim().toLowerCase().email("Enter a valid email address"),
+    roleCodes: z
+      .array(z.enum(["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVISOR", "QC", "CLIENT_VIEWER"]))
+      .min(1, "At least one role is required"),
+    departmentIds: z.array(id).default([]),
+    password: z.string().min(8, "Password must be at least 8 characters"),
+  })
+  .strict();
+export type CreateUserInput = z.infer<typeof createUserSchema>;
+
+/** §4.10 Admin: reset a user's password. */
+export const resetPasswordSchema = z
+  .object({ userId: id, password: z.string().min(8, "Password must be at least 8 characters") })
+  .strict();
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+/** §4.10 Admin: master delay-reason list editor. */
+export const createDelayCategorySchema = z.object({ name: z.string().trim().min(1, "Name is required") }).strict();
+export type CreateDelayCategoryInput = z.infer<typeof createDelayCategorySchema>;
+
+export const updateDelayCategorySchema = z
+  .object({ id, name: z.string().trim().min(1).optional(), active: z.boolean().optional() })
+  .strict();
+export type UpdateDelayCategoryInput = z.infer<typeof updateDelayCategorySchema>;
+
+/**
+ * §4.10 Admin: standard-durations table editor. CLAUDE.md invariant #9 —
+ * edits a TEMPLATE, so they create a new ProcessTemplateVersion; a job
+ * already pinned to the prior version is never retroactively changed.
+ */
+export const updateStandardDurationsSchema = z
+  .object({
+    templateVersionId: id,
+    edits: z
+      .array(z.object({ templateProcessId: id, durationMinDays: z.number().int().positive(), durationMaxDays: z.number().int().positive() }))
+      .min(1, "At least one change is required"),
+    reason,
+  })
+  .strict();
+export type UpdateStandardDurationsInput = z.infer<typeof updateStandardDurationsSchema>;
+
 /** Override a process duration → new ScheduleRun version, mandatory reason. */
 export const applyDurationOverrideSchema = z
   .object({

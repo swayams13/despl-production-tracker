@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getActor, ROLES, hasRole } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
+import { CountUp } from "@/components/industrial/count-up";
 
 async function pilotJobId(tenantId: number): Promise<number | null> {
   return withTenant(tenantId, async (tx) => {
@@ -91,26 +92,26 @@ export default async function Dashboard() {
       <div className="kpis">
         <div className="kpi">
           <h6>Overall completion</h6>
-          <div className="v mono">{k.percentComplete}<small>%</small></div>
+          <div className="v mono"><CountUp value={k.percentComplete} /><small>%</small></div>
           <div className="sub"><span className="mono">{completeCount} of {k.totalPlans}</span> plans complete</div>
           <div className="pbar"><i style={{ width: `${k.percentComplete}%` }} /></div>
         </div>
 
         <Link href="/workspace" className="kpi clicky">
           <h6>On track</h6>
-          <div className="v mono">{onTrack}</div>
+          <div className="v mono"><CountUp value={onTrack} /></div>
           <div className="sub">not currently overdue</div>
         </Link>
 
         <Link href="/workspace?status=overdue" className={`kpi clicky${k.overdue > 0 ? " alert" : ""}`}>
           <h6>At-risk / overdue</h6>
-          <div className="v mono" style={{ color: k.overdue > 0 ? "var(--s-overdue)" : undefined }}>{k.overdue}</div>
+          <div className="v mono" style={{ color: k.overdue > 0 ? "var(--s-overdue)" : undefined }}><CountUp value={k.overdue} /></div>
           <div className="sub">click to review</div>
         </Link>
 
         <div className="kpi">
           <h6>Open hold points</h6>
-          <div className="v mono">{k.openHoldPoints}</div>
+          <div className="v mono"><CountUp value={k.openHoldPoints} /></div>
           <div className="sub">
             {k.oldestHoldAgeDays !== null
               ? <>oldest open <b className="mono" style={{ color: "var(--s-hold)" }}>{k.oldestHoldAgeDays}d</b> · {k.awaitingTpiCount} await TPI</>

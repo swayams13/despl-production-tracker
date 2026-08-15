@@ -2,11 +2,30 @@
 
 import Link from "next/link";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
+import { StatusChip } from "@/components/industrial/status-chip";
+import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { DeptDetail } from "@/lib/services/departments.read";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
+/** Raw ProcessPlanStatus + the derived overdue flag → the display vocabulary (never raw enums in the UI). */
+function toDisplayStatus(status: string, overdue: boolean): StageDisplayStatus {
+  if (overdue && status !== "COMPLETE") return "overdue";
+  switch (status) {
+    case "COMPLETE":
+      return "complete";
+    case "SUBMITTED":
+      return "submitted";
+    case "ON_HOLD":
+      return "hold";
+    case "IN_PROGRESS":
+      return "progress";
+    default:
+      return "idle";
+  }
 }
 
 export function DepartmentDetailClient({ dept }: { dept: DeptDetail }) {
@@ -43,7 +62,7 @@ export function DepartmentDetailClient({ dept }: { dept: DeptDetail }) {
                   <td className="mono">{it.jobNumber}</td>
                   <td className="mono" style={{ color: "var(--muted)" }}>{it.serialNo}</td>
                   <td>{it.processName}</td>
-                  <td>{it.status.replace("_", " ").toLowerCase()}</td>
+                  <td><StatusChip status={toDisplayStatus(it.status, it.overdue)} /></td>
                   <td className="num mono" style={{ color: it.overdue ? "var(--s-overdue)" : "var(--muted)" }}>{fmtDate(it.plannedFinish)}</td>
                 </tr>
               ))}

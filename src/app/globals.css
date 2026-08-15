@@ -344,7 +344,14 @@ body {
 .theme-industrial .drop .d-row:last-child { border-bottom: none; }
 .theme-industrial .drop .d-row:hover { background: var(--surface-2); }
 .theme-industrial .drop .d-row small { display: block; color: var(--muted); margin-top: 2px; font-size: 11px; }
-.theme-industrial .content { padding: 22px 24px 48px; }
+.theme-industrial .content { padding: 22px 24px 48px; animation: pageFadeUp .28s cubic-bezier(.2, .8, .2, 1); }
+
+/* dark scrollbars (Firefox + WebKit) */
+.theme-industrial, .theme-industrial * { scrollbar-color: #3a3f47 var(--surface); scrollbar-width: thin; }
+.theme-industrial ::-webkit-scrollbar { width: 10px; height: 10px; }
+.theme-industrial ::-webkit-scrollbar-track { background: var(--surface); }
+.theme-industrial ::-webkit-scrollbar-thumb { background: #3a3f47; border-radius: 6px; border: 2px solid var(--surface); }
+.theme-industrial ::-webkit-scrollbar-thumb:hover { background: #4a4f57; }
 .theme-industrial .page-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .theme-industrial .page-h h1 { font-size: 20px; font-weight: 600; }
 .theme-industrial .page-h .sub { color: var(--muted); }
@@ -478,6 +485,15 @@ body {
 .theme-industrial .d-bad { color: var(--s-overdue); }
 .theme-industrial .clicky { cursor: pointer; }
 
+/* welding (§4.7, §9.8) — ported 1:1 from the mockup */
+.theme-industrial .weld-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.theme-industrial .weld-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; }
+.theme-industrial .weld-card.warn { border-top: 2px solid var(--s-overdue); }
+.theme-industrial .weld-card h4 { font-weight: 600; margin-bottom: 2px; }
+.theme-industrial .weld-card .role { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
+.theme-industrial .weld-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; font-size: 11px; color: var(--muted); }
+.theme-industrial .weld-stats b { display: block; font-size: 15px; font-weight: 600; color: var(--text); }
+
 /* departments (§4.6, §9.7) — ported 1:1 from the mockup */
 .theme-industrial .dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
 .theme-industrial .dept-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; cursor: pointer; transition: border-color .15s; text-decoration: none; display: block; }
@@ -545,10 +561,11 @@ body {
 @keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes sheetIn { from { transform: translateX(102%); } to { transform: none; } }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pageFadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .theme-industrial .drop { animation: pop .16s ease; }
 .theme-industrial.stage-sheet[data-state="open"] { animation: sheetIn .28s cubic-bezier(.2, .8, .2, 1); }
 .stage-sheet-ov[data-state="open"] { animation: fadeIn .2s ease; }
 @media (prefers-reduced-motion: reduce) {
-  .theme-industrial .drop, .theme-industrial.stage-sheet, .stage-sheet-ov { animation: none; }
+  .theme-industrial .drop, .theme-industrial.stage-sheet, .stage-sheet-ov, .theme-industrial .content { animation: none; }
   .theme-industrial .spine i { transition: none; }
 }

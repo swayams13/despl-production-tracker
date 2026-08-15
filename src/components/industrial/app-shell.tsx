@@ -2,10 +2,13 @@
 
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { StageSpine } from "./stage-spine";
 import { DEMO_SPINE } from "./_demo";
+import { markNotificationReadAction, markAllNotificationsReadAction } from "@/app/actions/notifications";
+import { logout } from "@/app/actions/auth";
+import type { NotificationRow } from "@/lib/services/notifications.read";
 
 // Icons inlined from the mockup (lucide-react is pinned at an atypical 1.x here;
 // the approved SVGs are the pixel reference anyway).
@@ -55,6 +58,12 @@ const icons = {
       <path d="M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" />
     </svg>
   ),
+  admin: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.36.5.6 1 .6H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1.4z" />
+    </svg>
+  ),
 };
 
 const NAV: { group: string; items: { href: string; label: string; icon: ReactNode; badge?: number }[] }[] = [
@@ -68,7 +77,7 @@ const NAV: { group: string; items: { href: string; label: string; icon: ReactNod
   {
     group: "Execution",
     items: [
-      { href: "/workspace", label: "My Workspace", icon: icons.workspace, badge: 8 },
+      { href: "/workspace", label: "My Workspace", icon: icons.workspace },
       { href: "/departments", label: "Departments", icon: icons.departments },
       { href: "/qc", label: "QC & Hold Points", icon: icons.qc },
       { href: "/welding", label: "Welding", icon: icons.welding },
@@ -76,10 +85,7 @@ const NAV: { group: string; items: { href: string; label: string; icon: ReactNod
   },
   {
     group: "Records",
-    items: [
-      { href: "/bom", label: "BOM & Components", icon: icons.bom },
-      { href: "/reports", label: "Reports", icon: icons.reports },
-    ],
+    items: [{ href: "/reports", label: "Reports", icon: icons.reports }],
   },
 ];
 
@@ -92,22 +98,64 @@ const ROLE_LABEL: Record<string, string> = {
   CLIENT_VIEWER: "Client",
 };
 
+function fmtWhen(iso: string): string {
+  const d = new Date(iso);
+  const days = Math.floor((Date.now() - d.getTime()) / 864e5);
+  if (days <= 0) return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+}
+
+/** Where a notification's payload sends you when clicked. */
+function notificationHref(n: NotificationRow): string | null {
+  const p = n.payload as { jobId?: number; unitId?: number; stageNo?: number; date?: string } | null;
+  if (n.type === "DIGEST_PUBLISHED") return p?.date ? `/reports?date=${p.date}` : "/reports";
+  if (p?.jobId != null && p.stageNo != null) {
+    return p.unitId != null
+      ? `/jobs/${p.jobId}?openUnit=${p.unitId}&openStage=${p.stageNo}`
+      : `/jobs/${p.jobId}`;
+  }
+  return null;
+}
+
 export function AppShell({
   children,
   userName,
   userRole,
+  overdueCount,
+  notifications,
 }: {
   children: ReactNode;
   userName: string;
   userRole: string;
+  overdueCount: number;
+  notifications: { unreadCount: number; recent: NotificationRow[] };
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const initials = userName.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
   const roleLabel = ROLE_LABEL[userRole] ?? userRole;
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
 
-  const active = NAV.flatMap((g) => g.items).find((i) => pathname.startsWith(i.href));
+  const nav =
+    userRole === "ADMIN" || userRole === "MANAGEMENT"
+      ? [...NAV, { group: "Admin", items: [{ href: "/admin", label: "Admin", icon: icons.admin }] }]
+      : NAV;
+  const active = nav.flatMap((g) => g.items).find((i) => pathname.startsWith(i.href));
+
+  const openNotification = async (n: NotificationRow) => {
+    if (!n.readAt) await markNotificationReadAction(n.id);
+    setBellOpen(false);
+    const href = notificationHref(n);
+    if (href) router.push(href);
+    router.refresh();
+  };
+
+  const markAllRead = async () => {
+    await markAllNotificationsReadAction();
+    router.refresh();
+  };
 
   return (
     <div className="app">
@@ -116,7 +164,7 @@ export function AppShell({
           <b>DESPL</b>
           <span>Production Tracker</span>
         </div>
-        {NAV.map((g) => (
+        {nav.map((g) => (
           <div className="navgrp" key={g.group}>
             <h6>{g.group}</h6>
             {g.items.map((it) => (
@@ -127,7 +175,7 @@ export function AppShell({
               >
                 {it.icon}
                 {it.label}
-                {it.badge ? <span className="badge">{it.badge}</span> : null}
+                {it.href === "/workspace" && overdueCount > 0 ? <span className="badge">{overdueCount}</span> : null}
               </Link>
             ))}
           </div>
@@ -138,6 +186,14 @@ export function AppShell({
             <b style={{ fontWeight: 500 }}>{userName}</b>
             <small>{roleLabel}</small>
           </div>
+          <button
+            className="btn"
+            style={{ marginLeft: "auto", padding: "4px 8px" }}
+            aria-label="Sign out"
+            onClick={() => logout()}
+          >
+            Sign out
+          </button>
         </div>
       </aside>
 
@@ -187,25 +243,48 @@ export function AppShell({
                 <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
                 <path d="M13.7 21a2 2 0 01-3.4 0" />
               </svg>
-              <em>3</em>
+              {notifications.unreadCount > 0 && <em>{notifications.unreadCount}</em>}
               {bellOpen && (
                 <div className="drop">
-                  <div className="d-row">
-                    PO Receipt crossed 7d — Units 2, 3<small>Reason required · 08:00</small>
-                  </div>
-                  <div className="d-row">
-                    Marking · Unit 1 awaiting your verification<small>Submitted by R. Kadam · 08:02</small>
-                  </div>
-                  <div className="d-row">
-                    ITP-320-04 open 6 days — TPI visit not booked<small>Hydro test witness · Unit 2</small>
-                  </div>
+                  {notifications.recent.length === 0 ? (
+                    <div className="d-row" style={{ color: "var(--muted)" }}>
+                      No notifications yet.
+                    </div>
+                  ) : (
+                    notifications.recent.map((n) => (
+                      <div
+                        key={n.id}
+                        className="d-row"
+                        style={{ opacity: n.readAt ? 0.55 : 1, cursor: "pointer" }}
+                        onClick={() => openNotification(n)}
+                      >
+                        {n.title}
+                        <small>
+                          {n.body ? `${n.body} · ` : ""}
+                          {fmtWhen(n.createdAt)}
+                        </small>
+                      </div>
+                    ))
+                  )}
+                  {notifications.unreadCount > 0 && (
+                    <div
+                      className="d-row"
+                      style={{ color: "var(--accent)", textAlign: "center" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        markAllRead();
+                      }}
+                    >
+                      Mark all as read
+                    </div>
+                  )}
                 </div>
               )}
             </button>
           </div>
         </div>
 
-        <div className="content">{children}</div>
+        <div className="content" key={pathname}>{children}</div>
       </div>
     </div>
   );

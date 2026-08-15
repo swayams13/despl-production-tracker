@@ -47,6 +47,11 @@ export interface QcpGrid {
 }
 
 const CLASS_PRIORITY = ["H", "W", "RW", "R&A", "R", "P"];
+/** A code outside the known list ranks last, never first (indexOf's -1 would otherwise sort it ahead of "H"). */
+function classPriorityRank(code: string): number {
+  const i = CLASS_PRIORITY.indexOf(code);
+  return i === -1 ? CLASS_PRIORITY.length : i;
+}
 
 export async function loadQcpGrid(actor: Actor, jobId: number, unitId?: number): Promise<QcpGrid | null> {
   return withTenant(actor.tenantId, async (tx) => {
@@ -121,7 +126,7 @@ export async function loadQcpGrid(actor: Actor, jobId: number, unitId?: number):
       const codesByParty = item.partyCodes.map((pc) => ({ party: pc.inspectionParty.code, code: pc.qcpCode.code, requiresCall: pc.qcpCode.requiresCall }));
       const qcCode = codesByParty.find((c) => !c.party.toUpperCase().includes("TPI"))?.code ?? null;
       const tpiCode = codesByParty.find((c) => c.party.toUpperCase().includes("TPI"))?.code ?? null;
-      const classCode = [...codesByParty].sort((a, b) => CLASS_PRIORITY.indexOf(a.code) - CLASS_PRIORITY.indexOf(b.code))[0]?.code ?? "P";
+      const classCode = [...codesByParty].sort((a, b) => classPriorityRank(a.code) - classPriorityRank(b.code))[0]?.code ?? "P";
       const requiresCall = codesByParty.some((c) => c.requiresCall);
 
       const attempt = latestByItem.get(item.id);
