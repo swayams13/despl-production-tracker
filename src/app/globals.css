@@ -396,6 +396,27 @@ body {
 .theme-industrial .sh-pos { display: flex; gap: 1.5px; margin-top: 10px; }
 .theme-industrial .sh-pos i { flex: 1; height: 6px; border-radius: 1px; }
 
+/* workspace (§4.4) — ported 1:1 from the mockup */
+.theme-industrial table { width: 100%; border-collapse: collapse; }
+.theme-industrial th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.theme-industrial td { padding: 0 12px; height: 36px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 13px; }
+.theme-industrial tbody tr:last-child td { border-bottom: none; }
+.theme-industrial tr.row { transition: background .12s; }
+.theme-industrial tr.row:hover td { background: var(--surface-2); }
+.theme-industrial .num { text-align: right; }
+.theme-industrial select.btn { color: var(--muted); font-family: inherit; }
+.theme-industrial input.ws-detail { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 12px; padding: 5px 8px; width: 100%; font-family: inherit; }
+.theme-industrial input.ws-detail:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.theme-industrial .sumchips { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+.theme-industrial .ws-card { margin-bottom: 14px; }
+.theme-industrial .ws-card .hd b { font-size: 13px; font-weight: 600; color: var(--text); }
+.theme-industrial .ws-card .hd .meta { color: var(--muted); font-size: 11.5px; }
+.theme-industrial .ws-card .hd .actions { margin-left: auto; display: flex; gap: 8px; }
+.theme-industrial .ws-err { color: var(--s-overdue); font-size: 11px; margin-top: 2px; }
+.theme-industrial .filter-chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 122, 26, .12); color: var(--accent); border: 1px solid rgba(255, 122, 26, .35); font-size: 11px; font-weight: 600; padding: 3px 6px 3px 10px; border-radius: 10px; }
+.theme-industrial .filter-chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
+.theme-industrial .note { color: var(--muted); font-size: 11px; margin-top: 20px; text-align: center; }
+
 /* motion */
 @keyframes pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes sheetIn { from { transform: translateX(102%); } to { transform: none; } }

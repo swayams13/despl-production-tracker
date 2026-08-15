@@ -15,10 +15,12 @@ import {
 } from "@/lib/schedule";
 import {
   holdProcessSchema,
+  rejectProcessSchema,
   startProcessSchema,
   submitProcessSchema,
   verifyProcessSchema,
   type HoldProcessInput,
+  type RejectProcessInput,
   type StartProcessInput,
   type SubmitProcessInput,
   type VerifyProcessInput,
@@ -48,7 +50,7 @@ import type { ProcessPlan, ProcessPlanStatus } from "@/generated/prisma/client";
 
 // ── Pure state machine (exported so the transition matrix is unit-testable) ──
 
-export type ProcessAction = "start" | "submit" | "verify" | "hold" | "resume";
+export type ProcessAction = "start" | "submit" | "verify" | "reject" | "hold" | "resume";
 
 /**
  * The only legal (from → to) edges. hold is reachable from either active state;
@@ -64,6 +66,7 @@ export const TRANSITIONS: Record<ProcessAction, { from: ProcessPlanStatus[]; to:
   start: { from: ["NOT_STARTED"], to: "IN_PROGRESS" },
   submit: { from: ["IN_PROGRESS"], to: "SUBMITTED" },
   verify: { from: ["SUBMITTED"], to: "COMPLETE" },
+  reject: { from: ["SUBMITTED"], to: "IN_PROGRESS" },
   hold: { from: ["IN_PROGRESS", "SUBMITTED"], to: "ON_HOLD" },
   resume: { from: ["ON_HOLD"], to: "IN_PROGRESS" },
 };
@@ -214,6 +217,44 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
           after: { status: updated.status, verifiedBy: updated.verifiedBy, actualFinish: updated.actualFinish },
           eventType: "ProcessVerified",
           eventPayload: { processPlanId: plan.id, submittedBy: plan.submittedBy, verifiedBy: actor.userId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * SUBMITTED → IN_PROGRESS (checker rejects the maker's submission). Same
+ * maker–checker gate as verify (#3): QC role AND actor ≠ submittedBy — the
+ * person who submitted cannot reject their own work. A reason is mandatory
+ * (schema) and recorded in the append-only trail; `submittedBy` is cleared so
+ * the maker must re-submit after rework. No hold/predecessor gate: rejecting is
+ * always allowed on a submitted item, it only sends work back.
+ */
+export async function rejectProcess(actor: Actor, input: RejectProcessInput): Promise<ProcessPlan> {
+  const { processPlanId, reason } = rejectProcessSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId);
+    assertMakerChecker(actor, plan.submittedBy);
+    const to = assertTransition("reject", plan.status);
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.processPlan.update({
+        where: { id: plan.id },
+        data: { status: to, submittedBy: null },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "process.reject",
+          entityType: "ProcessPlan",
+          entityId: plan.id,
+          before: { status: plan.status, submittedBy: plan.submittedBy },
+          after: { status: updated.status, submittedBy: updated.submittedBy, reason },
+          eventType: "ProcessRejected",
+          eventPayload: { processPlanId: plan.id, submittedBy: plan.submittedBy, rejectedBy: actor.userId, reason },
         },
       };
     });

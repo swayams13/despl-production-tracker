@@ -17,3 +17,32 @@ export async function fileDelayAction(
     return toActionError(e);
   }
 }
+
+/**
+ * File one categorised reason across many plans — the workspace "Apply reason
+ * to all overdue" bulk action (§4.4). Each plan still routes through the same
+ * `fileDelayReason` service (its own gate + audit row); a per-plan failure
+ * doesn't roll back the others, so the result reports how many landed.
+ */
+export async function fileDelayBulkAction(
+  processPlanIds: number[],
+  categoryId: number,
+  detail?: string,
+): Promise<ActionResult & { filed?: number }> {
+  const actor = await requireActor();
+  let filed = 0;
+  let firstError: ActionResult | null = null;
+  for (const processPlanId of processPlanIds) {
+    try {
+      await fileDelayReason(actor, { processPlanId, categoryId, detail });
+      filed++;
+    } catch (e) {
+      const err = toActionError(e);
+      if (!err.ok && !firstError) firstError = err;
+    }
+  }
+  revalidatePath("/workspace");
+  revalidatePath("/dashboard");
+  if (firstError && filed === 0) return firstError;
+  return { ok: true, filed };
+}

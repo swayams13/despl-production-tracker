@@ -37,6 +37,7 @@ describe("assertTransition", () => {
     ["start", "NOT_STARTED", "IN_PROGRESS"],
     ["submit", "IN_PROGRESS", "SUBMITTED"],
     ["verify", "SUBMITTED", "COMPLETE"],
+    ["reject", "SUBMITTED", "IN_PROGRESS"],
     ["hold", "IN_PROGRESS", "ON_HOLD"],
     ["hold", "SUBMITTED", "ON_HOLD"],
     ["resume", "ON_HOLD", "IN_PROGRESS"],

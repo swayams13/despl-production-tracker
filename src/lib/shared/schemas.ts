@@ -63,6 +63,10 @@ export type VerifyProcessInput = z.infer<typeof verifyProcessSchema>;
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
 export type HoldProcessInput = z.infer<typeof holdProcessSchema>;
 
+/** QC rejects a submitted process back to the maker, with a mandatory reason. */
+export const rejectProcessSchema = z.object({ processPlanId: id, reason }).strict();
+export type RejectProcessInput = z.infer<typeof rejectProcessSchema>;
+
 /** QC records a checkpoint result for a unit → clears/opens the hold point (#4). */
 export const recordQcpExecutionSchema = z
   .object({
