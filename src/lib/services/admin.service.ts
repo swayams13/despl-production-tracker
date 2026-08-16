@@ -35,6 +35,19 @@ export async function createUser(actor: Actor, input: CreateUserInput): Promise<
     if (existing) {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { email }, "A user with this email already exists.");
     }
+    // username is derived from the email local-part (see comment below) and
+    // is @@unique([tenantId, username]) at the DB level; two different email
+    // domains can share a local-part (bob@gmail.com, bob@yahoo.com), so this
+    // needs its own pre-check rather than relying on the email check above.
+    const username = email.split("@")[0];
+    const existingUsername = await tx.user.findFirst({ where: { tenantId: actor.tenantId, username } });
+    if (existingUsername) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { username },
+        "A user with this username already exists.",
+      );
+    }
     const roles = await tx.role.findMany({ where: { tenantId: actor.tenantId, code: { in: roleCodes } } });
     if (roles.length !== roleCodes.length) {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { roleCodes }, "One or more roles are invalid.");
@@ -57,7 +70,7 @@ export async function createUser(actor: Actor, input: CreateUserInput): Promise<
           // ponytail: derived from email local-part, matching the migration's
           // backfill rule. Task 1.3 (password-change flow) is the one that
           // needs a real username-entry UX; this just keeps rows valid.
-          username: email.split("@")[0],
+          username,
           passwordHash,
           roles: { create: roles.map((r) => ({ roleId: r.id })) },
           departments: { create: departmentIds.map((departmentId) => ({ departmentId })) },
