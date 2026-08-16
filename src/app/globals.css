@@ -368,6 +368,10 @@ body {
 .theme-industrial .c-hold { background: rgba(217, 166, 46, .12); color: var(--s-hold); } .theme-industrial .c-hold i { background: var(--s-hold); }
 .theme-industrial .c-overdue { background: rgba(240, 82, 77, .12); color: var(--s-overdue); } .theme-industrial .c-overdue i { background: var(--s-overdue); }
 .theme-industrial .c-idle { background: rgba(74, 79, 87, .25); color: #9aa0a8; } .theme-industrial .c-idle i { background: var(--s-idle); }
+/* neutral tag — role/department badges (Task 4.2). Distinct shape from
+   .chip on purpose: status is the ONLY thing that gets the pill+dot
+   treatment (design tokens hard ban), roles/departments are just labels. */
+.theme-industrial .tag { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 500; padding: 2px 7px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .theme-industrial .btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: 4px; padding: 5px 12px; font-size: 12px; font-weight: 500; cursor: pointer; transition: border-color .15s, background .15s; font-family: inherit; }
 .theme-industrial .btn:hover { border-color: #3a3f47; }
 .theme-industrial .btn-accent { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
@@ -406,6 +410,35 @@ body {
 .theme-industrial .sh-x:hover { background: var(--surface-2); color: var(--text); }
 .theme-industrial .sh-pos { display: flex; gap: 1.5px; margin-top: 10px; }
 .theme-industrial .sh-pos i { flex: 1; height: 6px; border-radius: 1px; }
+
+/* admin dialog (centered modal — forms don't fit the stage-sheet's right-side
+   metaphor; reuses the same .sh-hd/.sh-body/.sh-ft slots and Radix Dialog
+   wiring as stage-sheet.tsx, portaled the same way, so it re-declares
+   .theme-industrial for the same reason). Task 4.2, SPEC §7.3. */
+.admin-dialog-ov { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 40; }
+.theme-industrial.admin-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 560px; max-width: 92vw; max-height: 86vh; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; z-index: 41; display: flex; flex-direction: column; }
+.theme-industrial.admin-dialog.wide { width: 760px; }
+.theme-industrial .ad-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.theme-industrial .ad-check-grid { display: flex; flex-wrap: wrap; gap: 10px 16px; font-size: 12px; color: var(--muted); }
+.theme-industrial .ad-check-grid label { display: flex; align-items: center; gap: 5px; }
+.theme-industrial .ad-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* credential slip (A6 print) — SPEC §7.3: "Print credential slip". Hidden on
+   screen (the dialog shows the same info in normal styled markup); made the
+   ONLY visible thing on the page during print via the visibility trick below,
+   scoped to this one container so it never touches any other page's print
+   behavior. */
+.cred-slip { display: none; }
+@media print {
+  body * { visibility: hidden; }
+  .cred-slip, .cred-slip * { visibility: visible; }
+  .cred-slip { display: block; position: fixed; top: 0; left: 0; width: 100%; padding: 8mm; box-sizing: border-box; color: #000; background: #fff; font-family: system-ui, sans-serif; }
+  .cred-slip h2 { font-size: 14px; margin: 0 0 10px; }
+  .cred-slip .cs-label { font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: #555; margin-top: 10px; }
+  .cred-slip .cs-value { font-size: 13px; font-family: ui-monospace, monospace; }
+  .cred-slip .cs-warn { margin-top: 14px; font-size: 10px; }
+  @page { size: A6; margin: 6mm; }
+}
 
 /* workspace (§4.4) — ported 1:1 from the mockup */
 .theme-industrial table { width: 100%; border-collapse: collapse; }
@@ -585,7 +618,10 @@ body {
 .theme-industrial .drop { animation: pop .16s ease; }
 .theme-industrial.stage-sheet[data-state="open"] { animation: sheetIn .28s cubic-bezier(.2, .8, .2, 1); }
 .stage-sheet-ov[data-state="open"] { animation: fadeIn .2s ease; }
+.theme-industrial.admin-dialog[data-state="open"] { animation: fadeIn .2s ease; }
+.admin-dialog-ov[data-state="open"] { animation: fadeIn .2s ease; }
 @media (prefers-reduced-motion: reduce) {
-  .theme-industrial .drop, .theme-industrial.stage-sheet, .stage-sheet-ov, .theme-industrial .content { animation: none; }
+  .theme-industrial .drop, .theme-industrial.stage-sheet, .stage-sheet-ov, .theme-industrial .content,
+  .theme-industrial.admin-dialog, .admin-dialog-ov { animation: none; }
   .theme-industrial .spine i { transition: none; }
 }
