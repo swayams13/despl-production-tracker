@@ -1,16 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, ROLES, hasRole } from "@/lib/authz";
-import { withTenant } from "@/lib/db";
 import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
+import { loadPortfolio } from "@/lib/services/portfolio.read";
+import { PortfolioBand, healthFromSlug } from "./_portfolio";
 import { CountUp } from "@/components/industrial/count-up";
-
-async function pilotJobId(tenantId: number): Promise<number | null> {
-  return withTenant(tenantId, async (tx) => {
-    const j = await tx.job.findFirst({ where: { jobNumber: "DESPL-320" }, select: { id: true } });
-    return j?.id ?? null;
-  });
-}
 
 const STATUS_COLS = ["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "COMPLETE", "ON_HOLD"] as const;
 const STATUS_LABELS: Record<(typeof STATUS_COLS)[number], string> = {
@@ -49,20 +43,43 @@ function onTimeColor(pct: number): string {
   return "var(--s-overdue)";
 }
 
-export default async function Dashboard() {
+function first(v: string | string[] | undefined): string | undefined {
+  return Array.isArray(v) ? v[0] : v;
+}
+
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const actor = await getActor();
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
   if (!hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect("/workspace");
 
-  const jobId = await pilotJobId(actor.tenantId);
+  const sp = await searchParams;
+  const portfolio = await loadPortfolio(actor);
+  const activeFilter = healthFromSlug(first(sp.health));
+
+  // Default to the worst-off project, which is row 0 — that is the whole point
+  // of the worst-first sort. An explicit ?job= wins so a link stays stable.
+  const requested = Number(first(sp.job));
+  const selected =
+    portfolio.rows.find((r) => r.id === requested) ?? portfolio.rows[0] ?? null;
+  const jobId = selected?.id ?? null;
+
   const k: JobKpis | null = jobId ? await loadJobKpis(actor, jobId) : null;
 
   if (!k) {
     return (
       <>
         <div className="page-h"><h1>Dashboard</h1></div>
-        <p className="note">No current schedule for this job. Generate one, or run the demo bootstrap, to see the dashboard.</p>
+        <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} />
+        <p className="note">
+          {selected
+            ? `No current schedule for ${selected.jobNumber}. Generate one to see its detail cards.`
+            : "No projects yet."}
+        </p>
       </>
     );
   }
@@ -77,15 +94,32 @@ export default async function Dashboard() {
     <>
       <div className="page-h">
         <h1>Dashboard</h1>
-        <span className="sub">
-          {k.jobNumber}
-          {k.equipmentName ? ` · ${k.equipmentName}` : ""}
-          {k.designCode ? ` · ${k.designCode}` : ""}
-          {` · ${k.unitCount} units`}
-        </span>
         <span className="sub" style={{ marginLeft: "auto" }}>
           {now.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })} · as of{" "}
           <span className="mono">{now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+        </span>
+      </div>
+
+      <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} />
+
+      <div className="page-h" style={{ marginTop: 8 }}>
+        <h2 style={{ fontSize: 15, fontWeight: 600 }}>Project detail</h2>
+        <nav className="sub" style={{ display: "flex", gap: 6, flexWrap: "wrap" }} aria-label="Select project">
+          {portfolio.rows.map((r) => (
+            <Link
+              key={r.id}
+              href={`/dashboard?job=${r.id}${activeFilter ? `&health=${first(sp.health)}` : ""}`}
+              className={`chip ${r.id === jobId ? "c-progress" : "c-idle"}`}
+            >
+              <i />
+              {r.jobNumber}
+            </Link>
+          ))}
+        </nav>
+        <span className="sub" style={{ marginLeft: "auto" }}>
+          {k.equipmentName ? `${k.equipmentName} · ` : ""}
+          {k.designCode ? `${k.designCode} · ` : ""}
+          {k.unitCount} units
         </span>
       </div>
 
