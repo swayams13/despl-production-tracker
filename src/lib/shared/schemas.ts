@@ -176,6 +176,18 @@ export type AssignPlanInput = z.infer<typeof assignPlanSchema>;
 export const releasePlanSchema = z.object({ processPlanId: id }).strict();
 export type ReleasePlanInput = z.infer<typeof releasePlanSchema>;
 
+/**
+ * First-login password change (personal dashboards v1, Task 1.3). Minimum
+ * length only — SPEC's own C28 default ("≥10 chars, no complexity theatre").
+ */
+export const changePasswordSchema = z
+  .object({
+    current: z.string().min(1, "Enter your current password"),
+    next: z.string().min(10, "New password must be at least 10 characters"),
+  })
+  .strict();
+export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
 /** Override a process duration → new ScheduleRun version, mandatory reason. */
 export const applyDurationOverrideSchema = z
   .object({

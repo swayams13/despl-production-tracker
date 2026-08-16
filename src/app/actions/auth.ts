@@ -32,7 +32,12 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     const user = await tx.user.findFirst({ where: { email, active: true } });
     if (!user) return null;
     if (!(await verifyPassword(user.passwordHash, password))) return null;
-    return { userId: user.id, tenantId: user.tenantId, clientId: user.clientId };
+    return {
+      userId: user.id,
+      tenantId: user.tenantId,
+      clientId: user.clientId,
+      sessionVersion: user.sessionVersion,
+    };
   });
 
   if (!session) return invalid;

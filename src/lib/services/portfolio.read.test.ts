@@ -22,6 +22,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("portfolio.read (DB)", async () => {
       email: "sj@despl.test",
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
+      mustChangePassword: false,
     };
   }
 
@@ -65,6 +66,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("portfolio.read (DB)", async () => {
       email: "client@despl.test",
       roles: [ROLES.CLIENT_VIEWER],
       departmentIds: [],
+      mustChangePassword: false,
     };
     const p = await loadPortfolio(actor);
 

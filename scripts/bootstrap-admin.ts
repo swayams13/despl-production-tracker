@@ -44,6 +44,7 @@ async function main() {
     email: "bootstrap@local",
     roles: [ROLES.ADMIN],
     departmentIds: [],
+    mustChangePassword: false,
   };
 
   const user = await createUser(bootstrapActor, {

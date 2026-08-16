@@ -21,7 +21,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
   });
 
   function actor(tenantId: number, userId: number, roles: string[]): Actor {
-    return { userId, tenantId, clientId: null, name: `U${userId}`, email: `u${userId}@x`, roles: roles as never, departmentIds: [] };
+    return { userId, tenantId, clientId: null, name: `U${userId}`, email: `u${userId}@x`, roles: roles as never, departmentIds: [], mustChangePassword: false };
   }
 
   async function despl320(): Promise<{ jobId: number; tenantId: number }> {

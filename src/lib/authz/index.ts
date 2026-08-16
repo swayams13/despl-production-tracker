@@ -23,6 +23,8 @@ export interface Actor {
   roles: RoleCode[];
   /** Department ids a supervisor may act on. Empty for non-supervisors. */
   departmentIds: number[];
+  /** True until the user completes the first-login password change. */
+  mustChangePassword: boolean;
 }
 
 /**
@@ -42,6 +44,12 @@ export async function getActor(): Promise<Actor | null> {
       include: { roles: { include: { role: true } }, departments: true },
     });
     if (!user) return null;
+    // A stale token: `changeOwnPassword` bumped `User.sessionVersion` since
+    // this token was issued, either by this device's own password change
+    // (whose cookie was immediately re-issued with the new version) or by
+    // invalidating every OTHER previously-issued session. Same effect as
+    // "user not found" — no separate error code needed.
+    if (session.sessionVersion !== user.sessionVersion) return null;
 
     return {
       userId: user.id,
@@ -51,6 +59,7 @@ export async function getActor(): Promise<Actor | null> {
       email: user.email,
       roles: user.roles.map((r) => r.role.code as RoleCode),
       departmentIds: user.departments.map((d) => d.departmentId),
+      mustChangePassword: user.mustChangePassword,
     };
   });
 }

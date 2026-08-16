@@ -70,6 +70,7 @@ describe("verify maker–checker guard", () => {
     email: "qc@x",
     roles: [ROLES.QC],
     departmentIds: [],
+    mustChangePassword: false,
   });
   const supervisorQc = (userId: number): Actor => ({ ...qc(userId), roles: [ROLES.SUPERVISOR, ROLES.QC] });
 
@@ -227,7 +228,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     const userSupB = await owner.user.create({
       data: { tenantId, email: "supb@x", username: "supb", name: "SupB", passwordHash: "x" },
     });
-    const base = { tenantId, clientId: null };
+    const base = { tenantId, clientId: null, mustChangePassword: false };
     supA = { ...base, userId: userSup.id, name: "Sup", email: "sup@x", roles: [ROLES.SUPERVISOR, ROLES.QC], departmentIds: [deptA.id] };
     qc = { ...base, userId: userQc.id, name: "Qc", email: "qc@x", roles: [ROLES.QC], departmentIds: [] };
     supB = { ...base, userId: userSupB.id, name: "SupB", email: "supb@x", roles: [ROLES.SUPERVISOR], departmentIds: [deptB.id] };
@@ -356,6 +357,7 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
       email: "ph@x",
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
+      mustChangePassword: false,
     };
   }
 

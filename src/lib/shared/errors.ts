@@ -47,6 +47,10 @@ export const ERROR_CODES = {
   ASSIGNEE_NOT_IN_DEPARTMENT: "ASSIGNEE_NOT_IN_DEPARTMENT",
   /** The proposed assignee's account is not active. */
   ASSIGNEE_INACTIVE: "ASSIGNEE_INACTIVE",
+  /** changeOwnPassword: the supplied "current" password did not verify. */
+  INVALID_CURRENT_PASSWORD: "INVALID_CURRENT_PASSWORD",
+  /** Too many failed password-change attempts in the last 15 minutes. */
+  RATE_LIMITED: "RATE_LIMITED",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -77,6 +81,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   PLAN_COMPLETE: "This work is already complete and cannot be claimed.",
   ASSIGNEE_NOT_IN_DEPARTMENT: "That person does not belong to this department.",
   ASSIGNEE_INACTIVE: "That person's account is not active.",
+  INVALID_CURRENT_PASSWORD: "Your current password is incorrect.",
+  RATE_LIMITED: "Too many attempts. Wait a few minutes and try again.",
 };
 
 /**

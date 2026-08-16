@@ -20,6 +20,7 @@ function actor(over: Partial<Actor> = {}): Actor {
     email: "sj@despl.test",
     roles: [ROLES.PRODUCTION_HEAD],
     departmentIds: [],
+    mustChangePassword: false,
     ...over,
   };
 }

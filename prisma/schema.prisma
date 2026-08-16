@@ -237,6 +237,12 @@ model User {
   /// are backfilled to false in the migration (they already have working
   /// passwords) — only the Prisma default is true, for rows created after.
   mustChangePassword Boolean  @default(true) @map("must_change_password")
+  /// Bumped on every `changeOwnPassword` call. `SessionPayload.sessionVersion`
+  /// is stamped into the JWT at issuance; `getActor()` compares the two on
+  /// every request and treats a mismatch as "not signed in" — this is how a
+  /// password change invalidates every OTHER previously-issued token without
+  /// a session table (personal dashboards v1, Task 1.3).
+  sessionVersion     Int      @default(0) @map("session_version")
   createdAt          DateTime @default(now()) @map("created_at")
 
   tenant        Organization     @relation(fields: [tenantId], references: [id])

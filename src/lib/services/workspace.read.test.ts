@@ -28,6 +28,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
       email: "sj@despl.test",
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
+      mustChangePassword: false,
     };
 
     const result = await loadPrioritizedJob(actor, job.id);
@@ -51,6 +52,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
       email: "qc@despl.test",
       roles: [ROLES.QC],
       departmentIds: [],
+      mustChangePassword: false,
     };
 
     const open = await loadOpenHoldPoints(actor, job.id);
@@ -77,6 +79,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
       email: "sj@despl.test",
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
+      mustChangePassword: false,
     };
 
     const kpis = await loadJobKpis(actor, job.id);
@@ -162,6 +165,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
       email: "qc2@despl.test",
       roles: [ROLES.QC],
       departmentIds: [],
+      mustChangePassword: false,
     };
 
     // Reset own precondition so reruns stay green (same convention as

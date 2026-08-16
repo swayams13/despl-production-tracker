@@ -52,6 +52,7 @@ async function main() {
     email: "bootstrap@local",
     roles: [ROLES.ADMIN],
     departmentIds: [],
+    mustChangePassword: false,
   };
   // A job with a real order date anchors on it: that is the actual planning
   // input, not an invention. DESPL-320's order date is genuinely unknown (seed

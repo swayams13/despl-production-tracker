@@ -40,6 +40,7 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
       email: "admin@test.local",
       roles: [ROLES.ADMIN],
       departmentIds: [],
+      mustChangePassword: false,
     };
   });
 

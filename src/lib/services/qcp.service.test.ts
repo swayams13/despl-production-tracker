@@ -31,6 +31,7 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
       email: "ph@x",
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
+      mustChangePassword: false,
     };
   }
 

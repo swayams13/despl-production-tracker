@@ -20,7 +20,7 @@ describe.skipIf(!RUN_DB)("welding.service (DB-backed)", async () => {
   });
 
   function actorBase(tenantId: number): Actor {
-    return { userId: 1, tenantId, clientId: null, name: "Test", email: "t@x", roles: [], departmentIds: [] };
+    return { userId: 1, tenantId, clientId: null, name: "Test", email: "t@x", roles: [], departmentIds: [], mustChangePassword: false };
   }
 
   async function fixture() {

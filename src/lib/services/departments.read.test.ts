@@ -19,6 +19,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("departments.read (DB)", async () => 
       email: "sj@despl.test",
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
+      mustChangePassword: false,
     };
   }
 

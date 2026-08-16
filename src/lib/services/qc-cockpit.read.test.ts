@@ -29,6 +29,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadQcCockpit (DB)", async () => {
       email: "qc@despl.test",
       roles: [ROLES.QC],
       departmentIds: [],
+      mustChangePassword: false,
     };
 
     const cockpit = await loadQcCockpit(actor);

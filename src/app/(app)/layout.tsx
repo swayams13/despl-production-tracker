@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { redirect } from "next/navigation";
 import { Toaster } from "sonner";
 import { AppShell } from "@/components/industrial/app-shell";
 import { getActor } from "@/lib/authz";
@@ -19,9 +20,16 @@ import { syncNotifications } from "@/lib/services/notifications.service";
  * (§9.8) is the lazy reconciliation for the two notification triggers with no
  * natural mutation moment (stage crossed due date, hold point aged) — run
  * best-effort on every authenticated page load rather than a cron.
+ *
+ * `mustChangePassword` interstitial (Task 1.3): a user who has not yet set
+ * their own password can reach NOTHING under this route group — every page
+ * here funnels through this one layout, so the redirect belongs here, not
+ * duplicated per-page. `/account/password` lives OUTSIDE this route group
+ * (like `/login`), so there is no self-redirect loop.
  */
 export default async function AppGroupLayout({ children }: { children: ReactNode }) {
   const actor = await getActor();
+  if (actor?.mustChangePassword) redirect("/account/password");
 
   let overdueCount = 0;
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };

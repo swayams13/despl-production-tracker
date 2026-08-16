@@ -10,11 +10,18 @@ const MAX_AGE_SECONDS = 60 * 60 * 12; // one working day
  * in the token: they are loaded per request, so revoking a role or moving a
  * supervisor between departments takes effect immediately instead of at their
  * next login.
+ *
+ * `sessionVersion` is the token's stamp of `User.sessionVersion` at issuance.
+ * `getActor()` (src/lib/authz/index.ts) compares it against the live DB value
+ * on every request; a mismatch is treated as "not signed in". This is how
+ * `changeOwnPassword` invalidates every OTHER previously-issued session
+ * without a session table — see src/lib/auth/change-password.ts.
  */
 export interface SessionPayload {
   userId: number;
   tenantId: number;
   clientId: number | null;
+  sessionVersion: number;
 }
 
 function secret(): Uint8Array {
@@ -48,9 +55,10 @@ export async function readSession(): Promise<SessionPayload | null> {
   if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, secret());
-    const { userId, tenantId, clientId } = payload as unknown as SessionPayload;
+    const { userId, tenantId, clientId, sessionVersion } = payload as unknown as SessionPayload;
     if (typeof userId !== "number" || typeof tenantId !== "number") return null;
-    return { userId, tenantId, clientId: clientId ?? null };
+    if (typeof sessionVersion !== "number") return null;
+    return { userId, tenantId, clientId: clientId ?? null, sessionVersion };
   } catch {
     // expired or tampered
     return null;
