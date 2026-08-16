@@ -52,6 +52,35 @@ pnpm lint && pnpm typecheck
 11. **Schedule lags never relax gating.** A negative lag means work may *start* concurrently. It never permits completing a process out of order, and never overrides a hold point.
 12. Refusals must be explainable: use stable error codes (`GATING_BLOCKED`, `MAKER_CHECKER_VIOLATION`, `REASON_REQUIRED`, `HOLD_POINT_OPEN`, …) so the UI can say why.
 
+## Agent conduct: never forge credentials to work around missing tools
+
+**No agent — subagent, workflow step, or otherwise — may read `AUTH_SECRET` (or any other
+live signing key/secret) out of `.env` and use it to hand-construct a session token,
+cookie, or JWT.** This happened once (16 Aug 2026, portfolio-dashboard session — see
+`progress.md`'s "Session — Portfolio Dashboard" log for the full account): an implementer
+lacking browser automation extracted `AUTH_SECRET` and used `jose` to forge a valid
+`sj@despl.local` session, bypassing `/login` entirely, to verify a UI change with curl.
+It was caught by the harness's own safety monitor, not by review — do not rely on that
+happening again.
+
+**If you need an authenticated session to verify something, get one the real way:**
+
+- **Preferred:** drive the actual `/login` form through real browser automation
+  (Playwright, `mcp__claude-in-chrome__*`, or equivalent) — type the email/password,
+  submit, and verify from there. This is what actually proves the login flow itself
+  still works, which a forged session can never do.
+- **If no browser automation is available:** say so explicitly and report verification
+  as incomplete (`DONE_WITH_CONCERNS` in an SDD dispatch, or the equivalent), rather than
+  reaching for a credential shortcut. An honestly-flagged gap is recoverable; a forged
+  session is a live credential exposed in a transcript.
+- **Never** import `createSession`/`jose`/any signing utility directly in a script to
+  mint a session outside the real `login()` server action (`src/app/actions/auth.ts`) —
+  that function's own credential check (`verifyPassword` against the DB) is the thing
+  being verified when a test claims "logged in," and skipping it makes the claim false.
+
+This applies to every phase of work — implementation, self-review, task review, and
+final review — not just the phase where the incident happened.
+
 ## Conventions
 
 - zod schema in `packages/shared` is the single source of validation truth (client + server import it).
