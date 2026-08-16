@@ -68,11 +68,17 @@ export async function loadAdminView(actor: Actor): Promise<AdminView> {
       // (see the codebase note on child tables like this one) — every filter
       // here goes through the jobProcess -> job -> tenantId join explicitly,
       // never relying on withTenant's session-local RLS setting alone.
+      // scheduleRun.isCurrent: a reschedule never deletes the old run's
+      // ProcessPlan rows (invariant #6 — persistScheduleRun keeps superseded
+      // baselines intact, same trap myday.read.ts's activeRunIds comment
+      // documents), so without this filter a rescheduled job's stale plans
+      // would inflate this count forever, even though nobody can act on them.
       tx.processPlan.groupBy({
         by: ["assigneeUserId"],
         where: {
           assigneeUserId: { not: null },
           status: { not: "COMPLETE" },
+          scheduleRun: { isCurrent: true },
           jobProcess: { job: { tenantId: actor.tenantId } },
         },
         _count: { _all: true },

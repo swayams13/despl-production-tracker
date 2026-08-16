@@ -81,6 +81,20 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("admin.read — Employees table exten
     await mkPlan(userC.id, "COMPLETE"); // must NOT count toward openItemsCount
     await mkPlan(null, "NOT_STARTED"); // unassigned pool item — must not count toward anyone
 
+    // Task review round 1, Finding 2: a reschedule never deletes the prior
+    // run's ProcessPlan rows (invariant #6). Give userD (otherwise 0 open
+    // items) a NOT_STARTED plan on a SUPERSEDED run — without the
+    // scheduleRun.isCurrent filter this leaks into their count.
+    const staleRun = await owner.scheduleRun.create({
+      data: { jobId: job.id, version: 2, mode: "FORWARD", projectStartDate: new Date(), isCurrent: false },
+    });
+    const staleJp = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: seq++, code: String(seq), name: "Stale-run process", departmentId: dept.id },
+    });
+    await owner.processPlan.create({
+      data: { scheduleRunId: staleRun.id, jobProcessId: staleJp.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED", assigneeUserId: userD.id },
+    });
+
     admin = {
       userId: 1,
       tenantId,
@@ -119,7 +133,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("admin.read — Employees table exten
     expect(rowC!.openItemsCount).toBe(1);
   });
 
-  it("openItemsCount is 0 for a user with no assigned plans", async () => {
+  it("openItemsCount excludes plans on a superseded (non-current) schedule run", async () => {
+    // userD has a NOT_STARTED plan, but only on the stale run created above —
+    // must still read 0, not 1.
     const view = await loadAdminView(admin);
     const rowD = view.users.find((u) => u.id === userDNoItemsId);
     expect(rowD!.openItemsCount).toBe(0);

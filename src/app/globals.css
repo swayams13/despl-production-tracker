@@ -424,20 +424,27 @@ body {
 .theme-industrial .ad-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
 /* credential slip (A6 print) — SPEC §7.3: "Print credential slip". Hidden on
-   screen (the dialog shows the same info in normal styled markup); made the
-   ONLY visible thing on the page during print via the visibility trick below,
-   scoped to this one container so it never touches any other page's print
-   behavior. */
+   screen (the dialog shows the same info in normal styled markup).
+   FIX (task review round 1): the hiding rule below is gated on
+   `body:has(.cred-slip)`, not a bare `body *` — `.cred-slip` only exists in
+   the DOM while the credential dialog itself is mounted, so printing any
+   OTHER page (or this page with the dialog closed) is completely
+   unaffected. Also dropped the global `@page { size: A6 }` override, which
+   had the identical unscoped-to-every-print-job bug: `.cred-slip` is sized
+   to A6 (105mm×148mm) directly instead, so it prints correctly as a small
+   slip on whatever paper size the browser's print dialog already has,
+   without hijacking @page (which CSS cannot scope to an ancestor selector
+   at all — no selector-gated way to apply it only "while this dialog is
+   open"). */
 .cred-slip { display: none; }
 @media print {
-  body * { visibility: hidden; }
+  body:has(.cred-slip) * { visibility: hidden; }
   .cred-slip, .cred-slip * { visibility: visible; }
-  .cred-slip { display: block; position: fixed; top: 0; left: 0; width: 100%; padding: 8mm; box-sizing: border-box; color: #000; background: #fff; font-family: system-ui, sans-serif; }
+  .cred-slip { display: block; position: fixed; top: 0; left: 0; width: 105mm; height: 148mm; padding: 8mm; box-sizing: border-box; color: #000; background: #fff; font-family: system-ui, sans-serif; }
   .cred-slip h2 { font-size: 14px; margin: 0 0 10px; }
   .cred-slip .cs-label { font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: #555; margin-top: 10px; }
   .cred-slip .cs-value { font-size: 13px; font-family: ui-monospace, monospace; }
   .cred-slip .cs-warn { margin-top: 14px; font-size: 10px; }
-  @page { size: A6; margin: 6mm; }
 }
 
 /* workspace (§4.4) — ported 1:1 from the mockup */
