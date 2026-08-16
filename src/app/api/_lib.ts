@@ -28,6 +28,8 @@ const STATUS: Record<ErrorCode, number> = {
   INVALID_CURRENT_PASSWORD: 409,
   RATE_LIMITED: 429,
   PASSWORD_UNCHANGED: 409,
+  CANNOT_SELF_DEACTIVATE: 409,
+  CANNOT_SELF_DEMOTE: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

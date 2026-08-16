@@ -55,6 +55,10 @@ export const ERROR_CODES = {
   PASSWORD_UNCHANGED: "PASSWORD_UNCHANGED",
   /** The user still owes a forced password change and may not act until it is done. */
   MUST_CHANGE_PASSWORD: "MUST_CHANGE_PASSWORD",
+  /** setUserActive: an admin tried to deactivate their own account. */
+  CANNOT_SELF_DEACTIVATE: "CANNOT_SELF_DEACTIVATE",
+  /** updateUserRolesDepts: an admin tried to remove their own ADMIN role. */
+  CANNOT_SELF_DEMOTE: "CANNOT_SELF_DEMOTE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -89,6 +93,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   RATE_LIMITED: "Too many attempts. Wait a few minutes and try again.",
   PASSWORD_UNCHANGED: "Your new password must be different from your current password.",
   MUST_CHANGE_PASSWORD: "Change your password before doing anything else.",
+  CANNOT_SELF_DEACTIVATE: "You cannot deactivate your own account.",
+  CANNOT_SELF_DEMOTE: "You cannot remove your own admin role.",
 };
 
 /**
