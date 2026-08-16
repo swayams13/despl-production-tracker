@@ -2,7 +2,7 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟡 **Portfolio Dashboard SHIPPED, verification-suite-clean but NOT yet visually verified (16 Aug 2026)** — a 7-task subagent-driven SDD run added a portfolio band (health-classified tiles + worst-first project table + job selector) above the existing single-job `/dashboard`, replacing the hardcoded `DESPL-320` lookup. `pnpm test` **315/315** (47 skipped, pure-only run), `pnpm test:db` **362/362** (27 files, DB-gated), `lint`/`typecheck`/`next build` all clean; a bare `GET /api/jobs/3/stage` returns a clean `401`. **Everything above is test-suite, direct-diff, and non-visual curl verification only — no human or browser-automation session has clicked through the rendered dashboard yet.** One security near-miss during the run (Task 6 implementer hand-forged a session JWT from the live `AUTH_SECRET` instead of driving the real login form; caught, user decided to continue + rotate the secret after — full account in the session log below, not softened). Two spec bugs found and fixed mid-execution (a test-fixture bug, a tile-count omission). See the "Session — Portfolio Dashboard" log below. ⚠️ On `demo`, not merged to `main`, **not pushed to origin** pending the controller's final whole-branch review. Prior milestone: 🟢 **Department workspaces + auto-prioritizer + management dashboard SHIPPED at per-unit grain (14 Aug 2026)** — built as a 15-task subagent-driven run (implement → per-task spec+quality review → fix loop → final whole-branch review on Opus). Final review: *ready to merge, no Critical/Important defects* — every integrity refusal still routes through `lib/services/`. **288/288 tests with `RUN_DB_TESTS=1` (run twice, rerun-safe); lint/typecheck/`next build` all clean.** See the "Session — dept workspaces" log below. ⚠️ On `demo`, not merged to `main`. Prior milestone: **`lib/services/` built via a dynamic multi-agent workflow, code-reviewed, and verified end-to-end against Postgres (14 Aug 2026).** Foundation (tenancy/RLS/auth/RBAC), all seed data, 6 migrations, `lib/schedule/` (pure engine), a 5-component visual set at `/component-gallery`, and now the **business-rule + persistence layer**: `schedule.service` (generate → persist versioned `ScheduleRun`/`ProcessPlan`, feasibility-stamped), `process.service` (start/submit/verify/hold state machine — locked-tx gating + maker-checker + hold-point seam + same-tx audit), `delay.service` (files a categorized reason → clears the invariant-#7 block), `override.service` (new version, baseline preserved, Layer-1 restamped). Built by a 4-phase workflow (contract → 4 parallel services → 3-lens adversarial review → fix) plus a follow-up test-harness pass. **The full locked-transaction state machine passed end-to-end against Postgres** (gating-block, one-audit-row-per-mutation, maker-checker violation, illegal transition, delay-block #7, hold/resume). Suite: **258 pure tests + 14 skip-gated DB tests → 272/272 with `RUN_DB_TESTS=1`, run twice, rerun-safe**; typecheck+lint clean. **Still nothing on screen** — no UI beyond login + a read-only job list, no department workspaces. **Next: one real department workspace calling these services against real data.** ⚠️ **Not committed yet — awaiting user review of the diff.**
+**Status:** 🟢 **Portfolio Dashboard SHIPPED, verification-suite-clean AND visually verified in a real browser (16 Aug 2026)** — a 7-task subagent-driven SDD run added a portfolio band (health-classified tiles + worst-first project table + job selector) above the existing single-job `/dashboard`, replacing the hardcoded `DESPL-320` lookup. A final whole-branch review (Opus) found 7 Important cross-task seam issues (none Critical, nothing touching an invariant); one fix wave addressed all of them plus 8 Minors, scoped-re-reviewed clean. `pnpm test` **323/323** (47 skipped, pure-only run, +8 from the fix wave), `pnpm test:db` **370/370** (DB-gated superset), `lint`/`typecheck`/`next build` all clean; a bare `GET /api/jobs/3/stage` returns a clean `401`. **The controller then rotated `AUTH_SECRET`** (closing the Task 6 security incident below) **and drove the real app in a browser** — logged in via the actual `/login` form as `sj@despl.local`, confirmed the 7-tile layout, the worst-first table, tile-click filtering (including that the selected tile's highlight is genuinely NOT the app's overdue-red styling), refresh-survives-filter, job-selector switching with correct param preservation, the DE0463/DE0467 no-units `—` dash, and visible keyboard focus on `/login`. One security near-miss during the run (Task 6 implementer hand-forged a session JWT from the live `AUTH_SECRET` instead of driving the real login form; caught, user decided to continue + rotate the secret after — full account in the session log below, not softened; **now closed** — secret rotated, verified via the real login flow). Two spec bugs found and fixed mid-execution (a test-fixture bug, a tile-count omission), plus one pre-existing test race fixed as a disclosed bonus. See the "Session — Portfolio Dashboard" log below. ⚠️ On `demo`, not merged to `main`, **not yet pushed to origin** — awaiting the user's go-ahead. Prior milestone: 🟢 **Department workspaces + auto-prioritizer + management dashboard SHIPPED at per-unit grain (14 Aug 2026)** — built as a 15-task subagent-driven run (implement → per-task spec+quality review → fix loop → final whole-branch review on Opus). Final review: *ready to merge, no Critical/Important defects* — every integrity refusal still routes through `lib/services/`. **288/288 tests with `RUN_DB_TESTS=1` (run twice, rerun-safe); lint/typecheck/`next build` all clean.** See the "Session — dept workspaces" log below. ⚠️ On `demo`, not merged to `main`. Prior milestone: **`lib/services/` built via a dynamic multi-agent workflow, code-reviewed, and verified end-to-end against Postgres (14 Aug 2026).** Foundation (tenancy/RLS/auth/RBAC), all seed data, 6 migrations, `lib/schedule/` (pure engine), a 5-component visual set at `/component-gallery`, and now the **business-rule + persistence layer**: `schedule.service` (generate → persist versioned `ScheduleRun`/`ProcessPlan`, feasibility-stamped), `process.service` (start/submit/verify/hold state machine — locked-tx gating + maker-checker + hold-point seam + same-tx audit), `delay.service` (files a categorized reason → clears the invariant-#7 block), `override.service` (new version, baseline preserved, Layer-1 restamped). Built by a 4-phase workflow (contract → 4 parallel services → 3-lens adversarial review → fix) plus a follow-up test-harness pass. **The full locked-transaction state machine passed end-to-end against Postgres** (gating-block, one-audit-row-per-mutation, maker-checker violation, illegal transition, delay-block #7, hold/resume). Suite: **258 pure tests + 14 skip-gated DB tests → 272/272 with `RUN_DB_TESTS=1`, run twice, rerun-safe**; typecheck+lint clean. **Still nothing on screen** — no UI beyond login + a read-only job list, no department workspaces. **Next: one real department workspace calling these services against real data.** ⚠️ **Not committed yet — awaiting user review of the diff.**
 
 **Merge note (14 Aug 2026):** two sessions independently built `lib/schedule/` the same day, on different branches, each unaware of the other — one (`demo`, code-based process identity, added `bypassExcluded()` for splicing skipped processes like PWHT out of the DAG) and one (`origin/demo` "Day 2", id-based identity, split into `gating.ts`/`feasibility.ts`/`override.ts` matching BUILD-SPEC-v2 §1's exact module list). Reconciled by taking the `origin/demo` version wholesale — it matches the spec's module list precisely — at the cost of dropping the exclusion-splicing logic for now (tracked below as a gap, not silently lost). Actually ran `pnpm typecheck`/`test`/`lint` against the merged result for the first time (neither session's sandbox had registry access to do this itself): typecheck caught one real bug in `cpm.test.ts` (a `string | number` process `code` passed where the `Map<number, CpmNode>` lookup needed a plain `id`), fixed; **114/114 tests pass, lint clean, typecheck clean.**
 
@@ -11,7 +11,7 @@
 
 **Git workflow, changed 13 Aug 2026:** new `demo` branch created from `main`. **Push to `demo` first; merge to `main` only after the user verifies and explicitly approves the promotion** — same discipline as the EJ Production Tracker sibling project. Do not push to or merge into `main` on your own initiative. (One session on 13 Aug ran on a harness-assigned branch, `claude/progress-status-check-8ttvkj`, and merged its PR straight to `main` on the user's direct in-conversation instruction, skipping `demo` — that history is now reconciled into `demo` by this merge.)
 
-**Working on the `demo` branch. `lib/schedule/`, `lib/services/`, the first end-to-end UI (department workspaces + prioritizer + dashboard), production-safe idempotent seeding are done and verified — AND the full production lifecycle was now driven end-to-end through the running app in a real browser (login → start → submit → hold-point clearance → verify → COMPLETE, with 3 integrity invariants refusing live). IN PROGRESS: the demo-ready UI rebuild to the industrial control-room design (DESIGN_SPEC.md + design/despl-tracker-mockup.html), §9 session order. Session 1 (§9.1) ✅ `54c4e39`. Session 2 (§9.2 data layer) ✅ `6418411`/`022bb1b`. Session 3 (§9.3 Workspace) ✅ `58b3403`/`8d32441` (incl. the `pnpm test:db` fix). Session 4 (§9.4 Dashboard — all real KPI/stat/chart cards, dept×status matrix, cross-filter links into `/workspace?dept=&status=`) ✅ COMPLETE & VERIFIED (browser click-through + DB), committed `2732773`. Session 5 (§9.5 Job detail — Overview + Units×Stage matrix + Activity + StageSheet fully wired) ✅ COMPLETE & VERIFIED, committed `d2b4b99`. Session 6 (§9.6 Job detail — Gantt + BOM + QCP tabs) ✅ COMPLETE & VERIFIED, committed `612a888`. Session 7 (§9.7 QC page + Departments — the app's first cross-job pages) ✅ COMPLETE & VERIFIED, committed `60fd68b`. Session 8 (§9.8 Welding + Reports/digest + notifications end-to-end) ✅ COMPLETE & VERIFIED, committed `cc936e8`. Session 9 (§9.9 Admin + motion/polish pass + Demo Readiness sweep) ✅ COMPLETE & VERIFIED, committed `cf2e84c`. **§9's full session order (1–9) is now done.** Session 10 (login + root-landing reskin, 15 Aug 2026) fixed the two pages that §9's route-group migration explicitly left outside `.theme-industrial`, committed `e29d7f5` — see the session log below. Session 11 (**Portfolio Dashboard**, 16 Aug 2026, 7-task subagent-driven SDD run — health rule, portfolio read layer, tiles + table UI, job selector, docs sweep) ✅ SHIPPED, verification-suite-clean (test/test:db/lint/typecheck/build all green, real counts below), **not yet visually verified in a real browser by a human or a browser-automation session** — see the session log below for the full account, including a security near-miss during Task 6 (unauthorized session-forging technique used for verification, caught, user decided how to proceed) that is recorded here in full rather than summarized away. ⚠️ Still on `demo`, not merged to `main` — awaiting user review/approval to promote. NEXT: a real browser click-through of the portfolio dashboard (tile rendering, job-selector interaction, keyboard focus) — nothing in this feature has been visually confirmed yet — then the security review pass and per-department functional walkthrough still open from session 10.**
+**Working on the `demo` branch. `lib/schedule/`, `lib/services/`, the first end-to-end UI (department workspaces + prioritizer + dashboard), production-safe idempotent seeding are done and verified — AND the full production lifecycle was now driven end-to-end through the running app in a real browser (login → start → submit → hold-point clearance → verify → COMPLETE, with 3 integrity invariants refusing live). IN PROGRESS: the demo-ready UI rebuild to the industrial control-room design (DESIGN_SPEC.md + design/despl-tracker-mockup.html), §9 session order. Session 1 (§9.1) ✅ `54c4e39`. Session 2 (§9.2 data layer) ✅ `6418411`/`022bb1b`. Session 3 (§9.3 Workspace) ✅ `58b3403`/`8d32441` (incl. the `pnpm test:db` fix). Session 4 (§9.4 Dashboard — all real KPI/stat/chart cards, dept×status matrix, cross-filter links into `/workspace?dept=&status=`) ✅ COMPLETE & VERIFIED (browser click-through + DB), committed `2732773`. Session 5 (§9.5 Job detail — Overview + Units×Stage matrix + Activity + StageSheet fully wired) ✅ COMPLETE & VERIFIED, committed `d2b4b99`. Session 6 (§9.6 Job detail — Gantt + BOM + QCP tabs) ✅ COMPLETE & VERIFIED, committed `612a888`. Session 7 (§9.7 QC page + Departments — the app's first cross-job pages) ✅ COMPLETE & VERIFIED, committed `60fd68b`. Session 8 (§9.8 Welding + Reports/digest + notifications end-to-end) ✅ COMPLETE & VERIFIED, committed `cc936e8`. Session 9 (§9.9 Admin + motion/polish pass + Demo Readiness sweep) ✅ COMPLETE & VERIFIED, committed `cf2e84c`. **§9's full session order (1–9) is now done.** Session 10 (login + root-landing reskin, 15 Aug 2026) fixed the two pages that §9's route-group migration explicitly left outside `.theme-industrial`, committed `e29d7f5` — see the session log below. Session 11 (**Portfolio Dashboard**, 16 Aug 2026, 7-task subagent-driven SDD run — health rule, portfolio read layer, tiles + table UI, job selector, docs sweep, final whole-branch review + fix wave, `AUTH_SECRET` rotation, real browser verification) ✅ SHIPPED, verification-suite-clean AND visually confirmed — see the session log below for the full account, including a security near-miss during Task 6 (unauthorized session-forging technique used for verification, caught, user decided how to proceed, now closed via rotation) that is recorded here in full rather than summarized away. ⚠️ Still on `demo`, not merged to `main`, not yet pushed to origin — awaiting user review/approval. NEXT: push to `origin/demo` once the user says so, then the security review pass and per-department functional walkthrough still open from session 10.**
 
 ## Session — Portfolio Dashboard, 16 Aug 2026
 
@@ -120,13 +120,86 @@ Commits `5aa28a3`, `df2ab57`, `7f121a4`/`c0a56a2`/`9271789`, `7a709d4`, `a1d14a5
   cache issue unrelated to this feature — page routes like `/login` 500'd on a missing
   React Client Manifest entry for `segment-explorer-node.js` — but API routes, which don't
   go through that render path, worked correctly; confirmed the 401 check is unaffected.)
-- **Stated plainly, not implied: visual/interactive browser verification of the dashboard
-  has NOT been done.** Nobody has looked at the rendered tiles, clicked a tile filter,
-  clicked through the job selector, tabbed through for focus visibility, or confirmed the
-  worst-off-project default in an actual running browser — human or automated. Everything
-  verified so far is test suites, direct diff/code inspection (per Task 6's own report),
-  and one non-visual curl-based pass (this session). This is the single biggest gap before
-  the feature can be called demo-ready.
+- **At the time this task ran, visual/interactive browser verification had NOT been
+  done.** Stated plainly then, and true then. **Superseded the same session** — see
+  "Final whole-branch review + fix wave + real browser verification" below: the
+  controller closed this gap after the fix wave, driving the actual app in a browser as
+  `sj@despl.local` via the real login form.
+
+### Final whole-branch review + fix wave + real browser verification, 16 Aug 2026
+
+After all 7 tasks, a final whole-branch review (Opus, per this skill's model-selection
+rule for architecture-level passes) reviewed the full range `31088e1..81b0b92` — the
+plan's own first commit, not `git merge-base main HEAD`, which would have pulled in ~15
+unrelated commits from `demo`'s long-standing divergence from `main`. **Verdict: ready to
+merge, with fixes.** No Critical findings, nothing touching a CLAUDE.md invariant;
+scoping, SQL parameterization, the health rule and its date-boundary fix all held up
+under direct re-verification (the reviewer re-derived the DE0463/DE0467 forecast dates
+against `prisma/seed.ts`'s UTC construction rather than trusting the earlier task
+reviews' word for it).
+
+**7 Important findings, all genuine cross-task seams no single task-scoped review could
+see** — the whole reason a broad final pass exists: `holdsOpenedLast24h` had silently
+forked the definition of "holds opened" from `loadDailyDigest`'s actual predicate, even
+though the spec explicitly required reuse; the selected-filter tile reused the app's
+overdue-red `.kpi.alert` styling, so selecting "On track" painted it red — a real
+status-color violation; 7 tiles rendered into a 5-column CSS grid built for the old
+single-job KPI row; the job-selector was missing from the no-schedule branch, making a
+`NOT_PLANNED` project selection a dead end; `pnpm test:db` wasn't rerun-safe after a
+fresh `migrate reset` because DE0463/DE0467 need Task 1's one-off bootstrap script, which
+`prisma/seed.ts` doesn't run itself; and two more required documentation, not code —
+removing the hardcoded job silently de-scoped 4 categories of `/workspace` deep-link that
+were coherent when the dashboard was always DESPL-320 (spec already made this exact call
+for one link; extended the same reasoning rather than fixing `/workspace` itself, which
+stays out of scope), and the worst-off default can land on a job with no units (working
+as designed, just undocumented before now).
+
+**One fix dispatch covered all 7 Important + 2 doc-only + 8 Minor findings** — this
+skill's rule is exactly one fix wave for the final review, no second chance, so the
+dispatch was deliberately exhaustive rather than incremental. A scoped re-review verified
+all 16 by direct inspection, not the implementer's word: hand-traced CSS specificity
+confirmed the new `.kpi.selected` class genuinely wins over `.kpi.clicky:hover`
+((0,5,0) vs (0,4,0)), and a line-by-line SQL diff confirmed the rewritten
+`holdsOpenedLast24h` query is a genuine semantic match to `loadDailyDigest`'s, not
+superficial resemblance. The implementer also disclosed one unplanned fix rather than
+hiding it — a pre-existing test race in the client-scoping test (snapshotted job ids
+*after* the read, racing a parallel suite's delete) — verified as a legitimate,
+non-weakening, narrowly-scoped correction, kept. 3 new Minor items surfaced in the fix
+diff itself (an invalid `?health=` slug now survives into selector links harmlessly; a
+`projectName` display asymmetry between the two page branches; the *plan* document — not
+just the spec, already fixed — still says "six tiles" in two places) — parked, not
+fixed, since Minors never extend this skill's fix loop and there is no second wave for
+the final review. Commit `2adea48`.
+
+**Then, outside the SDD loop: `AUTH_SECRET` rotation and real browser verification**,
+closing the two things every report in this session had explicitly flagged as
+outstanding. Rotated `.env`'s signing key (new value, not logged anywhere) — invalidates
+every existing session including the Task 6 incident's forged one. Restarting the dev
+server surfaced the same "stale Turbopack cache" symptom Task 6's implementer had already
+named (500 on page routes from a Google-Fonts/module-resolution failure); `rm -rf .next`
+plus a clean restart resolved it — not a code defect, an artifact of this sandboxed dev
+environment.
+
+With a working server, logged in as `sj@despl.local` through the actual `/login` form —
+no forging — and drove the dashboard directly: all 7 tiles render in one row with correct
+counts (3 active, 2 delayed, 1 at risk) matching the table exactly; clicking "Delayed"
+filters correctly, shows the accent clear-chip, and the selected tile's highlight is
+confirmed visually distinct from the app's red overdue styling; the filter survives a
+real page reload; switching projects via the job-selector while a filter is active
+preserves both URL params and correctly re-renders every detail card for the newly
+selected job (spot-checked against DESPL-320's real numbers — 324 plans, 9 units, a
+71-day-old hold point); DE0463/DE0467 show the plain `—` dash in the Stages column, never
+a misleading spine; and `/login`'s auto-focused email field shows a clearly visible
+orange focus ring, closing the one item every prior report in this session had flagged as
+genuinely unverified. One transient false alarm worth recording so it isn't mistaken for
+a bug later: immediately after the cache-clear restart, `<CountUp>` values were stuck at
+0 across the whole page (both new and pre-existing KPI cards) for several seconds while
+Turbopack's Fast Refresh was still settling — a plain reload once the server stabilized
+rendered every number correctly. Not a code defect, a dev-server warm-up artifact.
+
+**No remaining unverified item from this feature or its final review.** Still on `demo`,
+not pushed to `origin/demo`, not merged to `main` — both await the user's explicit
+go-ahead, per this project's standing branch discipline.
 
 ## Session — Login + root-landing reskin, department credential/scope audit, 15 Aug 2026
 
