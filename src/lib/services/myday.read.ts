@@ -107,8 +107,10 @@ export interface MyDayView {
 
 /** IST (UTC+5:30) calendar-day bounds for `now` shifted by `offsetDays` —
  * same fixed-offset convention reports.read.ts's istDayRange uses, just
- * date-math'd from a live `now` instead of a literal ISO date string. */
-function istDay(now: Date, offsetDays: number): { start: Date; end: Date; date: string } {
+ * date-math'd from a live `now` instead of a literal ISO date string.
+ * Exported for command-center.read.ts (task 3.1 ruling) to reuse verbatim
+ * instead of reintroducing browser-local time. */
+export function istDay(now: Date, offsetDays: number): { start: Date; end: Date; date: string } {
   const ist = new Date(now.getTime() + 5.5 * 3600 * 1000);
   ist.setUTCDate(ist.getUTCDate() + offsetDays);
   const date = ist.toISOString().slice(0, 10);

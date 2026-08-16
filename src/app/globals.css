@@ -511,6 +511,16 @@ body {
 .theme-industrial .dept-nums { display: flex; gap: 16px; font-size: 11px; color: var(--muted); }
 .theme-industrial .dept-nums b { display: block; font-size: 16px; font-weight: 600; color: var(--text); }
 
+/* office command center (§7.4, task 3.1) — the "This week" load strip; every
+   other section reuses .card/.hd/table/.dept-grid/.grid-h. */
+.theme-industrial .week-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.theme-industrial .week-cell { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 8px; text-align: center; }
+.theme-industrial .week-cell.today { border-color: rgba(255, 122, 26, .55); background: rgba(255, 122, 26, .06); }
+.theme-industrial .week-cell .dy { font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: .05em; }
+.theme-industrial .week-cell .dn { font-size: 15px; font-weight: 600; margin: 1px 0 5px; }
+.theme-industrial .week-cell .ld { font-size: 10.5px; color: var(--muted); }
+.theme-industrial .week-cell .ld b { color: var(--text); font-weight: 600; }
+
 /* job detail (§4.3) — ported 1:1 from the mockup */
 .theme-industrial .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 16px; overflow-x: auto; }
 .theme-industrial .tab { padding: 8px 14px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; white-space: nowrap; text-decoration: none; }
