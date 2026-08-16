@@ -342,7 +342,7 @@ export async function updateStandardDurations(
 export async function createEmployee(
   actor: Actor,
   input: CreateEmployeeInput,
-): Promise<{ userId: number; username: string; tempPassword: string }> {
+): Promise<{ userId: number; username: string; tempPassword: string; effectiveEmail: string }> {
   const {
     displayName,
     username,
@@ -415,7 +415,7 @@ export async function createEmployee(
         },
       });
       return {
-        result: { userId: user.id, username: user.username, tempPassword },
+        result: { userId: user.id, username: user.username, tempPassword, effectiveEmail },
         audit: {
           action: "admin.createEmployee",
           entityType: "User",
@@ -548,8 +548,20 @@ export async function updateUserRolesDepts(actor: Actor, input: UpdateUserRolesD
 }
 
 export type BulkImportEmployeeResult =
-  | { ok: true; userId: number; username: string; tempPassword: string }
+  | { ok: true; userId: number; username: string; tempPassword: string; effectiveEmail: string }
   | { ok: false; row: unknown; error: string };
+
+/**
+ * Strip password-shaped keys before a row is echoed back in a failure
+ * report. The documented CSV columns never include these, so this is
+ * defensive (a stray `password` field on a malformed row must never ride
+ * along in a report a UI might display or log), not a fix for an active path.
+ */
+function omitPasswordFields(row: unknown): unknown {
+  if (typeof row !== "object" || row === null) return row;
+  const { password: _password, tempPassword: _tempPassword, ...rest } = row as Record<string, unknown>;
+  return rest;
+}
 
 /**
  * SPEC §5.2: load employees from already-parsed CSV rows (CSV parsing itself
@@ -565,7 +577,11 @@ export async function bulkImportEmployees(actor: Actor, rows: unknown[]): Promis
   for (const row of rows) {
     const parsed = createEmployeeSchema.safeParse(row);
     if (!parsed.success) {
-      results.push({ ok: false, row, error: parsed.error.issues.map((i) => i.message).join("; ") });
+      results.push({
+        ok: false,
+        row: omitPasswordFields(row),
+        error: parsed.error.issues.map((i) => i.message).join("; "),
+      });
       continue;
     }
     try {
@@ -574,7 +590,7 @@ export async function bulkImportEmployees(actor: Actor, rows: unknown[]): Promis
     } catch (e) {
       results.push({
         ok: false,
-        row,
+        row: omitPasswordFields(row),
         error: e instanceof AppError ? e.message : "Could not create this employee.",
       });
     }

@@ -256,10 +256,14 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
       departmentIds: [deptId],
     });
     expect(created.tempPassword).toMatch(/^[a-z]+-[a-z]+-[a-z]+-\d{2}$/);
+    // Task 4.1 fix round: email omitted → returns the synthesized placeholder
+    // that was actually stored, so a credential slip has something to print.
+    expect(created.effectiveEmail).toBe(`${created.username}@no-email.despl.local`);
 
     const row = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
     expect(row.mustChangePassword).toBe(true);
     expect(row.name).toBe("Meera S");
+    expect(row.email).toBe(created.effectiveEmail);
     // Never persisted in plaintext (SPEC §9) — the hash is not the temp password itself.
     expect(row.passwordHash).not.toBe(created.tempPassword);
 
@@ -281,6 +285,22 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
       password: "admin-chosen-password-1",
     });
     expect(created.tempPassword).toBe("admin-chosen-password-1");
+  });
+
+  it("createEmployee returns the supplied email as effectiveEmail when one is given", async () => {
+    // NOT @despl.local: migration-backfill.test.ts asserts every @despl.local
+    // row's username equals its email local-part, which this row (username
+    // "hasemail-*", email "explicit-*") deliberately does not — same reason
+    // the other fixtures in this file use @test.local / @x.com.
+    const email = `explicit-${Date.now()}@test.local`;
+    const created = await createEmployee(admin, {
+      displayName: "Has Email",
+      username: `hasemail-${Date.now()}`,
+      email,
+      roles: ["QC"],
+      departmentIds: [],
+    });
+    expect(created.effectiveEmail).toBe(email);
   });
 
   it("createEmployee rejects a duplicate username with a clean AppError, not a DB crash", async () => {
@@ -406,5 +426,23 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
     const good2 = await owner.user.findFirst({ where: { tenantId, username: `bulk-good2-${stamp}` } });
     expect(good1).toBeTruthy();
     expect(good2).toBeTruthy();
+  });
+
+  it("bulkImportEmployees strips password fields from a failed row's echoed report", async () => {
+    const stamp = Date.now();
+    // Not a documented CSV column, but a defensive strip must catch it
+    // regardless — this row also fails validation (no "roles") so it takes
+    // the safeParse-failure branch.
+    const rows = [
+      { displayName: "Leaky", username: `bulk-leak-${stamp}`, password: "hunter2", tempPassword: "shh-123" },
+    ];
+
+    const results = await bulkImportEmployees(admin, rows);
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    const failed = results[0] as { ok: false; row: unknown; error: string };
+    expect(failed.row).not.toHaveProperty("password");
+    expect(failed.row).not.toHaveProperty("tempPassword");
+    expect(failed.row).toMatchObject({ displayName: "Leaky", username: `bulk-leak-${stamp}` });
   });
 });
