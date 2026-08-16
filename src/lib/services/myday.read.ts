@@ -102,13 +102,19 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   let doneThisWeek = 0;
   const cycleDeltas: number[] = [];
   const myPlanIds: number[] = [];
+  // Current-run ids of the actor's ACTIVE jobs only — clearedToday/
+  // firstPassRejects30d scope their queries to this same universe so the
+  // whole payload agrees on "what counts", instead of clearedToday quietly
+  // reading the whole tenant while everything else reads ACTIVE jobs only.
+  const activeRunIds: number[] = [];
 
   const { start: todayStart, end: todayEnd } = istDay(now, 0);
 
-  const clearedToday = await withTenant(actor.tenantId, async (tx) => {
+  const { clearedToday, firstPassRejects30d } = await withTenant(actor.tenantId, async (tx) => {
     for (const job of jobs) {
       const run = await getCurrentScheduleRun(tx, job.id, null);
       if (!run) continue;
+      activeRunIds.push(run.id);
 
       const spine = await loadJobSpine(tx, job.id);
       const cpm = computeCpm(spine.processes, spine.edges);
@@ -164,50 +170,60 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
     }
 
     // clearedToday (SPEC §6.1): my items COMPLETE or SUBMITTED today, server
-    // date. COMPLETE uses actualFinish (server-clock, invariant #1) directly;
-    // SUBMITTED has no timestamp column on ProcessPlan, so it reads the
-    // ProcessSubmitted domain event instead (same event-sourced pattern
-    // loadJobKpis's eventCounts / reports.read.ts use for "did X happen
-    // today"). Scoped by assigneeUserId = actor.userId directly on
-    // process_plans (safe with no extra tenant join: assigneeUserId can only
-    // ever equal this specific, already-tenant-resolved user id — see
-    // lockProcessPlanForUpdate's comment on why process_plans itself carries
-    // no RLS).
-    const completedTodayCount = await tx.processPlan.count({
-      where: {
-        assigneeUserId: actor.userId,
-        status: "COMPLETE",
-        actualFinish: { gte: todayStart, lt: todayEnd },
-      },
-    });
-    const submittedTodayRows = await tx.$queryRaw<{ n: number }[]>`
-      SELECT count(DISTINCT pp.id)::int AS n
-      FROM process_plans pp
-      JOIN domain_events de ON de.aggregate_type = 'ProcessPlan' AND de.aggregate_id = pp.id::text
-      WHERE pp.assignee_user_id = ${actor.userId}
-        AND pp.status = 'SUBMITTED'
-        AND de.type = 'ProcessSubmitted'
-        AND de.at >= ${todayStart} AND de.at < ${todayEnd}
-    `;
-    return completedTodayCount + (submittedTodayRows[0]?.n ?? 0);
+    // date, scoped to the same ACTIVE-job/current-run universe as
+    // mine/pool/teamHeld and the scoreboard (activeRunIds, built above —
+    // superseded runs keep their ProcessPlan rows per persistScheduleRun's
+    // own invariant #6, so an unscoped query here would count completions
+    // from a run nobody can act on anymore). COMPLETE uses actualFinish
+    // (server-clock, invariant #1) directly; SUBMITTED has no timestamp
+    // column on ProcessPlan, so it reads the ProcessSubmitted domain event
+    // instead (same event-sourced pattern loadJobKpis's eventCounts /
+    // reports.read.ts use for "did X happen today").
+    const completedTodayCount = activeRunIds.length
+      ? await tx.processPlan.count({
+          where: {
+            assigneeUserId: actor.userId,
+            status: "COMPLETE",
+            actualFinish: { gte: todayStart, lt: todayEnd },
+            scheduleRunId: { in: activeRunIds },
+          },
+        })
+      : 0;
+    const submittedTodayRows = activeRunIds.length
+      ? await tx.$queryRaw<{ n: number }[]>`
+          SELECT count(DISTINCT pp.id)::int AS n
+          FROM process_plans pp
+          JOIN domain_events de ON de.aggregate_type = 'ProcessPlan' AND de.aggregate_id = pp.id::text
+          WHERE pp.assignee_user_id = ${actor.userId}
+            AND pp.status = 'SUBMITTED'
+            AND pp.schedule_run_id = ANY(${activeRunIds}::int[])
+            AND de.type = 'ProcessSubmitted'
+            AND de.at >= ${todayStart} AND de.at < ${todayEnd}
+        `
+      : [];
+    const clearedToday = completedTodayCount + (submittedTodayRows[0]?.n ?? 0);
+
+    // firstPassRejects30d: already scoped to the active-job universe via
+    // myPlanIds (only ever populated from `run.processPlans` inside this
+    // same active-job loop, above) — no separate scoping needed here.
+    const rejectRows = myPlanIds.length
+      ? await tx.$queryRaw<{ n: number }[]>`
+          SELECT count(*)::int AS n
+          FROM domain_events de
+          WHERE de.aggregate_type = 'ProcessPlan'
+            AND de.type = 'ProcessRejected'
+            AND de.at >= ${thirtyDaysAgo}
+            AND de.aggregate_id = ANY(${myPlanIds.map(String)}::text[])
+        `
+      : [];
+    const firstPassRejects30d = rejectRows[0]?.n ?? 0;
+
+    return { clearedToday, firstPassRejects30d };
   });
 
   mine.sort(compareRankedPlans);
   pool.sort(compareRankedPlans);
   teamHeld.sort(compareRankedPlans);
-
-  const firstPassRejects30d = await withTenant(actor.tenantId, async (tx) => {
-    if (myPlanIds.length === 0) return 0;
-    const rows = await tx.$queryRaw<{ n: number }[]>`
-      SELECT count(*)::int AS n
-      FROM domain_events de
-      WHERE de.aggregate_type = 'ProcessPlan'
-        AND de.type = 'ProcessRejected'
-        AND de.at >= ${thirtyDaysAgo}
-        AND de.aggregate_id = ANY(${myPlanIds.map(String)}::text[])
-    `;
-    return rows[0]?.n ?? 0;
-  });
 
   const scoreboard: MyDayScoreboard = {
     onTimePct30d: onTimeTotal > 0 ? Math.round((onTimeCount / onTimeTotal) * 100) : null,

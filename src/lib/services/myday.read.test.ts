@@ -44,6 +44,16 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
   let planSubmittedStale: { id: number };
   const jpDurationMax = new Map<string, number>(); // key: our own label, for the expected-value calc
 
+  // Cross-job aggregation fixtures (a SECOND active job) — proves the merge
+  // actually merges (push into shared arrays across jobs) rather than one
+  // job's rows silently clobbering another's, and that the merged list is
+  // genuinely re-sorted globally rather than left as "job1's rows, then
+  // job2's rows" in creation order.
+  let planMineFuture: { id: number }; // job1, mine, NOT overdue (bucket 1)
+  let job2Mine: { id: number }; // job2, mine, overdue (bucket 0 — must outrank planMineFuture after merge)
+  let job2Pool: { id: number };
+  let job2TeamHeld: { id: number };
+
   beforeAll(async () => {
     const org = await owner.organization.create({ data: { code: `MYDAY-${Date.now()}`, name: "My Day test" } });
     const tenantId = org.id;
@@ -70,6 +80,23 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
 
     const run = await owner.scheduleRun.create({
       data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+
+    // A second ACTIVE job — same tenant/client/departments/users — so the
+    // cross-job aggregation tests below prove a genuine merge, not a
+    // single-job coincidence.
+    const job2 = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-myday2-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-MYDAY2-${Date.now()}`,
+      },
+    });
+    const run2 = await owner.scheduleRun.create({
+      data: { jobId: job2.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
 
     const mkUser = async (suffix: string, deptId: number) => {
@@ -100,10 +127,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     };
 
     let seq = 1;
-    const mkProcess = async (deptId: number, durationMaxDays = 2) => {
+    const mkProcess = async (deptId: number, jobId: number = job.id, durationMaxDays = 2) => {
       const jp = await owner.jobProcess.create({
         data: {
-          jobId: job.id,
+          jobId,
           seq: seq++,
           code: `P${seq}`,
           name: `Process ${seq}`,
@@ -141,9 +168,42 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
       data: { scheduleRunId: run.id, jobProcessId: jp5.id, ownerDepartmentId: deptOther.id, assigneeUserId: meUser.id, status: "NOT_STARTED", plannedFinish: istNoon(3) },
     });
 
+    // ── cross-job aggregation fixtures (job1 + job2) ──────────────────────
+    // job1: mine, deliberately NOT overdue (plannedFinish 10 days out) → not
+    // in the overdue bucket, so with no predecessor edges (READY, and
+    // "critical" under this fixture's equal-duration single-node islands —
+    // see prioritizer bucket()) it ranks bucket 1.
+    const jpMineFuture = await mkProcess(deptMine.id);
+    planMineFuture = await owner.processPlan.create({
+      data: {
+        scheduleRunId: run.id, jobProcessId: jpMineFuture.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
+        status: "NOT_STARTED", plannedFinish: new Date(Date.now() + 10 * 24 * 3600 * 1000),
+      },
+    });
+    // job2: mine, unambiguously OVERDUE (plannedFinish 10 days in the past)
+    // → bucket 0, must outrank planMineFuture once merged+sorted. If the
+    // merge just concatenated "job1's rows, then job2's rows" without a
+    // global re-sort, planMineFuture (pushed first) would come first —
+    // this fixture is specifically built to catch that.
+    const jp2Mine = await mkProcess(deptMine.id, job2.id);
+    job2Mine = await owner.processPlan.create({
+      data: {
+        scheduleRunId: run2.id, jobProcessId: jp2Mine.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
+        status: "NOT_STARTED", plannedFinish: new Date(Date.now() - 10 * 24 * 3600 * 1000),
+      },
+    });
+    const jp2Pool = await mkProcess(deptMine.id, job2.id);
+    job2Pool = await owner.processPlan.create({
+      data: { scheduleRunId: run2.id, jobProcessId: jp2Pool.id, ownerDepartmentId: deptMine.id, assigneeUserId: null, status: "NOT_STARTED" },
+    });
+    const jp2Team = await mkProcess(deptMine.id, job2.id);
+    job2TeamHeld = await owner.processPlan.create({
+      data: { scheduleRunId: run2.id, jobProcessId: jp2Team.id, ownerDepartmentId: deptMine.id, assigneeUserId: teammateUser.id, status: "IN_PROGRESS" },
+    });
+
     // ── scoreboard / clearedToday fixtures ───────────────────────────────
     const now = new Date();
-    const jp6 = await mkProcess(deptMine.id, 2);
+    const jp6 = await mkProcess(deptMine.id, job.id, 2);
     jpDurationMax.set("done", 2);
     const done_actualStart = new Date(now.getTime() - 2 * 24 * 3600 * 1000);
     const done_actualFinish = new Date(now.getTime());
@@ -158,7 +218,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
       actualFinish: done_actualFinish,
     };
 
-    const jp7 = await mkProcess(deptMine.id, 2);
+    const jp7 = await mkProcess(deptMine.id, job.id, 2);
     jpDurationMax.set("late", 2);
     const late_actualStart = new Date(now.getTime() - 5 * 24 * 3600 * 1000);
     const late_actualFinish = new Date(now.getTime());
@@ -245,6 +305,35 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     expect(view.pool.every((r) => r.plan.assigneeUserId === null)).toBe(true);
     expect(view.teamHeld.every((r) => r.plan.assigneeUserId !== null && r.plan.assigneeUserId !== actor.userId)).toBe(true);
     expect(view.mine.every((r) => r.plan.assigneeUserId === actor.userId)).toBe(true);
+  });
+
+  // ── cross-job aggregation (the thing this task was dispatched to prove) ─
+
+  it("merges rows from BOTH active jobs into the same mine/pool/teamHeld arrays — neither job clobbers the other", () => {
+    const ids = (list: { plan: { id: number } }[]) => list.map((r) => r.plan.id);
+
+    expect(ids(view.mine)).toContain(planMineFuture.id); // job1
+    expect(ids(view.mine)).toContain(job2Mine.id); // job2 — both present, not one overwriting the other
+    expect(ids(view.pool)).toContain(planPool.id); // job1
+    expect(ids(view.pool)).toContain(job2Pool.id); // job2
+    expect(ids(view.teamHeld)).toContain(planTeamHeld.id); // job1
+    expect(ids(view.teamHeld)).toContain(job2TeamHeld.id); // job2
+  });
+
+  it("re-sorts the merged mine list globally by compareRankedPlans — job2's overdue row outranks job1's non-overdue row", () => {
+    // planMineFuture (job1, NOT overdue, bucket 1) was pushed to `mine` BEFORE
+    // job2Mine (job2, overdue, bucket 0) — jobs are looped in creation order.
+    // A merge that's just "job1's rows then job2's rows" (no real global
+    // re-sort — e.g. a broken/omitted compareRankedPlans call) would leave
+    // planMineFuture ahead of job2Mine. The prioritizer's real rank (overdue
+    // beats everything, per prioritizer.ts's `bucket()`) requires the
+    // opposite order.
+    const mineIds = view.mine.map((r) => r.plan.id);
+    const idxFuture = mineIds.indexOf(planMineFuture.id);
+    const idxJob2 = mineIds.indexOf(job2Mine.id);
+    expect(idxFuture).toBeGreaterThanOrEqual(0);
+    expect(idxJob2).toBeGreaterThanOrEqual(0);
+    expect(idxJob2).toBeLessThan(idxFuture);
   });
 
   // ── clearedToday ──────────────────────────────────────────────────────
