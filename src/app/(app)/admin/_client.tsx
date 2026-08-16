@@ -281,17 +281,17 @@ function AddEmployeeDialog({
             <Dialog.Title asChild><h2>Add employee</h2></Dialog.Title>
           </div>
           <div className="sh-body">
-            <div className="ad-grid">
+            <div className="emp-grid">
               <input className="ws-detail" placeholder="Name *" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
               <div>
                 <input className="ws-detail" placeholder="Username *" value={username} onChange={(e) => setUsername(e.target.value)} />
-                <div className="ad-hint">Email address or employee code, e.g. SUP-FAB-03</div>
+                <div className="emp-hint">Email address or employee code, e.g. SUP-FAB-03</div>
               </div>
               <input className="ws-detail" placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} />
               <input className="ws-detail" placeholder="Employee code (optional)" value={employeeCode} onChange={(e) => setEmployeeCode(e.target.value)} />
             </div>
             <div className="sh-sec">Roles</div>
-            <div className="ad-check-grid">
+            <div className="emp-check-grid">
               {view.roles.map((r) => (
                 <label key={r.code}>
                   <input type="checkbox" checked={roles.has(r.code)} onChange={() => toggleSet(roles, setRoles, r.code)} />
@@ -300,7 +300,7 @@ function AddEmployeeDialog({
               ))}
             </div>
             <div className="sh-sec">Departments{deptsRequired ? " *" : " (optional for Management/Admin)"}</div>
-            <div className="ad-check-grid">
+            <div className="emp-check-grid">
               {view.departments.map((d) => (
                 <label key={d.id}>
                   <input type="checkbox" checked={departmentIds.has(d.id)} onChange={() => toggleSet(departmentIds, setDepartmentIds, d.id)} />
@@ -372,7 +372,7 @@ function EditEmployeeDialog({
           </div>
           <div className="sh-body">
             <div className="sh-sec">Roles</div>
-            <div className="ad-check-grid">
+            <div className="emp-check-grid">
               {view.roles.map((r) => (
                 <label key={r.code}>
                   <input
@@ -385,9 +385,9 @@ function EditEmployeeDialog({
                 </label>
               ))}
             </div>
-            {lockOwnAdmin && <div className="ad-hint">You cannot remove your own Admin role.</div>}
+            {lockOwnAdmin && <div className="emp-hint">You cannot remove your own Admin role.</div>}
             <div className="sh-sec">Departments{deptsRequired ? " *" : " (optional for Management/Admin)"}</div>
-            <div className="ad-check-grid">
+            <div className="emp-check-grid">
               {view.departments.map((d) => (
                 <label key={d.id}>
                   <input type="checkbox" checked={departmentIds.has(d.id)} onChange={() => toggleSet(departmentIds, setDepartmentIds, d.id)} />
@@ -590,13 +590,13 @@ function BulkImportDialog({ view, onClose }: { view: AdminView; onClose: () => v
             <Dialog.Title asChild><h2>Bulk import employees</h2></Dialog.Title>
           </div>
           <div className="sh-body">
-            <p className="ad-hint" style={{ marginBottom: 10 }}>
+            <p className="emp-hint" style={{ marginBottom: 10 }}>
               CSV columns: displayName,username,email,employeeCode,roles,departments. For roles/departments, separate
               multiple values with |. Roles: {view.roles.map((r) => `${r.code} (${ROLE_LABEL[r.code] ?? r.name})`).join(", ")}.
             </p>
             <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
             {fileName && (
-              <div className="ad-hint">{fileName} — {rows.length} row{rows.length === 1 ? "" : "s"} parsed, {validRows.length} valid.</div>
+              <div className="emp-hint">{fileName} — {rows.length} row{rows.length === 1 ? "" : "s"} parsed, {validRows.length} valid.</div>
             )}
 
             {rows.length > 0 && !report && (
