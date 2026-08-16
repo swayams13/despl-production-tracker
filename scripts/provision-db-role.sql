@@ -25,3 +25,24 @@ END
 \gexec
 
 GRANT despl_app TO despl_web;
+
+-- Pin this role's default session timezone to UTC (CLAUDE.md: "store UTC,
+-- display IST"). Without this, it depends on the Postgres server's own
+-- `timezone` GUC default, which is NOT guaranteed to be UTC (Homebrew/local
+-- installs default to the host OS's zone at initdb time). That gap is real,
+-- not theoretical: it was caught live during Task 4.4's browser pass — every
+-- naive `timestamp without time zone` column (domain_events.at, etc.) stores
+-- literal UTC-clock digits (Prisma's query engine computes now() in UTC and
+-- Postgres stores the digits verbatim, ignoring any tz suffix on the bound
+-- parameter), but a raw-SQL comparison against a JS Date parameter
+-- (`de.at >= ${someDate}`, as myday.read.ts's clearedToday does) makes
+-- Postgres implicitly cast the naive column to timestamptz using the
+-- CURRENT SESSION's timezone — silently shifting the comparison by the
+-- server's UTC/local offset. On a server whose default is Asia/Kolkata
+-- (+05:30), that reliably knocked "SUBMITTED today" counts to 0 for anything
+-- submitted before the day's last 5.5 hours. Existing regression coverage:
+-- myday.read.test.ts "counts today's COMPLETE + today's SUBMITTED, and only
+-- today's" — it was already asserting the right thing and started failing
+-- the moment the DB's default drifted from UTC, which is exactly what
+-- surfaced this. Idempotent; safe to re-run.
+ALTER ROLE despl_web SET timezone = 'UTC';
