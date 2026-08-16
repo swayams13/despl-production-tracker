@@ -425,22 +425,50 @@ body {
 
 /* credential slip (A6 print) — SPEC §7.3: "Print credential slip". Hidden on
    screen (the dialog shows the same info in normal styled markup).
-   FIX (task review round 1): the hiding rule below is gated on
-   `body:has(.cred-slip)`, not a bare `body *` — `.cred-slip` only exists in
-   the DOM while the credential dialog itself is mounted, so printing any
-   OTHER page (or this page with the dialog closed) is completely
-   unaffected. Also dropped the global `@page { size: A6 }` override, which
-   had the identical unscoped-to-every-print-job bug: `.cred-slip` is sized
-   to A6 (105mm×148mm) directly instead, so it prints correctly as a small
-   slip on whatever paper size the browser's print dialog already has,
-   without hijacking @page (which CSS cannot scope to an ancestor selector
-   at all — no selector-gated way to apply it only "while this dialog is
-   open"). */
-.cred-slip { display: none; }
+
+   FIX (task review round 1): the hiding rule is gated on the slip's
+   presence, not a bare `body *` — the original unconditionally hid/resized
+   EVERY page in the app, since this stylesheet loads once at the root
+   layout.
+
+   FIX (task review round 2, two sub-fixes — both verified with a standalone
+   Playwright/Chromium PDF reproduction, `page.pdf({ preferCSSPageSize:
+   true })`, documented in task-4.2-report.md):
+
+   1. Page SIZE: round 1 dropped the actual A6 physical page size entirely
+      (sizing only the inner div left the printed PAGE at the
+      browser/printer's default — Letter/A4 — with A6-sized content sitting
+      in a corner of an otherwise-blank sheet). `@page` can't be scoped to a
+      descendant selector like `:has()` — it's a non-nestable top-level
+      at-rule — so this uses CSS Paged Media's actual mechanism for that: a
+      NAMED page (`.cred-slip { page: cred-slip }` + `@page cred-slip { ...
+      }` below). Confirmed the size must be `105mm 148mm` (A6's literal
+      dimensions), not the `A6` keyword — this Chromium build's PDF backend
+      silently ignores the keyword form but honors explicit lengths.
+
+   2. Page COUNT: `.cred-slip` is portaled straight to <body> (see
+      CredentialDialog in admin/_client.tsx), as a sibling of the app root
+      and of Dialog.Portal's own overlay/content, NOT nested inside either.
+      `visibility: hidden` on everything else (round 1's approach) does NOT
+      remove those elements from pagination — they still each get their own
+      printed page, so the dialog's on-screen chrome (nested several levels
+      inside Dialog.Content, itself a sibling of .cred-slip once portaled)
+      would otherwise print as a blank Letter-sized page ahead of the slip.
+      `display: none` genuinely removes an element from pagination, so the
+      print rule below `display:none`s every OTHER top-level <body> child —
+      which only produces a clean, single, correctly-sized page because
+      `.cred-slip` is ALSO a direct <body> child, not buried inside one of
+      the things being hidden.
+
+   Reproduced both non-leak guarantees too: printing a document with no
+   `.cred-slip` in the DOM at all gets the browser's untouched default page
+   (no page-count or page-size change), confirming neither fix reaches
+   outside the moment the credential dialog is actually open. */
+.cred-slip { display: none; page: cred-slip; }
+@page cred-slip { size: 105mm 148mm; margin: 6mm; }
 @media print {
-  body:has(.cred-slip) * { visibility: hidden; }
-  .cred-slip, .cred-slip * { visibility: visible; }
-  .cred-slip { display: block; position: fixed; top: 0; left: 0; width: 105mm; height: 148mm; padding: 8mm; box-sizing: border-box; color: #000; background: #fff; font-family: system-ui, sans-serif; }
+  body:has(.cred-slip) > :not(.cred-slip) { display: none; }
+  .cred-slip { display: block; position: fixed; top: 0; left: 0; width: 100%; padding: 8mm; box-sizing: border-box; color: #000; background: #fff; font-family: system-ui, sans-serif; }
   .cred-slip h2 { font-size: 14px; margin: 0 0 10px; }
   .cred-slip .cs-label { font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: #555; margin-top: 10px; }
   .cred-slip .cs-value { font-size: 13px; font-family: ui-monospace, monospace; }

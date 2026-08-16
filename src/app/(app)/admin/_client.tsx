@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -474,14 +475,6 @@ function CredentialDialog({ username, tempPassword, onClose }: { username: strin
               <div style={{ display: "contents" }}><dt>Username</dt><dd className="mono">{username}</dd></div>
               <div style={{ display: "contents" }}><dt>Temp password</dt><dd className="mono">{tempPassword}</dd></div>
             </dl>
-            <div className="cred-slip">
-              <h2>DESPL Production Tracker</h2>
-              <div className="cs-label">Username</div>
-              <div className="cs-value">{username}</div>
-              <div className="cs-label">Temporary password</div>
-              <div className="cs-value">{tempPassword}</div>
-              <div className="cs-warn">You must change this password at first login.<br />{appUrl}</div>
-            </div>
           </div>
           <div className="sh-ft">
             <button className="btn btn-accent" onClick={() => window.print()}>Print credential slip</button>
@@ -489,6 +482,32 @@ function CredentialDialog({ username, tempPassword, onClose }: { username: strin
           </div>
         </Dialog.Content>
       </Dialog.Portal>
+      {/*
+       * FIX (task review round 2): `.cred-slip` used to live nested inside
+       * Dialog.Content, hidden with `visibility:hidden` on its siblings for
+       * print. Verified (standalone Playwright/Chromium PDF check, see
+       * task-4.2-report.md) that `visibility:hidden` does NOT remove an
+       * element from pagination — it still gets its own (blank) printed
+       * page, so that approach produced a blank Letter-sized page before the
+       * A6 slip. Portaling `.cred-slip` directly to <body>, as a sibling of
+       * the app root and of Dialog.Portal's own overlay/content rather than
+       * a descendant of either, lets the print CSS `display: none` every
+       * OTHER top-level body child (globals.css's
+       * `body:has(.cred-slip) > :not(.cred-slip)`) — display:none actually
+       * removes them from pagination, leaving exactly one page: the slip.
+       */}
+      {typeof document !== "undefined" &&
+        createPortal(
+          <div className="cred-slip">
+            <h2>DESPL Production Tracker</h2>
+            <div className="cs-label">Username</div>
+            <div className="cs-value">{username}</div>
+            <div className="cs-label">Temporary password</div>
+            <div className="cs-value">{tempPassword}</div>
+            <div className="cs-warn">You must change this password at first login.<br />{appUrl}</div>
+          </div>,
+          document.body,
+        )}
     </Dialog.Root>
   );
 }
