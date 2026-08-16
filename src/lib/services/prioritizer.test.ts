@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 import { prioritize, type PrioritizeInput } from "./prioritizer";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,4 +65,44 @@ test("readiness keys predecessor status by (jobProcessId, unitId), not jobProces
   const unit2Proc2 = ranked.find((r) => r.plan.id === 4)!;
   expect(unit1Proc2.state).toBe("READY");
   expect(unit2Proc2.state).toBe("BLOCKED");
+});
+
+// blockingPredecessorIds (task 3.1 ruling 2f, command-center.read.ts's
+// "You're blocking" cross-department computation) — additive field on
+// RankedPlan, populated only for BLOCKED plans.
+describe("blockingPredecessorIds", () => {
+  it("names the incomplete predecessor's jobProcessId for a BLOCKED plan", () => {
+    const input: PrioritizeInput = {
+      today: new Date("2026-08-14"),
+      plans: [
+        plan({ id: 1, jobProcessId: 1, status: "IN_PROGRESS" }),
+        plan({ id: 2, jobProcessId: 2, status: "NOT_STARTED" }),
+      ],
+      edges: [{ processId: 2, predecessorId: 1, type: "FINISH_TO_START", lagDays: 0 }],
+      floatByProcessId: new Map([[1, { totalFloat: 0, isCritical: true }], [2, { totalFloat: 0, isCritical: true }]]),
+      processNameById: new Map([[1, "Shell rolling"], [2, "Long-seam weld"]]),
+    };
+    const ranked = prioritize(input).get(10)!;
+    const blocked = ranked.find((r) => r.plan.id === 2)!;
+    expect(blocked.state).toBe("BLOCKED");
+    expect(blocked.blockingPredecessorIds).toEqual([1]);
+  });
+
+  it.each<[string, string]>([
+    ["READY", "NOT_STARTED"],
+    ["IN_PROGRESS", "IN_PROGRESS"],
+    ["SUBMITTED", "SUBMITTED"],
+    ["ON_HOLD", "ON_HOLD"],
+    ["DONE", "COMPLETE"],
+  ])("is empty for a %s plan (no predecessors)", (_label, status) => {
+    const input: PrioritizeInput = {
+      today: new Date("2026-08-14"),
+      plans: [plan({ id: 1, jobProcessId: 1, status })],
+      edges: [],
+      floatByProcessId: new Map([[1, { totalFloat: 0, isCritical: false }]]),
+      processNameById: new Map([[1, "Shell rolling"]]),
+    };
+    const ranked = prioritize(input).get(10)!;
+    expect(ranked[0].blockingPredecessorIds).toEqual([]);
+  });
 });

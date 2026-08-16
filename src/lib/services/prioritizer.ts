@@ -12,6 +12,14 @@ export interface RankedPlan {
   reasonText: string;
   criticalPath: boolean;
   floatDays: number;
+  /** jobProcessIds of the predecessors currently blocking this plan (task
+   * 3.1 ruling 2f, command-center.read.ts's "You're blocking" computation) —
+   * populated from the same `startReadiness()` call the BLOCKED/READY branch
+   * below already makes. Empty for every state other than BLOCKED. Purely
+   * additive: every existing caller (myday.read.ts, portfolio.read.ts,
+   * workspace.read.ts) already ignores unknown fields on the RankedPlan it
+   * receives, so this changes no existing behavior. */
+  blockingPredecessorIds: number[];
 }
 
 export interface PrioritizeInput {
@@ -70,6 +78,7 @@ export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
     let state: PlanState;
     let reasonCode: string = plan.status;
     let reasonText: string;
+    let blockingIds: number[] = [];
 
     switch (plan.status) {
       case "COMPLETE": state = "DONE"; reasonText = "Complete."; break;
@@ -88,6 +97,7 @@ export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
           reasonText = criticalPath ? "Ready to start — on the critical path." : "Ready to start.";
         } else {
           state = "BLOCKED"; reasonCode = "BLOCKED";
+          blockingIds = blockingPredecessorIds;
           const names = blockingPredecessorIds.map((id) => processNameById.get(id) ?? `#${id}`);
           reasonText = `Waiting on: ${names.join(", ")}.`;
         }
@@ -97,7 +107,7 @@ export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
       reasonCode = "OVERDUE";
       reasonText = `Overdue — file a delay reason to continue. ${reasonText}`;
     }
-    return { plan, state, overdue, reasonCode, reasonText, criticalPath, floatDays };
+    return { plan, state, overdue, reasonCode, reasonText, criticalPath, floatDays, blockingPredecessorIds: blockingIds };
   });
 
   // Group by department, sort within each: bucket, then earliest plannedFinish, then unit.
