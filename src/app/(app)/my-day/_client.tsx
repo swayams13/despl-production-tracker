@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { startAction, submitAction, holdAction, resumeAction, verifyAction, rejectAction } from "@/app/actions/process";
@@ -135,11 +135,21 @@ function MineRowView({
   const [categoryId, setCategoryId] = useState<number | "">("");
   const [detail, setDetail] = useState("");
   const overdue = row.ranked.overdue;
+  // Only a READY row can actually start right after filing — an overdue row
+  // that's IN_PROGRESS/ON_HOLD/SUBMITTED/BLOCKED still needs the reason filed
+  // (invariant #7), but "start" doesn't apply to it (its own action, if any,
+  // is MineActionButton's job). Label follows this so the button never
+  // claims to do more than it will.
+  const canStartAfterFile = row.ranked.state === "READY";
 
   const fileReason = (e: MouseEvent) => {
     stop(e);
     if (categoryId === "") return toast.error("Choose a delay reason first.");
-    run(() => fileDelayAction(row.ranked.plan.id, categoryId, detail || undefined), "Delay reason filed.");
+    run(async () => {
+      const filed = await fileDelayAction(row.ranked.plan.id, categoryId, detail || undefined);
+      if (!filed.ok || !canStartAfterFile) return filed;
+      return startAction(row.ranked.plan.id); // sequential — only fires once the file succeeds
+    }, canStartAfterFile ? "Filed & started." : "Delay reason filed.");
   };
 
   return (
@@ -162,7 +172,7 @@ function MineRowView({
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
               <input className="ws-detail" style={{ maxWidth: 160 }} placeholder="Detail (optional)" value={detail} onChange={(e) => setDetail(e.target.value)} aria-label={`Delay detail for ${row.jobNumber} · ${row.processName}`} />
-              <button className="btn" disabled={pending} onClick={fileReason}>File &amp; start</button>
+              <button className="btn" disabled={pending} onClick={fileReason}>{canStartAfterFile ? "File & start" : "File"}</button>
             </>
           )}
           <MineActionButton row={row} pending={pending} run={run} />
@@ -308,16 +318,30 @@ export function MyDayClient({
   };
 
   const orderedTabs = isQc ? [TABS[2], TABS[0], TABS[1], TABS[3], TABS[4]] : TABS;
-  const [tab, setTab] = useState<TabKey>(isQc ? "qc" : "attention");
+  const defaultMineTab: Exclude<TabKey, "pool"> = isQc ? "qc" : "attention";
+  const [tab, setTab] = useState<TabKey>(defaultMineTab);
   const [teamHeldOpen, setTeamHeldOpen] = useState(false);
+  const poolRef = useRef<HTMLDivElement | null>(null);
 
-  const mineRows = view.mine.filter((r) => mineBucket(r) === tab);
-  const nothingInTab =
-    (tab === "pool" && view.pool.length === 0) ||
-    (tab === "qc" && qcQueueRows.length === 0) ||
-    (tab !== "pool" && tab !== "qc" && mineRows.length === 0);
+  // Controller ruling (task review): Mine and Department pool are both
+  // always-visible sections (matching "Held by teammates" already being
+  // one) — the KPI tabs filter WITHIN Mine, they don't hide Pool. "Pool" is
+  // still one of the 5 tabs (for its count + the tab bar's `.on` highlight),
+  // but selecting it doesn't change what Mine shows — it scrolls the
+  // always-visible Pool section into view instead (below), so a supervisor
+  // never has to leave the default view to see claimable pool items.
+  const mineFilter: Exclude<TabKey, "pool"> = tab === "pool" ? defaultMineTab : tab;
+  const isVerifyMode = mineFilter === "qc" && isQc;
+  const mineSectionRows = isVerifyMode ? qcQueueRows : view.mine.filter((r) => mineBucket(r) === mineFilter);
 
-  const nextUp = view.mine[0] ?? view.pool[0] ?? null;
+  useEffect(() => {
+    if (tab === "pool") poolRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [tab]);
+
+  // "Next item" for Mine's empty state (SPEC §7.2 bullet 7) looks across ALL
+  // of mine, not just the current filter — "nothing needs attention" should
+  // still say what's coming up next, not just "nothing here".
+  const nextUp = view.mine[0] ?? null;
 
   return (
     <>
@@ -356,57 +380,88 @@ export function MyDayClient({
         ))}
       </div>
 
-      {nothingInTab ? (
-        <p className="note">
-          {nextUp
-            ? `Nothing due here. Next item: ${nextUp.processName} · ${nextUp.serialNo} · due ${fmtDue(nextUp.ranked.plan.plannedFinish)}.`
-            : "Nothing due right now — you're caught up."}
-        </p>
-      ) : (
-        <div className="card ws-card">
-          <div className="hd">
-            <b>{tab === "pool" ? "Department pool" : tab === "qc" && isQc ? "Awaiting your verification" : "Mine"}</b>
-            <span className="meta">
-              {tab === "pool" ? "Unassigned — claim to take ownership" : tab === "qc" && isQc ? "QC gate · maker / checker" : "Ranked by priority"}
-            </span>
-          </div>
+      {/* Mine — always visible; the active tab filters which rows show. */}
+      <div className="card ws-card">
+        <div className="hd">
+          <b>{isVerifyMode ? "Awaiting your verification" : "Mine"}</b>
+          <span className="meta">{isVerifyMode ? "QC gate · maker / checker" : "Ranked by priority"}</span>
+        </div>
+        {mineSectionRows.length === 0 ? (
+          <p className="note" style={{ margin: "16px 0" }}>
+            {isVerifyMode
+              ? "Nothing awaiting your verification right now."
+              : nextUp
+                ? `Nothing due here. Next item: ${nextUp.processName} · ${nextUp.serialNo} · due ${fmtDue(nextUp.ranked.plan.plannedFinish)}.`
+                : "Nothing due right now — you're caught up."}
+          </p>
+        ) : (
+          <table>
+            {/* No thead in verify mode — QcQueueRowView is a 3-cell row
+                (job+process / action), same headerless convention
+                /workspace's own QC section uses; a 4-column header here
+                would misalign against it. */}
+            {!isVerifyMode && (
+              <thead>
+                <tr>
+                  <th style={{ width: 130 }}>Job</th>
+                  <th>Process</th>
+                  <th style={{ width: 80 }}>Due</th>
+                  <th className="num" style={{ width: 80 }}>Overdue</th>
+                  <th style={{ width: 220 }} />
+                </tr>
+              </thead>
+            )}
+            <tbody>
+              {isVerifyMode
+                ? qcQueueRows.map((r) => (
+                    <QcQueueRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+                  ))
+                : mineSectionRows.map((r) => (
+                    <MineRowView
+                      key={r.ranked.plan.id}
+                      row={r}
+                      categories={view.delayCategories}
+                      onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+                    />
+                  ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Department pool — always visible; "Pool" tab just scrolls here. */}
+      <div className="card ws-card" ref={poolRef}>
+        <div className="hd">
+          <b>Department pool</b>
+          <span className="meta">Unassigned — claim to take ownership</span>
+          <span className="chip c-idle"><i />{view.pool.length}</span>
+        </div>
+        {view.pool.length === 0 ? (
+          <p className="note" style={{ margin: "16px 0" }}>Nothing in the department pool right now.</p>
+        ) : (
           <table>
             <thead>
               <tr>
                 <th style={{ width: 130 }}>Job</th>
                 <th>Process</th>
                 <th style={{ width: 80 }}>Due</th>
-                {tab !== "pool" && tab !== "qc" && <th className="num" style={{ width: 80 }}>Overdue</th>}
                 <th style={{ width: 220 }} />
               </tr>
             </thead>
             <tbody>
-              {tab === "pool"
-                ? view.pool.map((r) => (
-                    <PoolRowView
-                      key={r.ranked.plan.id}
-                      row={r}
-                      canAssign={canAssign}
-                      members={view.deptMembers[r.ranked.plan.ownerDepartmentId] ?? []}
-                      onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
-                    />
-                  ))
-                : tab === "qc" && isQc
-                  ? qcQueueRows.map((r) => (
-                      <QcQueueRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
-                    ))
-                  : mineRows.map((r) => (
-                      <MineRowView
-                        key={r.ranked.plan.id}
-                        row={r}
-                        categories={view.delayCategories}
-                        onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
-                      />
-                    ))}
+              {view.pool.map((r) => (
+                <PoolRowView
+                  key={r.ranked.plan.id}
+                  row={r}
+                  canAssign={canAssign}
+                  members={view.deptMembers[r.ranked.plan.ownerDepartmentId] ?? []}
+                  onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+                />
+              ))}
             </tbody>
           </table>
-        </div>
-      )}
+        )}
+      </div>
 
       <div className="card ws-card">
         <div className="hd" style={{ cursor: "pointer" }} onClick={() => setTeamHeldOpen((o) => !o)}>
