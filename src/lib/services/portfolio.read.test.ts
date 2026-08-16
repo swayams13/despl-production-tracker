@@ -76,6 +76,16 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("portfolio.read (DB)", async () => {
     expect(p.rows.every((r) => allowed.has(r.id))).toBe(true);
   });
 
+  it("tallies cancelled jobs into cancelledCount instead of dropping them silently", async () => {
+    const actor = await sjActor();
+    const p = await loadPortfolio(actor);
+
+    const cancelled = await owner.job.count({
+      where: { tenantId: actor.tenantId, status: "CANCELLED" },
+    });
+    expect(p.cancelledCount).toBe(cancelled);
+  });
+
   it("classifies DE0463 and DE0467 as delayed once scheduled", async () => {
     const p = await loadPortfolio(await sjActor());
 
