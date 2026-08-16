@@ -223,9 +223,11 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
             else teamHeld.push(toRow(r));
           } else if (isQcActor && r.state === "SUBMITTED") {
             // Outside the actor's own department but awaiting QC verification —
-            // route into teamHeld (always assignee != null on SUBMITTED, the
-            // maker who submitted it) so the "With QC" tab's cross-dept filter
-            // has something to find.
+            // route into teamHeld so the "With QC" tab's cross-dept filter has
+            // something to find. assigneeUserId is usually the maker who
+            // submitted it, but not guaranteed non-null — assignment.service
+            // is the sole writer of that column (D16) and a plan can be
+            // started/submitted by a supervisor without ever being claimed.
             teamHeld.push(toRow(r));
           }
         }
@@ -313,13 +315,16 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
     const firstPassRejects30d = rejectRows[0]?.n ?? 0;
 
     // deptMembers (SPEC §7.2 bullet 5): the "Assign to…" select's option
-    // list, department -> active staff. Every pool/teamHeld row's department
-    // is already a subset of actor.departmentIds (the partition rule above),
-    // so one query keyed by the actor's own departments covers every row
-    // this actor could ever assign from. Assign-capable roles only — a QC-
-    // only actor gets an empty map (safe: the UI simply never renders the
-    // select without an assign-capable role, same gate `assignPlan` itself
-    // enforces server-side).
+    // list, department -> active staff. Every pool/teamHeld row an
+    // assign-capable actor can actually see is in one of actor.departmentIds
+    // (the partition rule above) — a QC actor's cross-dept teamHeld rows
+    // (the branch above) are the one exception, but that's moot here since
+    // this block is gated on an assign-capable role, not QC, so one query
+    // keyed by the actor's own departments still covers every row this actor
+    // could ever assign from. Assign-capable roles only — a QC-only actor
+    // gets an empty map (safe: the UI simply never renders the select
+    // without an assign-capable role, same gate `assignPlan` itself enforces
+    // server-side).
     const deptMembers: Record<number, { id: number; name: string }[]> = {};
     if (actor.departmentIds.length > 0 && hasRole(actor, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) {
       const memberRows = await tx.userDepartment.findMany({

@@ -13,4 +13,5 @@ export default async function Home() {
   if (actor.clientId !== null) redirect("/portal");
   if (hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect("/dashboard");
   if (hasRole(actor, ROLES.SUPERVISOR, ROLES.QC)) redirect("/my-day");
+  redirect("/workspace"); // fallback for any authenticated shape none of the above catch (e.g. a staff CLIENT_VIEWER with no clientId) — a real page beats a blank one
 }

@@ -499,4 +499,93 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read — QC cross-department v
     // Specifically teamHeld — it's assigned to the maker, not unassigned, and not mine.
     expect(view.teamHeld.map((r) => r.ranked.plan.id)).toContain(submittedElsewhere.id);
   });
+
+  /**
+   * Fix 2 (final whole-branch review, 17 Aug 2026): the partition-invariant
+   * assertions above (`myday.read (DB)`'s "no plan id appears in more than
+   * one bucket" / "every non-DONE row is mine or in my dept" / "pool rows
+   * always unassigned, teamHeld rows always assigned to someone else") only
+   * ever ran against a SUPERVISOR actor. QC has its own shape — a QC actor
+   * CAN be the maker on their own department's plan (QC runs its own
+   * NDE/inspection process through the same submit/verify flow as any other
+   * department) — and `loadMyDay` itself has no bug here: the row lands in
+   * `mine` exactly like it would for any other assignee (the real bug this
+   * was chasing turned out to be client-side, in `_client.tsx`'s tab
+   * routing). This test re-runs the same partition invariants for a QC actor
+   * whose own plan is self-submitted, so the server-side precondition the
+   * client fix relies on — a self-submitted "mine" row is present, in
+   * exactly one bucket, and carries `submittedBy === actor.userId` — is
+   * pinned down for the actor shape the bug actually lived in.
+   */
+  it("puts a QC actor's own self-submitted plan in `mine` (not lost), satisfying the same partition invariants a SUPERVISOR actor's rows do", async () => {
+    const org = await owner.organization.create({ data: { code: `QCSELF-${Date.now()}`, name: "QC self-submit test" } });
+    const tenantId = org.id;
+
+    const deptQc = await owner.department.create({ data: { tenantId, code: "QC", name: "QC Dept" } });
+
+    const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PV", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-qcself-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-QCSELF-${Date.now()}`,
+      },
+    });
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+
+    const qcUser = await owner.user.create({
+      data: { tenantId, email: `qcself-${Date.now()}@x`, username: `qcself-${Date.now()}`, name: "QC Self", passwordHash: "x" },
+    });
+    await owner.userDepartment.create({ data: { userId: qcUser.id, departmentId: deptQc.id } });
+
+    const qcActor: Actor = {
+      userId: qcUser.id,
+      tenantId,
+      clientId: null,
+      name: "QC Self",
+      email: "qcself@despl.test",
+      roles: [ROLES.QC],
+      departmentIds: [deptQc.id],
+      mustChangePassword: false,
+    };
+
+    // QC's own NDE process — maker AND submitter are the same QC actor.
+    const jp = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 1, code: "P1", name: "Weld NDE", departmentId: deptQc.id, durationMinDays: 1, durationMaxDays: 2 },
+    });
+    const selfSubmitted = await owner.processPlan.create({
+      data: {
+        scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptQc.id,
+        assigneeUserId: qcUser.id, submittedBy: qcUser.id, status: "SUBMITTED",
+      },
+    });
+
+    const view = await loadMyDay(qcActor);
+
+    // Present, and in `mine` specifically — an assignee who is the actor
+    // always wins "mine" regardless of role (the partition rule every other
+    // fixture in this file already exercises for a SUPERVISOR actor).
+    expect(view.mine.map((r) => r.ranked.plan.id)).toContain(selfSubmitted.id);
+    expect(view.pool.map((r) => r.ranked.plan.id)).not.toContain(selfSubmitted.id);
+    expect(view.teamHeld.map((r) => r.ranked.plan.id)).not.toContain(selfSubmitted.id);
+
+    const row = view.mine.find((r) => r.ranked.plan.id === selfSubmitted.id);
+    expect(row?.ranked.state).toBe("SUBMITTED");
+    // The exact precondition `_client.tsx`'s Fix 2 read-only render keys on.
+    expect(row?.ranked.plan.submittedBy).toBe(qcUser.id);
+    expect(row?.ranked.plan.assigneeUserId).toBe(qcUser.id);
+
+    // Same disjointness invariant as the SUPERVISOR-actor test above.
+    const allIds = [...view.mine, ...view.pool, ...view.teamHeld].map((r) => r.ranked.plan.id);
+    expect(new Set(allIds).size).toBe(allIds.length);
+  });
 });

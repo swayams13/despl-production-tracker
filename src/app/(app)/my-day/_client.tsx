@@ -15,19 +15,30 @@ type Category = { id: number; name: string };
 type Refusal = { code: string; message: string };
 type TabKey = "attention" | "due" | "qc" | "upnext" | "pool";
 
+// Fixed UTC+5:30 offset — same convention myday.read.ts's istDay() uses
+// server-side. This component renders both on the server (UTC) and the
+// client (whatever the browser's local zone is); a local-timezone Date
+// method (getDate()/toDateString()/toLocaleDateString() without an explicit
+// timeZone) would make the two renders disagree during the 00:00–05:30 IST
+// window and trip a React hydration mismatch. Deterministic IST calendar-day
+// number regardless of runtime timezone.
+function istEpochDay(d: Date): number {
+  return Math.floor((d.getTime() + 5.5 * 3600 * 1000) / 864e5);
+}
+
 function fmtDue(d: Date | string | null): string {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  return new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
 }
 
 function isToday(d: Date | string | null): boolean {
   if (!d) return false;
-  return new Date(d).toDateString() === new Date().toDateString();
+  return istEpochDay(new Date(d)) === istEpochDay(new Date());
 }
 
 function daysOverdue(d: Date | string | null): number {
   if (!d) return 0;
-  return Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 864e5));
+  return Math.max(0, istEpochDay(new Date()) - istEpochDay(new Date(d)));
 }
 
 function initials(name: string): string {
@@ -149,6 +160,12 @@ function MineRowView({
   // is MineActionButton's job). Label follows this so the button never
   // claims to do more than it will.
   const canStartAfterFile = row.ranked.state === "READY";
+  // Job-grain plans (office departments — Engineering/Procurement/Planning,
+  // myday.read.ts's serialNo: "—" fallback) have no unitId; the StageSheet
+  // launcher (`useStageSheetLauncher().openStage`) silently no-ops without
+  // one. Don't offer a click that does nothing (CLAUDE.md: "No dead
+  // controls") — unit-grain rows keep click-to-open exactly as before.
+  const clickable = row.ranked.plan.unitId != null;
 
   const fileReason = (e: MouseEvent) => {
     stop(e);
@@ -161,7 +178,7 @@ function MineRowView({
   };
 
   return (
-    <tr className="row" onClick={onOpenStage} style={{ cursor: "pointer" }}>
+    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -175,11 +192,11 @@ function MineRowView({
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }} onClick={stop}>
           {overdue && (
             <>
-              <select className="btn" value={categoryId} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")} aria-label={`Delay reason for ${row.jobNumber} · ${row.processName}`}>
+              <select className="btn" disabled={pending} value={categoryId} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")} aria-label={`Delay reason for ${row.jobNumber} · ${row.processName}`}>
                 <option value="">Delay reason…</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
-              <input className="ws-detail" style={{ maxWidth: 160 }} placeholder="Detail (optional)" value={detail} onChange={(e) => setDetail(e.target.value)} aria-label={`Delay detail for ${row.jobNumber} · ${row.processName}`} />
+              <input className="ws-detail" style={{ maxWidth: 160 }} disabled={pending} placeholder="Detail (optional)" value={detail} onChange={(e) => setDetail(e.target.value)} aria-label={`Delay detail for ${row.jobNumber} · ${row.processName}`} />
               <button className="btn" disabled={pending} onClick={fileReason}>{canStartAfterFile ? "File & start" : "File"}</button>
             </>
           )}
@@ -205,9 +222,10 @@ function PoolRowView({
 }) {
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const { pending, run } = useRun(setRefusal);
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
 
   return (
-    <tr className="row" onClick={onOpenStage} style={{ cursor: "pointer" }}>
+    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -256,9 +274,10 @@ function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () =
     setRejecting(false);
     setReason("");
   };
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
 
   return (
-    <tr className="row" onClick={onOpenStage} style={{ cursor: "pointer" }}>
+    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -277,6 +296,27 @@ function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () =
           <button className="btn btn-accent" disabled={pending} onClick={(e) => { stop(e); run(() => verifyAction(row.ranked.plan.id), "Verified — next stage unlocked."); }}>Verify</button>
         </div>
         <RefusalNote refusal={refusal} />
+      </td>
+    </tr>
+  );
+}
+
+// ── A QC actor's OWN submitted plan, shown in the verify queue read-only
+// (Fix 2, final whole-branch review) — maker-checker means this actor can
+// never verify/reject it, so it gets no action controls, just a same-shape
+// row (3 <td>s, matching QcQueueRowView) so the headerless verify-mode table
+// stays column-aligned. ────────────────────────────────────────────────────
+function SelfSubmittedRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+  return (
+    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+      <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
+      <td>
+        {row.processName}
+        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+      </td>
+      <td className="num" style={{ width: 200 }}>
+        <span style={{ color: "var(--muted)", fontSize: 11 }}>Awaiting QC — submitted by you</span>
       </td>
     </tr>
   );
@@ -317,10 +357,25 @@ export function MyDayClient({
     [isQc, view.mine, view.pool, view.teamHeld, actorUserId],
   );
 
+  // A QC actor's own self-submitted plans (Fix 2, final whole-branch review):
+  // `qcQueueRows` deliberately excludes these (maker-checker), but that
+  // exclusion must not make the row disappear from the whole page — mineBucket()
+  // already routes every non-overdue SUBMITTED "mine" row into the "qc"
+  // bucket, so reuse that same filter to surface them read-only. The
+  // `submittedBy === actorUserId` check (not just "mine") matters:
+  // assignPlan doesn't restrict reassignment by status, so a SUBMITTED plan
+  // CAN have an assignee different from its submitter — that row already
+  // belongs to `qcQueueRows` (this actor genuinely can verify it) and must
+  // not also land here, or it renders twice.
+  const selfSubmittedRows = useMemo(
+    () => view.mine.filter((r) => mineBucket(r) === "qc" && r.ranked.plan.submittedBy === actorUserId),
+    [view.mine, actorUserId],
+  );
+
   const counts: Record<TabKey, number> = {
     attention: view.mine.filter((r) => mineBucket(r) === "attention").length,
     due: view.mine.filter((r) => mineBucket(r) === "due").length,
-    qc: qcQueueRows.length,
+    qc: isQc ? qcQueueRows.length + selfSubmittedRows.length : qcQueueRows.length,
     upnext: view.mine.filter((r) => mineBucket(r) === "upnext").length,
     pool: view.pool.length,
   };
@@ -351,7 +406,7 @@ export function MyDayClient({
   // always-visible Pool section into view instead (below), so a supervisor
   // never has to leave the default view to see claimable pool items.
   const isVerifyMode = mineTab === "qc" && isQc;
-  const mineSectionRows = isVerifyMode ? qcQueueRows : view.mine.filter((r) => mineBucket(r) === mineTab);
+  const mineSectionRows = isVerifyMode ? [...qcQueueRows, ...selfSubmittedRows] : view.mine.filter((r) => mineBucket(r) === mineTab);
 
   useEffect(() => {
     if (tab === "pool") poolRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -432,9 +487,16 @@ export function MyDayClient({
             )}
             <tbody>
               {isVerifyMode
-                ? qcQueueRows.map((r) => (
-                    <QcQueueRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
-                  ))
+                ? mineSectionRows.map((r) =>
+                    // Self-submitted rows (Fix 2) get the read-only render —
+                    // maker-checker means this actor can never verify/reject
+                    // their own work, so QcQueueRowView's controls don't apply.
+                    r.ranked.plan.submittedBy === actorUserId ? (
+                      <SelfSubmittedRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+                    ) : (
+                      <QcQueueRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+                    ),
+                  )
                 : mineSectionRows.map((r) => (
                     <MineRowView
                       key={r.ranked.plan.id}
@@ -495,8 +557,10 @@ export function MyDayClient({
           ) : (
             <table>
               <tbody>
-                {view.teamHeld.map((r) => (
-                  <tr key={r.ranked.plan.id} className="row" onClick={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} style={{ cursor: "pointer" }}>
+                {view.teamHeld.map((r) => {
+                  const clickable = r.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+                  return (
+                  <tr key={r.ranked.plan.id} className="row" onClick={clickable ? () => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo) : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
                     <td style={{ width: 40 }}>
                       <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials(r.assigneeName ?? "—")}</div>
                     </td>
@@ -512,7 +576,8 @@ export function MyDayClient({
                       </span>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )
