@@ -23,7 +23,7 @@ export interface PrioritizeInput {
 }
 
 // Rank buckets — lower is higher priority.
-function bucket(r: { state: PlanState; overdue: boolean; criticalPath: boolean }): number {
+export function bucket(r: { state: PlanState; overdue: boolean; criticalPath: boolean }): number {
   if (r.state === "DONE") return 6;
   if (r.overdue) return 0;
   const actionable = r.state === "READY" || r.state === "IN_PROGRESS" || r.state === "SUBMITTED";
@@ -31,6 +31,21 @@ function bucket(r: { state: PlanState; overdue: boolean; criticalPath: boolean }
   if (r.state === "READY") return 2;
   if (actionable || r.state === "ON_HOLD") return 3;
   return 4; // BLOCKED
+}
+
+/**
+ * The prioritizer's own ranking order — bucket, then earliest plannedFinish,
+ * then unit — exported so a cross-job aggregation (myday.read.ts merges
+ * RankedPlan[] from several per-job `prioritize()` calls) can sort the merged
+ * list identically instead of re-deriving the comparator.
+ */
+export function compareRankedPlans(a: RankedPlan, b: RankedPlan): number {
+  const ba = bucket(a), bb = bucket(b);
+  if (ba !== bb) return ba - bb;
+  const fa = a.plan.plannedFinish?.getTime() ?? Infinity;
+  const fb = b.plan.plannedFinish?.getTime() ?? Infinity;
+  if (fa !== fb) return fa - fb;
+  return (a.plan.unitId ?? 0) - (b.plan.unitId ?? 0);
 }
 
 export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
@@ -93,14 +108,7 @@ export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
     byDept.get(deptId)!.push(r);
   }
   for (const list of byDept.values()) {
-    list.sort((a, b) => {
-      const ba = bucket(a), bb = bucket(b);
-      if (ba !== bb) return ba - bb;
-      const fa = a.plan.plannedFinish?.getTime() ?? Infinity;
-      const fb = b.plan.plannedFinish?.getTime() ?? Infinity;
-      if (fa !== fb) return fa - fb;
-      return (a.plan.unitId ?? 0) - (b.plan.unitId ?? 0);
-    });
+    list.sort(compareRankedPlans);
   }
   return byDept;
 }
