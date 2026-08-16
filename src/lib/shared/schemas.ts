@@ -133,11 +133,50 @@ export const createUserSchema = z
   .strict();
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
-/** §4.10 Admin: reset a user's password. */
+/**
+ * §4.10 Admin: reset a user's password. `password` is optional (personal
+ * dashboards v1, Task 4.1) — omit it and the service generates a readable
+ * temp password the same way `createEmployee` does, returned once.
+ */
 export const resetPasswordSchema = z
-  .object({ userId: id, password: z.string().min(8, "Password must be at least 8 characters") })
+  .object({ userId: id, password: z.string().min(8, "Password must be at least 8 characters").optional() })
   .strict();
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+
+const roleCodeEnum = z.enum(["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVISOR", "QC", "CLIENT_VIEWER"]);
+
+/**
+ * SPEC §5.2: create an employee account. Deliberately a SEPARATE contract
+ * from `createUserSchema` (optional generated password, explicit
+ * username/employeeCode) — see Task 4.1 ruling; do not merge the two.
+ */
+export const createEmployeeSchema = z
+  .object({
+    displayName: z.string().trim().min(1, "Name is required"),
+    username: z.string().trim().min(1, "Username is required"),
+    email: z.string().trim().toLowerCase().email("Enter a valid email address").optional(),
+    employeeCode: z.string().trim().min(1).optional(),
+    roles: roleCodeEnum.array().min(1, "At least one role is required"),
+    departmentIds: z.array(id).default([]),
+    // C28 default: ≥10 chars, no complexity theatre. Omit to auto-generate.
+    password: z.string().min(10, "Password must be at least 10 characters").optional(),
+  })
+  .strict();
+export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
+
+/** §5.2: activate/deactivate an account. Deactivation never deletes (invariant #6). */
+export const setUserActiveSchema = z.object({ userId: id, active: z.boolean() }).strict();
+export type SetUserActiveInput = z.infer<typeof setUserActiveSchema>;
+
+/** §5.2: replace a user's roles/departments wholesale, audited before→after. */
+export const updateUserRolesDeptsSchema = z
+  .object({
+    userId: id,
+    roles: roleCodeEnum.array().min(1, "At least one role is required"),
+    departmentIds: z.array(id).default([]),
+  })
+  .strict();
+export type UpdateUserRolesDeptsInput = z.infer<typeof updateUserRolesDeptsSchema>;
 
 /** §4.10 Admin: master delay-reason list editor. */
 export const createDelayCategorySchema = z.object({ name: z.string().trim().min(1, "Name is required") }).strict();
