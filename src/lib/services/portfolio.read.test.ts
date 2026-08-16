@@ -78,12 +78,32 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("portfolio.read (DB)", async () => {
 
   it("tallies cancelled jobs into cancelledCount instead of dropping them silently", async () => {
     const actor = await sjActor();
-    const p = await loadPortfolio(actor);
+    const before = await loadPortfolio(actor);
 
-    const cancelled = await owner.job.count({
-      where: { tenantId: actor.tenantId, status: "CANCELLED" },
+    // Don't rely on the seed happening to have a CANCELLED job — insert a
+    // throwaway one, same convention as delay.service.test.ts's Date.now()
+    // -unique fixture rows. despl_test is the disposable DB-gated tier, so no
+    // cleanup. Borrow FK values off any existing job in this tenant.
+    const existing = await owner.job.findFirst({
+      where: { tenantId: actor.tenantId },
+      select: { clientId: true, familyId: true, templateVersionId: true },
     });
-    expect(p.cancelledCount).toBe(cancelled);
+    if (!existing) throw new Error("no seeded job to borrow FK values from — run pnpm db:seed");
+
+    await owner.job.create({
+      data: {
+        tenantId: actor.tenantId,
+        publicId: `pub-cancel-test-${Date.now()}`,
+        clientId: existing.clientId,
+        familyId: existing.familyId,
+        templateVersionId: existing.templateVersionId,
+        jobNumber: `CANCEL-TEST-${Date.now()}`,
+        status: "CANCELLED",
+      },
+    });
+
+    const after = await loadPortfolio(actor);
+    expect(after.cancelledCount).toBe(before.cancelledCount + 1);
   });
 
   it("classifies DE0463 and DE0467 as delayed once scheduled", async () => {
