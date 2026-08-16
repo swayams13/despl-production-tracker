@@ -164,6 +164,18 @@ export const updateStandardDurationsSchema = z
   .strict();
 export type UpdateStandardDurationsInput = z.infer<typeof updateStandardDurationsSchema>;
 
+/** Claim an unassigned plan into the caller's own name (personal dashboards v1, SPEC §5.1). */
+export const claimPlanSchema = z.object({ processPlanId: id }).strict();
+export type ClaimPlanInput = z.infer<typeof claimPlanSchema>;
+
+/** Assign (or reassign) a plan to a specific user. */
+export const assignPlanSchema = z.object({ processPlanId: id, userId: id }).strict();
+export type AssignPlanInput = z.infer<typeof assignPlanSchema>;
+
+/** Return a plan to its department pool (assigneeUserId → null). */
+export const releasePlanSchema = z.object({ processPlanId: id }).strict();
+export type ReleasePlanInput = z.infer<typeof releasePlanSchema>;
+
 /** Override a process duration → new ScheduleRun version, mandatory reason. */
 export const applyDurationOverrideSchema = z
   .object({

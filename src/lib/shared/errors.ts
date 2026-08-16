@@ -37,6 +37,16 @@ export const ERROR_CODES = {
   INVALID_STATE_TRANSITION: "INVALID_STATE_TRANSITION",
   /** The job's process graph is malformed (cycle, dangling edge) and cannot be scheduled. */
   SCHEDULE_GRAPH_INVALID: "SCHEDULE_GRAPH_INVALID",
+  /** Actor tried to claim a plan outside their own department's pool. */
+  NOT_IN_DEPARTMENT: "NOT_IN_DEPARTMENT",
+  /** Plan is already claimed/assigned to someone. */
+  ALREADY_ASSIGNED: "ALREADY_ASSIGNED",
+  /** A COMPLETE plan cannot be claimed. */
+  PLAN_COMPLETE: "PLAN_COMPLETE",
+  /** The proposed assignee does not hold the plan's owning department. */
+  ASSIGNEE_NOT_IN_DEPARTMENT: "ASSIGNEE_NOT_IN_DEPARTMENT",
+  /** The proposed assignee's account is not active. */
+  ASSIGNEE_INACTIVE: "ASSIGNEE_INACTIVE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -62,6 +72,11 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This process has no confirmed duration yet — it cannot be scheduled until DESPL provides one.",
   INVALID_STATE_TRANSITION: "This process cannot move to that state from its current one.",
   SCHEDULE_GRAPH_INVALID: "The process graph for this job is invalid and cannot be scheduled.",
+  NOT_IN_DEPARTMENT: "You can only claim work belonging to your own department.",
+  ALREADY_ASSIGNED: "This work is already claimed by someone.",
+  PLAN_COMPLETE: "This work is already complete and cannot be claimed.",
+  ASSIGNEE_NOT_IN_DEPARTMENT: "That person does not belong to this department.",
+  ASSIGNEE_INACTIVE: "That person's account is not active.",
 };
 
 /**
