@@ -23,16 +23,12 @@ describe.skipIf(!RUN_DB)("D16 — assignment never bypasses gating (DB)", async 
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { startProcess } = await import("./process.service");
   const { claimPlan, assignPlan } = await import("./assignment.service");
-  // ponytail: cap this file's own pool — every test in this suite runs
-  // sequentially, so it never needs more than a couple of connections. 33
-  // DB-gated files each open their own default-sized (~17) pool; with this
-  // file added as the 32nd/33rd, the full suite tipped into transient
-  // "unable to start a transaction" timeouts on a second back-to-back run
-  // (observed directly: reproduced with these 2 new files in, gone with them
-  // out — see task-1.4-report.md). Capping ours is the fix that's actually
-  // ours to make without touching the 16 pre-existing files that already
-  // share this same uncapped pattern.
-  const owner = new PrismaClient({ datasourceUrl: `${process.env.DIRECT_URL}?connection_limit=3` });
+  // connection_limit is set once, for every DB-gated test file, on DIRECT_URL
+  // itself in .env.test (this file and migration-backfill.test.ts originally
+  // capped only their own pool here; moved to the single env-var source once
+  // it turned out the app's own `prisma` singleton — fed by DATABASE_URL,
+  // uncapped — was the bigger remaining contributor. See .env.test's comment).
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
   let deptId = 0;

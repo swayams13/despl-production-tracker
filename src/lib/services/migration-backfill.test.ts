@@ -1,55 +1,52 @@
 import { afterAll, describe, expect, it } from "vitest";
 
 /**
- * Task 1.1's person-grain migration (prisma/migrations/20260816175249_person_grain)
- * does two DIFFERENT things per column and both need proving separately:
+ * UPDATE (16 Aug 2026): despl_test was reset (`prisma migrate reset`) this
+ * session to clear ~months of no-cleanup DB-gated test accumulation (524
+ * orgs / 132K+ process_plans rows had made some queries slow enough to break
+ * unrelated tests). That reset consumed exactly the scenario the CAVEAT below
+ * used to warn about — this file's first two cases no longer prove Task
+ * 1.1's migration backfill ran; `pnpm db:seed`'s own explicit field values
+ * (`mustChangePassword: false`, `username: email.split("@")[0]` in
+ * `prisma/seed.ts`'s `mkUser`) now determine the outcome on every reseed,
+ * regardless of whether the migration's backfill logic is even correct. The
+ * migration itself was verified correct at the time it shipped (see
+ * progress.md / the SDD ledger for that historical record) — it doesn't need
+ * a live re-proof on a DB that gets periodically reset. Retitled and
+ * reframed below as seed-behavior regression tests, which is what they
+ * actually check now; the original CAVEAT is kept for context on why.
  *
- *   1. must_change_password: added nullable, EVERY existing row backfilled to
- *      false via a plain UPDATE, THEN the column got NOT NULL DEFAULT true.
- *      So existing (pre-migration) rows carry false from the backfill, while
- *      brand-new rows carry true from the default — two different mechanisms
- *      landing on two different values. A test against a fresh row only ever
- *      proves the default; it says nothing about whether the backfill UPDATE
- *      actually ran. This file checks both, separately.
- *   2. username: added nullable, backfilled via split_part(email, '@', 1) for
- *      existing rows, then made NOT NULL (no separate default — every row,
- *      old or new, gets an explicit username at insert time going forward).
+ * Original doc (Task 1.1's person-grain migration,
+ * prisma/migrations/20260816175249_person_grain, did two DIFFERENT things
+ * per column): must_change_password was added nullable, EVERY existing row
+ * backfilled to false via a plain UPDATE, THEN the column got NOT NULL
+ * DEFAULT true — so pre-migration rows carried false from the backfill while
+ * brand-new rows carried true from the default. username was added nullable,
+ * backfilled via split_part(email, '@', 1), then made NOT NULL.
  *
- * "Pre-existing seeded user" here means a user seeded by prisma/seed.ts (the
- * @despl.local domain, per its mkUser() calls) — never a user this file (or
- * any other DB-gated test) creates itself. Those seed rows were present in
- * despl_test BEFORE the migration ran, so their must_change_password value
- * can only be explained by the backfill, not the column default.
- *
- * CAVEAT — this proof depends on despl_test's history, not just its schema:
- * the seeded-user assertion below only works because despl_test has been
- * `migrate dev`'d incrementally and never reset, so it still carries @despl.local
- * rows that predate 20260816175249_person_grain. If despl_test is ever run
- * through `prisma migrate reset` and reseeded, `pnpm db:seed` will run AFTER
- * the column's `DEFAULT true` already exists in migration history — every
- * seeded row will land on `true`, and the first `it()` below will fail. That
- * failure means "the DB history this test relies on is gone," not "the
- * migration is broken" — there's no backfill left to prove on a
- * freshly-reset-then-reseeded table. Whoever hits it should delete/rewrite
- * this test at that point, or make it robust by cross-checking
- * `_prisma_migrations` timestamps against `user.createdAt` instead of
- * trusting live DB state.
+ * CAVEAT (now realized, kept for the next person who resets this DB again):
+ * the seeded-user assertions only prove the backfill ran if despl_test still
+ * carries @despl.local rows older than the migration. Once reset+reseeded,
+ * pnpm db:seed runs AFTER the column's DEFAULT/explicit-value logic already
+ * exists — every seeded row reflects seed.ts's own values, not any
+ * historical backfill. That's expected, not a regression.
  */
 const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
 describe.skipIf(!RUN_DB)("Task 1.1 migration backfill (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  // ponytail: capped pool — see the matching comment in
-  // d16-gate-independence.test.ts for why (this file is the other half of
-  // the 2 new files that tipped the full DB suite into transient connection
-  // timeouts on a second run).
-  const owner = new PrismaClient({ datasourceUrl: `${process.env.DIRECT_URL}?connection_limit=3` });
+  // connection_limit is set once, for every DB-gated test file, on DIRECT_URL
+  // itself in .env.test (was a per-file `?connection_limit=3` here and in
+  // d16-gate-independence.test.ts; moved to the single env-var source so the
+  // app's own `prisma` singleton — which DATABASE_URL fed uncapped — gets the
+  // same cap, and so no file risks double-appending a query string).
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   afterAll(async () => {
     await owner.$disconnect();
   });
 
-  it("every seeded (pre-migration) user has mustChangePassword === false — the backfill ran, not just the default", async () => {
+  it("every seeded demo user has mustChangePassword === false — prisma/seed.ts's mkUser sets it explicitly, so demo accounts are never locked behind the first-login interstitial", async () => {
     const seeded = await owner.user.findMany({ where: { email: { endsWith: "@despl.local" } } });
     expect(seeded.length).toBeGreaterThan(0); // sanity: `pnpm db:seed` has run against this DB
     for (const u of seeded) {
@@ -57,14 +54,15 @@ describe.skipIf(!RUN_DB)("Task 1.1 migration backfill (DB)", async () => {
     }
   });
 
-  it("every seeded user has a non-null, non-empty username backfilled from the email local-part", async () => {
+  it("every seeded user has a non-null, non-empty username derived from the email local-part (seed.ts's mkUser sets it explicitly)", async () => {
     const seeded = await owner.user.findMany({ where: { email: { endsWith: "@despl.local" } } });
     for (const u of seeded) {
       expect(u.username).toBeTruthy();
       expect(u.username).toBe(u.email.split("@")[0]);
     }
-    // Spot-check a specific known seeded row's derivation (migration.sql:
-    // split_part(email, '@', 1)).
+    // Spot-check a specific known seeded row's derivation — matches both
+    // seed.ts's mkUser (email.split("@")[0]) and the original migration's
+    // backfill SQL (split_part(email, '@', 1)), same rule either way.
     const sj = seeded.find((u) => u.email === "sj@despl.local");
     expect(sj?.username).toBe("sj");
   });

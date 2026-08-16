@@ -1233,7 +1233,20 @@ async function seedDemo(
         clientId: number | null = null,
       ) => {
         const user = await tx.user.create({
-          data: { tenantId, clientId, email, username: email.split("@")[0], name, passwordHash },
+          // Demo/dev seed accounts ship with a known, documented password
+          // (see the SEED_PASSWORD warning above) — same reasoning as Task
+          // 1.1's migration backfill for pre-existing rows: they already have
+          // a working password and must not be locked out behind the
+          // first-login interstitial.
+          data: {
+            tenantId,
+            clientId,
+            email,
+            username: email.split("@")[0],
+            name,
+            passwordHash,
+            mustChangePassword: false,
+          },
         });
         await tx.userRole.createMany({
           data: roleCodes.map((c) => ({ userId: user.id, roleId: roleIdByCode.get(c)! })),

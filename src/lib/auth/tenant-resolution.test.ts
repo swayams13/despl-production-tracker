@@ -15,7 +15,9 @@ const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
 describe.skipIf(!RUN_DB)("resolveTenantForLogin (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  const owner = new PrismaClient({ datasourceUrl: `${process.env.DIRECT_URL}?connection_limit=3` });
+  // connection_limit is set once, for every DB-gated test file, on DIRECT_URL
+  // itself in .env.test — see that file's comment.
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   afterAll(async () => {
     await owner.$disconnect();
