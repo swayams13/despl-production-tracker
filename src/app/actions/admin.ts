@@ -23,6 +23,11 @@ export async function createUserAction(input: CreateUserInput): Promise<ActionRe
 
 export async function resetPasswordAction(userId: number, password: string): Promise<ActionResult> {
   try {
+    // tempPassword deliberately dropped here: this action wraps the
+    // ADMIN-CHOSEN-password path from the existing /admin table UI, which
+    // already has the plaintext in `password`. Task 4.2 wires the
+    // generate-if-omitted path (and the credential-slip hand-off) through a
+    // new action of its own.
     await resetUserPassword(await requireActor(), { userId, password });
     revalidatePath("/admin");
     return { ok: true };

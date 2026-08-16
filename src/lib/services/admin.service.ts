@@ -1,6 +1,7 @@
+import { randomInt } from "node:crypto";
 import { withTenant } from "@/lib/db";
 import { audited } from "@/lib/audit";
-import { requireRole, assertNotClientUser, ROLES, type Actor } from "@/lib/authz";
+import { requireRole, assertNotClientUser, hasRole, ROLES, type Actor, type RoleCode } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { hashPassword } from "@/lib/auth/password";
 import {
@@ -9,11 +10,17 @@ import {
   createDelayCategorySchema,
   updateDelayCategorySchema,
   updateStandardDurationsSchema,
+  createEmployeeSchema,
+  setUserActiveSchema,
+  updateUserRolesDeptsSchema,
   type CreateUserInput,
   type ResetPasswordInput,
   type CreateDelayCategoryInput,
   type UpdateDelayCategoryInput,
   type UpdateStandardDurationsInput,
+  type CreateEmployeeInput,
+  type SetUserActiveInput,
+  type UpdateUserRolesDeptsInput,
 } from "@/lib/shared/schemas";
 import type { User, DelayCategoryRef, ProcessTemplateVersion } from "@/generated/prisma/client";
 
@@ -24,6 +31,26 @@ import type { User, DelayCategoryRef, ProcessTemplateVersion } from "@/generated
  * Readiness checklist's "management sees zero action buttons anywhere") and
  * none of it is exempt from invariant #5 (append-only audit).
  */
+
+/**
+ * Word list for generated temp passwords — small and boring on purpose
+ * (personal dashboards v1, Task 4.1 / SPEC §5.2 "3 random words + 2 digits").
+ * `node:crypto`'s `randomInt` is a CSPRNG; `Math.random()` is explicitly
+ * banned for anything credential-shaped.
+ */
+const TEMP_PASSWORD_WORDS = [
+  "anchor", "bridge", "cactus", "copper", "desert", "ember", "engine", "falcon",
+  "forest", "granite", "harbor", "island", "jungle", "kettle", "lantern", "meadow",
+  "nectar", "oyster", "pepper", "quartz", "ribbon", "summit", "tanker", "timber",
+  "umbrella", "valley", "willow", "yonder", "zephyr", "boiler", "rocket", "signal",
+] as const;
+
+/** e.g. "granite-falcon-summit-07". Crypto-random, never `Math.random()`. */
+function generateTempPassword(): string {
+  const words = Array.from({ length: 3 }, () => TEMP_PASSWORD_WORDS[randomInt(TEMP_PASSWORD_WORDS.length)]);
+  const digits = String(randomInt(100)).padStart(2, "0");
+  return `${words.join("-")}-${digits}`;
+}
 
 export async function createUser(actor: Actor, input: CreateUserInput): Promise<User> {
   const { name, email, roleCodes, departmentIds, password } = createUserSchema.parse(input);
@@ -91,23 +118,35 @@ export async function createUser(actor: Actor, input: CreateUserInput): Promise<
   });
 }
 
-export async function resetUserPassword(actor: Actor, input: ResetPasswordInput): Promise<void> {
+/**
+ * Reset a user's password. `password` lets an admin set a specific one;
+ * omitted, a readable temp password is generated the same way `createEmployee`
+ * does. Either way the plaintext is returned ONCE — SPEC §9: never persisted,
+ * never logged, never in the audit payload — and the caller is responsible
+ * for handing it to the employee (print slip / CSV) and discarding it.
+ */
+export async function resetUserPassword(
+  actor: Actor,
+  input: ResetPasswordInput,
+): Promise<{ tempPassword: string }> {
   const { userId, password } = resetPasswordSchema.parse(input);
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN);
+  const tempPassword = password ?? generateTempPassword();
 
   return withTenant(actor.tenantId, async (tx) => {
     const user = await tx.user.findFirst({ where: { id: userId, tenantId: actor.tenantId } });
     if (!user) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "User", userId });
 
-    const passwordHash = await hashPassword(password);
+    const passwordHash = await hashPassword(tempPassword);
     await audited(tx, actor, async () => {
-      // An admin-chosen password is a temp credential the admin knows: bump
-      // sessionVersion so every session issued before the reset stops
-      // resolving (getActor compares it), and set mustChangePassword so the
-      // user has to replace it on next login. Without both, an admin reset —
-      // the path most likely to be undoing a COMPROMISED credential — leaves
-      // the old sessions live and the admin-known password permanent.
+      // An admin-chosen (or generated) password is a temp credential the
+      // admin knows: bump sessionVersion so every session issued before the
+      // reset stops resolving (getActor compares it), and set
+      // mustChangePassword so the user has to replace it on next login.
+      // Without both, an admin reset — the path most likely to be undoing a
+      // COMPROMISED credential — leaves the old sessions live and the
+      // admin-known password permanent.
       await tx.user.update({
         where: { id: userId },
         data: { passwordHash, sessionVersion: { increment: 1 }, mustChangePassword: true },
@@ -118,13 +157,15 @@ export async function resetUserPassword(actor: Actor, input: ResetPasswordInput)
           action: "admin.resetPassword",
           entityType: "User",
           entityId: userId,
-          // No before/after: the only fields that changed are password
-          // material and its two locks — nothing safe or useful to diff.
+          // No before/after, no tempPassword: the only fields that changed
+          // are password material and its two locks — nothing safe or useful
+          // to diff, and the plaintext must never reach the audit trail.
           eventType: "UserPasswordReset",
           eventPayload: { userId },
         },
       };
     });
+    return { tempPassword };
   });
 }
 
@@ -285,4 +326,258 @@ export async function updateStandardDurations(
       };
     });
   });
+}
+
+/**
+ * SPEC §5.2: create an employee account — a NEW creation path, deliberately
+ * NOT routed through `createUser` (Task 4.1 ruling: materially different
+ * contract — optional generated password, explicit username/employeeCode —
+ * kept as two distinct exported functions).
+ *
+ * `User.email` stayed NOT NULL at the DB level (Task 1.1's deliberate call).
+ * When the caller omits it, a placeholder derived from the already-unique
+ * `username` is stored so the row satisfies the column — it is never treated
+ * as a deliverable address anywhere downstream.
+ */
+export async function createEmployee(
+  actor: Actor,
+  input: CreateEmployeeInput,
+): Promise<{ userId: number; username: string; tempPassword: string }> {
+  const {
+    displayName,
+    username,
+    email,
+    employeeCode,
+    roles: roleCodes,
+    departmentIds,
+    password,
+  } = createEmployeeSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN);
+
+  // Generated outside the transaction: it is never written anywhere except
+  // the hash below and the one-time return value — never logged, never in
+  // the audit payload (SPEC §9).
+  const tempPassword = password ?? generateTempPassword();
+  const effectiveEmail = email ?? `${username}@no-email.despl.local`;
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const existingUsername = await tx.user.findFirst({ where: { tenantId: actor.tenantId, username } });
+    if (existingUsername) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, { username }, "A user with this username already exists.");
+    }
+    // Only pre-check a caller-supplied email — a synthesized placeholder is
+    // already unique because `username` was just checked above.
+    if (email) {
+      const existingEmail = await tx.user.findFirst({ where: { tenantId: actor.tenantId, email } });
+      if (existingEmail) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { email }, "A user with this email already exists.");
+      }
+    }
+    if (employeeCode) {
+      const existingCode = await tx.user.findFirst({ where: { tenantId: actor.tenantId, employeeCode } });
+      if (existingCode) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { employeeCode },
+          "A user with this employee code already exists.",
+        );
+      }
+    }
+    const roles = await tx.role.findMany({ where: { tenantId: actor.tenantId, code: { in: roleCodes } } });
+    if (roles.length !== roleCodes.length) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, { roleCodes }, "One or more roles are invalid.");
+    }
+    if (departmentIds.length) {
+      const depts = await tx.department.count({ where: { tenantId: actor.tenantId, id: { in: departmentIds } } });
+      if (depts !== departmentIds.length) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { departmentIds }, "One or more departments are invalid.");
+      }
+    }
+
+    const passwordHash = await hashPassword(tempPassword);
+
+    return audited(tx, actor, async () => {
+      const user = await tx.user.create({
+        data: {
+          tenantId: actor.tenantId,
+          name: displayName,
+          email: effectiveEmail,
+          username,
+          employeeCode,
+          passwordHash,
+          // Explicit, not just relying on the schema default — this exact
+          // field was skipped once before in this codebase's history and had
+          // to be backfilled by a migration (Phase 1).
+          mustChangePassword: true,
+          roles: { create: roles.map((r) => ({ roleId: r.id })) },
+          departments: { create: departmentIds.map((departmentId) => ({ departmentId })) },
+        },
+      });
+      return {
+        result: { userId: user.id, username: user.username, tempPassword },
+        audit: {
+          action: "admin.createEmployee",
+          entityType: "User",
+          entityId: user.id,
+          // No password material in the audit payload (SPEC §9).
+          after: {
+            displayName,
+            username,
+            email: email ?? null,
+            employeeCode: employeeCode ?? null,
+            roleCodes,
+            departmentIds,
+          },
+          // Distinct from createUser's "UserCreated": this is a genuinely
+          // different creation path (generated credentials, explicit
+          // username/employeeCode), worth telling apart in the event stream.
+          eventType: "EmployeeCreated",
+          eventPayload: { userId: user.id, username, roleCodes },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Activate/deactivate an account (invariant #6: never delete). Deactivating
+ * invalidates every live session (same sessionVersion-bump pattern as
+ * `resetUserPassword`) but deliberately does NOT touch the person's assigned
+ * plans — SPEC §5.2 / C29 default: no auto-release, the UI surfaces an
+ * "assigned to inactive user" warning chip instead (Task 4.2's job).
+ */
+export async function setUserActive(actor: Actor, input: SetUserActiveInput): Promise<User> {
+  const { userId, active } = setUserActiveSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN);
+
+  // Pure guard, no DB needed: an admin can never lock themselves out.
+  if (actor.userId === userId && !active) {
+    throw new AppError(ERROR_CODES.CANNOT_SELF_DEACTIVATE);
+  }
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const user = await tx.user.findFirst({ where: { id: userId, tenantId: actor.tenantId } });
+    if (!user) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "User", userId });
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: active ? { active } : { active, sessionVersion: { increment: 1 } },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "admin.setUserActive",
+          entityType: "User",
+          entityId: userId,
+          before: { active: user.active },
+          after: { active: updated.active },
+          eventType: active ? "UserActivated" : "UserDeactivated",
+          eventPayload: { userId, active },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Replace a user's roles/departments wholesale, audited with a full
+ * before→after diff (role codes / department ids, not opaque row counts).
+ */
+export async function updateUserRolesDepts(actor: Actor, input: UpdateUserRolesDeptsInput): Promise<User> {
+  const { userId, roles: roleCodes, departmentIds } = updateUserRolesDeptsSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN);
+
+  // Pure guard, no DB needed: an admin can never strip their OWN admin role.
+  // Checked against the actor's own (freshly per-request-resolved, see
+  // requireActor()) roles — the actor object cannot be stale within one call.
+  if (actor.userId === userId && hasRole(actor, ROLES.ADMIN) && !roleCodes.includes(ROLES.ADMIN)) {
+    throw new AppError(ERROR_CODES.CANNOT_SELF_DEMOTE);
+  }
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const user = await tx.user.findFirst({
+      where: { id: userId, tenantId: actor.tenantId },
+      include: { roles: { include: { role: true } }, departments: true },
+    });
+    if (!user) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "User", userId });
+
+    const roles = await tx.role.findMany({ where: { tenantId: actor.tenantId, code: { in: roleCodes } } });
+    if (roles.length !== roleCodes.length) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, { roleCodes }, "One or more roles are invalid.");
+    }
+    if (departmentIds.length) {
+      const depts = await tx.department.count({ where: { tenantId: actor.tenantId, id: { in: departmentIds } } });
+      if (depts !== departmentIds.length) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { departmentIds }, "One or more departments are invalid.");
+      }
+    }
+
+    const beforeRoleCodes = user.roles.map((r) => r.role.code as RoleCode).sort();
+    const beforeDepartmentIds = user.departments.map((d) => d.departmentId).sort((a, b) => a - b);
+    const afterRoleCodes = [...roleCodes].sort();
+    const afterDepartmentIds = [...departmentIds].sort((a, b) => a - b);
+
+    return audited(tx, actor, async () => {
+      await tx.userRole.deleteMany({ where: { userId } });
+      await tx.userDepartment.deleteMany({ where: { userId } });
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          roles: { create: roles.map((r) => ({ roleId: r.id })) },
+          departments: { create: departmentIds.map((departmentId) => ({ departmentId })) },
+        },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "admin.updateUserRolesDepts",
+          entityType: "User",
+          entityId: userId,
+          before: { roleCodes: beforeRoleCodes, departmentIds: beforeDepartmentIds },
+          after: { roleCodes: afterRoleCodes, departmentIds: afterDepartmentIds },
+          eventType: "UserRolesDeptsUpdated",
+          eventPayload: { userId, roleCodes: afterRoleCodes, departmentIds: afterDepartmentIds },
+        },
+      };
+    });
+  });
+}
+
+export type BulkImportEmployeeResult =
+  | { ok: true; userId: number; username: string; tempPassword: string }
+  | { ok: false; row: unknown; error: string };
+
+/**
+ * SPEC §5.2: load employees from already-parsed CSV rows (CSV parsing itself
+ * is Task 4.2's UI concern — this takes structured objects). Each row is its
+ * own `createEmployee` call in its own transaction, never one batch
+ * transaction, so a bad row can never roll back the good rows ahead of it.
+ */
+export async function bulkImportEmployees(actor: Actor, rows: unknown[]): Promise<BulkImportEmployeeResult[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN);
+
+  const results: BulkImportEmployeeResult[] = [];
+  for (const row of rows) {
+    const parsed = createEmployeeSchema.safeParse(row);
+    if (!parsed.success) {
+      results.push({ ok: false, row, error: parsed.error.issues.map((i) => i.message).join("; ") });
+      continue;
+    }
+    try {
+      const created = await createEmployee(actor, parsed.data);
+      results.push({ ok: true, ...created });
+    } catch (e) {
+      results.push({
+        ok: false,
+        row,
+        error: e instanceof AppError ? e.message : "Could not create this employee.",
+      });
+    }
+  }
+  return results;
 }
