@@ -51,6 +51,8 @@ export const ERROR_CODES = {
   INVALID_CURRENT_PASSWORD: "INVALID_CURRENT_PASSWORD",
   /** Too many failed password-change attempts in the last 15 minutes. */
   RATE_LIMITED: "RATE_LIMITED",
+  /** changeOwnPassword: "next" is identical to "current" — refuses to defeat the forced-change flow. */
+  PASSWORD_UNCHANGED: "PASSWORD_UNCHANGED",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -83,6 +85,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   ASSIGNEE_INACTIVE: "That person's account is not active.",
   INVALID_CURRENT_PASSWORD: "Your current password is incorrect.",
   RATE_LIMITED: "Too many attempts. Wait a few minutes and try again.",
+  PASSWORD_UNCHANGED: "Your new password must be different from your current password.",
 };
 
 /**

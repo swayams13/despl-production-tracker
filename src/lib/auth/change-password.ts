@@ -33,6 +33,14 @@ const RATE_LIMIT_MAX_ATTEMPTS = 5;
 export async function changeOwnPassword(actor: Actor, input: ChangePasswordInput): Promise<void> {
   const { current, next } = changePasswordSchema.parse(input);
 
+  // Reusing the (admin-known or old) password would silently defeat the
+  // forced-change flow — mustChangePassword flips false but the same secret
+  // stays live. Pure string comparison on the submitted plaintext, no DB
+  // needed, so this is checked before touching the DB.
+  if (next === current) {
+    throw new AppError(ERROR_CODES.PASSWORD_UNCHANGED);
+  }
+
   const { user, recentFailures } = await withTenant(actor.tenantId, async (tx) => {
     const user = await tx.user.findFirst({ where: { id: actor.userId } });
     const recentFailures = await tx.auditLog.count({

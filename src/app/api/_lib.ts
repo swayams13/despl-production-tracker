@@ -25,6 +25,7 @@ const STATUS: Record<ErrorCode, number> = {
   ASSIGNEE_INACTIVE: 409,
   INVALID_CURRENT_PASSWORD: 409,
   RATE_LIMITED: 429,
+  PASSWORD_UNCHANGED: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

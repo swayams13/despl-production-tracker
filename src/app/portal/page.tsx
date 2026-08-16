@@ -12,10 +12,18 @@ import { logout } from "@/app/actions/auth";
  * and TPI call dates) is built on day 3, reading ProgressSnapshot.
  *
  * Nothing here is exposed externally until DESPL's team reviews the design.
+ *
+ * `mustChangePassword` interstitial (Task 1.3): `/portal` lives OUTSIDE the
+ * (app) route group, so it doesn't inherit that layout's redirect — every
+ * client user (`clientId !== null`) lands here straight from `login()`, so
+ * without this check a forced-change client user could reach the portal
+ * without ever changing their temp password. `/account/password` also lives
+ * outside (app), so there is no self-redirect loop.
  */
 export default async function PortalPage() {
   const actor = await getActor();
   if (!actor) redirect("/login");
+  if (actor.mustChangePassword) redirect("/account/password");
   if (actor.clientId === null) redirect("/");
 
   const clientId = actor.clientId;

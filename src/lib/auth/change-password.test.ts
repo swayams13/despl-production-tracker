@@ -60,6 +60,13 @@ describe("changeOwnPassword — pure schema refusals", () => {
       }),
     ).rejects.toBeTruthy();
   });
+
+  it("rejects next === current with PASSWORD_UNCHANGED before touching the DB (an admin-known temp password can never stay live)", async () => {
+    const { changeOwnPassword } = await import("./change-password");
+    await expect(
+      changeOwnPassword(pureActor(), { current: "same-password-1", next: "same-password-1" }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.PASSWORD_UNCHANGED);
+  });
 });
 
 /**
