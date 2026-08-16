@@ -265,7 +265,11 @@ language, no new colors.
 
 ### 6.1 Summary tiles
 
-Six tiles: **Active · On track · At risk · Delayed · On hold · Completed**.
+Seven tiles: **Active · On track · At risk · Delayed · On hold · Completed · Not planned**.
+(An earlier draft of this section listed six and omitted Not planned — an oversight
+against §4's own claim that NOT_PLANNED is a real signal, not a gap: without its own
+tile, an unscheduled project couldn't be one-click filtered to. Active is a status
+tally, not a health bucket; the other six are exactly `HEALTH_ORDER`.)
 
 Each is a count with a one-line caption. Clicking a tile filters the table below via a
 URL param (`/dashboard?health=delayed`) so the filter survives refresh and the back

@@ -223,7 +223,7 @@ const cases: [name: string, input: Partial<HealthInput>, expected: string][] = [
   ["no plans at all", { totalPlans: 0 }, "NOT_PLANNED"],
   ["no plans outranks a blown promise", { totalPlans: 0, deliveryDate: "2026-01-01T00:00:00.000Z" }, "NOT_PLANNED"],
   ["promised date already passed", { deliveryDate: "2026-08-15T00:00:00.000Z" }, "DELAYED"],
-  ["promised today is NOT yet late", { deliveryDate: "2026-08-16T00:00:00.000Z" }, "ON_TRACK"],
+  ["promised today is NOT yet late", { deliveryDate: "2026-08-16T00:00:00.000Z", forecastDispatch: "2026-08-16T00:00:00.000Z" }, "ON_TRACK"],
   ["forecast breaches the promise", { forecastDispatch: "2026-12-02T00:00:00.000Z" }, "DELAYED"],
   ["forecast exactly equals the promise", { forecastDispatch: "2026-12-01T00:00:00.000Z" }, "ON_TRACK"],
   ["delayed outranks at-risk", { forecastDispatch: "2026-12-02T00:00:00.000Z", overduePlans: 5 }, "DELAYED"],
