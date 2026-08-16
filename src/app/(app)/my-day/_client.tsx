@@ -78,9 +78,17 @@ function useRun(onRefusal: (r: Refusal | null) => void) {
 function RefusalNote({ refusal }: { refusal: Refusal | null }) {
   if (!refusal) return null;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11 }} onClick={stop}>
+    // flexWrap + a flex-basis on the message (not display:flex's default
+    // nowrap): the action <td>s these render in are a fixed ~200-220px
+    // (thead `width` above), already narrower than the chip + a full
+    // sentence. Without this, the message span gets flex-shrunk toward
+    // zero and wraps one word per line down the row instead of wrapping
+    // normally — found live in Task 2.4's browser pass (a real
+    // REASON_REQUIRED refusal rendered as an unreadable vertical word
+    // stack).
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6, fontSize: 11 }} onClick={stop}>
       <span className="chip c-overdue"><i />{refusal.code}</span>
-      <span style={{ color: "var(--muted)" }}>{refusal.message}</span>
+      <span style={{ color: "var(--muted)", flex: "1 1 160px" }}>{refusal.message}</span>
     </div>
   );
 }

@@ -413,3 +413,90 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     }
   });
 });
+
+/**
+ * Regression: found by Task 2.4's real browser click-through (a supervisor
+ * submitted a Planning-department plan for QC, then logging in as
+ * `qc@despl.local` — whose only department is QC itself, per the seed's
+ * `mkUser(..., ["QC"], ["QC"])` — showed "With QC (0)", nothing to verify).
+ * `/my-day`'s "With QC" tab is client-derived from `mine ∪ pool ∪ teamHeld`
+ * (`_client.tsx`'s `qcQueueRows`), and the partition loop gated pool/teamHeld
+ * on `actor.departmentIds.includes(ownerDepartmentId)` with no QC bypass —
+ * so a SUBMITTED plan owned by any department other than QC's own never
+ * reached any of the three arrays, even though `workspace.read.ts`'s
+ * `qcQueue` has always treated QC verification as cross-department ("QC
+ * verifies cross-dept"). This is the exact maker-checker flow invariant #3
+ * exists to protect, so it's tested directly here rather than folded into
+ * the fixture above (isolated tenant, own actor — a QC role this time).
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read — QC cross-department verification (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("puts a SUBMITTED plan owned by a DIFFERENT department into the QC actor's teamHeld, so the With QC filter finds it", async () => {
+    const org = await owner.organization.create({ data: { code: `QCPARITY-${Date.now()}`, name: "QC parity test" } });
+    const tenantId = org.id;
+
+    const deptQc = await owner.department.create({ data: { tenantId, code: "QC", name: "QC Dept" } });
+    const deptOther = await owner.department.create({ data: { tenantId, code: "OTHER", name: "Other Dept" } });
+
+    const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PV", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-qcparity-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-QCPARITY-${Date.now()}`,
+      },
+    });
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+
+    const qcUser = await owner.user.create({
+      data: { tenantId, email: `qcparity-${Date.now()}@x`, username: `qcparity-${Date.now()}`, name: "QC", passwordHash: "x" },
+    });
+    await owner.userDepartment.create({ data: { userId: qcUser.id, departmentId: deptQc.id } });
+    const makerUser = await owner.user.create({
+      data: { tenantId, email: `maker-${Date.now()}@x`, username: `maker-${Date.now()}`, name: "Maker", passwordHash: "x" },
+    });
+
+    const qcActor: Actor = {
+      userId: qcUser.id,
+      tenantId,
+      clientId: null,
+      name: "QC",
+      email: "qc@despl.test",
+      roles: [ROLES.QC],
+      departmentIds: [deptQc.id], // QC's OWN department — deliberately NOT deptOther
+      mustChangePassword: false,
+    };
+
+    const jp = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 1, code: "P1", name: "Weld NDE", departmentId: deptOther.id, durationMinDays: 1, durationMaxDays: 2 },
+    });
+    const submittedElsewhere = await owner.processPlan.create({
+      data: {
+        scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptOther.id,
+        assigneeUserId: makerUser.id, submittedBy: makerUser.id, status: "SUBMITTED",
+      },
+    });
+
+    const view = await loadMyDay(qcActor);
+
+    const allIds = [...view.mine, ...view.pool, ...view.teamHeld].map((r) => r.ranked.plan.id);
+    expect(allIds).toContain(submittedElsewhere.id);
+    // Specifically teamHeld — it's assigned to the maker, not unassigned, and not mine.
+    expect(view.teamHeld.map((r) => r.ranked.plan.id)).toContain(submittedElsewhere.id);
+  });
+});

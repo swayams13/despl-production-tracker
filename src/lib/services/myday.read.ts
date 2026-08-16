@@ -120,6 +120,14 @@ function istDay(now: Date, offsetDays: number): { start: Date; end: Date; date: 
 export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   const now = new Date();
   const jobs = (await loadJobs(actor)).filter((j) => j.status === "ACTIVE");
+  // QC verifies cross-department (workspace.read.ts's `qcQueue` — "SUBMITTED
+  // plans across ALL departments"). Without this, a QC actor whose only
+  // department is QC itself would never see a SUBMITTED plan owned by any
+  // OTHER department in mine/pool/teamHeld, and `/my-day`'s "With QC" tab
+  // (client-derived from those three arrays, `_client.tsx`'s `qcQueueRows`)
+  // would come up empty for the exact maker-checker verification flow it
+  // exists to surface.
+  const isQcActor = hasRole(actor, ROLES.QC);
 
   const mine: MyDayRow[] = [];
   const pool: MyDayRow[] = [];
@@ -200,8 +208,10 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       // loses "mine" just because they were later moved off that dept);
       // otherwise only rows in a department the actor belongs to are in
       // scope at all — cross-department is aggregate-only (D14, not this
-      // function's job). Disjoint by construction: assigneeUserId is exactly
-      // one of {actor.userId, null, someone else}.
+      // function's job), EXCEPT the QC-verification bypass below (QC's
+      // department-crossing duty is a named exception, not a hole in D14).
+      // Disjoint by construction: each branch is `else if`, so a row can
+      // only ever land in exactly one of mine/pool/teamHeld.
       for (const rows of rankedByDept.values()) {
         for (const r of rows) {
           if (r.state === "DONE") continue; // actionable/live boards only, not a history log
@@ -211,6 +221,12 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
           } else if (actor.departmentIds.includes(r.plan.ownerDepartmentId)) {
             if (assignee == null) pool.push(toRow(r));
             else teamHeld.push(toRow(r));
+          } else if (isQcActor && r.state === "SUBMITTED") {
+            // Outside the actor's own department but awaiting QC verification —
+            // route into teamHeld (always assignee != null on SUBMITTED, the
+            // maker who submitted it) so the "With QC" tab's cross-dept filter
+            // has something to find.
+            teamHeld.push(toRow(r));
           }
         }
       }
