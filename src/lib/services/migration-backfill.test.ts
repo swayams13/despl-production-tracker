@@ -20,6 +20,20 @@ import { afterAll, describe, expect, it } from "vitest";
  * any other DB-gated test) creates itself. Those seed rows were present in
  * despl_test BEFORE the migration ran, so their must_change_password value
  * can only be explained by the backfill, not the column default.
+ *
+ * CAVEAT — this proof depends on despl_test's history, not just its schema:
+ * the seeded-user assertion below only works because despl_test has been
+ * `migrate dev`'d incrementally and never reset, so it still carries @despl.local
+ * rows that predate 20260816175249_person_grain. If despl_test is ever run
+ * through `prisma migrate reset` and reseeded, `pnpm db:seed` will run AFTER
+ * the column's `DEFAULT true` already exists in migration history — every
+ * seeded row will land on `true`, and the first `it()` below will fail. That
+ * failure means "the DB history this test relies on is gone," not "the
+ * migration is broken" — there's no backfill left to prove on a
+ * freshly-reset-then-reseeded table. Whoever hits it should delete/rewrite
+ * this test at that point, or make it robust by cross-checking
+ * `_prisma_migrations` timestamps against `user.createdAt` instead of
+ * trusting live DB state.
  */
 const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
