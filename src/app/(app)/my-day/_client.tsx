@@ -320,19 +320,30 @@ export function MyDayClient({
   const orderedTabs = isQc ? [TABS[2], TABS[0], TABS[1], TABS[3], TABS[4]] : TABS;
   const defaultMineTab: Exclude<TabKey, "pool"> = isQc ? "qc" : "attention";
   const [tab, setTab] = useState<TabKey>(defaultMineTab);
+  // The last-selected non-pool tab — what Mine actually shows. Kept separate
+  // from `tab` (which also tracks "pool", for the tab bar's `.on` highlight
+  // and the scroll trigger below) so clicking "Pool" to check pool items
+  // doesn't silently reset Mine's filter back to a fixed default (task
+  // review round 2 — a plain `tab === "pool" ? defaultMineTab : tab` fallback
+  // discarded whatever the user had actually selected, e.g. "Due today").
+  const [mineTab, setMineTab] = useState<Exclude<TabKey, "pool">>(defaultMineTab);
   const [teamHeldOpen, setTeamHeldOpen] = useState(false);
   const poolRef = useRef<HTMLDivElement | null>(null);
 
-  // Controller ruling (task review): Mine and Department pool are both
-  // always-visible sections (matching "Held by teammates" already being
-  // one) — the KPI tabs filter WITHIN Mine, they don't hide Pool. "Pool" is
-  // still one of the 5 tabs (for its count + the tab bar's `.on` highlight),
-  // but selecting it doesn't change what Mine shows — it scrolls the
+  const selectTab = (key: TabKey) => {
+    setTab(key);
+    if (key !== "pool") setMineTab(key);
+  };
+
+  // Controller ruling: Mine and Department pool are both always-visible
+  // sections (matching "Held by teammates" already being one) — the KPI
+  // tabs filter WITHIN Mine, they don't hide Pool. "Pool" is still one of
+  // the 5 tabs (for its count + the tab bar's `.on` highlight), but
+  // selecting it doesn't change what Mine shows — it scrolls the
   // always-visible Pool section into view instead (below), so a supervisor
   // never has to leave the default view to see claimable pool items.
-  const mineFilter: Exclude<TabKey, "pool"> = tab === "pool" ? defaultMineTab : tab;
-  const isVerifyMode = mineFilter === "qc" && isQc;
-  const mineSectionRows = isVerifyMode ? qcQueueRows : view.mine.filter((r) => mineBucket(r) === mineFilter);
+  const isVerifyMode = mineTab === "qc" && isQc;
+  const mineSectionRows = isVerifyMode ? qcQueueRows : view.mine.filter((r) => mineBucket(r) === mineTab);
 
   useEffect(() => {
     if (tab === "pool") poolRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -374,7 +385,7 @@ export function MyDayClient({
 
       <div className="tabs">
         {orderedTabs.map((t) => (
-          <button key={t.key} className={`tab${tab === t.key ? " on" : ""}`} style={{ cursor: "pointer" }} onClick={() => setTab(t.key)}>
+          <button key={t.key} className={`tab${tab === t.key ? " on" : ""}`} style={{ cursor: "pointer" }} onClick={() => selectTab(t.key)}>
             {t.label} <span className="mono">({counts[t.key]})</span>
           </button>
         ))}
