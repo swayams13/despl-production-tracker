@@ -54,6 +54,10 @@ export async function createUser(actor: Actor, input: CreateUserInput): Promise<
           tenantId: actor.tenantId,
           name,
           email,
+          // ponytail: derived from email local-part, matching the migration's
+          // backfill rule. Task 1.3 (password-change flow) is the one that
+          // needs a real username-entry UX; this just keeps rows valid.
+          username: email.split("@")[0],
           passwordHash,
           roles: { create: roles.map((r) => ({ roleId: r.id })) },
           departments: { create: departmentIds.map((departmentId) => ({ departmentId })) },

@@ -1233,7 +1233,7 @@ async function seedDemo(
         clientId: number | null = null,
       ) => {
         const user = await tx.user.create({
-          data: { tenantId, clientId, email, name, passwordHash },
+          data: { tenantId, clientId, email, username: email.split("@")[0], name, passwordHash },
         });
         await tx.userRole.createMany({
           data: roleCodes.map((c) => ({ userId: user.id, roleId: roleIdByCode.get(c)! })),

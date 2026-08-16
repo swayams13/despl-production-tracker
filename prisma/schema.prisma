@@ -214,23 +214,40 @@ model Client {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  tenantId     Int      @map("tenant_id")
+  id                 Int      @id @default(autoincrement())
+  tenantId           Int      @map("tenant_id")
   /// Non-null => external client user. Scoped to this client, snapshots only.
-  clientId     Int?     @map("client_id")
-  email        String
-  passwordHash String   @map("password_hash")
-  name         String
-  employeeCode String?  @map("employee_code")
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now()) @map("created_at")
+  clientId           Int?     @map("client_id")
+  email              String
+  /// Login handle distinct from email (personal dashboards v1). Backfilled
+  /// from the email local-part for existing rows. Tenant-scoped, not
+  /// globally unique — matches `email`'s own scoping (design note: this app
+  /// is architected multi-tenant even though only one org exists today; see
+  /// resolveTenantForLogin). A plain global @unique would be the one field
+  /// on this model that can collide across tenants.
+  username           String   @map("username")
+  passwordHash       String   @map("password_hash")
+  name               String
+  /// Tenant-scoped unique, matching Welder.employeeCode's own scoping.
+  /// Nullable: Postgres allows multiple NULLs under a unique constraint, so
+  /// existing rows with no employee code need no backfill.
+  employeeCode       String?  @map("employee_code")
+  active             Boolean  @default(true)
+  /// New accounts must change their password on first login. Existing rows
+  /// are backfilled to false in the migration (they already have working
+  /// passwords) — only the Prisma default is true, for rows created after.
+  mustChangePassword Boolean  @default(true) @map("must_change_password")
+  createdAt          DateTime @default(now()) @map("created_at")
 
-  tenant      Organization     @relation(fields: [tenantId], references: [id])
-  client      Client?          @relation(fields: [clientId], references: [id])
-  roles       UserRole[]
-  departments UserDepartment[]
+  tenant        Organization     @relation(fields: [tenantId], references: [id])
+  client        Client?          @relation(fields: [clientId], references: [id])
+  roles         UserRole[]
+  departments   UserDepartment[]
+  assignedPlans ProcessPlan[]
 
   @@unique([tenantId, email])
+  @@unique([tenantId, username])
+  @@unique([tenantId, employeeCode])
   @@index([tenantId])
   @@index([clientId])
   @@map("users")
@@ -748,11 +765,14 @@ model ProcessPlan {
   submittedBy       Int?              @map("submitted_by")
   verifiedBy        Int?              @map("verified_by")
   ownerDepartmentId Int               @map("owner_department_id")
+  /// NULL = unassigned, sits in the department pool (Task 1.2's concern).
+  assigneeUserId    Int?              @map("assignee_user_id")
 
   scheduleRun     ScheduleRun   @relation(fields: [scheduleRunId], references: [id], onDelete: Cascade)
   jobProcess      JobProcess    @relation(fields: [jobProcessId], references: [id])
   unit            Unit?         @relation(fields: [unitId], references: [id])
   ownerDepartment Department    @relation(fields: [ownerDepartmentId], references: [id])
+  assignee        User?         @relation(fields: [assigneeUserId], references: [id])
   delayReasons    DelayReason[]
 
   @@unique([scheduleRunId, jobProcessId, unitId])
@@ -762,6 +782,7 @@ model ProcessPlan {
   // drives every "due this week", notification and escalation query
   @@index([ownerDepartmentId, plannedFinish])
   @@index([status])
+  @@index([assigneeUserId, status])
   @@map("process_plans")
 }
 

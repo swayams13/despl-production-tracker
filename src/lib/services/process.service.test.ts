@@ -219,13 +219,13 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     planC = (await mkPlan(jpC.id, deptB.id, past)).id;
 
     const userSup = await owner.user.create({
-      data: { tenantId, email: "sup@x", name: "Sup", passwordHash: "x" },
+      data: { tenantId, email: "sup@x", username: "sup", name: "Sup", passwordHash: "x" },
     });
     const userQc = await owner.user.create({
-      data: { tenantId, email: "qc@x", name: "Qc", passwordHash: "x" },
+      data: { tenantId, email: "qc@x", username: "qc", name: "Qc", passwordHash: "x" },
     });
     const userSupB = await owner.user.create({
-      data: { tenantId, email: "supb@x", name: "SupB", passwordHash: "x" },
+      data: { tenantId, email: "supb@x", username: "supb", name: "SupB", passwordHash: "x" },
     });
     const base = { tenantId, clientId: null };
     supA = { ...base, userId: userSup.id, name: "Sup", email: "sup@x", roles: [ROLES.SUPERVISOR, ROLES.QC], departmentIds: [deptA.id] };
