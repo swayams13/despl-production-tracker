@@ -110,21 +110,23 @@ dropped, for two reasons.
    project's discipline is to flag unknowns as C-numbers rather than quietly encode a
    guess, and adding a fabricated constant to the one rule management reads every morning
    is the wrong place to start guessing.
-2. **It would fork a 70-line rule.** Open-hold-point detection lives in
-   `loadOpenHoldPoints()` (`workspace.read.ts`) as TypeScript — latest attempt per
-   (item, unit), `blocksCompletion` party codes, planned-start age fallback. Re-expressing
-   it in SQL to feed the view would create exactly the two-implementations-that-disagree
-   problem `DESIGN_SPEC` §11.5 exists to prevent.
+2. **The signal is already covered.** An uncleared hold blocks stage completion
+   (invariant #4), so it drives the stage overdue and the project reaches `AT_RISK`
+   through the `overduePlans > 0` branch anyway. The independent trigger would fire
+   *earlier* than that, and only sometimes — a marginal gain bought with a made-up number.
 
-An uncleared hold blocks stage completion (invariant #4), so it drives the stage overdue
-and the project reaches AT_RISK through the `overdue_plans > 0` branch anyway. The signal
-is not lost — only the independent, unsourced trigger is.
+*(An earlier draft argued this branch would also fork `loadOpenHoldPoints`' 70-line rule
+into SQL. That argument died with the view in §5.1 — `loadOpenHoldPoints` already returns
+`ageDays` per hold, so the input is cheaply available in TypeScript now. Reason 1 is the
+whole reason. Recorded rather than quietly dropped, so the decision can be re-argued on
+its actual merits.)*
 
 Open hold points remain a **column** on the table, so they stay visible.
 
 **Upgrade path:** if SJ says an ageing hold must go amber even with zero overdue stages,
-add the branch — computing the input in TypeScript from the existing `loadOpenHoldPoints()`
-rather than reimplementing it in SQL — and log the agreed threshold as a C-number.
+add one branch to `classifyJobHealth()` fed by `max(ageDays)` from the existing
+`loadOpenHoldPoints()`, with the threshold SJ gives — and add the table-driven test case
+alongside the other twelve.
 
 ## 5. Architecture
 
@@ -148,66 +150,44 @@ Resulting page order at `/dashboard`:
 
 ### 5.1 Where the rule lives
 
-`v_job_health`, a SQL view, per `DESIGN_SPEC` §11.5 ("put the rule in a SQL view so
-dashboard, job detail, workspace and reports can never disagree"). Every input to the
-rule as specified in §4 is a plain aggregate, so the whole thing is expressible in SQL
-with no TypeScript branch — which is precisely what §4.1 buys by dropping hold ageing.
+**One exported pure function, `classifyJobHealth()`, in `src/lib/services/job-health.ts`.
+No SQL view, no migration.**
 
-Follows the `v_unit_stage_status` migration's established pattern:
+An earlier draft of this spec specified a `v_job_health` view, reaching for `DESIGN_SPEC`
+§11.5 ("put the rule in a SQL view so dashboard, job detail, workspace and reports can
+never disagree") out of habit. Writing the implementation plan showed the view would be
+pure duplication: **`loadJobs()` already returns every single input the rule needs** —
+`status`, `deliveryDate`, `forecastDispatch`, `overduePlans`, `totalPlans` — computed in
+one grouped, non-N+1 query that every consumer already calls.
 
-- `WITH (security_invoker = true)` — mandatory. Without it the view runs as its owner and
-  bypasses tenant RLS, leaking cross-tenant rows.
-- `GRANT SELECT ON v_job_health TO despl_web;`
-- Overdue compares against `now() AT TIME ZONE 'UTC'`, matching the UTC timestamps Prisma
-  stores and the `plannedFinish < new Date()` used everywhere else.
+§11.5's guarantee is *one implementation*, not *SQL specifically*. A single exported
+function that all three consumers import satisfies it identically, and the expensive part
+— the per-job aggregation — stays in SQL where it already lives.
 
-```sql
-CREATE VIEW v_job_health
-WITH (security_invoker = true) AS
-WITH plan_tally AS (
-  SELECT sr.job_id,
-         count(*)::int                                        AS total_plans,
-         count(*) FILTER (WHERE pp.status = 'COMPLETE')::int   AS complete_plans,
-         count(*) FILTER (
-           WHERE pp.status <> 'COMPLETE'
-             AND pp.planned_finish IS NOT NULL
-             AND pp.planned_finish < (now() AT TIME ZONE 'UTC')
-         )::int                                               AS overdue_plans,
-         max(pp.planned_finish)                               AS forecast_dispatch
-  FROM process_plans pp
-  JOIN schedule_runs sr
-    ON sr.id = pp.schedule_run_id AND sr.is_current = true
-  GROUP BY sr.job_id
-)
-SELECT
-  j.id                                   AS job_id,
-  coalesce(t.total_plans, 0)             AS total_plans,
-  coalesce(t.complete_plans, 0)          AS complete_plans,
-  coalesce(t.overdue_plans, 0)           AS overdue_plans,
-  t.forecast_dispatch,
-  CASE
-    WHEN j.status = 'CANCELLED'                        THEN 'CANCELLED'
-    WHEN j.status = 'COMPLETE'                         THEN 'COMPLETED'
-    WHEN j.status = 'ON_HOLD'                          THEN 'ON_HOLD'
-    WHEN coalesce(t.total_plans, 0) = 0                THEN 'NOT_PLANNED'
-    -- Date-vs-date, not timestamp: the promised day itself is not yet late.
-    WHEN j.delivery_date IS NOT NULL
-     AND j.delivery_date::date
-       < (now() AT TIME ZONE 'UTC')::date              THEN 'DELAYED'
-    WHEN j.delivery_date IS NOT NULL
-     AND t.forecast_dispatch > j.delivery_date         THEN 'DELAYED'
-    WHEN coalesce(t.overdue_plans, 0) > 0              THEN 'AT_RISK'
-    ELSE 'ON_TRACK'
-  END AS health
-FROM jobs j
-LEFT JOIN plan_tally t ON t.job_id = j.id;
+What this buys, and why it is the better decomposition:
 
-GRANT SELECT ON v_job_health TO despl_web;
+- **The rule becomes table-driven testable in the always-on tier.** Twelve pure cases in
+  `pnpm test` instead of twelve DB fixtures (job + schedule run + process plans each)
+  reachable only through `pnpm test:db`. `CLAUDE.md` requires violation-case tests for any
+  new rule; this makes them cheap enough that they will actually be maintained.
+- **No migration**, so nothing to roll forward, and no `security_invoker` footgun to get
+  wrong.
+- **No second definition of "overdue".** The view would have had to restate the
+  `status <> 'COMPLETE' AND planned_finish < now()` predicate that `loadJobs()` already
+  owns — two copies, guaranteed to drift.
+
+```ts
+// src/lib/services/job-health.ts
+export function classifyJobHealth(job: HealthInput, today: Date): JobHealthRaw;
 ```
 
-`total_plans`, `complete_plans` and `overdue_plans` stay at the 36-process plan grain per
-`DESIGN_SPEC` §11.4 — never rolled up to 25 stages first. The tile counts and the table
-must reconcile exactly.
+`today` is an injected parameter, not `new Date()` inside the function — that is what makes
+the date-boundary cases ("promised today", "promised yesterday") testable without clock
+mocking. Callers pass the server clock.
+
+Plan-grain discipline is unchanged: `totalPlans`, `completePlans` and `overduePlans` are
+counted at the 36-process plan grain per `DESIGN_SPEC` §11.4, never rolled up to 25 stages
+first. Tile counts and table rows must reconcile exactly.
 
 ### 5.2 Read layer
 
@@ -244,10 +224,16 @@ export interface Portfolio {
 export async function loadPortfolio(actor: Actor): Promise<Portfolio>;
 ```
 
-Composes `loadJobs()` (already non-N+1) with one `v_job_health` query and one
-change-since query, joined in memory by job id. Client scoping is inherited from
-`loadJobs()`, which already filters to `actor.clientId` for portal users on top of
-tenant RLS.
+Composes `loadJobs()` with `classifyJobHealth()` per row plus one change-since query,
+joined in memory by job id. Client scoping is inherited from `loadJobs()`, which already
+filters to `actor.clientId` for portal users on top of tenant RLS.
+
+**Known ceiling:** `loadJobs()`'s main tally is one grouped query, but its *extras*
+(`loadOpenHoldPoints` + `loadJobSpines`) run two queries per job in a `Promise.all` — so
+the portfolio costs roughly `2N + 3` queries. Fine at DESPL's ~3–40 concurrently active
+jobs; it would need a batched rewrite before a tenant with hundreds. Mark it with a
+`ponytail:` comment naming that ceiling rather than pre-optimising for a scale that does
+not exist.
 
 `active` counts every job whose status is `ACTIVE`, regardless of health — it is the
 denominator the other tiles partition, not a seventh bucket.
@@ -286,8 +272,21 @@ URL param (`/dashboard?health=delayed`) so the filter survives refresh and the b
 button, matching the existing cross-filter convention. The active filter shows a
 dismissible orange chip, as `/workspace` already does.
 
-Colors come from existing tokens only: `--s-complete` (on track), `--s-hold` (at risk),
-`--s-overdue` (delayed), `--s-idle` (on hold, not planned), `--muted` (completed).
+Colors reuse the existing chip classes only — no new CSS:
+
+| Health | Class | Why |
+|---|---|---|
+| On track | `c-progress` (blue) | blue already means "in progress and fine" app-wide |
+| At risk | `c-hold` (amber) | |
+| Delayed | `c-overdue` (red) | |
+| Completed | `c-complete` (green) | green already means "done" everywhere else |
+| On hold | `c-idle` (grey) | a paused project is a decision taken, not a health problem |
+| Not planned | `c-idle` (grey) | label disambiguates from On hold |
+
+On track is blue rather than green deliberately: green is already the app's "complete"
+colour, so painting a healthy in-flight project green would make it indistinguishable at a
+glance from a finished one — the exact confusion this board exists to remove.
+
 Reuse `<CountUp>` for tile values, consistent with the existing KPI row.
 
 Accent discipline: the tiles introduce no new orange. Per `CLAUDE.md`, more than about
@@ -314,8 +313,13 @@ cards (an explicit hard ban).
 | Δ 24h | `verifiedLast24h` / `newlyOverdueLast24h` / `holdsOpenedLast24h`, compact |
 | Updated | `lastActivityAt`, relative |
 
-Row click → `/jobs/[id]`. The overdue cell deep-links to
-`/workspace?job=<id>&status=overdue`.
+Row click → `/jobs/[id]`. The overdue cell deep-links to `/workspace?status=overdue`.
+
+**Not `?job=<id>`:** `/workspace` hardcodes DESPL-320 the same way `/dashboard` does
+(`workspace/page.tsx:8`) and ignores a `job` param entirely. Emitting one would look like
+job-scoped navigation while silently showing the pilot job's stages — worse than not
+offering it. Job-scoping `/workspace` is real work and out of scope here; until then the
+link filters by status only.
 
 If any cancelled jobs exist, a muted footer line reads `N cancelled — not shown`. They are
 excluded from tiles and rows, never silently dropped.
@@ -416,9 +420,13 @@ cases, not just the happy path.
 the sum of health buckets for `ACTIVE` jobs. Asserted in a test, since Demo Readiness
 §8.3 already requires KPI/matrix reconciliation and this is the same class of bug.
 
-**Tenancy:** a DB-gated test asserting `v_job_health` returns zero rows with `app.tenant_id`
-unset, proving `security_invoker` is doing its job. This is the one that matters — a view
-created without it silently bypasses RLS.
+All of the above are **pure** tests against `classifyJobHealth()` in the always-on
+`pnpm test` tier — no database, no fixtures, no clock mocking (`today` is injected).
+
+**Tenancy:** a DB-gated test asserting `loadPortfolio` returns only the acting tenant's
+jobs, and that a client-scoped actor sees only their own client's. This inherits
+`loadJobs()`'s existing filter plus tenant RLS, so the test guards the composition rather
+than re-proving RLS itself.
 
 **Sort:** worst-first ordering asserted against a fixture with one job in each bucket.
 
@@ -430,16 +438,18 @@ every account, which has already happened once (see §11).
 
 | File | Change |
 |---|---|
-| `prisma/migrations/<ts>_v_job_health/migration.sql` | new — the view + grant |
+| `src/lib/services/job-health.ts` | new — `classifyJobHealth`, the rule |
+| `src/lib/services/job-health.test.ts` | new — table-driven, pure, always-on tier |
 | `src/lib/services/portfolio.read.ts` | new — `loadPortfolio` |
-| `src/lib/services/portfolio.read.test.ts` | new — health rule table tests |
+| `src/lib/services/portfolio.read.test.ts` | new — DB-gated composition + scoping test |
+| `src/components/industrial/health-chip.tsx` | new — `<HealthChip />` + label/class map |
+| `src/app/(app)/dashboard/_portfolio.tsx` | new — tiles + table |
 | `src/app/(app)/dashboard/page.tsx` | portfolio band + selector; drop hardcoded lookup |
-| `src/app/(app)/dashboard/_portfolio.tsx` | new — tiles + table client component |
 | `scripts/bootstrap-schedule.ts` | accept a job number instead of hardcoding DESPL-320 |
 | `docs/DESIGN_SPEC.md` §4.2 | record that the portfolio option was taken |
 | `progress.md` | session log |
 
-No schema change. No new dependency. The view is additive and forward-only.
+**No migration. No schema change. No new dependency.**
 
 ## 11. Note on the current environment
 
