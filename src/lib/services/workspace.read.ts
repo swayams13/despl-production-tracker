@@ -224,7 +224,8 @@ export interface WorkspaceFilter {
 
 const STAGE_COUNT = 25;
 
-function stageLabel(workOrderStages: number[]): string {
+/** Exported so myday.read.ts's cross-job row labels reuse this instead of a second implementation. */
+export function stageLabel(workOrderStages: number[]): string {
   if (workOrderStages.length === 0) return "—";
   const lo = Math.min(...workOrderStages);
   const hi = Math.max(...workOrderStages);

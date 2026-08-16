@@ -54,6 +54,13 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
   let job2Pool: { id: number };
   let job2TeamHeld: { id: number };
 
+  // Captured for the display-label assertions (task 2.3 ruling — the
+  // additive MyDayRow denormalization) — each fixture job's own jobNumber,
+  // to prove a row is labeled with ITS job, not whichever job the loop
+  // visited first.
+  let job1Number: string;
+  let job2Number: string;
+
   beforeAll(async () => {
     const org = await owner.organization.create({ data: { code: `MYDAY-${Date.now()}`, name: "My Day test" } });
     const tenantId = org.id;
@@ -78,6 +85,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
       },
     });
 
+    job1Number = job.jobNumber;
+
     const run = await owner.scheduleRun.create({
       data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
@@ -95,6 +104,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
         jobNumber: `DESPL-MYDAY2-${Date.now()}`,
       },
     });
+    job2Number = job2.jobNumber;
+
     const run2 = await owner.scheduleRun.create({
       data: { jobId: job2.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
@@ -270,7 +281,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
   // ── mine / pool / teamHeld: exhaustive + disjoint (SPEC §10) ────────────
 
   it("puts each fixture plan in exactly the bucket the partition rule predicts", () => {
-    const ids = (list: { plan: { id: number } }[]) => list.map((r) => r.plan.id);
+    const ids = (list: { ranked: { plan: { id: number } } }[]) => list.map((r) => r.ranked.plan.id);
 
     expect(ids(view.mine)).toContain(planMine.id);
     // "mine" wins regardless of department — assigned to me in a dept I don't hold.
@@ -288,29 +299,43 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     expect(ids(view.mine)).not.toContain(planCompleteLate.id);
   });
 
+  // ── row display labels (task 2.3 ruling — additive MyDayRow denormalization) ─
+
+  it("labels each row with its OWN job's number, dept name, and a real process name — not a shared/stale value", () => {
+    const job1Row = view.mine.find((r) => r.ranked.plan.id === planMine.id);
+    const job2Row = view.mine.find((r) => r.ranked.plan.id === job2Mine.id);
+    expect(job1Row?.jobNumber).toBe(job1Number);
+    expect(job2Row?.jobNumber).toBe(job2Number); // proves job2's rows aren't mislabeled with job1's number
+    expect(job1Row?.jobId).not.toBe(job2Row?.jobId);
+    expect(job1Row?.deptName).toBe("Mine Dept");
+    expect(job1Row?.processName).toMatch(/^Process \d+$/);
+    // No unitId on any fixture plan (job/equipment-grain) — serialNo falls back honestly.
+    expect(job1Row?.serialNo).toBe("—");
+  });
+
   it("no plan id appears in more than one of mine/pool/teamHeld", () => {
-    const allIds = [...view.mine, ...view.pool, ...view.teamHeld].map((r) => r.plan.id);
+    const allIds = [...view.mine, ...view.pool, ...view.teamHeld].map((r) => r.ranked.plan.id);
     expect(new Set(allIds).size).toBe(allIds.length);
   });
 
   it("every non-DONE row in mine ∪ pool ∪ teamHeld is either assigned to me or in one of my departments", () => {
     for (const r of [...view.mine, ...view.pool, ...view.teamHeld]) {
-      const isMine = r.plan.assigneeUserId === actor.userId;
-      const inMyDept = actor.departmentIds.includes(r.plan.ownerDepartmentId);
+      const isMine = r.ranked.plan.assigneeUserId === actor.userId;
+      const inMyDept = actor.departmentIds.includes(r.ranked.plan.ownerDepartmentId);
       expect(isMine || inMyDept).toBe(true);
     }
   });
 
   it("pool rows are always unassigned; teamHeld rows are always assigned to someone else", () => {
-    expect(view.pool.every((r) => r.plan.assigneeUserId === null)).toBe(true);
-    expect(view.teamHeld.every((r) => r.plan.assigneeUserId !== null && r.plan.assigneeUserId !== actor.userId)).toBe(true);
-    expect(view.mine.every((r) => r.plan.assigneeUserId === actor.userId)).toBe(true);
+    expect(view.pool.every((r) => r.ranked.plan.assigneeUserId === null)).toBe(true);
+    expect(view.teamHeld.every((r) => r.ranked.plan.assigneeUserId !== null && r.ranked.plan.assigneeUserId !== actor.userId)).toBe(true);
+    expect(view.mine.every((r) => r.ranked.plan.assigneeUserId === actor.userId)).toBe(true);
   });
 
   // ── cross-job aggregation (the thing this task was dispatched to prove) ─
 
   it("merges rows from BOTH active jobs into the same mine/pool/teamHeld arrays — neither job clobbers the other", () => {
-    const ids = (list: { plan: { id: number } }[]) => list.map((r) => r.plan.id);
+    const ids = (list: { ranked: { plan: { id: number } } }[]) => list.map((r) => r.ranked.plan.id);
 
     expect(ids(view.mine)).toContain(planMineFuture.id); // job1
     expect(ids(view.mine)).toContain(job2Mine.id); // job2 — both present, not one overwriting the other
@@ -328,7 +353,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     // planMineFuture ahead of job2Mine. The prioritizer's real rank (overdue
     // beats everything, per prioritizer.ts's `bucket()`) requires the
     // opposite order.
-    const mineIds = view.mine.map((r) => r.plan.id);
+    const mineIds = view.mine.map((r) => r.ranked.plan.id);
     const idxFuture = mineIds.indexOf(planMineFuture.id);
     const idxJob2 = mineIds.indexOf(job2Mine.id);
     expect(idxFuture).toBeGreaterThanOrEqual(0);

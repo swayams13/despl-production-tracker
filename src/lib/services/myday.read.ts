@@ -1,9 +1,10 @@
 import { withTenant } from "@/lib/db";
-import type { Actor } from "@/lib/authz";
+import { hasRole, ROLES, type Actor } from "@/lib/authz";
 import { computeCpm, workingDaysBetween } from "@/lib/schedule";
 import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
 import { prioritize, compareRankedPlans, type RankedPlan } from "./prioritizer";
 import { loadJobs } from "./jobs.read";
+import { stageLabel } from "./workspace.read";
 
 /**
  * `/my-day` (personal dashboards v1, SPEC §6.1) — the personalized read every
@@ -59,13 +60,49 @@ export interface MyDayWeekDay {
   hotCount: number;
 }
 
+/**
+ * A ranked plan with the display fields `/my-day` needs to render a
+ * cross-job row without the client re-deriving them — same denormalize-in-
+ * the-read-function convention `workspace.read.ts`'s `WsUnitRow`/`WsCard`
+ * use, extended with `jobId`/`jobNumber` since this view spans jobs (task
+ * 2.3 ruling, `.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`
+ * "Task 2.3 — pre-dispatch rulings"). `stageNo` is the row's StageSheet
+ * launch key (`useStageSheetLauncher().openStage(jobId, unitId, stageNo)`),
+ * same convention as `qc-cockpit.read.ts`'s `QcQueueRow`/`departments.read.ts`'s
+ * `DeptOpenItem` (`workOrderStages[0] ?? 0`).
+ */
+export interface MyDayRow {
+  ranked: RankedPlan;
+  jobId: number;
+  jobNumber: string;
+  processName: string;
+  serialNo: string;
+  stageLabel: string;
+  stageNo: number;
+  deptName: string;
+  /** The holding teammate's display name — only ever set on `teamHeld` rows
+   * (SPEC §7.2 bullet 6, "avatar + status"); null on `mine`/`pool` rows,
+   * where it isn't rendered. Backfilled after the per-job loop (below) in
+   * one query, not per-row. */
+  assigneeName: string | null;
+}
+
 export interface MyDayView {
-  mine: RankedPlan[];
-  pool: RankedPlan[];
-  teamHeld: RankedPlan[];
+  mine: MyDayRow[];
+  pool: MyDayRow[];
+  teamHeld: MyDayRow[];
   clearedToday: number;
   scoreboard: MyDayScoreboard;
   week: MyDayWeekDay[];
+  /** Department id -> active staff members, for the "Assign to…" select on
+   * pool rows (SPEC §7.2 bullet 5, supervisors only). Populated only when
+   * the actor holds an assign-capable role — empty otherwise, safe to
+   * render unconditionally. */
+  deptMembers: Record<number, { id: number; name: string }[]>;
+  /** Active delay-reason categories, for the row-level "File reason & start"
+   * flow on overdue `mine` rows — same list `workspace.read.ts`'s
+   * `WorkspaceView.delayCategories` carries, one tenant-wide query. */
+  delayCategories: { id: number; name: string }[];
 }
 
 /** IST (UTC+5:30) calendar-day bounds for `now` shifted by `offsetDays` —
@@ -84,9 +121,9 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   const now = new Date();
   const jobs = (await loadJobs(actor)).filter((j) => j.status === "ACTIVE");
 
-  const mine: RankedPlan[] = [];
-  const pool: RankedPlan[] = [];
-  const teamHeld: RankedPlan[] = [];
+  const mine: MyDayRow[] = [];
+  const pool: MyDayRow[] = [];
+  const teamHeld: MyDayRow[] = [];
 
   // Scoreboard accumulators — over MY COMPLETE plans in the same active-job
   // universe as mine/pool/teamHeld (ponytail: reuses each job's spine/
@@ -110,7 +147,14 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
 
   const { start: todayStart, end: todayEnd } = istDay(now, 0);
 
-  const { clearedToday, firstPassRejects30d } = await withTenant(actor.tenantId, async (tx) => {
+  const { clearedToday, firstPassRejects30d, deptMembers, delayCategories } = await withTenant(actor.tenantId, async (tx) => {
+    // Loaded once, not per job — every job in the tenant shares the same
+    // department table (task 2.3 ruling: additive display-label lookups
+    // alongside the existing per-job loop, same shape as workspace.read.ts's
+    // own department/unit lookups).
+    const departments = await tx.department.findMany({ select: { id: true, name: true } });
+    const deptNameById = new Map(departments.map((d) => [d.id, d.name]));
+
     for (const job of jobs) {
       const run = await getCurrentScheduleRun(tx, job.id, null);
       if (!run) continue;
@@ -121,6 +165,13 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
       const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
       const durationMaxById = new Map(spine.rawProcesses.map((p) => [p.id, p.durationMaxDays]));
+      // Display metadata per process — same denormalization workspace.read.ts's
+      // `procMeta` does, plus `stageNo` for the StageSheet launch key.
+      const procMeta = new Map(
+        spine.rawProcesses.map((p) => [p.id, { name: p.name, stageLabel: stageLabel(p.workOrderStages), stageNo: p.workOrderStages[0] ?? 0 }]),
+      );
+      const units = await tx.unit.findMany({ where: { equipment: { jobId: job.id } }, select: { id: true, serialNo: true } });
+      const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
 
       const rankedByDept = prioritize({
         plans: run.processPlans,
@@ -129,6 +180,21 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
         processNameById,
         today: now,
       });
+
+      const toRow = (r: RankedPlan): MyDayRow => {
+        const meta = procMeta.get(r.plan.jobProcessId);
+        return {
+          ranked: r,
+          jobId: job.id,
+          jobNumber: job.jobNumber,
+          processName: meta?.name ?? processNameById.get(r.plan.jobProcessId) ?? `#${r.plan.jobProcessId}`,
+          serialNo: r.plan.unitId != null ? (serialByUnit.get(r.plan.unitId) ?? `#${r.plan.unitId}`) : "—",
+          stageLabel: meta?.stageLabel ?? "—",
+          stageNo: meta?.stageNo ?? 0,
+          deptName: deptNameById.get(r.plan.ownerDepartmentId) ?? `#${r.plan.ownerDepartmentId}`,
+          assigneeName: null, // backfilled for teamHeld rows only, after the per-job loop below
+        };
+      };
 
       // Partition: mine wins regardless of department (an assignee never
       // loses "mine" just because they were later moved off that dept);
@@ -141,10 +207,10 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
           if (r.state === "DONE") continue; // actionable/live boards only, not a history log
           const assignee = r.plan.assigneeUserId;
           if (assignee === actor.userId) {
-            mine.push(r);
+            mine.push(toRow(r));
           } else if (actor.departmentIds.includes(r.plan.ownerDepartmentId)) {
-            if (assignee == null) pool.push(r);
-            else teamHeld.push(r);
+            if (assignee == null) pool.push(toRow(r));
+            else teamHeld.push(toRow(r));
           }
         }
       }
@@ -166,6 +232,18 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
             cycleDeltas.push(actualDays - standard);
           }
         }
+      }
+    }
+
+    // Backfill teamHeld.assigneeName — one query across every job's teamHeld
+    // rows, not per-row/per-job (assignees are tenant users, not job-scoped).
+    const teamHeldAssigneeIds = [...new Set(teamHeld.map((r) => r.ranked.plan.assigneeUserId).filter((x): x is number => x != null))];
+    if (teamHeldAssigneeIds.length > 0) {
+      const assigneeUsers = await tx.user.findMany({ where: { id: { in: teamHeldAssigneeIds } }, select: { id: true, name: true } });
+      const nameByAssignee = new Map(assigneeUsers.map((u) => [u.id, u.name]));
+      for (const row of teamHeld) {
+        const uid = row.ranked.plan.assigneeUserId;
+        row.assigneeName = uid != null ? (nameByAssignee.get(uid) ?? null) : null;
       }
     }
 
@@ -218,12 +296,33 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       : [];
     const firstPassRejects30d = rejectRows[0]?.n ?? 0;
 
-    return { clearedToday, firstPassRejects30d };
+    // deptMembers (SPEC §7.2 bullet 5): the "Assign to…" select's option
+    // list, department -> active staff. Every pool/teamHeld row's department
+    // is already a subset of actor.departmentIds (the partition rule above),
+    // so one query keyed by the actor's own departments covers every row
+    // this actor could ever assign from. Assign-capable roles only — a QC-
+    // only actor gets an empty map (safe: the UI simply never renders the
+    // select without an assign-capable role, same gate `assignPlan` itself
+    // enforces server-side).
+    const deptMembers: Record<number, { id: number; name: string }[]> = {};
+    if (actor.departmentIds.length > 0 && hasRole(actor, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) {
+      const memberRows = await tx.userDepartment.findMany({
+        where: { departmentId: { in: actor.departmentIds }, user: { active: true, clientId: null } },
+        select: { departmentId: true, user: { select: { id: true, name: true } } },
+      });
+      for (const m of memberRows) {
+        (deptMembers[m.departmentId] ??= []).push({ id: m.user.id, name: m.user.name });
+      }
+    }
+
+    const delayCategories = await tx.delayCategoryRef.findMany({ where: { active: true }, select: { id: true, name: true } });
+
+    return { clearedToday, firstPassRejects30d, deptMembers, delayCategories };
   });
 
-  mine.sort(compareRankedPlans);
-  pool.sort(compareRankedPlans);
-  teamHeld.sort(compareRankedPlans);
+  mine.sort((a, b) => compareRankedPlans(a.ranked, b.ranked));
+  pool.sort((a, b) => compareRankedPlans(a.ranked, b.ranked));
+  teamHeld.sort((a, b) => compareRankedPlans(a.ranked, b.ranked));
 
   const scoreboard: MyDayScoreboard = {
     onTimePct30d: onTimeTotal > 0 ? Math.round((onTimeCount / onTimeTotal) * 100) : null,
@@ -243,13 +342,15 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
     let mineCount = 0;
     let poolCount = 0;
     let hotCount = 0;
-    for (const r of mine) {
+    for (const row of mine) {
+      const r = row.ranked;
       if (r.plan.plannedFinish && r.plan.plannedFinish >= start && r.plan.plannedFinish < end) {
         mineCount++;
         if (r.overdue || r.criticalPath) hotCount++;
       }
     }
-    for (const r of pool) {
+    for (const row of pool) {
+      const r = row.ranked;
       if (r.plan.plannedFinish && r.plan.plannedFinish >= start && r.plan.plannedFinish < end) {
         poolCount++;
         if (r.overdue || r.criticalPath) hotCount++;
@@ -258,5 +359,5 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
     week.push({ date, mineCount, poolCount, hotCount });
   }
 
-  return { mine, pool, teamHeld, clearedToday, scoreboard, week };
+  return { mine, pool, teamHeld, clearedToday, scoreboard, week, deptMembers, delayCategories };
 }
