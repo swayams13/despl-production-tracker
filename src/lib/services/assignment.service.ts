@@ -18,7 +18,8 @@ import {
   type ReleasePlanInput,
 } from "@/lib/shared/schemas";
 import type { ProcessPlan } from "@/generated/prisma/client";
-import { lockProcessPlanForUpdate } from "./_shared";
+import { lockProcessPlanForUpdate, loadPlanNotifyContext } from "./_shared";
+import { notify } from "./notifications.service";
 
 /**
  * Who a plan appears on whose list for (personal dashboards v1, SPEC §5.1).
@@ -62,6 +63,10 @@ export async function claimPlan(actor: Actor, input: ClaimPlanInput): Promise<Pr
       });
     }
 
+    // ponytail: no "you were assigned" notification here — the affected user
+    // IS the actor (they just clicked "claim"), so notifying yourself about
+    // your own action is noise, not signal. assignPlan below (a *different*
+    // user assigning someone else) is the case SPEC §8 actually needs.
     return audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({
         where: { id: processPlanId },
@@ -117,7 +122,7 @@ export async function assignPlan(actor: Actor, input: AssignPlanInput): Promise<
     }
 
     const before = plan.assigneeUserId;
-    return audited(tx, actor, async () => {
+    const updated = await audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({
         where: { id: processPlanId },
         data: { assigneeUserId: userId },
@@ -135,6 +140,22 @@ export async function assignPlan(actor: Actor, input: AssignPlanInput): Promise<
         },
       };
     });
+
+    // SPEC §8: "you were assigned…" — same transaction as the state change.
+    const ctx = await loadPlanNotifyContext(tx, updated);
+    await notify(tx, actor.tenantId, [
+      {
+        recipientId: userId,
+        type: "PLAN_ASSIGNED",
+        entityType: "ProcessPlan",
+        entityId: updated.id,
+        title: `You were assigned ${ctx.processName}${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}`,
+        body: `By ${actor.name} · ${ctx.jobNumber}`,
+        payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo },
+      },
+    ]);
+
+    return updated;
   });
 }
 

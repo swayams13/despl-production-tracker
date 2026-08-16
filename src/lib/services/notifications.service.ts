@@ -100,7 +100,7 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
         scheduleRun: { isCurrent: true },
         jobProcess: { job: { tenantId: actor.tenantId } },
       },
-      select: { id: true, jobProcessId: true, unitId: true, ownerDepartmentId: true, scheduleRunId: true, status: true, baselineStart: true, baselineFinish: true, plannedStart: true, plannedFinish: true, submittedBy: true, verifiedBy: true, actualStart: true, actualFinish: true },
+      select: { id: true, jobProcessId: true, unitId: true, ownerDepartmentId: true, assigneeUserId: true, scheduleRunId: true, status: true, baselineStart: true, baselineFinish: true, plannedStart: true, plannedFinish: true, submittedBy: true, verifiedBy: true, actualStart: true, actualFinish: true },
     });
     if (overduePlans.length === 0) return;
 
@@ -132,7 +132,13 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
     }
 
     for (const plan of pending) {
-      const recipients = [...new Set([...(supervisorsByDept.get(plan.ownerDepartmentId) ?? []), ...productionHeadIds])];
+      // Assignee-first (SPEC §8): an assigned plan notifies the assignee +
+      // PH only; PH inclusion is unconditional either way. Unassigned falls
+      // back to the pre-existing dept-supervisors + PH behavior, unchanged.
+      const recipients =
+        plan.assigneeUserId != null
+          ? [...new Set([plan.assigneeUserId, ...productionHeadIds])]
+          : [...new Set([...(supervisorsByDept.get(plan.ownerDepartmentId) ?? []), ...productionHeadIds])];
       if (recipients.length === 0) continue;
 
       const ctx = await loadPlanNotifyContext(tx, plan as ProcessPlan);

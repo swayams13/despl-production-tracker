@@ -128,4 +128,88 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
       expect(second).toBe(first);
     });
   });
+
+  // ── Task 4.3: assignee-first recipient resolution ──────────────────────
+  // Own throwaway tenant (not seed tenant 1), so productionHeadIds/dept-member
+  // scans can't pick up unrelated seed users — deterministic recipient sets.
+  describe("syncOverdueStageNotifications — assignee-first recipient resolution", () => {
+    let tenantId = 0;
+    let deptId = 0;
+    let phUserId = 0;
+    let memberAId = 0;
+    let memberBId = 0;
+    let assignedPlanId = 0;
+    let unassignedPlanId = 0;
+    const past = new Date(Date.now() - 20 * 864e5);
+
+    beforeAll(async () => {
+      const org = await owner.organization.create({ data: { code: `NOTIFY-ASSIGNEE-${Date.now()}`, name: "Notify assignee test" } });
+      tenantId = org.id;
+      const dept = await owner.department.create({ data: { tenantId, code: "PROD", name: "Production" } });
+      deptId = dept.id;
+
+      // Role rows are per-tenant (@@unique([tenantId, code])) — this fresh
+      // org has none yet, unlike the seed tenant the other fixtures reuse.
+      const phRole = await owner.role.create({ data: { tenantId, code: "PRODUCTION_HEAD", name: "Production Head" } });
+
+      const mkUser = async (suffix: string) => {
+        const u = await owner.user.create({
+          data: { tenantId, email: `${suffix}-${Date.now()}@x`, username: `${suffix}-${Date.now()}`, name: suffix, passwordHash: "x" },
+        });
+        await owner.userDepartment.create({ data: { userId: u.id, departmentId: deptId } });
+        return u;
+      };
+      const ph = await owner.user.create({
+        data: { tenantId, email: `ph-${Date.now()}@x`, username: `ph-${Date.now()}`, name: "PH", passwordHash: "x" },
+      });
+      await owner.userRole.create({ data: { userId: ph.id, roleId: phRole.id } });
+      phUserId = ph.id;
+
+      const memberA = await mkUser("membera");
+      const memberB = await mkUser("memberb");
+      memberAId = memberA.id;
+      memberBId = memberB.id;
+
+      const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-${Date.now()}` } });
+      const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+      const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+      const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+      const job = await owner.job.create({
+        data: { tenantId, publicId: `pub-notify-assignee-${Date.now()}`, clientId: client.id, familyId: family.id, templateVersionId: tv.id, jobNumber: `NOTIFY-ASSIGNEE-${Date.now()}` },
+      });
+      const run = await owner.scheduleRun.create({ data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: past, isCurrent: true } });
+
+      const jpAssigned = await owner.jobProcess.create({ data: { jobId: job.id, seq: 1, code: "A1", name: "Assigned process", departmentId: deptId, workOrderStages: [1] } });
+      const assignedPlan = await owner.processPlan.create({
+        data: { scheduleRunId: run.id, jobProcessId: jpAssigned.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past, assigneeUserId: memberAId },
+      });
+      assignedPlanId = assignedPlan.id;
+
+      const jpUnassigned = await owner.jobProcess.create({ data: { jobId: job.id, seq: 2, code: "A2", name: "Unassigned process", departmentId: deptId, workOrderStages: [1] } });
+      const unassignedPlan = await owner.processPlan.create({
+        data: { scheduleRunId: run.id, jobProcessId: jpUnassigned.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past },
+      });
+      unassignedPlanId = unassignedPlan.id;
+    });
+
+    it("an assigned overdue plan notifies the assignee + PH only, not other dept members", async () => {
+      const ph = actor(tenantId, phUserId, [ROLES.PRODUCTION_HEAD]);
+      await syncNotifications(ph);
+
+      const notifs = await owner.notification.findMany({
+        where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: assignedPlanId },
+      });
+      expect(notifs.map((n) => n.recipientId).sort()).toEqual([memberAId, phUserId].sort());
+    });
+
+    it("an unassigned overdue plan falls back to all dept members + PH (unchanged behavior)", async () => {
+      const ph = actor(tenantId, phUserId, [ROLES.PRODUCTION_HEAD]);
+      await syncNotifications(ph);
+
+      const notifs = await owner.notification.findMany({
+        where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: unassignedPlanId },
+      });
+      expect(notifs.map((n) => n.recipientId).sort()).toEqual([memberAId, memberBId, phUserId].sort());
+    });
+  });
 });

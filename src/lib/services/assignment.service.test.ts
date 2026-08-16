@@ -262,6 +262,25 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("assignment service — claim/assign/
     ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
   });
 
+  it("assign writes a PLAN_ASSIGNED 'you were assigned' notification to the target user only (Task 4.3)", async () => {
+    const plan = await makePlan();
+    const assigned = await assignPlan(supervisor, { processPlanId: plan.id, userId: deptMemberUserId });
+    const notifs = await owner.notification.findMany({
+      where: { type: "PLAN_ASSIGNED", entityType: "ProcessPlan", entityId: assigned.id },
+    });
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0].recipientId).toBe(deptMemberUserId);
+  });
+
+  it("claim writes NO self-notification — the affected user is the actor who just claimed it (Task 4.3 judgment call)", async () => {
+    const plan = await makePlan();
+    const claimed = await claimPlan(peerActor, { processPlanId: plan.id });
+    const notifs = await owner.notification.findMany({
+      where: { entityType: "ProcessPlan", entityId: claimed.id },
+    });
+    expect(notifs).toHaveLength(0);
+  });
+
   it("assign succeeds for PRODUCTION_HEAD and ADMIN despite no department membership", async () => {
     const plan1 = await makePlan();
     const byPh = await assignPlan(phActor, { processPlanId: plan1.id, userId: deptMemberUserId });
