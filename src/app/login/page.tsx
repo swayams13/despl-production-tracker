@@ -20,13 +20,13 @@ export default function LoginPage() {
           </div>
 
           <form action={formAction} className="card p-5">
-            <label className="block text-xs font-medium text-[var(--muted)]" htmlFor="email">
-              Email
+            <label className="block text-xs font-medium text-[var(--muted)]" htmlFor="identifier">
+              Username or email
             </label>
             <input
-              id="email"
-              name="email"
-              type="email"
+              id="identifier"
+              name="identifier"
+              type="text"
               autoComplete="username"
               required
               autoFocus

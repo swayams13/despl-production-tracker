@@ -9,8 +9,9 @@ import { z } from "zod";
  * clock. If you find yourself adding one here, the design is wrong.
  */
 
+/** D13: login identifier is username OR email — not email-only, and not `.email()`-shaped. */
 export const loginSchema = z.object({
-  email: z.string().trim().toLowerCase().email("Enter a valid email address"),
+  identifier: z.string().trim().min(1, "Enter your username or email"),
   password: z.string().min(1, "Enter your password"),
 });
 

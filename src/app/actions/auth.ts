@@ -13,23 +13,35 @@ export interface LoginState {
 
 export async function login(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const parsed = loginSchema.safeParse({
-    email: formData.get("email"),
+    identifier: formData.get("identifier"),
     password: formData.get("password"),
   });
   if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Enter your email and password" };
+    return { error: parsed.error.issues[0]?.message ?? "Enter your username or email and password" };
   }
-  const { email, password } = parsed.data;
+  const { identifier, password } = parsed.data;
 
   // Same generic message for unknown tenant, unknown user, inactive user and
   // wrong password — never reveal which accounts exist.
-  const invalid: LoginState = { error: "Email or password is incorrect" };
+  const invalid: LoginState = { error: "Incorrect username, email, or password" };
 
-  const tenantId = await resolveTenantForLogin(email);
+  // resolveTenantForLogin ignores its input (single-tenant, resolves by a
+  // fixed org code — see that file's doc comment), so widening the
+  // identifier to username-or-email needs no change here.
+  const tenantId = await resolveTenantForLogin(identifier);
   if (tenantId === null) return invalid;
 
   const session = await withTenant(tenantId, async (tx) => {
-    const user = await tx.user.findFirst({ where: { email, active: true } });
+    // D13 (SPEC §3): login identifier is username OR email. Email lookups stay
+    // lowercased to match how email is always stored (createUser/createEmployee
+    // both lowercase it); username is matched as typed since createEmployee's
+    // username is stored verbatim, case included.
+    const user = await tx.user.findFirst({
+      where: {
+        active: true,
+        OR: [{ email: identifier.toLowerCase() }, { username: identifier }],
+      },
+    });
     if (!user) return null;
     if (!(await verifyPassword(user.passwordHash, password))) return null;
     return {
