@@ -244,6 +244,11 @@ model User {
   /// a session table (personal dashboards v1, Task 1.3).
   sessionVersion     Int      @default(0) @map("session_version")
   createdAt          DateTime @default(now()) @map("created_at")
+  /// Stamped by `login()` on every successful sign-in (server clock only,
+  /// invariant #1). Null = never logged in (seeded/imported, not yet used
+  /// their credentials) — the /admin Employees table (SPEC §7.3) renders
+  /// that as "Never", not a fabricated date.
+  lastLoginAt        DateTime? @map("last_login_at")
 
   tenant        Organization     @relation(fields: [tenantId], references: [id])
   client        Client?          @relation(fields: [clientId], references: [id])

@@ -44,6 +44,11 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     });
     if (!user) return null;
     if (!(await verifyPassword(user.passwordHash, password))) return null;
+    // Server clock only (invariant #1) — feeds /admin's "Last login" column
+    // (SPEC §7.3). Not audited/domain-evented: this is login infrastructure
+    // bookkeeping, not a business-record mutation, matching how sessionVersion
+    // itself is written outside the audit path everywhere except admin resets.
+    await tx.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     return {
       userId: user.id,
       tenantId: user.tenantId,
