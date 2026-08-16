@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, ROLES, hasRole } from "@/lib/authz";
 import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
-import { loadPortfolio } from "@/lib/services/portfolio.read";
+import { loadPortfolio, type PortfolioRow } from "@/lib/services/portfolio.read";
 import { PortfolioBand, healthFromSlug } from "./_portfolio";
 import { CountUp } from "@/components/industrial/count-up";
 
@@ -47,6 +47,37 @@ function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
+/**
+ * Project switcher for the detail section. Rendered in BOTH page branches — a
+ * NOT_PLANNED job is a supported selection, and without this the no-schedule
+ * branch would leave the browser's back button as the only way out of it.
+ */
+function JobSelector({
+  rows,
+  jobId,
+  healthSlug,
+}: {
+  rows: PortfolioRow[];
+  jobId: number | null;
+  healthSlug: string | undefined;
+}) {
+  return (
+    <nav className="sub" style={{ display: "flex", gap: 6, flexWrap: "wrap" }} aria-label="Select project">
+      {rows.map((r) => (
+        <Link
+          key={r.id}
+          href={`/dashboard?job=${r.id}${healthSlug ? `&health=${healthSlug}` : ""}`}
+          className={`chip ${r.id === jobId ? "c-progress" : "c-idle"}`}
+          aria-current={r.id === jobId ? "true" : undefined}
+        >
+          <i />
+          {r.jobNumber}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
 export default async function Dashboard({
   searchParams,
 }: {
@@ -59,7 +90,8 @@ export default async function Dashboard({
 
   const sp = await searchParams;
   const portfolio = await loadPortfolio(actor);
-  const activeFilter = healthFromSlug(first(sp.health));
+  const healthSlug = first(sp.health);
+  const activeFilter = healthFromSlug(healthSlug);
 
   // Default to the worst-off project, which is row 0 — that is the whole point
   // of the worst-first sort. An explicit ?job= wins so a link stays stable.
@@ -67,6 +99,10 @@ export default async function Dashboard({
   const selected =
     portfolio.rows.find((r) => r.id === requested) ?? portfolio.rows[0] ?? null;
   const jobId = selected?.id ?? null;
+  // Only an explicit, valid `?job=` is carried through the health-filter links —
+  // filtering must not silently reset a chosen project, but it must also not pin
+  // the worst-off default into the URL for someone who never picked one.
+  const jobParam = selected && selected.id === requested ? String(selected.id) : undefined;
 
   const k: JobKpis | null = jobId ? await loadJobKpis(actor, jobId) : null;
 
@@ -74,7 +110,15 @@ export default async function Dashboard({
     return (
       <>
         <div className="page-h"><h1>Dashboard</h1></div>
-        <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} />
+        <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} jobParam={jobParam} />
+        {portfolio.rows.length > 0 && (
+          <div className="page-h" style={{ marginTop: 8 }}>
+            <h2 style={{ fontSize: 15, fontWeight: 600 }}>
+              Project detail — <span className="mono">{selected?.jobNumber ?? "—"}</span>
+            </h2>
+            <JobSelector rows={portfolio.rows} jobId={jobId} healthSlug={healthSlug} />
+          </div>
+        )}
         <p className="note">
           {selected
             ? `No current schedule for ${selected.jobNumber}. Generate one to see its detail cards.`
@@ -100,22 +144,14 @@ export default async function Dashboard({
         </span>
       </div>
 
-      <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} />
+      <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} jobParam={jobParam} />
 
       <div className="page-h" style={{ marginTop: 8 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 600 }}>Project detail</h2>
-        <nav className="sub" style={{ display: "flex", gap: 6, flexWrap: "wrap" }} aria-label="Select project">
-          {portfolio.rows.map((r) => (
-            <Link
-              key={r.id}
-              href={`/dashboard?job=${r.id}${activeFilter ? `&health=${first(sp.health)}` : ""}`}
-              className={`chip ${r.id === jobId ? "c-progress" : "c-idle"}`}
-            >
-              <i />
-              {r.jobNumber}
-            </Link>
-          ))}
-        </nav>
+        <h2 style={{ fontSize: 15, fontWeight: 600 }}>
+          Project detail — <span className="mono">{selected?.jobNumber}</span>
+          {selected?.projectName ? <span style={{ color: "var(--muted)", fontWeight: 500 }}> · {selected.projectName}</span> : null}
+        </h2>
+        <JobSelector rows={portfolio.rows} jobId={jobId} healthSlug={healthSlug} />
         <span className="sub" style={{ marginLeft: "auto" }}>
           {k.equipmentName ? `${k.equipmentName} · ` : ""}
           {k.designCode ? `${k.designCode} · ` : ""}

@@ -468,7 +468,7 @@ done unattended; it is a separate decision from this spec.
 
 ## 12. Acceptance criteria
 
-1. `/dashboard` opens with six tiles whose counts reconcile exactly with the table rows.
+1. `/dashboard` opens with seven tiles whose counts reconcile exactly with the table rows.
 2. Every project appears in exactly one bucket; `active` equals the sum of the `ACTIVE`
    buckets.
 3. DE0463 and DE0467 both read **Delayed**, each for its own documented reason, after §8.

@@ -1227,7 +1227,7 @@ Never merge to `main` without explicit human approval.
 **Gaps found and accepted:**
 
 - **Loading skeleton (§6.4) is not built.** The dashboard is a server component with no streaming boundary, so there is no loading state to fill today. Adding a `loading.tsx` would change the page's rendering model for every card, not just the new band — larger than this feature. Flagged here rather than silently skipped; raise it if the board feels slow on real data.
-- **Error state (§6.4)** relies on Next's existing error boundary for the route group. No new handling added, consistent with every other page in the app.
+- **Error state (§6.4) is not built, and nothing catches for it.** An earlier version of this line claimed it "relies on Next's existing error boundary for the route group" — that was factually wrong: there is no `error.tsx` (and no `loading.tsx`) anywhere under `src/app`. A throw in `loadPortfolio` falls through to Next's default error screen. This is a pre-existing, app-wide gap that this plan does not address, not a mechanism this plan relies on. Building one is real app-wide scope, deliberately out of this plan.
 - **`prefers-reduced-motion`** is already handled globally for `CountUp` and page transitions (§9.9); the band adds no new animation.
 
 **Placeholder scan:** none. Every code step contains the actual content. Task 3 step 4 and Task 5 step 1 are explicit *verify-before-trusting* steps for two things I could not confirm from the schema alone (the `ProcessVerified` event type string, `StageSpine`'s prop names) — these are instructions to check reality, not placeholders for missing design.

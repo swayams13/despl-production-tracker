@@ -92,6 +92,22 @@ Commits `5aa28a3`, `df2ab57`, `7f121a4`/`c0a56a2`/`9271789`, `7a709d4`, `a1d14a5
   documented for the single-job dashboard. `/workspace` still hardcodes `DESPL-320`, so
   the portfolio table's overdue deep-link (`/workspace?status=overdue`) filters by status
   only — it does not also scope to the job that was clicked.
+- **Known limitation — every `/workspace` deep-link on the dashboard is job-blind, not
+  just the portfolio table's.** `src/app/(app)/workspace/page.tsx` hardcodes `DESPL-320`
+  and ignores any job param, so now that the detail section can show *any* selected
+  project, its outbound links are no longer coherent with that selection: the On-track KPI
+  link, the At-risk/overdue KPI link, every critical-path row link (`?dept=`) and every
+  department×status matrix cell link all land on DESPL-320's stages regardless of which
+  project is selected. Same call as the spec already made for the portfolio table's
+  overdue cell — emitting a job param `/workspace` ignores would *look* scoped while
+  silently showing the pilot job's stages, which is worse than not offering it. Job-scoping
+  `/workspace` is real, separate work and is out of this plan's scope.
+- **Working as designed, not a bug — the default-selected project can be one with no
+  units.** The health rule sorts worst-first, so the detail section defaults to DE0463
+  rather than DESPL-320; DE0463 has no `Unit` rows, so its stage spine and hold-point
+  visuals are sparse, while its % complete, forecast and critical path are still real (it
+  has 36 scheduled plans). Worst-first defaulting is the point of the feature, so this
+  stays.
 - **Verify (this task, Task 7 of 7):** `pnpm test` **315 passed, 47 skipped, 362 total**
   (19 files passed, 8 skipped). `pnpm test:db` **362 passed, 362 total, 27 files, all
   green** (no skips — this is the DB-gated superset run against the dedicated

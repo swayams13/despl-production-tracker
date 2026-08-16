@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { classifyJobHealth, type HealthInput } from "./job-health";
+import { classifyJobHealth, HEALTH_LABEL, HEALTH_ORDER, type HealthInput } from "./job-health";
 
 const TODAY = new Date("2026-08-16T09:00:00Z");
 
@@ -51,4 +51,14 @@ describe("classifyJobHealth", () => {
   test("is pure — the same input classifies identically twice", () => {
     expect(classifyJobHealth(base, TODAY)).toBe(classifyJobHealth(base, TODAY));
   });
+});
+
+// `HEALTH_ORDER` is a plain array, so — unlike HEALTH_LABEL/HEALTH_CLASS/SLUG,
+// which are `Record<JobHealth, _>` and fail to compile when a value is missing —
+// nothing stops a new health state from being added to the union and forgotten
+// here, silently dropping its tile and its sort rank. HEALTH_LABEL's keys are the
+// compiler-enforced complete list, so comparing against them is the cheap check.
+test("HEALTH_ORDER lists every JobHealth exactly once", () => {
+  expect([...HEALTH_ORDER].sort()).toEqual(Object.keys(HEALTH_LABEL).sort());
+  expect(new Set(HEALTH_ORDER).size).toBe(HEALTH_ORDER.length);
 });

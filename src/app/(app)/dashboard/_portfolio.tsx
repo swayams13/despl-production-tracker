@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CountUp } from "@/components/industrial/count-up";
-import { HealthChip, HEALTH_CLASS } from "@/components/industrial/health-chip";
+import { HealthChip } from "@/components/industrial/health-chip";
 import { StageSpine } from "@/components/industrial/stage-spine";
 import { HEALTH_LABEL, HEALTH_ORDER, type JobHealth } from "@/lib/services/job-health";
 import type { Portfolio, PortfolioRow } from "@/lib/services/portfolio.read";
@@ -19,7 +19,7 @@ function fmtRelative(iso: string | null): string {
 }
 
 /** URL slug per health, so a tile click survives refresh and the back button. */
-const SLUG: Record<JobHealth, string> = {
+export const SLUG: Record<JobHealth, string> = {
   ON_TRACK: "on-track",
   AT_RISK: "at-risk",
   DELAYED: "delayed",
@@ -37,12 +37,21 @@ export function healthFromSlug(slug: string | undefined): JobHealth | null {
 export function PortfolioBand({
   portfolio,
   activeFilter,
+  jobParam,
 }: {
   portfolio: Portfolio;
   activeFilter: JobHealth | null;
+  /** Current `?job=`, carried through every filter link so filtering never resets the selection. */
+  jobParam?: string;
 }) {
   const { counts, rows, cancelledCount } = portfolio;
   const shown = activeFilter ? rows.filter((r) => r.health === activeFilter) : rows;
+
+  /** `/dashboard` with the given health filter, keeping the selected job. */
+  const href = (health: JobHealth | null) => {
+    const q = [health ? `health=${SLUG[health]}` : "", jobParam ? `job=${jobParam}` : ""].filter(Boolean);
+    return q.length ? `/dashboard?${q.join("&")}` : "/dashboard";
+  };
 
   if (rows.length === 0) {
     return (
@@ -58,7 +67,7 @@ export function PortfolioBand({
 
   return (
     <>
-      <div className="kpis" style={{ marginBottom: 12 }}>
+      <div className="kpis-portfolio" style={{ marginBottom: 12 }}>
         <div className="kpi">
           <h6>Active projects</h6>
           <div className="v mono"><CountUp value={counts.active} /></div>
@@ -69,14 +78,14 @@ export function PortfolioBand({
           return (
             <Link
               key={h}
-              href={isActive ? "/dashboard" : `/dashboard?health=${SLUG[h]}`}
-              className={`kpi clicky${isActive ? " alert" : ""}`}
-              aria-pressed={isActive}
+              href={href(isActive ? null : h)}
+              className={`kpi clicky${isActive ? " selected" : ""}`}
+              aria-current={isActive ? "true" : undefined}
             >
               <h6>{HEALTH_LABEL[h]}</h6>
               <div className="v mono"><CountUp value={counts[h]} /></div>
               <div className="sub">
-                <span className={`chip ${HEALTH_CLASS[h]}`}><i />{HEALTH_LABEL[h]}</span>
+                <HealthChip health={h} />
               </div>
             </Link>
           );
@@ -87,7 +96,7 @@ export function PortfolioBand({
         <div className="hd">
           <h3>Projects — worst first</h3>
           {activeFilter && (
-            <Link href="/dashboard" className="chip" style={{ marginLeft: "auto", background: "rgba(255,122,26,.14)", color: "var(--accent)" }}>
+            <Link href={href(null)} className="chip" style={{ marginLeft: "auto", background: "rgba(255,122,26,.14)", color: "var(--accent)" }}>
               <i style={{ background: "var(--accent)" }} />
               {HEALTH_LABEL[activeFilter]} · clear
             </Link>
@@ -123,7 +132,7 @@ export function PortfolioBand({
           {shown.length === 0 && (
             <p className="note" style={{ margin: "16px 0" }}>
               No projects are {HEALTH_LABEL[activeFilter!].toLowerCase()} right now.{" "}
-              <Link href="/dashboard" className="btn btn-ghost">Show all</Link>
+              <Link href={href(null)} className="btn btn-ghost">Show all</Link>
             </p>
           )}
         </div>

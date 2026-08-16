@@ -433,6 +433,14 @@ body {
 .theme-industrial .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; overflow: hidden; transition: border-color .15s; }
 .theme-industrial .kpi.clicky:hover { border-color: #3a3f47; }
 .theme-industrial .kpi.alert { border-top: 2px solid var(--s-overdue); }
+/* Portfolio band: 7 tiles (Active + the six health buckets). Its own class so the
+   single-job KPI row above keeps its 5-column layout untouched. */
+.theme-industrial .kpis-portfolio { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
+/* "This filter is applied" — deliberately NOT .alert, which means overdue everywhere
+   else in the app. Neutral border-highlight + surface tint, so selection never
+   borrows a status colour and spends no extra accent. */
+.theme-industrial .kpi.selected,
+.theme-industrial .kpi.clicky.selected:hover { border-color: var(--text); background: var(--surface-2); }
 .theme-industrial .kpi h6 { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
 .theme-industrial .kpi .v { font-size: 28px; font-weight: 600; line-height: 1; }
 .theme-industrial .kpi .v small { font-size: 14px; color: var(--muted); font-weight: 500; }
@@ -551,10 +559,12 @@ body {
 
 @media (max-width: 1100px) {
   .theme-industrial .kpis { grid-template-columns: repeat(3, 1fr); }
+  .theme-industrial .kpis-portfolio { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .theme-industrial .grid-2, .theme-industrial .grid-h { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .theme-industrial .kpis { grid-template-columns: repeat(2, 1fr); }
+  .theme-industrial .kpis-portfolio { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* motion */
