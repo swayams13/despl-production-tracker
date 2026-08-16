@@ -211,7 +211,12 @@ export function CommandCenterClient({ view, canAct }: { view: CommandCenterView;
               {view.blocking.length === 0 ? (
                 <EmptyRow colSpan={4} text="Nothing else is waiting on this department right now." />
               ) : (
-                view.blocking.map((r) => <CommandRow key={r.ranked.plan.id} row={r} canAct={canAct} onOpen={() => open(r)} showDept />)
+                <>
+                  {view.blocking.slice(0, 6).map((r) => (
+                    <CommandRow key={r.ranked.plan.id} row={r} canAct={canAct} onOpen={() => open(r)} showDept />
+                  ))}
+                  {view.blocking.length > 6 && <EmptyRow colSpan={4} text={`+${view.blocking.length - 6} more`} />}
+                </>
               )}
             </tbody>
           </table>
@@ -227,7 +232,12 @@ export function CommandCenterClient({ view, canAct }: { view: CommandCenterView;
               {view.waitingOnOthers.length === 0 ? (
                 <EmptyRow colSpan={4} text="This department isn't waiting on anyone right now." />
               ) : (
-                view.waitingOnOthers.map((r) => <CommandRow key={r.ranked.plan.id} row={r} canAct={canAct} onOpen={() => open(r)} />)
+                <>
+                  {view.waitingOnOthers.slice(0, 6).map((r) => (
+                    <CommandRow key={r.ranked.plan.id} row={r} canAct={canAct} onOpen={() => open(r)} />
+                  ))}
+                  {view.waitingOnOthers.length > 6 && <EmptyRow colSpan={4} text={`+${view.waitingOnOthers.length - 6} more`} />}
+                </>
               )}
             </tbody>
           </table>

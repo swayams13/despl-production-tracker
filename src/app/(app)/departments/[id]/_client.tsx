@@ -28,7 +28,7 @@ function toDisplayStatus(status: string, overdue: boolean): StageDisplayStatus {
   }
 }
 
-export function DepartmentDetailClient({ dept }: { dept: DeptDetail }) {
+export function DepartmentDetailClient({ dept, commandCenterCode }: { dept: DeptDetail; commandCenterCode: string | null }) {
   const { sheet, openStage, refreshStage, closeSheet } = useStageSheetLauncher();
   const maxCycle = Math.max(1, ...dept.cycleTime.flatMap((c) => [c.standardDays, c.avgActualDays]));
   const maxReasons = Math.max(1, ...dept.reasonBreakdown.map((r) => r.count));
@@ -38,7 +38,14 @@ export function DepartmentDetailClient({ dept }: { dept: DeptDetail }) {
       <div className="page-h">
         <h1>{dept.name}</h1>
         <span className="sub">{dept.representative ?? "No supervisor assigned"} · representative</span>
-        <Link href="/departments" className="btn btn-ghost" style={{ marginLeft: "auto" }}>← All departments</Link>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 14, alignItems: "center" }}>
+          {commandCenterCode && (
+            <Link href={`/command/${commandCenterCode}`} className="sub">
+              Command Center →
+            </Link>
+          )}
+          <Link href="/departments" className="btn btn-ghost">← All departments</Link>
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>

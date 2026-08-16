@@ -101,6 +101,7 @@ export interface DeptReasonBreakdown {
 
 export interface DeptDetail {
   id: number;
+  code: string;
   name: string;
   representative: string | null;
   openItems: DeptOpenItem[];
@@ -183,6 +184,7 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
 
     return {
       id: dept.id,
+      code: dept.code,
       name: dept.name,
       representative: rep?.user.name ?? null,
       openItems,
