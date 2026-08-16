@@ -5,9 +5,16 @@ export interface AdminUserRow {
   id: number;
   name: string;
   email: string;
+  username: string;
+  employeeCode: string | null;
   active: boolean;
   roleCodes: string[];
+  departmentIds: number[];
   departmentNames: string[];
+  /** ISO timestamp of the last successful login, or null = never logged in. */
+  lastLogin: string | null;
+  /** ProcessPlan rows assigned to this user that are not COMPLETE. */
+  openItemsCount: number;
 }
 
 export interface AdminDelayCategoryRow {
@@ -43,7 +50,7 @@ export interface AdminView {
  * forward rather than always branching off v1 (invariant #9). */
 export async function loadAdminView(actor: Actor): Promise<AdminView> {
   return withTenant(actor.tenantId, async (tx) => {
-    const [userRows, roles, departments, delayCategories, latestVersion] = await Promise.all([
+    const [userRows, roles, departments, delayCategories, latestVersion, openCounts] = await Promise.all([
       tx.user.findMany({
         where: { tenantId: actor.tenantId },
         orderBy: { name: "asc" },
@@ -57,15 +64,35 @@ export async function loadAdminView(actor: Actor): Promise<AdminView> {
         orderBy: { version: "desc" },
         include: { processes: { orderBy: { seq: "asc" } } },
       }),
+      // ProcessPlan carries no tenantId of its own and is NOT covered by RLS
+      // (see the codebase note on child tables like this one) — every filter
+      // here goes through the jobProcess -> job -> tenantId join explicitly,
+      // never relying on withTenant's session-local RLS setting alone.
+      tx.processPlan.groupBy({
+        by: ["assigneeUserId"],
+        where: {
+          assigneeUserId: { not: null },
+          status: { not: "COMPLETE" },
+          jobProcess: { job: { tenantId: actor.tenantId } },
+        },
+        _count: { _all: true },
+      }),
     ]);
+
+    const openCountByUserId = new Map(openCounts.map((c) => [c.assigneeUserId as number, c._count._all]));
 
     const users: AdminUserRow[] = userRows.map((u) => ({
       id: u.id,
       name: u.name,
       email: u.email,
+      username: u.username,
+      employeeCode: u.employeeCode,
       active: u.active,
       roleCodes: u.roles.map((r) => r.role.code),
+      departmentIds: u.departments.map((d) => d.departmentId),
       departmentNames: u.departments.map((d) => d.department.name),
+      lastLogin: u.lastLoginAt ? u.lastLoginAt.toISOString() : null,
+      openItemsCount: openCountByUserId.get(u.id) ?? 0,
     }));
 
     return {
