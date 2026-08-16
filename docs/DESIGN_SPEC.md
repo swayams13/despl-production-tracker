@@ -82,8 +82,10 @@ app). Functional: real auth (existing), inline field errors, role-based redirect
 (management → dashboard, supervisor/QC → workspace).
 
 ### 4.2 `/dashboard`
-Question: "Will we ship on time, and what blocks us?" Scope: selected job (portfolio
-toggle if cheap). Layout per mockup:
+Question: "Will we ship on time, and what blocks us?" Scope: portfolio band (all
+projects, health-classified) above a selected-job detail section; the job is chosen
+by a selector defaulting to the worst-off project. Health rule and layout:
+docs/superpowers/specs/2026-08-16-portfolio-dashboard-design.md. Layout per mockup:
 
 - 5 KPI cards: Overall completion (count-up + progress bar, "N of M plans"), On track
   (delta vs last week + 14d sparkline), At-risk/overdue (red top-border, delta,
