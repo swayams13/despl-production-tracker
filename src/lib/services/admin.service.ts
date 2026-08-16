@@ -366,6 +366,22 @@ export async function createEmployee(
     if (existingUsername) {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { username }, "A user with this username already exists.");
     }
+    // D13 collision guard (fix round 2, 17 Aug 2026): login() resolves an
+    // identifier via `OR: [{email}, {username}]` with no ordering — username
+    // and email each carry their OWN per-tenant unique constraint, not a
+    // joint one, so nothing else stops a new username from equaling a
+    // DIFFERENT existing user's email (or vice versa below), which would make
+    // that identifier resolve to an unspecified one of two accounts at login.
+    const usernameCollidesWithEmail = await tx.user.findFirst({
+      where: { tenantId: actor.tenantId, email: username },
+    });
+    if (usernameCollidesWithEmail) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { username },
+        "This username matches another account's email address.",
+      );
+    }
     // Only pre-check a caller-supplied email — a synthesized placeholder is
     // already unique because `username` was just checked above.
     if (email) {
@@ -373,6 +389,20 @@ export async function createEmployee(
       if (existingEmail) {
         throw new AppError(ERROR_CODES.VALIDATION_FAILED, { email }, "A user with this email already exists.");
       }
+    }
+    // Symmetric collision guard — checked against effectiveEmail (not just a
+    // caller-supplied one) so the synthesized placeholder is covered too,
+    // even though a `@no-email.despl.local` placeholder colliding with a real
+    // username is very unlikely; the check is cheap either way.
+    const emailCollidesWithUsername = await tx.user.findFirst({
+      where: { tenantId: actor.tenantId, username: effectiveEmail },
+    });
+    if (emailCollidesWithUsername) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { email: effectiveEmail },
+        "This email matches another account's username.",
+      );
     }
     if (employeeCode) {
       const existingCode = await tx.user.findFirst({ where: { tenantId: actor.tenantId, employeeCode } });

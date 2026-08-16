@@ -311,6 +311,36 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });
 
+  // D13 collision guard (fix round 2): login() resolves an identifier via
+  // OR: [{email}, {username}] with no ordering — username and email each
+  // carry their own per-tenant unique constraint, not a joint one, so a new
+  // row's username/email must be rejected if it collides with a DIFFERENT
+  // existing row's email/username, or that identifier would resolve to an
+  // unspecified one of two accounts at login.
+  it("createEmployee rejects a username that collides with another account's email", async () => {
+    const stamp = Date.now();
+    const email = `collide-${stamp}@test.local`;
+    await createEmployee(admin, { displayName: "Has Email", username: `hasemail2-${stamp}`, email, roles: ["QC"], departmentIds: [] });
+    await expect(
+      createEmployee(admin, { displayName: "Collider", username: email, roles: ["QC"], departmentIds: [] }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  it("createEmployee rejects an email that collides with another account's username", async () => {
+    const stamp = Date.now();
+    const username = `taken-${stamp}@test.local`; // email-shaped username, on purpose
+    await createEmployee(admin, { displayName: "Odd Username", username, roles: ["QC"], departmentIds: [] });
+    await expect(
+      createEmployee(admin, {
+        displayName: "Collider",
+        username: `collider2-${stamp}`,
+        email: username,
+        roles: ["QC"],
+        departmentIds: [],
+      }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
+  });
+
   it("resetUserPassword generates a temp password when omitted, and re-arms mustChangePassword", async () => {
     const created = await createEmployee(admin, {
       displayName: "Reset Me",
