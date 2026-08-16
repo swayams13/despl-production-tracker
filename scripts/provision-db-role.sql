@@ -12,15 +12,16 @@
 --
 -- Never commit a real password here — :'despl_web_password' is a psql
 -- variable substituted at run time from the environment above.
+--
+-- The substitution happens in a top-level SELECT (via \gexec), not inside a
+-- DO $$ ... $$ block — psql does not interpolate :'var' inside dollar-quoted
+-- bodies (they're expected to hold literal text, e.g. array-slice colons),
+-- so a substitution placed there is sent to the server unexpanded.
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'despl_web') THEN
-    CREATE ROLE despl_web LOGIN PASSWORD :'despl_web_password';
-  ELSE
-    ALTER ROLE despl_web PASSWORD :'despl_web_password';
-  END IF;
+SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'despl_web')
+  THEN format('ALTER ROLE despl_web PASSWORD %L', :'despl_web_password')
+  ELSE format('CREATE ROLE despl_web LOGIN PASSWORD %L', :'despl_web_password')
 END
-$$;
+\gexec
 
 GRANT despl_app TO despl_web;

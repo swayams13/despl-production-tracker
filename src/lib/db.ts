@@ -20,6 +20,10 @@ export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+    // Default (5s) gets tight over a public proxy connection (e.g. one-off
+    // admin scripts run against Railway's public URL); the deployed app talks
+    // to Postgres over Railway's internal network and never gets close to this.
+    transactionOptions: { timeout: 20_000 },
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;

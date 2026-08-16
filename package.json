@@ -7,6 +7,7 @@
     "node": ">=20.11 <21"
   },
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
@@ -19,7 +20,8 @@
     "format": "prettier --write .",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:reference": "SEED_REFERENCE_ONLY=1 tsx prisma/seed.ts",
-    "db:bootstrap": "tsx scripts/bootstrap-schedule.ts"
+    "db:bootstrap": "tsx scripts/bootstrap-schedule.ts",
+    "db:bootstrap-admin": "tsx scripts/bootstrap-admin.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
