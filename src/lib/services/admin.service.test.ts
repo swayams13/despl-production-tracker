@@ -1,6 +1,74 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES, isAppError } from "@/lib/shared/errors";
+import { createEmployee, setUserActive, updateUserRolesDepts } from "./admin.service";
+
+function actor(over: Partial<Actor> = {}): Actor {
+  return {
+    userId: 1,
+    tenantId: 1,
+    clientId: null,
+    name: "Admin",
+    email: "admin@despl.test",
+    roles: [ROLES.ADMIN],
+    departmentIds: [],
+    mustChangePassword: false,
+    ...over,
+  };
+}
+
+/**
+ * Guard rails that are pure logic (no DB read needed to decide): checked
+ * against the caller's own request/actor shape, same split as
+ * assignment.service.test.ts's "pure refusals" tier.
+ */
+describe("admin.service — pure refusals", () => {
+  it("setUserActive refuses an admin deactivating their own account, before touching the DB", async () => {
+    const self = actor({ userId: 42 });
+    await expect(setUserActive(self, { userId: 42, active: false })).rejects.toMatchObject({
+      code: ERROR_CODES.CANNOT_SELF_DEACTIVATE,
+    });
+  });
+
+  it("updateUserRolesDepts refuses an admin removing their own ADMIN role, before touching the DB", async () => {
+    const self = actor({ userId: 42, roles: [ROLES.ADMIN] });
+    await expect(
+      updateUserRolesDepts(self, { userId: 42, roles: [ROLES.SUPERVISOR], departmentIds: [] }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.CANNOT_SELF_DEMOTE });
+  });
+
+  it("updateUserRolesDepts refuses a client (read-only) user before touching the DB (invariant #8)", async () => {
+    const clientUser = actor({ clientId: 99, roles: [ROLES.CLIENT_VIEWER] });
+    await expect(
+      updateUserRolesDepts(clientUser, { userId: 2, roles: [ROLES.QC], departmentIds: [] }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("createEmployee refuses a non-ADMIN caller (RBAC deny-by-default)", async () => {
+    const supervisor = actor({ roles: [ROLES.SUPERVISOR] });
+    await expect(
+      createEmployee(supervisor, {
+        displayName: "New Hire",
+        username: "newhire",
+        roles: ["QC"],
+        departmentIds: [],
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("rejects a smuggled *_at key on createEmployee via the strict schema (invariant #1)", async () => {
+    await expect(
+      createEmployee(actor(), {
+        displayName: "New Hire",
+        username: "newhire",
+        roles: ["QC"],
+        departmentIds: [],
+        // @ts-expect-error — .strict() schema; no timestamp field exists on this input
+        createdAt: new Date(),
+      }),
+    ).rejects.toBeTruthy();
+  });
+});
 
 /**
  * DB-backed coverage for createUser's uniqueness pre-checks. Gated off by
@@ -120,5 +188,223 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
     expect(auditRow).toBeTruthy();
     expect(auditRow?.before).toBeFalsy();
     expect(auditRow?.after).toBeFalsy();
+  });
+});
+
+/**
+ * DB-backed coverage for Task 4.1's five admin.service extensions (SPEC §5.2,
+ * §10): createEmployee, setUserActive, resetUserPassword's generate-if-omitted
+ * path, updateUserRolesDepts, bulkImportEmployees. Same RUN_DB_TESTS gate and
+ * disposable-org pattern as the block above.
+ *
+ * // ponytail: no cleanup — disposable test DB, per-run org code.
+ */
+describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { createEmployee, setUserActive, resetUserPassword, updateUserRolesDepts, bulkImportEmployees } =
+    await import("./admin.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  let tenantId = 0;
+  let deptId = 0;
+  let admin: Actor;
+
+  beforeAll(async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-EMP-${Date.now()}`, name: "Employee mgmt svc test" },
+    });
+    tenantId = org.id;
+    await owner.role.createMany({
+      data: [
+        { tenantId, code: "ADMIN", name: "Admin" },
+        { tenantId, code: "QC", name: "QC" },
+        { tenantId, code: "SUPERVISOR", name: "Supervisor" },
+      ],
+    });
+    const dept = await owner.department.create({ data: { tenantId, code: "FAB", name: "Fabrication" } });
+    deptId = dept.id;
+
+    const adminUser = await owner.user.create({
+      data: {
+        tenantId,
+        email: `admin-${Date.now()}@test.local`,
+        username: `admin-${Date.now()}`,
+        name: "Test Admin",
+        passwordHash: "x",
+      },
+    });
+    const adminRole = await owner.role.findFirstOrThrow({ where: { tenantId, code: "ADMIN" } });
+    await owner.userRole.create({ data: { userId: adminUser.id, roleId: adminRole.id } });
+
+    admin = {
+      userId: adminUser.id,
+      tenantId,
+      clientId: null,
+      name: "Test Admin",
+      email: adminUser.email,
+      roles: [ROLES.ADMIN],
+      departmentIds: [],
+      mustChangePassword: false,
+    };
+  });
+
+  it("createEmployee generates a readable temp password and sets mustChangePassword", async () => {
+    const created = await createEmployee(admin, {
+      displayName: "Meera S",
+      username: `meera-${Date.now()}`,
+      roles: ["QC"],
+      departmentIds: [deptId],
+    });
+    expect(created.tempPassword).toMatch(/^[a-z]+-[a-z]+-[a-z]+-\d{2}$/);
+
+    const row = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
+    expect(row.mustChangePassword).toBe(true);
+    expect(row.name).toBe("Meera S");
+    // Never persisted in plaintext (SPEC §9) — the hash is not the temp password itself.
+    expect(row.passwordHash).not.toBe(created.tempPassword);
+
+    const auditRow = await owner.auditLog.findFirst({
+      where: { tenantId, entityType: "User", entityId: String(created.userId), action: "admin.createEmployee" },
+      orderBy: { id: "desc" },
+    });
+    expect(auditRow).toBeTruthy();
+    // Invariant #5 / SPEC §9: no password material in the audit payload.
+    expect(JSON.stringify(auditRow?.after)).not.toContain(created.tempPassword);
+  });
+
+  it("createEmployee honours an explicit password instead of generating one", async () => {
+    const created = await createEmployee(admin, {
+      displayName: "Explicit Pw",
+      username: `explicitpw-${Date.now()}`,
+      roles: ["QC"],
+      departmentIds: [],
+      password: "admin-chosen-password-1",
+    });
+    expect(created.tempPassword).toBe("admin-chosen-password-1");
+  });
+
+  it("createEmployee rejects a duplicate username with a clean AppError, not a DB crash", async () => {
+    const username = `dupe-${Date.now()}`;
+    await createEmployee(admin, { displayName: "First", username, roles: ["QC"], departmentIds: [] });
+    await expect(
+      createEmployee(admin, { displayName: "Second", username, roles: ["QC"], departmentIds: [] }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  it("resetUserPassword generates a temp password when omitted, and re-arms mustChangePassword", async () => {
+    const created = await createEmployee(admin, {
+      displayName: "Reset Me",
+      username: `resetme-${Date.now()}`,
+      roles: ["QC"],
+      departmentIds: [],
+    });
+    await owner.user.update({ where: { id: created.userId }, data: { mustChangePassword: false } });
+
+    const { tempPassword } = await resetUserPassword(admin, { userId: created.userId });
+    expect(tempPassword).toMatch(/^[a-z]+-[a-z]+-[a-z]+-\d{2}$/);
+    expect(tempPassword).not.toBe(created.tempPassword);
+
+    const row = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
+    expect(row.mustChangePassword).toBe(true);
+  });
+
+  it("setUserActive deactivates a user, bumps sessionVersion, and their login-lookup goes dark", async () => {
+    const created = await createEmployee(admin, {
+      displayName: "Deactivate Me",
+      username: `deactivateme-${Date.now()}`,
+      roles: ["QC"],
+      departmentIds: [],
+    });
+    const before = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
+    expect(before.active).toBe(true);
+
+    const updated = await setUserActive(admin, { userId: created.userId, active: false });
+    expect(updated.active).toBe(false);
+    expect(updated.sessionVersion).toBe(before.sessionVersion + 1);
+
+    // getActor()'s own lookup (src/lib/authz/index.ts) filters on active:true —
+    // this is the DB-level proof that a deactivated user's session resolves
+    // to nothing, i.e. "login refused" without re-driving the whole auth stack.
+    const loginLookup = await owner.user.findFirst({ where: { id: created.userId, active: true } });
+    expect(loginLookup).toBeNull();
+
+    const auditRow = await owner.auditLog.findFirst({
+      where: { tenantId, entityType: "User", entityId: String(created.userId), action: "admin.setUserActive" },
+      orderBy: { id: "desc" },
+    });
+    expect(auditRow?.before).toMatchObject({ active: true });
+    expect(auditRow?.after).toMatchObject({ active: false });
+  });
+
+  it("setUserActive(active: true) reactivates without bumping sessionVersion", async () => {
+    const created = await createEmployee(admin, {
+      displayName: "Reactivate Me",
+      username: `reactivateme-${Date.now()}`,
+      roles: ["QC"],
+      departmentIds: [],
+    });
+    await setUserActive(admin, { userId: created.userId, active: false });
+    const deactivated = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
+
+    const reactivated = await setUserActive(admin, { userId: created.userId, active: true });
+    expect(reactivated.active).toBe(true);
+    expect(reactivated.sessionVersion).toBe(deactivated.sessionVersion); // no bump on reactivation
+  });
+
+  it("updateUserRolesDepts replaces roles/departments and audits a full before→after diff", async () => {
+    const created = await createEmployee(admin, {
+      displayName: "Role Change",
+      username: `rolechange-${Date.now()}`,
+      roles: ["QC"],
+      departmentIds: [deptId],
+    });
+
+    const updated = await updateUserRolesDepts(admin, {
+      userId: created.userId,
+      roles: ["SUPERVISOR"],
+      departmentIds: [],
+    });
+    expect(updated.id).toBe(created.userId);
+
+    const roleRows = await owner.userRole.findMany({ where: { userId: created.userId }, include: { role: true } });
+    expect(roleRows.map((r) => r.role.code)).toEqual(["SUPERVISOR"]);
+    const deptRows = await owner.userDepartment.findMany({ where: { userId: created.userId } });
+    expect(deptRows).toHaveLength(0);
+
+    const auditRow = await owner.auditLog.findFirst({
+      where: {
+        tenantId,
+        entityType: "User",
+        entityId: String(created.userId),
+        action: "admin.updateUserRolesDepts",
+      },
+      orderBy: { id: "desc" },
+    });
+    expect(auditRow?.before).toMatchObject({ roleCodes: ["QC"], departmentIds: [deptId] });
+    expect(auditRow?.after).toMatchObject({ roleCodes: ["SUPERVISOR"], departmentIds: [] });
+  });
+
+  it("bulkImportEmployees: a bad row never rolls back the good rows around it", async () => {
+    const stamp = Date.now();
+    const rows = [
+      { displayName: "Good One", username: `bulk-good1-${stamp}`, roles: ["QC"], departmentIds: [] },
+      // Missing required "roles" — fails zod validation, never reaches the DB.
+      { displayName: "Bad Shape", username: `bulk-bad-${stamp}` },
+      { displayName: "Good Two", username: `bulk-good2-${stamp}`, roles: ["QC"], departmentIds: [] },
+      // Duplicate of row 1's username — fails createEmployee's own DB pre-check.
+      { displayName: "Duplicate", username: `bulk-good1-${stamp}`, roles: ["QC"], departmentIds: [] },
+    ];
+
+    const results = await bulkImportEmployees(admin, rows);
+    expect(results).toHaveLength(4);
+    expect(results[0]).toMatchObject({ ok: true, username: `bulk-good1-${stamp}` });
+    expect(results[1]).toMatchObject({ ok: false });
+    expect(results[2]).toMatchObject({ ok: true, username: `bulk-good2-${stamp}` });
+    expect(results[3]).toMatchObject({ ok: false });
+
+    const good1 = await owner.user.findFirst({ where: { tenantId, username: `bulk-good1-${stamp}` } });
+    const good2 = await owner.user.findFirst({ where: { tenantId, username: `bulk-good2-${stamp}` } });
+    expect(good1).toBeTruthy();
+    expect(good2).toBeTruthy();
   });
 });
