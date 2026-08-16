@@ -62,6 +62,23 @@ export async function createUser(actor: Actor, input: CreateUserInput): Promise<
     if (existing) {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { email }, "A user with this email already exists.");
     }
+    // D13 collision guard (fix round 3, 17 Aug 2026): login() resolves an
+    // identifier via OR: [{email}, {username}] — createEmployee's `username`
+    // has no format constraint, so an admin can give someone an email-shaped
+    // username (e.g. "alice@vendor.com"). Without this check, a LATER
+    // createUser({email: "alice@vendor.com"}) would pass its own two checks
+    // above/below (no other row has that email; "alice" doesn't collide) and
+    // create a second row that identifier resolves to ambiguously at login.
+    const emailCollidesWithUsername = await tx.user.findFirst({
+      where: { tenantId: actor.tenantId, username: email },
+    });
+    if (emailCollidesWithUsername) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { email },
+        "This email matches another account's username.",
+      );
+    }
     // username is derived from the email local-part (see comment below) and
     // is @@unique([tenantId, username]) at the DB level; two different email
     // domains can share a local-part (bob@gmail.com, bob@yahoo.com), so this

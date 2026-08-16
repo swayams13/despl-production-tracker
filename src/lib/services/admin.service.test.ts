@@ -201,7 +201,7 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
  */
 describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  const { createEmployee, setUserActive, resetUserPassword, updateUserRolesDepts, bulkImportEmployees } =
+  const { createEmployee, createUser, setUserActive, resetUserPassword, updateUserRolesDepts, bulkImportEmployees } =
     await import("./admin.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -337,6 +337,31 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
         email: username,
         roles: ["QC"],
         departmentIds: [],
+      }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  // Fix round 3: createUser was missing the same guard from its own
+  // direction — a createEmployee'd account can have an email-shaped
+  // username (no format constraint on that field), and createUser never
+  // checked its email against existing USERNAMES, only existing emails and
+  // its own derived username.
+  it("createUser rejects an email that collides with an existing createEmployee username", async () => {
+    const stamp = Date.now();
+    const emailShapedUsername = `vendor-${stamp}@vendor.local`;
+    await createEmployee(admin, {
+      displayName: "Odd Username Two",
+      username: emailShapedUsername,
+      roles: ["QC"],
+      departmentIds: [],
+    });
+    await expect(
+      createUser(admin, {
+        name: "Collider",
+        email: emailShapedUsername,
+        roleCodes: ["QC"],
+        departmentIds: [],
+        password: "password123",
       }),
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });
