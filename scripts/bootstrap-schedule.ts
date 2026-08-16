@@ -23,20 +23,27 @@ async function resolveTargets() {
     });
     if (!admin) throw new Error("bootstrap: no ADMIN user found — run pnpm db:seed first");
 
+    const jobNumber = process.argv[2] ?? "DESPL-320";
     const job = await owner.job.findFirst({
-      where: { tenantId: org.id, jobNumber: "DESPL-320" },
-      select: { id: true },
+      where: { tenantId: org.id, jobNumber },
+      select: { id: true, orderDate: true },
     });
-    if (!job) throw new Error("bootstrap: job DESPL-320 not found — run pnpm db:seed first");
+    if (!job) throw new Error(`bootstrap: job ${jobNumber} not found — run pnpm db:seed first`);
 
-    return { tenantId: org.id, adminUserId: admin.id, jobId: job.id };
+    return {
+      tenantId: org.id,
+      adminUserId: admin.id,
+      jobId: job.id,
+      jobNumber,
+      orderDate: job.orderDate,
+    };
   } finally {
     await owner.$disconnect();
   }
 }
 
 async function main() {
-  const { tenantId, adminUserId, jobId } = await resolveTargets();
+  const { tenantId, adminUserId, jobId, jobNumber, orderDate } = await resolveTargets();
   const admin: Actor = {
     userId: adminUserId,
     tenantId,
@@ -46,19 +53,19 @@ async function main() {
     roles: [ROLES.ADMIN],
     departmentIds: [],
   };
-  // DESPL-320's order date is genuinely unknown (seed leaves it null rather
-  // than inventing one). FORWARD mode needs a project-start anchor, so
-  // bootstrap supplies one — a legitimate planning input per
-  // generateScheduleSchema, not a client-supplied actual (invariant #1).
-  //
-  // Anchored ~10 weeks (70 calendar days) ago rather than today: the PV
-  // envelope is ~119 working days (~24 weeks), so this puts the pilot
-  // mid-flight — a realistic spread of overdue/current/future plans for the
-  // demo's overdue -> REASON_REQUIRED delay flow (invariant #7), instead of
-  // an all-future schedule where nothing is ever overdue.
-  const projectStartDate = new Date(Date.now() - 70 * 24 * 60 * 60 * 1000);
+  // A job with a real order date anchors on it: that is the actual planning
+  // input, not an invention. DESPL-320's order date is genuinely unknown (seed
+  // leaves it null rather than fabricating one), so it keeps the synthetic
+  // anchor below — ~10 weeks back, putting the pilot mid-flight so the demo has
+  // a realistic spread of overdue/current/future plans for the overdue ->
+  // REASON_REQUIRED delay flow (invariant #7), instead of an all-future
+  // schedule where nothing is ever overdue.
+  const projectStartDate = orderDate ?? new Date(Date.now() - 70 * 24 * 60 * 60 * 1000);
   const run = await generateSchedule(admin, { jobId, mode: "FORWARD", projectStartDate });
-  console.log(`Generated schedule run ${run.id} v${run.version} with ${run.processPlans.length} plans.`);
+  console.log(
+    `[${jobNumber}] generated schedule run ${run.id} v${run.version} with ${run.processPlans.length} plans ` +
+      `(anchor ${projectStartDate.toISOString().slice(0, 10)}${orderDate ? ", real order date" : ", synthetic"}).`,
+  );
 }
 
 main()
