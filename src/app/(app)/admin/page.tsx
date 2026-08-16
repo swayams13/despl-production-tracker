@@ -12,5 +12,5 @@ export default async function AdminPage() {
   const view = await loadAdminView(actor);
   const canEdit = hasRole(actor, ROLES.ADMIN);
 
-  return <AdminClient view={view} canEdit={canEdit} />;
+  return <AdminClient view={view} canEdit={canEdit} actorUserId={actor.userId} />;
 }
