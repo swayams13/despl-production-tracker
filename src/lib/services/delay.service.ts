@@ -36,7 +36,7 @@ export async function fileDelayReason(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId); // throws NOT_FOUND
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId); // throws NOT_FOUND
     requireDepartmentScope(actor, plan.ownerDepartmentId);
 
     const category = await tx.delayCategoryRef.findUnique({ where: { id: categoryId } });

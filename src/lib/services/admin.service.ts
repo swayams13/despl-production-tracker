@@ -102,13 +102,24 @@ export async function resetUserPassword(actor: Actor, input: ResetPasswordInput)
 
     const passwordHash = await hashPassword(password);
     await audited(tx, actor, async () => {
-      await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+      // An admin-chosen password is a temp credential the admin knows: bump
+      // sessionVersion so every session issued before the reset stops
+      // resolving (getActor compares it), and set mustChangePassword so the
+      // user has to replace it on next login. Without both, an admin reset —
+      // the path most likely to be undoing a COMPROMISED credential — leaves
+      // the old sessions live and the admin-known password permanent.
+      await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, sessionVersion: { increment: 1 }, mustChangePassword: true },
+      });
       return {
         result: undefined,
         audit: {
           action: "admin.resetPassword",
           entityType: "User",
           entityId: userId,
+          // No before/after: the only fields that changed are password
+          // material and its two locks — nothing safe or useful to diff.
           eventType: "UserPasswordReset",
           eventPayload: { userId },
         },

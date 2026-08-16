@@ -44,7 +44,7 @@ export async function claimPlan(actor: Actor, input: ClaimPlanInput): Promise<Pr
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId); // throws NOT_FOUND
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId); // throws NOT_FOUND
 
     if (!actor.departmentIds.includes(plan.ownerDepartmentId)) {
       throw new AppError(ERROR_CODES.NOT_IN_DEPARTMENT, {
@@ -97,7 +97,7 @@ export async function assignPlan(actor: Actor, input: AssignPlanInput): Promise<
   requireRole(actor, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId); // throws NOT_FOUND
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId); // throws NOT_FOUND
     requireDepartmentScope(actor, plan.ownerDepartmentId);
 
     const target = await tx.user.findFirst({
@@ -148,7 +148,7 @@ export async function releasePlan(actor: Actor, input: ReleasePlanInput): Promis
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId); // throws NOT_FOUND
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId); // throws NOT_FOUND
 
     const isAssignee = actor.userId === plan.assigneeUserId;
     const isDeptSupervisor =
@@ -160,6 +160,12 @@ export async function releasePlan(actor: Actor, input: ReleasePlanInput): Promis
         processPlanId,
       });
     }
+
+    // Already in the pool: nothing changed, so nothing to record. The audit
+    // log is append-only — a before === after === null row is permanent
+    // noise. Checked AFTER the permission gate above, so a no-op release is
+    // refused for exactly the same callers a real one would be.
+    if (plan.assigneeUserId == null) return plan;
 
     const before = plan.assigneeUserId;
     return audited(tx, actor, async () => {

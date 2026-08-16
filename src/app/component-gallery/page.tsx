@@ -88,6 +88,7 @@ const TIMELINE_ITEMS: MilestoneItem[] = PROCESSES.map((label, i) => {
 export default async function ComponentGalleryPage() {
   const actor = await getActor();
   if (!actor) redirect("/login");
+  if (actor.mustChangePassword) redirect("/account/password");
   if (actor.clientId !== null) redirect("/portal");
 
   return (

@@ -7,6 +7,8 @@ const STATUS: Record<ErrorCode, number> = {
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
   CLIENT_SCOPE_VIOLATION: 403,
+  // Authenticated, but not permitted to act until the forced change is done.
+  MUST_CHANGE_PASSWORD: 403,
   NOT_FOUND: 404,
   VALIDATION_FAILED: 400,
   GATING_BLOCKED: 409,

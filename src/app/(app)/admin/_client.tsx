@@ -178,7 +178,7 @@ function UsersSection({ view, canEdit }: { view: AdminView; canEdit: boolean }) 
                         disabled={pending}
                         onClick={() => {
                           if (resetPassword.length < 8) return toast.error("Password must be at least 8 characters.");
-                          run(() => resetPasswordAction(u.id, resetPassword), "Password reset.", () => {
+                          run(() => resetPasswordAction(u.id, resetPassword), "Password reset. They are signed out and must set a new one at next login.", () => {
                             setResettingId(null);
                             setResetPassword("");
                           });

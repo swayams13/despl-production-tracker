@@ -111,7 +111,7 @@ export async function startProcess(actor: Actor, input: StartProcessInput): Prom
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId);
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     requireDepartmentScope(actor, plan.ownerDepartmentId);
     const to = assertTransition("start", plan.status);
 
@@ -154,7 +154,7 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId);
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     requireDepartmentScope(actor, plan.ownerDepartmentId);
     const to = assertTransition("submit", plan.status);
 
@@ -216,7 +216,7 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId);
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     assertMakerChecker(actor, plan.submittedBy);
     const to = assertTransition("verify", plan.status);
 
@@ -258,7 +258,7 @@ export async function rejectProcess(actor: Actor, input: RejectProcessInput): Pr
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId);
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     assertMakerChecker(actor, plan.submittedBy);
     const to = assertTransition("reject", plan.status);
 
@@ -312,7 +312,7 @@ export async function holdProcess(actor: Actor, input: HoldProcessInput): Promis
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId);
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     requireDepartmentScope(actor, plan.ownerDepartmentId);
     const to = assertTransition("hold", plan.status);
 
@@ -349,7 +349,7 @@ export async function resumeProcess(actor: Actor, input: StartProcessInput): Pro
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId);
+    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     requireDepartmentScope(actor, plan.ownerDepartmentId);
     const to = assertTransition("resume", plan.status);
 

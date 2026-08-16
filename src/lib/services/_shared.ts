@@ -258,14 +258,29 @@ export async function getCurrentScheduleRun(
  * maker-checker + status write must serialize on this row (ARCHITECTURE §3/§6):
  * take the lock BEFORE re-reading predecessor state and writing, so two
  * concurrent transitions on the same plan cannot interleave. Throws NOT_FOUND
- * if the plan does not exist (or is invisible to this tenant).
+ * if the plan does not exist OR belongs to another tenant.
+ *
+ * `process_plans` is NOT in the RLS `tenant_tables` set (it has no tenantId
+ * column), so — unlike jobs/users — a bare findUnique by id would happily
+ * return another tenant's row and every caller here is the last check before
+ * a write. The read is therefore anchored through `ownerDepartment`, which IS
+ * RLS-covered, and a cross-tenant id reads exactly like "doesn't exist" so
+ * nothing leaks about other tenants' data.
+ *
+ * // ponytail: the FOR UPDATE lock below is left unscoped — locking a row
+ * // that turns out to belong to another tenant is wasted work inside a
+ * // doomed transaction, not a data leak; the scoped read right after it is
+ * // what decides whether anything is returned.
  */
 export async function lockProcessPlanForUpdate(
   tx: Tx,
   processPlanId: number,
+  tenantId: number,
 ): Promise<ProcessPlan> {
   await tx.$queryRaw`SELECT id FROM process_plans WHERE id = ${processPlanId} FOR UPDATE`;
-  const row = await tx.processPlan.findUnique({ where: { id: processPlanId } });
+  const row = await tx.processPlan.findFirst({
+    where: { id: processPlanId, ownerDepartment: { tenantId } },
+  });
   if (!row) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessPlan", processPlanId });
   return row;
 }

@@ -19,7 +19,7 @@ const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
 describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  const { createUser } = await import("./admin.service");
+  const { createUser, resetUserPassword } = await import("./admin.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
@@ -79,5 +79,46 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
         password: "password123",
       }),
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  /**
+   * Final-review Finding 2: an admin reset is a temp credential the admin
+   * knows, and is the path most likely to be undoing a COMPROMISED one — so
+   * it must both kill existing sessions (sessionVersion bump, which getActor()
+   * compares against the token) and force the user to replace it.
+   */
+  it("resetUserPassword bumps sessionVersion and re-arms mustChangePassword", async () => {
+    const user = await createUser(admin, {
+      name: "Reset Target",
+      email: "resettarget@x.com",
+      roleCodes: ["ADMIN"],
+      departmentIds: [],
+      password: "password123",
+    });
+    expect(user.sessionVersion).toBe(0);
+    expect(user.mustChangePassword).toBe(true); // schema default for a new account
+
+    // Simulate the user having completed their first-login change already:
+    // the reset must re-arm the lock, not merely leave it set.
+    await owner.user.update({
+      where: { id: user.id },
+      data: { mustChangePassword: false, sessionVersion: 3 },
+    });
+
+    await resetUserPassword(admin, { userId: user.id, password: "admin-chosen-1" });
+
+    const row = await owner.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(row.sessionVersion).toBe(4); // every pre-reset session token now fails getActor()
+    expect(row.mustChangePassword).toBe(true);
+    expect(row.passwordHash).not.toBe(user.passwordHash);
+
+    // Invariant #5 + no password material in the trail.
+    const auditRow = await owner.auditLog.findFirst({
+      where: { tenantId, entityType: "User", entityId: String(user.id), action: "admin.resetPassword" },
+      orderBy: { id: "desc" },
+    });
+    expect(auditRow).toBeTruthy();
+    expect(auditRow?.before).toBeFalsy();
+    expect(auditRow?.after).toBeFalsy();
   });
 });

@@ -64,9 +64,22 @@ export async function getActor(): Promise<Actor | null> {
   });
 }
 
+/**
+ * "Give me an actor I may act as." Every server action and API route goes
+ * through this, so the forced-password-change lock belongs HERE and not in
+ * per-page guards — a page guard only stops a browser rendering a screen,
+ * while an admin holding a printed temp-password slip can otherwise drive
+ * every mutation directly, with the audit trail naming the employee.
+ *
+ * Deliberately NOT in getActor(): the layout and page guards need the actor
+ * object even while it is locked, to decide where to redirect it. The one
+ * legitimate exempt caller is `changePassword` (src/app/actions/account.ts),
+ * which calls getActor() directly — that is the action that clears the lock.
+ */
 export async function requireActor(): Promise<Actor> {
   const actor = await getActor();
   if (!actor) throw new AppError(ERROR_CODES.UNAUTHENTICATED);
+  if (actor.mustChangePassword) throw new AppError(ERROR_CODES.MUST_CHANGE_PASSWORD);
   return actor;
 }
 

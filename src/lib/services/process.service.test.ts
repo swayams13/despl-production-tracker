@@ -304,6 +304,36 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     expect(started.status).toBe("IN_PROGRESS");
   });
 
+  /**
+   * Final-review Finding 3, proved on a SECOND caller of the shared helper:
+   * lockProcessPlanForUpdate now anchors its read through the RLS-covered
+   * `departments` table, so a plan id from another tenant reads as NOT_FOUND
+   * for every one of the helper's 10 call sites, not just assignment.service.
+   */
+  it("cross-tenant: another tenant's PH cannot reach this plan by id (NOT_FOUND)", async () => {
+    const otherOrg = await owner.organization.create({
+      data: { code: `TEST-XT-${Date.now()}`, name: "Other tenant" },
+    });
+    const intruder: Actor = {
+      userId: 999_999,
+      tenantId: otherOrg.id,
+      clientId: null,
+      name: "Intruder",
+      email: "intruder@other",
+      roles: [ROLES.PRODUCTION_HEAD, ROLES.QC],
+      departmentIds: [],
+      mustChangePassword: false,
+    };
+    const statusBefore = (await owner.processPlan.findUniqueOrThrow({ where: { id: planC } })).status;
+
+    await expectCode(startProcess(intruder, { processPlanId: planC }), ERROR_CODES.NOT_FOUND);
+    await expectCode(holdProcess(intruder, { processPlanId: planC, reason: "x" }), ERROR_CODES.NOT_FOUND);
+    await expectCode(verifyProcess(intruder, { processPlanId: planC }), ERROR_CODES.NOT_FOUND);
+
+    const after = await owner.processPlan.findUniqueOrThrow({ where: { id: planC } });
+    expect(after.status).toBe(statusBefore);
+  });
+
   it("hold then resume round-trips, each audited", async () => {
     const before = await auditCount(planC);
     const held = await holdProcess(supB, { processPlanId: planC, reason: "power cut" });

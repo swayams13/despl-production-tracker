@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { claimPlan, assignPlan, releasePlan } from "./assignment.service";
-import { isAppError, ERROR_CODES } from "@/lib/shared/errors";
+import { ERROR_CODES } from "@/lib/shared/errors";
 import { ROLES, type Actor } from "@/lib/authz";
 
 /**
@@ -311,6 +311,77 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("assignment service — claim/assign/
     await claimPlan(peerActor, { processPlanId: plan.id });
     await expect(releasePlan(outsideSupervisor, { processPlanId: plan.id })).rejects.toMatchObject({
       code: ERROR_CODES.FORBIDDEN,
+    });
+  });
+
+  /**
+   * Final-review adjacent-minor: audit_log is append-only, so a
+   * before === after === null row for a release that changed nothing is
+   * permanent noise. Permission is still checked — only the write is skipped.
+   */
+  it("release of an already-unassigned plan is a no-op and writes NO audit row", async () => {
+    const plan = await makePlan();
+    const auditWhere = { entityType: "ProcessPlan", entityId: String(plan.id) };
+    const before = await owner.auditLog.count({ where: auditWhere });
+
+    const released = await releasePlan(supervisor, { processPlanId: plan.id });
+    expect(released.assigneeUserId).toBeNull();
+    expect(await owner.auditLog.count({ where: auditWhere })).toBe(before);
+  });
+
+  it("release of an already-unassigned plan is still FORBIDDEN for an outsider — the no-op short-circuit sits AFTER the permission gate", async () => {
+    const plan = await makePlan();
+    await expect(releasePlan(outsideSupervisor, { processPlanId: plan.id })).rejects.toMatchObject({
+      code: ERROR_CODES.FORBIDDEN,
+    });
+  });
+
+  /**
+   * Final-review Finding 3: `process_plans` is NOT covered by RLS (no tenantId
+   * column, absent from tenant_tables), so lockProcessPlanForUpdate has to
+   * anchor its read through the RLS-covered `departments` table itself. Before
+   * the fix, a PH/ADMIN could null the assignee of ANY tenant's plan by id.
+   * A cross-tenant id must read exactly like "doesn't exist".
+   */
+  describe("cross-tenant isolation (process_plans has no RLS of its own)", () => {
+    let intruderPh: Actor;
+
+    beforeAll(async () => {
+      const otherOrg = await owner.organization.create({
+        data: { code: `ASSIGN-XT-${Date.now()}`, name: "Other tenant" },
+      });
+      intruderPh = {
+        userId: 999_999,
+        tenantId: otherOrg.id,
+        clientId: null,
+        email: "intruder@other",
+        name: "Intruder PH",
+        roles: [ROLES.PRODUCTION_HEAD, ROLES.ADMIN],
+        departmentIds: [],
+        mustChangePassword: false,
+      };
+    });
+
+    it("releasePlan — tenant B's PH/ADMIN gets NOT_FOUND for tenant A's plan, and the assignee survives", async () => {
+      const plan = await makePlan();
+      await claimPlan(peerActor, { processPlanId: plan.id });
+
+      await expect(releasePlan(intruderPh, { processPlanId: plan.id })).rejects.toMatchObject({
+        code: ERROR_CODES.NOT_FOUND,
+      });
+
+      const row = await owner.processPlan.findUniqueOrThrow({ where: { id: plan.id } });
+      expect(row.assigneeUserId).toBe(peerActor.userId);
+    });
+
+    it("claimPlan and assignPlan are NOT_FOUND across tenants too", async () => {
+      const plan = await makePlan();
+      await expect(claimPlan(intruderPh, { processPlanId: plan.id })).rejects.toMatchObject({
+        code: ERROR_CODES.NOT_FOUND,
+      });
+      await expect(
+        assignPlan(intruderPh, { processPlanId: plan.id, userId: deptMemberUserId }),
+      ).rejects.toMatchObject({ code: ERROR_CODES.NOT_FOUND });
     });
   });
 });

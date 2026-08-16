@@ -1,10 +1,10 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { requireActor } from "@/lib/authz";
+import { getActor } from "@/lib/authz";
 import { changeOwnPassword } from "@/lib/auth/change-password";
 import { changePasswordSchema } from "@/lib/shared/schemas";
-import { isAppError, ERROR_MESSAGES } from "@/lib/shared/errors";
+import { AppError, ERROR_CODES, isAppError, ERROR_MESSAGES } from "@/lib/shared/errors";
 
 export interface ChangePasswordState {
   error?: string;
@@ -12,9 +12,14 @@ export interface ChangePasswordState {
 
 /**
  * First-login (and any-time) password change. Thin caller per CLAUDE.md
- * conventions: parse → requireActor → service call → map AppError to a
+ * conventions: parse → resolve actor → service call → map AppError to a
  * UI-safe message. On success, redirect to "/" — the role-based landing
  * router resolves where the now-unlocked user lands.
+ *
+ * The one action that must NOT use requireActor(): that helper refuses any
+ * actor with mustChangePassword set, and this is the action that clears it.
+ * Same null-check, minus that one guard — deliberately inline here rather
+ * than a bypass flag on the helper every other caller trusts.
  */
 export async function changePassword(
   _prev: ChangePasswordState,
@@ -29,7 +34,8 @@ export async function changePassword(
   }
 
   try {
-    const actor = await requireActor();
+    const actor = await getActor();
+    if (!actor) throw new AppError(ERROR_CODES.UNAUTHENTICATED);
     await changeOwnPassword(actor, parsed.data);
   } catch (e) {
     if (isAppError(e)) {
