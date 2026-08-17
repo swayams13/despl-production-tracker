@@ -31,6 +31,62 @@ Prior status: 🟡 **Railway deploy IN PROGRESS, blocked on a DB-auth mismatch (
 
 **Working on the `demo` branch. `lib/schedule/`, `lib/services/`, the first end-to-end UI (department workspaces + prioritizer + dashboard), production-safe idempotent seeding are done and verified — AND the full production lifecycle was now driven end-to-end through the running app in a real browser (login → start → submit → hold-point clearance → verify → COMPLETE, with 3 integrity invariants refusing live). IN PROGRESS: the demo-ready UI rebuild to the industrial control-room design (DESIGN_SPEC.md + design/despl-tracker-mockup.html), §9 session order. Session 1 (§9.1) ✅ `54c4e39`. Session 2 (§9.2 data layer) ✅ `6418411`/`022bb1b`. Session 3 (§9.3 Workspace) ✅ `58b3403`/`8d32441` (incl. the `pnpm test:db` fix). Session 4 (§9.4 Dashboard — all real KPI/stat/chart cards, dept×status matrix, cross-filter links into `/workspace?dept=&status=`) ✅ COMPLETE & VERIFIED (browser click-through + DB), committed `2732773`. Session 5 (§9.5 Job detail — Overview + Units×Stage matrix + Activity + StageSheet fully wired) ✅ COMPLETE & VERIFIED, committed `d2b4b99`. Session 6 (§9.6 Job detail — Gantt + BOM + QCP tabs) ✅ COMPLETE & VERIFIED, committed `612a888`. Session 7 (§9.7 QC page + Departments — the app's first cross-job pages) ✅ COMPLETE & VERIFIED, committed `60fd68b`. Session 8 (§9.8 Welding + Reports/digest + notifications end-to-end) ✅ COMPLETE & VERIFIED, committed `cc936e8`. Session 9 (§9.9 Admin + motion/polish pass + Demo Readiness sweep) ✅ COMPLETE & VERIFIED, committed `cf2e84c`. **§9's full session order (1–9) is now done.** Session 10 (login + root-landing reskin, 15 Aug 2026) fixed the two pages that §9's route-group migration explicitly left outside `.theme-industrial`, committed `e29d7f5` — see the session log below. Session 11 (**Portfolio Dashboard**, 16 Aug 2026, 7-task subagent-driven SDD run — health rule, portfolio read layer, tiles + table UI, job selector, docs sweep, final whole-branch review + fix wave, `AUTH_SECRET` rotation, real browser verification) ✅ SHIPPED, verification-suite-clean AND visually confirmed — see the session log below for the full account, including a security near-miss during Task 6 (unauthorized session-forging technique used for verification, caught, user decided how to proceed, now closed via rotation) that is recorded here in full rather than summarized away. **Update 16 Aug 2026 evening: pushed to both `origin/demo` and `origin/main`** (`c692d86`, the Railway deploy-fix commit — see the Status line above and the session log below). The security review pass and per-department functional walkthrough from session 10 are still open, now behind the Railway deploy blocker.**
 
+## Session — R1 Task 2 (`<ResponsiveTable>`) implemented, review interrupted before verdict, 17 Aug 2026 (continuation)
+
+Direct continuation of the "Supervisor UI v3 spec landed" session below — same
+subagent-driven-development run against the SDD ledger at
+`.superpowers/sdd/PLAN-responsive-supervisor-v1/progress.md`. Re-dispatched
+R1 Task 2 (`<ResponsiveTable>` primitive + adoption in `/my-day` Mine and
+`/admin` Employees) using the existing, still-valid brief
+(`task-2-brief.md` — the v3 amendment didn't touch Task 2's scope). BASE
+`356188c`.
+
+**Implementer reported DONE: `882ba44`** ("feat(responsive): add
+`<ResponsiveTable>` primitive, adopt in /my-day Mine and /admin Employees").
+CSS-only breakpoint swap (`.rt-table`/`.rt-cards`, 1024px, no
+JS `matchMedia`/`useState` — avoids the hydration-mismatch/flash risk the
+brief called out), placed in `globals.css` before Task 1's density layer
+with no cascade conflict (Task 1's own review found exactly that class of
+bug once already — implementer reports having checked for a recurrence).
+`/my-day`'s Mine table got card views for all three of its row shapes
+(`MineCardView`, `QcQueueCardView`, `SelfSubmittedCardView` — supervisor and
+both QC-mode rows, not just the common case) plus a `mineDisplayStatus`
+helper onto `<StatusChip>`; Pool/teamHeld tables correctly left untouched,
+per the brief's scope. `/admin` Employees got `EmployeeCardView`;
+`AddEmployeeDialog`'s full-screen-form conversion correctly left out
+(explicit brief deferral, a known SPEC §4 gap, not silently dropped).
+`pnpm typecheck && pnpm lint && pnpm build` clean; `pnpm test` 398/128
+skipped. Verified live via the real `/login` form (no forged sessions) as
+`admin@despl.local` and `qc@despl.local`; used a same-origin iframe to get
+a real 390px CSS viewport (the sandbox's `resize_window` didn't actually
+resize the browser) to confirm the table/card swap with live, non-empty
+data, including claiming a pool item to populate a real Mine row. Full
+report: `task-2-report.md`.
+
+**Review package generated** (`review-356188c..882ba44.diff`) and the
+task-reviewer dispatch was **started but interrupted by the user before
+returning any verdict** — the user asked to end the session here. **Task 2
+is NOT reviewed and NOT complete.** Do not treat `882ba44` as gated; the
+implementer's report is unverified until a task reviewer actually checks it
+against the brief.
+
+**NEXT SESSION — start here:** re-dispatch the task reviewer using
+`task-reviewer-prompt.md`'s template against the already-generated diff file
+above, `task-2-brief.md`, and `task-2-report.md` — no need to regenerate the
+review package, it's already sitting in the SDD workspace. Then continue the
+normal fix-loop → completion flow, and proceed to Task 3
+(`/board`/`/alerts`/`/profile` route shells, D31) per the amended 7-task
+list. The implementer's own report flagged 3 items worth handing to the
+reviewer verbatim rather than re-deriving: (1) `AddEmployeeDialog` deferred
+by brief scope, not a gap; (2) `QcQueueCardView`/`SelfSubmittedCardView`
+verified by code-parity only, no live cross-actor SUBMITTED-state data
+existed in the demo DB at check time; (3) a **pre-existing, out-of-scope**
+bug noted but not fixed: the app shell's fixed 236px sidebar causes
+page-level horizontal overflow at true phone width (the `.rt-cards` content
+itself has zero excess width) — worth its own task once R1's shell-variant
+task (now Task 4) replaces the fixed sidebar with the phone bottom nav,
+since that's likely what actually closes this gap rather than a separate fix.
+
 ## Session — Supervisor UI v3 spec landed, R1 scope amended (D28–D32), 17 Aug 2026
 
 Two parts to this session. **Part 1 (subagent-driven SDD, R1 Task 1 done, Task 2 paused mid-dispatch):** resumed `docs/PLAN-responsive-supervisor-v1.md` Session R1 against the (then-current) 5-task list. R0 pre-check against the Phase 2 (`/my-day`) log above confirmed it shipped desktop-only — R1 builds all of it, not a gap-fill. Pre-flight conflict scan and two rulings written to the SDD ledger (`.superpowers/sdd/PLAN-responsive-supervisor-v1/progress.md`): task order T1→T5, and — because Phase 2's own log explicitly says "no light variant exists anywhere in this app," contradicting SPEC-responsive-app-v2's "both palettes already exist" assumption — a ruling that Task 5 (theme) would need to design a light industrial palette from scratch, sourced from the v2 artifact. **Task 1 (density layer) shipped**: `57c782a` (pointer-coarse base font/min-height/Tailwind `coarse:`/`fine:` variants) then `5df8501`, a fix-round-1 commit — task review caught a real CSS cascade bug (the coarse `td` row-padding/text-size override was placed *before* a later unconditional `.theme-industrial td` rule with equal specificity, so on a real coarse-pointer device the later rule always won and silently overwrote it back to 13px/12px; confirmed via byte offset in the compiled build CSS, not just source presence). Fixed by relocating the whole density block to the end of the `.theme-industrial` scope; re-review confirmed clean, no new breakage. **Task 2 (`<ResponsiveTable>`) was briefed and about to dispatch when the user interrupted** to redirect the session — nothing committed for Task 2, `demo` was untouched at `5df8501` when the redirect landed, so nothing needed cleanup.
