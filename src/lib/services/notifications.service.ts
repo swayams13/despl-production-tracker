@@ -131,12 +131,29 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
       }
     }
 
+    // One batched lookup for every distinct assignee, same pattern as
+    // supervisorsByDept above — `setUserActive` deactivation does NOT release
+    // a user's assigned plans (by design, C29), so an assignee referenced
+    // here can be inactive and unable to log in at all.
+    const assigneeIds = [...new Set(pending.map((p) => p.assigneeUserId).filter((id): id is number => id != null))];
+    const activeAssigneeIds = new Set(
+      assigneeIds.length === 0
+        ? []
+        : (
+            await tx.user.findMany({
+              where: { tenantId: actor.tenantId, id: { in: assigneeIds }, active: true },
+              select: { id: true },
+            })
+          ).map((u) => u.id),
+    );
+
     for (const plan of pending) {
       // Assignee-first (SPEC §8): an assigned plan notifies the assignee +
-      // PH only; PH inclusion is unconditional either way. Unassigned falls
-      // back to the pre-existing dept-supervisors + PH behavior, unchanged.
+      // PH only, PROVIDED the assignee is still active — an inactive
+      // assignee can't act on it, so fall back to dept-supervisors + PH
+      // instead of notifying only an account nobody can log into.
       const recipients =
-        plan.assigneeUserId != null
+        plan.assigneeUserId != null && activeAssigneeIds.has(plan.assigneeUserId)
           ? [...new Set([plan.assigneeUserId, ...productionHeadIds])]
           : [...new Set([...(supervisorsByDept.get(plan.ownerDepartmentId) ?? []), ...productionHeadIds])];
       if (recipients.length === 0) continue;

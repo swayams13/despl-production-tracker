@@ -138,8 +138,10 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
     let phUserId = 0;
     let memberAId = 0;
     let memberBId = 0;
+    let inactiveMemberId = 0;
     let assignedPlanId = 0;
     let unassignedPlanId = 0;
+    let inactiveAssigneePlanId = 0;
     const past = new Date(Date.now() - 20 * 864e5);
 
     beforeAll(async () => {
@@ -170,6 +172,13 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
       memberAId = memberA.id;
       memberBId = memberB.id;
 
+      // Deactivated but still on the plan — setUserActive (by design, C29)
+      // never releases a deactivated user's assigned plans, so this row
+      // stays assignee-first without the fix in Finding 2.
+      const inactiveMember = await mkUser("inactivemember");
+      await owner.user.update({ where: { id: inactiveMember.id }, data: { active: false } });
+      inactiveMemberId = inactiveMember.id;
+
       const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-${Date.now()}` } });
       const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
       const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
@@ -190,6 +199,12 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
         data: { scheduleRunId: run.id, jobProcessId: jpUnassigned.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past },
       });
       unassignedPlanId = unassignedPlan.id;
+
+      const jpInactiveAssignee = await owner.jobProcess.create({ data: { jobId: job.id, seq: 3, code: "A3", name: "Inactive-assignee process", departmentId: deptId, workOrderStages: [1] } });
+      const inactiveAssigneePlan = await owner.processPlan.create({
+        data: { scheduleRunId: run.id, jobProcessId: jpInactiveAssignee.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past, assigneeUserId: inactiveMemberId },
+      });
+      inactiveAssigneePlanId = inactiveAssigneePlan.id;
     });
 
     it("an assigned overdue plan notifies the assignee + PH only, not other dept members", async () => {
@@ -209,6 +224,23 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
       const notifs = await owner.notification.findMany({
         where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: unassignedPlanId },
       });
+      expect(notifs.map((n) => n.recipientId).sort()).toEqual([memberAId, memberBId, phUserId].sort());
+    });
+
+    // Final whole-branch review, Finding 2: the assignee-first branch had no
+    // `active` filter, unlike the dept-supervisor fallback it partially
+    // replaced. A deactivated assignee can't log in, so notifying only them
+    // (+ PH) leaves dept supervisors — who COULD act on it — never notified.
+    it("an overdue plan assigned to an INACTIVE user falls back to active dept members + PH, not just PH", async () => {
+      const ph = actor(tenantId, phUserId, [ROLES.PRODUCTION_HEAD]);
+      await syncNotifications(ph);
+
+      const notifs = await owner.notification.findMany({
+        where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: inactiveAssigneePlanId },
+      });
+      // The inactive assignee themselves must NOT be a recipient (they can't
+      // log in to act on it) — the fallback set is active dept members + PH,
+      // same as the unassigned case above.
       expect(notifs.map((n) => n.recipientId).sort()).toEqual([memberAId, memberBId, phUserId].sort());
     });
   });
