@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DESPL Tracker — Supervisor Shop-Floor Flow v2 (Responsive UI)</title>
+<style>
+:root{
+  --bg:#0B0C0E; --surface:#141619; --surface-2:#1C1F24; --border:#262A30;
+  --text:#E7E9EC; --muted:#8B919A; --accent:#FF7A1A;
+  --s-complete:#3FB950; --s-progress:#4C8DFF; --s-submitted:#A371F7;
+  --s-hold:#D9A62E; --s-overdue:#F0524D; --s-idle:#4A4F57;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:Inter,-apple-system,'Segoe UI','Noto Sans',sans-serif;font-size:13px;line-height:1.5}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.hero{border-bottom:1px solid var(--border);background:var(--surface);padding:16px 24px}
+.hero-inner{max-width:1360px;margin:0 auto;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.hero h1{font-size:15.5px;font-weight:600}
+.tag{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent);border:1px solid rgba(255,122,26,.4);background:rgba(255,122,26,.08);padding:2px 8px;border-radius:10px;font-weight:600}
+.tag.g{color:var(--muted);border-color:var(--border);background:var(--surface-2)}
+.hero .sub{color:var(--muted);font-size:11px;width:100%}
+.layout{max-width:1360px;margin:0 auto;display:grid;grid-template-columns:auto 1fr;gap:34px;padding:24px;align-items:start}
+@media(max-width:1100px){.layout{grid-template-columns:1fr;justify-items:center}}
+
+/* ===== stage & device switch ===== */
+.devsw{display:flex;gap:6px;margin-bottom:12px}
+.devsw span{padding:6px 14px;font-size:11.5px;border:1px solid var(--border);border-radius:8px;color:var(--muted);cursor:pointer;background:var(--surface);user-select:none;font-weight:600}
+.devsw span.on{color:var(--accent);border-color:rgba(255,122,26,.5);background:rgba(255,122,26,.08)}
+.frame{background:#000;border:6px solid #23262b;border-radius:34px;overflow:hidden;position:relative;box-shadow:0 24px 60px rgba(0,0,0,.6);transition:width .3s,height .3s}
+.frame.phone{width:392px;height:788px}
+.frame.tab{width:960px;height:620px;border-radius:22px}
+.app{position:absolute;inset:0;background:var(--bg);display:flex;flex-direction:column;overflow:hidden;
+  --abg:var(--bg);--asurf:var(--surface);--asurf2:var(--surface-2);--abord:var(--border);--atext:var(--text);--amut:var(--muted)}
+.app.outdoor{--abg:#000;--asurf:#0d0d0f;--asurf2:#1b1b1f;--abord:#4a505a;--atext:#ffffff;--amut:#c6ccd4}
+.app.light{--abg:#F2F3F5;--asurf:#FFFFFF;--asurf2:#E9EBEF;--abord:#D4D8DE;--atext:#191C20;--amut:#5C6570}
+.app.light .tcard,.app.light .sg,.app.light .statsline,.app.light .fch,.app.light .dg{box-shadow:0 1px 2px rgba(16,20,26,.06)}
+.app{background:var(--abg);color:var(--atext)}
+.app *{scrollbar-width:thin}
+
+/* top bar */
+.tb{padding:22px 16px 10px;display:flex;align-items:center;gap:9px;background:var(--asurf);border-bottom:1px solid var(--abord);flex:none}
+.frame.tab .tb{padding-top:12px}
+.tb .ti{flex:1;min-width:0}
+.tb .hi{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb .sm{font-size:10.5px;color:var(--amut)}
+.icobtn{width:42px;height:42px;border-radius:10px;border:1px solid var(--abord);background:var(--asurf2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none;color:var(--amut)}
+.icobtn.on{color:var(--accent);border-color:rgba(255,122,26,.5)}
+.icobtn svg{width:19px;height:19px}
+.lang{display:flex;border:1px solid var(--abord);border-radius:9px;overflow:hidden;flex:none}
+.lang span{padding:9px 9px;font-size:11.5px;cursor:pointer;color:var(--amut);background:var(--asurf2);user-select:none;min-width:34px;text-align:center}
+.lang span.on{background:var(--accent);color:#0B0C0E;font-weight:700}
+
+/* body + bottom nav */
+.abody{flex:1;overflow-y:auto;padding:14px 14px 18px}
+.bnav{flex:none;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--abord);background:var(--asurf);padding:6px 4px 16px}
+.bn{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--amut);cursor:pointer;padding:6px 0;min-height:48px;font-weight:600}
+.bn.on{color:var(--accent)}
+.bn svg{width:21px;height:21px}
+.bn .bdg{position:absolute;margin-left:22px;margin-top:-3px;background:var(--s-overdue);color:#fff;font-size:8.5px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:var(--mono)}
+
+/* chips / cards */
+.chiprow{display:flex;gap:7px;overflow-x:auto;padding-bottom:8px;margin-bottom:6px;scrollbar-width:none}
+.fch{flex:none;display:flex;align-items:center;gap:7px;border:1px solid var(--abord);background:var(--asurf);border-radius:10px;padding:9px 13px;font-size:12px;font-weight:600;cursor:pointer;min-height:42px;color:var(--amut)}
+.fch b{font-family:var(--mono);font-size:13px;color:var(--atext)}
+.fch.hot b{color:var(--s-overdue)}
+.fch.on{border-color:rgba(255,122,26,.55);background:rgba(255,122,26,.08);color:var(--atext)}
+.statsline{display:flex;align-items:center;gap:8px;background:var(--asurf);border:1px solid var(--abord);border-radius:10px;padding:9px 13px;margin-bottom:10px;font-size:11.5px;color:var(--amut);cursor:pointer;min-height:44px}
+.statsline b{color:var(--s-complete);font-family:var(--mono)}
+.statsline .chev{margin-left:auto;transition:transform .2s}
+.statsline.open .chev{transform:rotate(180deg)}
+.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:-4px 0 10px}
+.sg{background:var(--asurf);border:1px solid var(--abord);border-radius:10px;padding:9px 12px}
+.sg .v{font-family:var(--mono);font-size:17px;font-weight:700}
+.sg .l{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--amut);font-weight:600}
+.sect{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--amut);margin:12px 2px 8px;display:flex;gap:8px;align-items:center}
+.sect .n{font-family:var(--mono);font-weight:500;text-transform:none}
+.tcard{background:var(--asurf);border:1px solid var(--abord);border-left:4px solid var(--s-idle);border-radius:12px;padding:12px 14px;margin-bottom:9px;cursor:pointer;position:relative}
+.tcard:active{border-color:var(--accent)}
+.tcard.first{border-color:rgba(255,122,26,.55)}
+.ribbon{position:absolute;top:-8px;left:12px;background:var(--accent);color:#0B0C0E;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:2px 8px;border-radius:7px}
+.tcard .tt{font-weight:700;font-size:14px;padding-right:60px}
+.tcard .tm{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:5px}
+.ucell{font-family:var(--mono);font-size:11.5px;background:var(--asurf2);border:1px solid var(--abord);padding:2px 8px;border-radius:5px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;padding:3px 9px;border-radius:9px;white-space:nowrap}
+.c-over{background:rgba(240,82,77,.16);color:var(--s-overdue)}
+.c-sub{background:rgba(163,113,247,.16);color:var(--s-submitted)}
+.c-hold{background:rgba(217,166,46,.16);color:var(--s-hold)}
+.c-prog{background:rgba(76,141,255,.16);color:var(--s-progress)}
+.c-ok{background:rgba(63,185,80,.16);color:var(--s-complete)}
+.c-idle{background:rgba(74,79,87,.3);color:var(--amut)}
+.tcard .why{font-size:11px;color:var(--amut);margin-top:5px}
+.tcard .arr{position:absolute;right:12px;top:14px;color:var(--amut)}
+.cbtn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;border:1px solid var(--abord);background:var(--asurf2);color:var(--atext);width:100%;margin-top:10px;font-family:inherit}
+.cbtn.acc{background:var(--accent);border-color:var(--accent);color:#0B0C0E}
+.cbtn.ghost{background:transparent}
+.wake{display:inline-flex;align-items:center;gap:5px;font-size:9.5px;color:var(--s-progress);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.wake .dot{width:6px;height:6px;border-radius:50%;background:var(--s-progress);animation:blink 1.6s infinite}
+@keyframes blink{50%{opacity:.25}}
+
+/* exec screen */
+.exec-h{padding:14px 16px 12px;background:var(--asurf);border-bottom:1px solid var(--abord)}
+.backrow{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.backb{width:44px;height:44px;border-radius:10px;border:1px solid var(--abord);background:var(--asurf2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.exec-h h3{font-size:17px;font-weight:700}
+.exec-h .em{font-size:11px;color:var(--amut);font-family:var(--mono)}
+.spine{display:flex;gap:2px;height:6px;margin:10px 0 8px}
+.spine i{flex:1;border-radius:2px;background:var(--asurf2)}
+.exec-b{flex:1;overflow-y:auto;padding:14px 16px 120px}
+.pinned{position:absolute;left:0;right:0;bottom:0;padding:12px 16px 24px;background:linear-gradient(transparent,var(--abg) 30%);display:flex;gap:10px}
+.pinned .cbtn{margin-top:0;min-height:56px;font-size:15px}
+.rgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:8px 0 4px}
+.rbtn{min-height:56px;border-radius:11px;border:2px solid var(--abord);background:var(--asurf);display:flex;align-items:center;justify-content:center;text-align:center;font-size:13px;font-weight:700;cursor:pointer;padding:8px;color:var(--atext)}
+.rbtn.sel{border-color:var(--s-overdue);background:rgba(240,82,77,.1);color:var(--s-overdue)}
+.photo{border:2px dashed var(--abord);border-radius:12px;min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;cursor:pointer;color:var(--amut);margin-bottom:8px}
+.photo.has{border-style:solid;border-color:rgba(63,185,80,.55);background:rgba(63,185,80,.06);color:var(--atext)}
+.meta{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.mchip{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;background:var(--asurf2);border:1px solid var(--abord);border-radius:9px;padding:4px 9px;color:var(--amut);font-family:var(--mono)}
+textarea.nt{width:100%;background:var(--asurf);border:1px solid var(--abord);border-radius:12px;color:var(--atext);padding:12px 14px;font-size:14px;font-family:inherit;min-height:64px;margin-bottom:8px}
+.box{display:flex;gap:9px;border-radius:12px;padding:11px 13px;font-size:12px;margin-bottom:10px;color:var(--amut)}
+.box.warn{background:rgba(240,82,77,.08);border:1px solid rgba(240,82,77,.35)}
+.box.hold{background:rgba(217,166,46,.09);border:1px solid rgba(217,166,46,.35)}
+.box.info{background:rgba(76,141,255,.08);border:1px solid rgba(76,141,255,.3)}
+.box b{color:var(--atext)}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}
+.dg{background:var(--asurf);border:1px solid var(--abord);border-radius:10px;padding:9px 12px}
+.dg .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--amut);font-weight:700}
+.dg .v{font-family:var(--mono);font-size:12.5px;margin-top:2px}
+.doc{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:10px 0;color:var(--s-progress);cursor:pointer;border-bottom:1px dashed var(--abord);min-height:44px}
+.okwrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}
+.okring{width:82px;height:82px;border-radius:50%;background:rgba(63,185,80,.14);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.rv{width:100%;background:var(--asurf);border:1px solid var(--abord);border-radius:12px;padding:4px 14px;margin:16px 0;text-align:left;font-size:12px}
+.rv .r{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px dashed var(--abord)}
+.rv .r:last-child{border-bottom:none}
+.rv .k{color:var(--amut);flex:none}
+
+/* board */
+.stsel{display:flex;gap:7px;overflow-x:auto;padding-bottom:8px;scrollbar-width:none}
+
+/* tablet split */
+.split{flex:1;display:flex;overflow:hidden}
+.rail{width:64px;flex:none;background:var(--asurf);border-right:1px solid var(--abord);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:4px}
+.rl{width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--amut);cursor:pointer}
+.rl.on{color:var(--accent);background:rgba(255,122,26,.1)}
+.rl svg{width:22px;height:22px}
+.mlist{width:340px;flex:none;border-right:1px solid var(--abord);overflow-y:auto;padding:12px}
+.mdet{flex:1;overflow-y:auto;position:relative;display:flex;flex-direction:column}
+.tcard.sel2{border-color:rgba(255,122,26,.6);background:rgba(255,122,26,.05)}
+
+/* ===== annotations ===== */
+.ann h2{font-size:15px;font-weight:600;margin-bottom:4px}
+.ann .blk{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:15px;margin-bottom:13px}
+.ann .blk h3{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);margin-bottom:7px}
+.ann p{color:var(--muted);font-size:12.5px;margin-bottom:7px}
+.ann p b{color:var(--text)}
+.try{display:flex;gap:9px;align-items:flex-start;padding:6px 0;color:var(--muted);font-size:12px;border-bottom:1px dashed var(--border)}
+.try:last-child{border-bottom:none}
+.try .n2{font-family:var(--mono);color:var(--accent);font-weight:700;flex:none}
+.toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,8px);background:var(--surface-2);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;padding:11px 16px;font-size:12.5px;box-shadow:0 8px 24px rgba(0,0,0,.5);opacity:0;transition:all .25s;pointer-events:none;z-index:99;max-width:430px}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-inner">
+    <h1>DESPL Tracker · Supervisor Shop-Floor Flow v2</h1>
+    <span class="tag">Responsive UI — same app, phone &amp; tablet</span>
+    <span class="tag g">No code changed</span>
+    <div class="sub">This is <b style="color:var(--text)">/my-day at small widths</b> — not a separate app. The queue is the home screen (no job→vessel→step drilldown), one primary action per card, actions pinned in the thumb zone, working outdoor mode ☀ and English / हिन्दी / ગુજરાતી. Switch device frames to see the identical app reflow per the SPEC-responsive-app-v2 degradation matrix.</div>
+  </div>
+</div>
+
+<div class="layout">
+  <div>
+    <div class="devsw">
+      <span class="on" id="dv-phone" onclick="setDev('phone')">📱 Phone 390px</span>
+      <span id="dv-tab" onclick="setDev('tab')">⬛ Tablet 10&quot; landscape</span>
+    </div>
+    <div class="frame phone" id="frame"><div class="app" id="app"></div></div>
+  </div>
+
+  <div class="ann">
+    <h2>What changed vs the first mobile concept — and why it's easier</h2>
+    <div class="blk">
+      <h3>The queue replaced the drilldown</h3>
+      <p>The old concept made the supervisor navigate <b>job → vessel → step → update</b>: four screens before any work. Here the ranked queue <b>is</b> the home screen — the prioritizer already knows what's first, so the top card wears a <b>"do this first"</b> ribbon and 90% of updates are <b>two taps</b>: card → action. A WhatsApp ping deep-links straight to the card, removing navigation entirely.</p>
+    </div>
+    <div class="blk">
+      <h3>Built for gloves and daylight</h3>
+      <p><b>56px primary actions pinned to the bottom</b> (thumb zone), 48px minimum everywhere, one decision per screen, status = colour + icon + word. The <b>theme button cycles Dark → Light → Outdoor</b>: light/dark is a per-user preference (everyone chooses), outdoor is a high-contrast override for bays with open shutters — try all three. While a task is in progress the screen <b>stays awake</b> (wake-lock chip on the card).</p>
+    </div>
+    <div class="blk">
+      <h3>Rules render, they don't surprise</h3>
+      <p>An overdue card leads with the <b>reason grid</b> — filing the reason and starting is one motion (invariant #7). A hold-point card keeps its finish button visibly locked with the ITP reference and a <b>Nudge QC</b> escape. Submitting states what happens next: QC verifies, the next stage unlocks. Photo + GPS are evidence; the authoritative timestamp stays the server clock.</p>
+    </div>
+    <div class="blk">
+      <h3>Try the full day (phone frame)</h3>
+      <div class="try"><span class="n2">1</span><span>Tap the top overdue card → pick a reason → <b>File reason &amp; start</b>. It returns as In&nbsp;progress.</span></div>
+      <div class="try"><span class="n2">2</span><span>Open "Nozzle fit-up" (In progress) → add the photo (geotag + time chips appear) → <b>Work finished</b> → see the confirmation, then the card sitting "With QC".</span></div>
+      <div class="try"><span class="n2">3</span><span><b>Claim</b> the pool card — it jumps into "Mine".</span></div>
+      <div class="try"><span class="n2">4</span><span>Open the hold card — finish is locked with the ITP reason; nudge QC instead.</span></div>
+      <div class="try"><span class="n2">5</span><span>Bottom nav → <b>Board</b>: the flow board collapsed to one column with a state selector (SPEC §4).</span></div>
+      <div class="try"><span class="n2">6</span><span>Cycle the <b>theme button</b> (Dark → Light → Outdoor) and switch <b>हि / ગુ</b> in the top bar. Then switch to the <b>Tablet</b> frame: same app becomes master-detail with an icon rail.</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= i18n ================= */
+const T={
+en:{today:"Today",board:"Board",alerts:"Alerts",profile:"Profile",hi:"Good morning",dept:"Fabrication / Welding",
+overdue:"Overdue",due:"Due today",qc:"With QC",pool:"Pool",mine:"My work",deptpool:"Department pool — tap Claim to take",
+cleared:"cleared today",stats:"My stats — 86% on-time",onTime:"On-time 30d",doneWk:"Done this week",cycle:"Cycle vs std",rejects:"Rejects 30d",
+doFirst:"Do this first",claim:"Claim",start:"Start work",fileStart:"File reason & start",finish:"Work finished",
+whyLate:"Why is it late? Pick one — then start.",daysLate:"days late",dueTod:"due today",
+rM:"Material delay",rV:"Vendor delay",rMc:"Machine breakdown",rMp:"Manpower",rD:"Drawing revision",rC:"Client hold",
+photoT:"Photo of finished work",addPhoto:"Tap to add photo",photoAdded:"Photo added",notes:"Notes (optional)",notesPh:"Anything QC or the next team should know",
+sendQC:"Send to QC",sent:"Update sent",sentD:"QC will check this work. The next step opens after approval.",
+next:"Next",nextV:"QC notified · next step unlocks after approval",back:"Back to Today",
+holdT:"Hold point open",holdD:"— TPI must witness before this can be finished. The button stays locked until QC records clearance.",
+nudge:"Nudge QC",nudged:"Nudge sent to QC + Production Head with hold age",
+waitQC:"Waiting for QC check",waitD:"Someone other than you must verify (maker–checker). You'll be notified.",
+screenOn:"screen stays on",stage:"Step",std:"Std duration",elapsed:"Elapsed",dueL:"Due",docs:"Documents",
+ready:"Ready",prog:"In progress",sub:"With QC",hold:"On hold",done:"Done",blocked:"Blocked",
+stReady:"Ready",stProg:"In progress",stSub:"With QC",stHold:"Hold / Blocked",stDone:"Done",
+noPhoto:"No photo attached — photo is strong proof for QC. Send anyway?",
+alertsT:"Alerts",a1:"Fit-up circ seam · SR03 is 3 days late — reason required",a2:"Long-seam RT accepted · circ welding unlocks tomorrow",a3:"QC verified Shell rolling · SR05",
+n_fit:"Fit-up — circ seam",n_noz:"Nozzle fit-up N1–N3",n_long:"Long-seam welding",n_lug:"Lifting-lug welding",n_wear:"Wear-plate fit-up",n_roll:"Shell rolling",n_saddle:"Saddle welding"},
+hi:{today:"आज",board:"बोर्ड",alerts:"सूचनाएँ",profile:"प्रोफ़ाइल",hi:"सुप्रभात",dept:"फैब्रिकेशन / वेल्डिंग",
+overdue:"देरी से",due:"आज करना है",qc:"QC के पास",pool:"पूल",mine:"मेरा काम",deptpool:"विभाग पूल — लेने के लिए Claim दबाएँ",
+cleared:"आज पूरे किए",stats:"मेरे आँकड़े — 86% समय पर",onTime:"समय पर 30 दिन",doneWk:"इस हफ्ते पूरे",cycle:"मानक बनाम समय",rejects:"रिजेक्ट 30 दिन",
+doFirst:"सबसे पहले यह करें",claim:"लें",start:"काम शुरू करें",fileStart:"कारण भरें और शुरू करें",finish:"काम पूरा हुआ",
+whyLate:"देरी क्यों हुई? एक चुनें — फिर शुरू करें।",daysLate:"दिन देरी",dueTod:"आज करना है",
+rM:"सामग्री की देरी",rV:"वेंडर की देरी",rMc:"मशीन खराब",rMp:"मैनपावर",rD:"ड्राइंग बदलाव",rC:"क्लाइंट होल्ड",
+photoT:"पूरे काम की फोटो",addPhoto:"फोटो जोड़ने के लिए दबाएँ",photoAdded:"फोटो जुड़ गई",notes:"नोट (वैकल्पिक)",notesPh:"QC या अगली टीम के लिए कुछ बताना हो तो लिखें",
+sendQC:"QC को भेजें",sent:"अपडेट भेज दिया गया",sentD:"QC इस काम की जाँच करेगा। मंज़ूरी के बाद अगला काम खुलेगा।",
+next:"आगे",nextV:"QC को सूचना गई · मंज़ूरी के बाद अगला काम खुलेगा",back:"आज पर वापस",
+holdT:"होल्ड पॉइंट खुला है",holdD:"— TPI की गवाही के बिना यह पूरा नहीं हो सकता। QC की मंज़ूरी तक बटन बंद रहेगा।",
+nudge:"QC को याद दिलाएँ",nudged:"QC और प्रोडक्शन हेड को सूचना भेजी गई",
+waitQC:"QC की जाँच बाकी",waitD:"आपके अलावा कोई और जाँच करेगा (मेकर–चेकर)। आपको सूचना मिलेगी।",
+screenOn:"स्क्रीन चालू रहेगी",stage:"स्टेप",std:"मानक समय",elapsed:"बीता समय",dueL:"नियत",docs:"दस्तावेज़",
+ready:"तैयार",prog:"चालू है",sub:"QC के पास",hold:"होल्ड पर",done:"पूरा",blocked:"रुका हुआ",
+stReady:"तैयार",stProg:"चालू",stSub:"QC के पास",stHold:"होल्ड / रुका",stDone:"पूरा",
+noPhoto:"फोटो नहीं जुड़ी — QC के लिए फोटो मज़बूत सबूत है। फिर भी भेजें?",
+alertsT:"सूचनाएँ",a1:"फिट-अप सर्क सीम · SR03 — 3 दिन देरी, कारण ज़रूरी",a2:"लॉन्ग-सीम RT पास · कल सर्क वेल्डिंग खुलेगी",a3:"QC ने शेल रोलिंग जाँची · SR05",
+n_fit:"फिट-अप — सर्क सीम",n_noz:"नोज़ल फिट-अप N1–N3",n_long:"लॉन्ग-सीम वेल्डिंग",n_lug:"लिफ्टिंग-लग वेल्डिंग",n_wear:"वियर-प्लेट फिट-अप",n_roll:"शेल रोलिंग",n_saddle:"सैडल वेल्डिंग"},
+gu:{today:"આજે",board:"બોર્ડ",alerts:"સૂચનાઓ",profile:"પ્રોફાઇલ",hi:"સુપ્રભાત",dept:"ફેબ્રિકેશન / વેલ્ડિંગ",
+overdue:"મોડું",due:"આજે કરવાનું",qc:"QC પાસે",pool:"પૂલ",mine:"મારું કામ",deptpool:"વિભાગ પૂલ — લેવા માટે Claim દબાવો",
+cleared:"આજે પૂરાં",stats:"મારા આંકડા — 86% સમયસર",onTime:"સમયસર 30 દિવસ",doneWk:"આ અઠવાડિયે પૂરાં",cycle:"માનક સામે સમય",rejects:"રિજેક્ટ 30 દિવસ",
+doFirst:"સૌથી પહેલા આ કરો",claim:"લો",start:"કામ શરૂ કરો",fileStart:"કારણ ભરો અને શરૂ કરો",finish:"કામ પૂરું થયું",
+whyLate:"મોડું કેમ થયું? એક પસંદ કરો — પછી શરૂ કરો.",daysLate:"દિવસ મોડું",dueTod:"આજે કરવાનું",
+rM:"સામગ્રીમાં વિલંબ",rV:"વેન્ડર વિલંબ",rMc:"મશીન ખરાબ",rMp:"મેનપાવર",rD:"ડ્રોઇંગ ફેરફાર",rC:"ક્લાયન્ટ હોલ્ડ",
+photoT:"પૂરા કામનો ફોટો",addPhoto:"ફોટો ઉમેરવા દબાવો",photoAdded:"ફોટો ઉમેરાયો",notes:"નોંધ (વૈકલ્પિક)",notesPh:"QC કે આગલી ટીમને કંઈ કહેવું હોય તો લખો",
+sendQC:"QC ને મોકલો",sent:"અપડેટ મોકલાયું",sentD:"QC આ કામ તપાસશે. મંજૂરી પછી આગળનું કામ ખૂલશે.",
+next:"આગળ",nextV:"QC ને જાણ થઈ · મંજૂરી પછી આગળનું કામ ખૂલશે",back:"આજે પર પાછા",
+holdT:"હોલ્ડ પોઇન્ટ ખુલ્લો છે",holdD:"— TPI ની હાજરી વિના આ પૂરું ન થાય. QC ની મંજૂરી સુધી બટન બંધ રહેશે.",
+nudge:"QC ને યાદ કરાવો",nudged:"QC અને પ્રોડક્શન હેડને જાણ કરાઈ",
+waitQC:"QC ની તપાસ બાકી",waitD:"તમારા સિવાય બીજું કોઈ તપાસશે (મેકર–ચેકર). તમને જાણ થશે.",
+screenOn:"સ્ક્રીન ચાલુ રહેશે",stage:"સ્ટેપ",std:"માનક સમય",elapsed:"વીતેલો સમય",dueL:"નિયત",docs:"દસ્તાવેજો",
+ready:"તૈયાર",prog:"ચાલુ છે",sub:"QC પાસે",hold:"હોલ્ડ પર",done:"પૂરું",blocked:"અટકેલું",
+stReady:"તૈયાર",stProg:"ચાલુ",stSub:"QC પાસે",stHold:"હોલ્ડ / અટકેલું",stDone:"પૂરું",
+noPhoto:"ફોટો નથી — QC માટે ફોટો મજબૂત પુરાવો છે. છતાં મોકલવું?",
+alertsT:"સૂચનાઓ",a1:"ફિટ-અપ સર્ક સીમ · SR03 — 3 દિવસ મોડું, કારણ જરૂરી",a2:"લોંગ-સીમ RT પાસ · કાલે સર્ક વેલ્ડિંગ ખૂલશે",a3:"QC એ શેલ રોલિંગ તપાસ્યું · SR05",
+n_fit:"ફિટ-અપ — સર્ક સીમ",n_noz:"નોઝલ ફિટ-અપ N1–N3",n_long:"લોંગ-સીમ વેલ્ડિંગ",n_lug:"લિફ્ટિંગ-લગ વેલ્ડિંગ",n_wear:"વિયર-પ્લેટ ફિટ-અપ",n_roll:"શેલ રોલિંગ",n_saddle:"સેડલ વેલ્ડિંગ"}};
+let L='en'; const t=k=>T[L][k]||T.en[k]||k;
+
+/* ================= model ================= */
+const S={OVER:'over',READY:'ready',PROG:'prog',SUB:'sub',HOLD:'hold'};
+let ITEMS=[
+ {id:1,nk:'n_fit',unit:'320SR03',stage:10,st:S.OVER,late:3,cp:1,mine:1,std:'2.0 d',el:'—',docs:['GA drawing R2','Weld map — course 2','WPS-08'],photo:0},
+ {id:2,nk:'n_noz',unit:'320SR01',stage:12,st:S.PROG,cp:0,mine:1,std:'2.0 d',el:'1.2 d',docs:['Nozzle orientation dwg','WPS-11'],photo:0},
+ {id:3,nk:'n_lug',unit:'320SR01',stage:13,st:S.HOLD,cp:0,mine:1,std:'0.5 d',el:'—',docs:['Lug drawing','WPS-05'],hold:'ITP-320-04 · H',photo:0},
+ {id:4,nk:'n_saddle',unit:'320SR02',stage:13,st:S.OVER,late:2,cp:0,mine:1,std:'1.5 d',el:'—',docs:['Saddle drawing'],photo:0},
+ {id:5,nk:'n_long',unit:'320SR04',stage:10,st:S.READY,cp:1,mine:0,std:'1.0 d',el:'—',docs:['Weld map — course 1','WPS-08'],photo:0},
+ {id:6,nk:'n_wear',unit:'320SR01',stage:13,st:S.READY,cp:0,mine:0,std:'1.0 d',el:'—',docs:['Wear plate dwg'],photo:0},
+ {id:7,nk:'n_roll',unit:'320SR05',stage:8,st:S.SUB,cp:0,mine:1,std:'1.5 d',el:'1.4 d',docs:[],photo:1}
+];
+let V={dev:'phone',tab:'today',screen:'list',sel:null,theme:'dark',statsOpen:0,reason:null,boardSt:'stProg',cleared:2};
+let tt;function toastMsg(m){const e=document.getElementById('toast');e.textContent=m;e.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('show'),3200)}
+
+const CHIP={over:['c-over',i=>i.late+' '+t('daysLate')],ready:['c-idle',()=>t('ready')],prog:['c-prog',()=>t('prog')],sub:['c-sub',()=>t('sub')],hold:['c-hold',()=>t('hold')]};
+const EDGE={over:'var(--s-overdue)',ready:'var(--s-progress)',prog:'var(--s-progress)',sub:'var(--s-submitted)',hold:'var(--s-hold)'};
+const chip=i=>{const c=CHIP[i.st];return `<span class="chip ${c[0]}">${c[1]}(i)</span>`.replace('(i)','')}
+function chipH(i){const c=CHIP[i.st];return `<span class="chip ${c[0]}">${c[1](i)}</span>`}
+
+/* ================= shared partials ================= */
+function topbar(title,sub){
+ return `<div class="tb">
+   <div class="ti"><div class="hi">${title}</div><div class="sm">${sub}</div></div>
+   <div class="icobtn ${V.theme!=='dark'?'on':''}" onclick="tglTheme()" title="Theme: dark → light → outdoor">
+     ${V.theme==='light'
+       ?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+       :V.theme==='outdoor'
+       ?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="5"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/></svg>'
+       :'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>'}
+   </div>
+   <div class="lang"><span class="${L==='en'?'on':''}" onclick="setL('en')">EN</span><span class="${L==='hi'?'on':''}" onclick="setL('hi')">हि</span><span class="${L==='gu'?'on':''}" onclick="setL('gu')">ગુ</span></div>
+ </div>`}
+function bnav(){
+ const ic={today:'<path d="M3 12l9-8 9 8M5 10v10h14V10"/>',board:'<rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="11" width="3.5" height="6" rx="1"/><rect x="13.5" y="7" width="3.5" height="10" rx="1"/>',alerts:'<path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 003.4 0"/>',profile:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>'};
+ return `<div class="bnav">${['today','board','alerts','profile'].map(k=>
+  `<div class="bn ${V.tab===k?'on':''}" onclick="nav('${k}')">${k==='alerts'?'<span class="bdg">3</span>':''}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">${ic[k]}</svg><span>${t(k)}</span></div>`).join('')}</div>`}
+
+function card(i,opts={}){
+ const first=opts.first?'first':''; const sel=opts.sel?'sel2':'';
+ const why=i.st===S.HOLD?`<div class="why" style="color:var(--s-hold)">${i.hold} — TPI</div>`:
+   i.st===S.PROG?`<div class="why">${t('elapsed')}: ${i.el} / ${i.std} · <span class="wake"><span class="dot"></span>${t('screenOn')}</span></div>`:
+   i.st===S.SUB?`<div class="why">${t('waitQC')}</div>`:'';
+ const claim=!i.mine?`<button class="cbtn acc" style="min-height:48px" onclick="event.stopPropagation();doClaim(${i.id})">${t('claim')}</button>`:'';
+ return `<div class="tcard ${first} ${sel}" style="border-left-color:${EDGE[i.st]}" onclick="openExec(${i.id})">
+   ${opts.first?`<div class="ribbon">${t('doFirst')}</div>`:''}
+   <div class="tt">${t(i.nk)}</div>
+   <div class="tm"><span class="ucell">${i.unit}</span>${chipH(i)}${i.cp?'<span class="chip" style="background:rgba(255,122,26,.14);color:var(--accent)">CP</span>':''}<span class="sm" style="font-family:var(--mono);font-size:10.5px;color:var(--amut)">${t('stage')} ${i.stage}/25</span></div>
+   ${why}${claim}
+   <svg class="arr" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+ </div>`}
+
+/* ================= screens ================= */
+function listBody(){
+ const mine=ITEMS.filter(i=>i.mine&&i.st!==S.SUB), sub=ITEMS.filter(i=>i.mine&&i.st===S.SUB), pool=ITEMS.filter(i=>!i.mine);
+ const rank={over:0,ready:1,prog:2,hold:3};mine.sort((a,b)=>(rank[a.st]-rank[b.st])||(b.cp-a.cp));
+ const nOver=ITEMS.filter(i=>i.st===S.OVER).length,nDue=ITEMS.filter(i=>[S.READY,S.PROG,S.HOLD].includes(i.st)).length,nSub=sub.length;
+ return `
+  <div class="chiprow">
+    <div class="fch hot"><b>${nOver}</b>${t('overdue')}</div>
+    <div class="fch"><b>${nDue}</b>${t('due')}</div>
+    <div class="fch"><b style="color:var(--s-submitted)">${nSub}</b>${t('qc')}</div>
+    <div class="fch"><b style="color:var(--s-complete)">${V.cleared}</b>${t('cleared')}</div>
+  </div>
+  <div class="statsline ${V.statsOpen?'open':''}" onclick="V.statsOpen=!V.statsOpen;render()">📊 ${t('stats')} <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+  ${V.statsOpen?`<div class="statgrid">
+    <div class="sg"><div class="v" style="color:var(--s-complete)">86%</div><div class="l">${t('onTime')}</div></div>
+    <div class="sg"><div class="v">11</div><div class="l">${t('doneWk')}</div></div>
+    <div class="sg"><div class="v" style="color:var(--s-hold)">+0.4d</div><div class="l">${t('cycle')}</div></div>
+    <div class="sg"><div class="v">1</div><div class="l">${t('rejects')}</div></div></div>`:''}
+  <div class="sect">${t('mine')} <span class="n">${mine.length}</span></div>
+  ${mine.map((i,x)=>card(i,{first:x===0})).join('')}
+  ${sub.length?`<div class="sect" style="color:var(--s-submitted)">${t('qc')} <span class="n">${sub.length}</span></div>${sub.map(i=>card(i)).join('')}`:''}
+  <div class="sect">${t('deptpool')} <span class="n">${pool.length}</span></div>
+  ${pool.map(i=>card(i)).join('')}`}
+
+function execBody(i,phone){
+ const spine=Array.from({length:25},(_,k)=>`<i style="${k+1<i.stage?'background:var(--s-complete)':k+1===i.stage?'background:var(--accent)':''}"></i>`).join('');
+ let mid='',pin='';
+ if(i.st===S.OVER){
+   mid=`<div class="box warn"><span>⚠</span><span><b>${i.late} ${t('daysLate')}.</b> ${t('whyLate')}</span></div>
+   <div class="rgrid">${[['rMc'],['rM'],['rV'],['rMp'],['rD'],['rC']].map(([k])=>`<div class="rbtn ${V.reason===k?'sel':''}" onclick="V.reason='${k}';render()">${t(k)}</div>`).join('')}</div>`;
+   pin=`<button class="cbtn acc" onclick="doFileStart(${i.id})">▶ ${t('fileStart')}</button>`;
+ }else if(i.st===S.READY){
+   pin=`<button class="cbtn acc" onclick="doStart(${i.id})">▶ ${t('start')}</button>`;
+ }else if(i.st===S.PROG){
+   mid=`<div class="sect" style="margin-top:4px">${t('photoT')}</div>
+   <div class="photo ${i.photo?'has':''}" onclick="snap(${i.id})">
+     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+     <span>${i.photo?t('photoAdded')+' ✓':t('addPhoto')}</span></div>
+   ${i.photo?`<div class="meta"><span class="mchip">📍 21.72°N 72.99°E</span><span class="mchip">🕒 10:42 IST</span><span class="mchip">ID SUP-FAB-03</span></div>`:''}
+   <div class="sect">${t('notes')}</div><textarea class="nt" placeholder="${t('notesPh')}"></textarea>
+   <div class="box info"><span>⚡</span><span><b>${t('next')}:</b> ${t('nextV')}</span></div>`;
+   pin=`<button class="cbtn acc" onclick="doSubmit(${i.id})">✓ ${t('finish')} — ${t('sendQC')}</button>`;
+ }else if(i.st===S.HOLD){
+   mid=`<div class="box hold"><span>⛔</span><span><b>${t('holdT')}: ${i.hold}</b> ${t('holdD')}</span></div>`;
+   pin=`<button class="cbtn" style="opacity:.45" disabled>🔒 ${t('finish')}</button><button class="cbtn ghost" style="max-width:150px" onclick="toastMsg(t('nudged'))">${t('nudge')}</button>`;
+ }else if(i.st===S.SUB){
+   mid=`<div class="box info"><span>⏳</span><span><b>${t('waitQC')}.</b> ${t('waitD')}</span></div>`;
+ }
+ const det=`<div class="dgrid">
+   <div class="dg"><div class="k">${t('std')}</div><div class="v">${i.std}</div></div>
+   <div class="dg"><div class="k">${t('elapsed')}</div><div class="v">${i.el}</div></div></div>
+   ${i.docs.length?`<div class="sect">${t('docs')}</div>${i.docs.map(d=>`<div class="doc" onclick="toastMsg('${d}')">▸ ${d}</div>`).join('')}`:''}`;
+ return {head:`<div class="exec-h">
+   ${phone?`<div class="backrow"><div class="backb" onclick="V.screen='list';render()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg></div>
+   <div style="flex:1"><h3>${t(i.nk)}</h3><div class="em">DESPL-320 · ${i.unit} · ${t('stage')} ${i.stage}/25</div></div></div>`
+   :`<h3>${t(i.nk)}</h3><div class="em">DESPL-320 · ${i.unit} · ${t('stage')} ${i.stage}/25</div>`}
+   <div class="spine">${spine}</div>
+   <div style="display:flex;gap:7px">${chipH(i)}${i.cp?'<span class="chip" style="background:rgba(255,122,26,.14);color:var(--accent)">CP</span>':''}${i.st===S.PROG?`<span class="wake"><span class="dot"></span>${t('screenOn')}</span>`:''}</div>
+ </div>`,body:mid+det,pin:pin?`<div class="pinned">${pin}</div>`:''}}
+
+function sentBody(i){
+ return `<div class="okwrap">
+   <div class="okring"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--s-complete)" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg></div>
+   <div style="font-size:19px;font-weight:800">${t('sent')}</div>
+   <p style="color:var(--amut);font-size:12.5px;margin-top:6px;max-width:280px">${t('sentD')}</p>
+   <div class="rv">
+     <div class="r"><span class="k">📷</span><span style="color:var(--s-complete)">✓ ${t('photoAdded')}</span></div>
+     <div class="r"><span class="k">📍</span><span class="mono">21.72°N 72.99°E</span></div>
+     <div class="r"><span class="k">🕒</span><span class="mono">10:42 IST · server</span></div>
+     <div class="r"><span class="k">${t('next')}</span><span>${t('nextV')}</span></div>
+   </div>
+   <button class="cbtn" style="max-width:260px" onclick="V.screen='list';render()">${t('back')}</button></div>`}
+
+function boardBody(){
+ const map={stReady:i=>[S.READY,S.OVER].includes(i.st),stProg:i=>i.st===S.PROG,stSub:i=>i.st===S.SUB,stHold:i=>i.st===S.HOLD,stDone:()=>false};
+ const cnt=k=>k==='stDone'?V.cleared:ITEMS.filter(map[k]).length;
+ const cards=V.boardSt==='stDone'?`<div class="box info"><span>✓</span><span>${V.cleared} ${t('cleared')}</span></div>`:ITEMS.filter(map[V.boardSt]).map(i=>card(i)).join('')||`<div class="box info"><span>—</span><span></span></div>`;
+ return `<div class="stsel">${['stReady','stProg','stSub','stHold','stDone'].map(k=>
+   `<div class="fch ${V.boardSt===k?'on':''}" onclick="V.boardSt='${k}';render()"><b>${cnt(k)}</b>${t(k)}</div>`).join('')}</div>${cards}`}
+
+function alertsBody(){
+ return ['a1','a2','a3'].map((k,x)=>`<div class="tcard" style="border-left-color:${x===0?'var(--s-overdue)':'var(--s-progress)'}" onclick="toastMsg('Deep-link: opens the exact card — same as a WhatsApp notification tap')"><div class="tt" style="font-size:13px;padding-right:20px">${t(k)}</div><div class="why mono" style="margin-top:4px">10:${10+x*7} IST</div></div>`).join('')}
+
+/* ================= renderers ================= */
+function renderPhone(app){
+ let head='',body='',pin='',nav=bnav();
+ if(V.screen==='exec'){const i=ITEMS.find(x=>x.id===V.sel);const e=execBody(i,true);head=e.head;body=`<div class="exec-b">${e.body}</div>`;pin=e.pin;nav='';}
+ else if(V.screen==='sent'){head=topbar(t('sent'),'DESPL-320');body=sentBody();nav='';}
+ else if(V.tab==='board'){head=topbar(t('board'),t('dept'));body=`<div class="abody">${boardBody()}</div>`;}
+ else if(V.tab==='alerts'){head=topbar(t('alertsT'),'');body=`<div class="abody">${alertsBody()}</div>`;}
+ else if(V.tab==='profile'){head=topbar('Ramesh K','SUP-FAB-03 · '+t('dept'));body=`<div class="abody"><div class="box info"><span>👤</span><span>Language + ☀ outdoor mode live in the top bar. Sign-out and password here in the real build.</span></div></div>`;}
+ else{head=topbar(`${t('hi')}, Ramesh`,t('dept')+' · DESPL-320');body=`<div class="abody">${listBody()}</div>`;}
+ app.innerHTML=head+body+pin+nav;
+}
+function renderTab(app){
+ const i=ITEMS.find(x=>x.id===V.sel)||ITEMS[0];V.sel=i.id;
+ const e=execBody(i,false);
+ const rail=`<div class="rail">${[['today','<path d="M3 12l9-8 9 8M5 10v10h14V10"/>'],['board','<rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="11" width="3.5" height="6" rx="1"/><rect x="13.5" y="7" width="3.5" height="10" rx="1"/>'],['alerts','<path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M10.3 21a2 2 0 003.4 0"/>'],['profile','<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>']].map(([k,p])=>
+   `<div class="rl ${V.tab===k?'on':''}" onclick="V.tab='${k}';render()" title="${t(k)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">${p}</svg></div>`).join('')}</div>`;
+ const mine=ITEMS.filter(x=>x.mine),pool=ITEMS.filter(x=>!x.mine);
+ const list=`<div class="mlist">
+   <div class="sect" style="margin-top:2px">${t('mine')} <span class="n">${mine.length}</span></div>
+   ${mine.map(x=>card(x,{sel:x.id===V.sel})).join('')}
+   <div class="sect">${t('deptpool')}</div>${pool.map(x=>card(x,{sel:x.id===V.sel})).join('')}</div>`;
+ const det=V.screen==='sent'?`<div class="mdet">${sentBody()}</div>`:`<div class="mdet">${e.head}<div class="exec-b">${e.body}</div>${e.pin}</div>`;
+ const mid=V.tab==='board'?`<div class="mdet"><div class="abody">${boardBody()}</div></div>`:V.tab==='alerts'?`<div class="mdet"><div class="abody">${alertsBody()}</div></div>`:list+det;
+ app.innerHTML=topbar(`${t('hi')}, Ramesh`,t('dept')+' · DESPL-320 · '+V.cleared+' '+t('cleared'))+`<div class="split">${rail}${mid}</div>`;
+}
+function render(){
+ const f=document.getElementById('frame'),app=document.getElementById('app');
+ f.className='frame '+(V.dev==='phone'?'phone':'tab');
+ app.className='app'+(V.theme==='dark'?'':' '+V.theme);
+ if(V.dev==='phone')renderPhone(app);else renderTab(app);
+}
+
+/* ================= actions ================= */
+function openExec(id){V.sel=id;V.reason=null;if(V.dev==='phone'){V.screen='exec';}render()}
+function nav(k){V.tab=k;V.screen='list';render()}
+function setL(l){L=l;render()}
+function tglTheme(){V.theme=V.theme==='dark'?'light':V.theme==='light'?'outdoor':'dark';render();
+ toastMsg(V.theme==='light'?'Light mode — per-user preference (D27); each employee picks System / Light / Dark':V.theme==='outdoor'?'Outdoor mode: high-contrast for daylight bays (D25) — overrides the theme while active':'Dark industrial theme')}
+function setDev(d){V.dev=d;V.screen='list';document.getElementById('dv-phone').classList.toggle('on',d==='phone');document.getElementById('dv-tab').classList.toggle('on',d==='tab');render();
+ if(d==='tab')toastMsg('Same app at tablet width: icon rail + master-detail. Nothing was rebuilt — the layout reflowed (SPEC §4).')}
+function doClaim(id){const i=ITEMS.find(x=>x.id===id);i.mine=1;render();toastMsg('Claimed from the department pool — audited, gates unchanged')}
+function doStart(id){const i=ITEMS.find(x=>x.id===id);i.st=S.PROG;i.el='0.0 d';V.screen=V.dev==='phone'?'exec':V.screen;render();toastMsg('Started — server clock, audit row. Screen will stay awake during the task.')}
+function doFileStart(id){if(!V.reason){toastMsg(t('whyLate'));return}
+ const i=ITEMS.find(x=>x.id===id);i.st=S.PROG;i.el='0.0 d';i.late=0;render();toastMsg('Reason "'+t(V.reason)+'" filed → block cleared → started. One motion.')}
+function snap(id){const i=ITEMS.find(x=>x.id===id);i.photo=1;render()}
+function doSubmit(id){const i=ITEMS.find(x=>x.id===id);
+ if(!i.photo&&!confirm(t('noPhoto')))return;
+ i.st=S.SUB;V.cleared++;V.screen='sent';render()}
+render();
+</script>
+</body>
+</html>
