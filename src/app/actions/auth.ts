@@ -32,14 +32,14 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   if (tenantId === null) return invalid;
 
   const session = await withTenant(tenantId, async (tx) => {
-    // D13 (SPEC §3): login identifier is username OR email. Email lookups stay
-    // lowercased to match how email is always stored (createUser/createEmployee
-    // both lowercase it); username is matched as typed since createEmployee's
-    // username is stored verbatim, case included.
+    // D13 (SPEC §3): login identifier is username OR email. Both lookups are
+    // lowercased to match how both are stored (createEmployeeSchema now
+    // lowercases `username` the same way `email` always has) — case alone
+    // must never make an identifier match two different rows.
     const user = await tx.user.findFirst({
       where: {
         active: true,
-        OR: [{ email: identifier.toLowerCase() }, { username: identifier }],
+        OR: [{ email: identifier.toLowerCase() }, { username: identifier.toLowerCase() }],
       },
     });
     if (!user) return null;

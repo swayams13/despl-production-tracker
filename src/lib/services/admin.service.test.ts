@@ -341,6 +341,35 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });
 
+  // Final whole-branch review, Finding 1: `email` was lowercased at the
+  // schema level, `username` never was — so a caller could evade the exact
+  // guard above just by typing a different CASE, e.g. an admin creating a
+  // user with username "Alice@Vendor.com" when "alice@vendor.com" already
+  // exists as another account's email. `createEmployeeSchema.username` now
+  // lowercases the same way `email` always has, so the collision query
+  // below (which matches on the lowercased value) catches it.
+  it("createEmployee rejects a username that case-insensitively collides with another account's email (case alone must not evade the guard)", async () => {
+    const stamp = Date.now();
+    const email = `casecollide-${stamp}@test.local`;
+    await createEmployee(admin, { displayName: "Has Email", username: `hasemail3-${stamp}`, email, roles: ["QC"], departmentIds: [] });
+    await expect(
+      createEmployee(admin, { displayName: "Collider", username: email.toUpperCase(), roles: ["QC"], departmentIds: [] }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  it("createEmployee lowercases a mixed-case username at creation, so it is stored the same way `email` always is", async () => {
+    const stamp = Date.now();
+    const created = await createEmployee(admin, {
+      displayName: "Mixed Case",
+      username: `MixedCase-${stamp}`,
+      roles: ["QC"],
+      departmentIds: [],
+    });
+    expect(created.username).toBe(`mixedcase-${stamp}`);
+    const row = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
+    expect(row.username).toBe(row.username.toLowerCase());
+  });
+
   // Fix round 3: createUser was missing the same guard from its own
   // direction — a createEmployee'd account can have an email-shaped
   // username (no format constraint on that field), and createUser never

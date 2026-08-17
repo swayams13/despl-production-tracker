@@ -28,6 +28,8 @@ export default function LoginPage() {
               name="identifier"
               type="text"
               autoComplete="username"
+              autoCapitalize="none"
+              autoCorrect="off"
               required
               autoFocus
               className="ws-detail mt-1.5"

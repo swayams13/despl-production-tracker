@@ -154,7 +154,10 @@ const roleCodeEnum = z.enum(["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVIS
 export const createEmployeeSchema = z
   .object({
     displayName: z.string().trim().min(1, "Name is required"),
-    username: z.string().trim().min(1, "Username is required"),
+    // Lowercased to match `email` below — case ALONE must never let two
+    // rows both match one login identifier (see login()'s OR lookup and
+    // the case-sensitive-collision finding this closed).
+    username: z.string().trim().toLowerCase().min(1, "Username is required"),
     email: z.string().trim().toLowerCase().email("Enter a valid email address").optional(),
     employeeCode: z.string().trim().min(1).optional(),
     roles: roleCodeEnum.array().min(1, "At least one role is required"),
