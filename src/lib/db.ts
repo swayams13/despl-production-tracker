@@ -41,6 +41,17 @@ export type Tx = Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0];
  * RLS is fail-closed: if app.tenant_id is not set, queries return zero rows
  * and inserts are rejected. A missed call here shows up immediately as empty
  * results, never as a silent cross-tenant read.
+ *
+ * Also pins this transaction's session timezone to UTC the same way
+ * (final whole-branch review, Finding 4). `scripts/provision-db-role.sql`'s
+ * `ALTER ROLE despl_web SET timezone = 'UTC'` only reaches environments
+ * someone re-runs it against — Railway, every teammate's local DB, and the
+ * demo laptop were all provisioned before that fix existed. A second
+ * `set_config('TimeZone', 'UTC', true)` here is self-applying: it runs on
+ * every transaction regardless of how the role was originally provisioned,
+ * so no environment can silently drift back to the server's own default
+ * (see provision-db-role.sql's comment for the exact naive-timestamp bug
+ * this closes).
  */
 export async function withTenant<T>(tenantId: number, fn: (tx: Tx) => Promise<T>): Promise<T> {
   if (!Number.isInteger(tenantId) || tenantId <= 0) {
@@ -48,6 +59,7 @@ export async function withTenant<T>(tenantId: number, fn: (tx: Tx) => Promise<T>
   }
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${String(tenantId)}, true)`;
+    await tx.$executeRaw`SELECT set_config('TimeZone', 'UTC', true)`;
     return fn(tx);
   });
 }
