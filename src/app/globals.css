@@ -504,6 +504,25 @@ body {
 .theme-industrial .filter-chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
 .theme-industrial .note { color: var(--muted); font-size: 11px; margin-top: 20px; text-align: center; }
 
+/* <ResponsiveTable /> (Task 2, SPEC §3.3): real table >=1024px, card list
+   below. CSS-only breakpoint swap so it can never hydration-mismatch or
+   flash — `.rt-table`/`.rt-cards` toggle on a plain media query, not JS. */
+.theme-industrial .rt-table { display: none; }
+.theme-industrial .rt-cards { display: flex; flex-direction: column; gap: 8px; }
+@media (min-width: 1024px) {
+  .theme-industrial .rt-table { display: block; }
+  .theme-industrial .rt-cards { display: none; }
+}
+.theme-industrial .rt-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; }
+.theme-industrial .rt-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.theme-industrial .rt-card-top b { font-size: 13px; font-weight: 600; }
+.theme-industrial .rt-card-meta { color: var(--muted); font-size: 11px; margin-bottom: 8px; }
+.theme-industrial .rt-card-row { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.theme-industrial .rt-card-delay { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.theme-industrial .rt-card-delay select.btn, .theme-industrial .rt-card-delay input.ws-detail { width: 100%; }
+.theme-industrial .rt-card-action { display: flex; gap: 8px; flex-wrap: wrap; }
+.theme-industrial .rt-card-action > * { flex: 1 1 120px; }
+
 /* dashboard (§4.2) — ported 1:1 from the mockup */
 .theme-industrial .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 10px; }
 .theme-industrial .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; overflow: hidden; transition: border-color .15s; }

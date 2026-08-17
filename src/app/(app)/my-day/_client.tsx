@@ -8,6 +8,9 @@ import { fileDelayAction } from "@/app/actions/delay";
 import { claimPlanAction, assignPlanAction, releasePlanAction } from "@/app/actions/assignment";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { CountUp } from "@/components/industrial/count-up";
+import { ResponsiveTable } from "@/components/industrial/responsive-table";
+import { StatusChip } from "@/components/industrial/status-chip";
+import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ActionResult } from "@/app/actions/_action";
 import type { MyDayView, MyDayRow } from "@/lib/services/myday.read";
 
@@ -57,6 +60,22 @@ function mineBucket(row: MyDayRow): Exclude<TabKey, "pool"> {
 
 function stop(e: MouseEvent) {
   e.stopPropagation();
+}
+
+/** Card-view status chip for a "mine" row — overdue beats state, matching
+ * the row/priority precedence already used elsewhere on this page. Maps the
+ * raw `PlanState` enum onto <StatusChip />'s display vocabulary so the card
+ * never renders a raw enum (CLAUDE.md hard ban). */
+function mineDisplayStatus(row: MyDayRow): { status: StageDisplayStatus; label?: string } {
+  if (row.ranked.overdue) return { status: "overdue" };
+  switch (row.ranked.state) {
+    case "READY": return { status: "idle", label: "Ready" };
+    case "IN_PROGRESS": return { status: "progress" };
+    case "ON_HOLD": return { status: "hold" };
+    case "SUBMITTED": return { status: "submitted" };
+    case "BLOCKED": return { status: "hold", label: "Blocked" };
+    default: return { status: "idle" };
+  }
 }
 
 /**
@@ -208,6 +227,68 @@ function MineRowView({
   );
 }
 
+// ── "Mine" card (<1024px): same state/handlers as MineRowView, re-laid out
+// per SPEC §4's phone row — task name, unit chip, status chip, due, one
+// full-width primary action. Independent local state from the table row (the
+// two are alternates, CSS-swapped, never both visible at once). ──────────
+function MineCardView({
+  row,
+  categories,
+  onOpenStage,
+}: {
+  row: MyDayRow;
+  categories: Category[];
+  onOpenStage: () => void;
+}) {
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const { pending, run } = useRun(setRefusal);
+  const [categoryId, setCategoryId] = useState<number | "">("");
+  const [detail, setDetail] = useState("");
+  const overdue = row.ranked.overdue;
+  const canStartAfterFile = row.ranked.state === "READY";
+  const clickable = row.ranked.plan.unitId != null;
+  const { status, label } = mineDisplayStatus(row);
+
+  const fileReason = (e: MouseEvent) => {
+    stop(e);
+    if (categoryId === "") return toast.error("Choose a delay reason first.");
+    run(async () => {
+      const filed = await fileDelayAction(row.ranked.plan.id, categoryId, detail || undefined);
+      if (!filed.ok || !canStartAfterFile) return filed;
+      return startAction(row.ranked.plan.id);
+    }, canStartAfterFile ? "Filed & started." : "Delay reason filed.");
+  };
+
+  return (
+    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+      <div className="rt-card-top">
+        <b>{row.processName}</b>
+        <StatusChip status={status} label={label} />
+      </div>
+      <div className="rt-card-meta">{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+      <div className="rt-card-row">
+        <span className="tag mono">{row.serialNo !== "—" ? row.serialNo : row.jobNumber}</span>
+        <span>Due {fmtDue(row.ranked.plan.plannedFinish)}</span>
+        {overdue && <span className="mono" style={{ color: "var(--s-overdue)" }}>{daysOverdue(row.ranked.plan.plannedFinish)}d overdue</span>}
+      </div>
+      {overdue && (
+        <div className="rt-card-delay" onClick={stop}>
+          <select className="btn" disabled={pending} value={categoryId} onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")} aria-label={`Delay reason for ${row.jobNumber} · ${row.processName}`}>
+            <option value="">Delay reason…</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <input className="ws-detail" disabled={pending} placeholder="Detail (optional)" value={detail} onChange={(e) => setDetail(e.target.value)} aria-label={`Delay detail for ${row.jobNumber} · ${row.processName}`} />
+          <button className="btn" disabled={pending} onClick={fileReason}>{canStartAfterFile ? "File & start" : "File"}</button>
+        </div>
+      )}
+      <div className="rt-card-action" onClick={stop}>
+        <MineActionButton row={row} pending={pending} run={run} />
+      </div>
+      <RefusalNote refusal={refusal} />
+    </div>
+  );
+}
+
 // ── Department pool row: Claim (+ Assign-to… for supervisors). ───────────
 function PoolRowView({
   row,
@@ -301,6 +382,49 @@ function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () =
   );
 }
 
+// ── QC verify queue card (<1024px) — same handlers as QcQueueRowView. ────
+function QcQueueCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const { pending, run } = useRun(setRefusal);
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+
+  const reject = (e: MouseEvent) => {
+    stop(e);
+    if (!reason.trim()) return toast.error("A reason is required to reject.");
+    run(() => rejectAction(row.ranked.plan.id, reason.trim()), "Rejected — returned to the maker.");
+    setRejecting(false);
+    setReason("");
+  };
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+
+  return (
+    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+      <div className="rt-card-top">
+        <b>{row.processName}</b>
+        <StatusChip status="submitted" />
+      </div>
+      <div className="rt-card-meta">{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+      <div className="rt-card-row">
+        <span className="tag mono">{row.serialNo !== "—" ? row.serialNo : row.jobNumber}</span>
+      </div>
+      {rejecting && (
+        <div className="rt-card-delay" onClick={stop}>
+          <input className="ws-detail" placeholder="Reason for rejection" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Rejection reason" autoFocus />
+        </div>
+      )}
+      <div className="rt-card-action" onClick={stop}>
+        {!rejecting && <button className="btn" disabled={pending} onClick={(e) => { stop(e); setRejecting(true); }}>Reject…</button>}
+        {rejecting && <button className="btn" disabled={pending} onClick={(e) => { stop(e); setRejecting(false); }}>Cancel</button>}
+        <button className="btn btn-accent" disabled={pending} onClick={rejecting ? reject : (e) => { stop(e); run(() => verifyAction(row.ranked.plan.id), "Verified — next stage unlocked."); }}>
+          {rejecting ? "Confirm reject" : "Verify"}
+        </button>
+      </div>
+      <RefusalNote refusal={refusal} />
+    </div>
+  );
+}
+
 // ── A QC actor's OWN submitted plan, shown in the verify queue read-only
 // (Fix 2, final whole-branch review) — maker-checker means this actor can
 // never verify/reject it, so it gets no action controls, just a same-shape
@@ -319,6 +443,25 @@ function SelfSubmittedRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage
         <span style={{ color: "var(--muted)", fontSize: 11 }}>Awaiting QC — submitted by you</span>
       </td>
     </tr>
+  );
+}
+
+// ── Self-submitted card (<1024px) — same read-only rendering as
+// SelfSubmittedRowView (maker-checker, invariant #3: no action controls). ─
+function SelfSubmittedCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+  return (
+    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+      <div className="rt-card-top">
+        <b>{row.processName}</b>
+        <StatusChip status="submitted" />
+      </div>
+      <div className="rt-card-meta">{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+      <div className="rt-card-row">
+        <span className="tag mono">{row.serialNo !== "—" ? row.serialNo : row.jobNumber}</span>
+      </div>
+      <p className="note" style={{ margin: 0, textAlign: "left" }}>Awaiting QC — submitted by you</p>
+    </div>
   );
 }
 
@@ -521,44 +664,66 @@ export function MyDayClient({
                 : "Nothing due right now — you're caught up."}
           </p>
         ) : (
-          <table>
-            {/* No thead in verify mode — QcQueueRowView is a 3-cell row
-                (job+process / action), same headerless convention
-                /workspace's own QC section uses; a 4-column header here
-                would misalign against it. */}
-            {!isVerifyMode && (
-              <thead>
-                <tr>
-                  <th style={{ width: 130 }}>Job</th>
-                  <th>Process</th>
-                  <th style={{ width: 80 }}>Due</th>
-                  <th className="num" style={{ width: 80 }}>Overdue</th>
-                  <th style={{ width: 220 }} />
-                </tr>
-              </thead>
-            )}
-            <tbody>
-              {isVerifyMode
+          <ResponsiveTable
+            table={
+              <table>
+                {/* No thead in verify mode — QcQueueRowView is a 3-cell row
+                    (job+process / action), same headerless convention
+                    /workspace's own QC section uses; a 4-column header here
+                    would misalign against it. */}
+                {!isVerifyMode && (
+                  <thead>
+                    <tr>
+                      <th style={{ width: 130 }}>Job</th>
+                      <th>Process</th>
+                      <th style={{ width: 80 }}>Due</th>
+                      <th className="num" style={{ width: 80 }}>Overdue</th>
+                      <th style={{ width: 220 }} />
+                    </tr>
+                  </thead>
+                )}
+                <tbody>
+                  {isVerifyMode
+                    ? mineSectionRows.map((r) =>
+                        // Self-submitted rows (Fix 2) get the read-only render —
+                        // maker-checker means this actor can never verify/reject
+                        // their own work, so QcQueueRowView's controls don't apply.
+                        r.ranked.plan.submittedBy === actorUserId ? (
+                          <SelfSubmittedRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+                        ) : (
+                          <QcQueueRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+                        ),
+                      )
+                    : mineSectionRows.map((r) => (
+                        <MineRowView
+                          key={r.ranked.plan.id}
+                          row={r}
+                          categories={view.delayCategories}
+                          onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+                        />
+                      ))}
+                </tbody>
+              </table>
+            }
+            cards={
+              isVerifyMode
                 ? mineSectionRows.map((r) =>
-                    // Self-submitted rows (Fix 2) get the read-only render —
-                    // maker-checker means this actor can never verify/reject
-                    // their own work, so QcQueueRowView's controls don't apply.
                     r.ranked.plan.submittedBy === actorUserId ? (
-                      <SelfSubmittedRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+                      <SelfSubmittedCardView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
                     ) : (
-                      <QcQueueRowView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+                      <QcQueueCardView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
                     ),
                   )
                 : mineSectionRows.map((r) => (
-                    <MineRowView
+                    <MineCardView
                       key={r.ranked.plan.id}
                       row={r}
                       categories={view.delayCategories}
                       onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
                     />
-                  ))}
-            </tbody>
-          </table>
+                  ))
+            }
+          />
         )}
       </div>
 

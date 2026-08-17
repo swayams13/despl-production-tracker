@@ -15,6 +15,7 @@ import {
   updateUserRolesDeptsAction,
   bulkImportEmployeesAction,
 } from "@/app/actions/admin";
+import { ResponsiveTable } from "@/components/industrial/responsive-table";
 import type { AdminView, AdminUserRow } from "@/lib/services/admin.read";
 import {
   parseEmployeeCsv,
@@ -114,82 +115,99 @@ function EmployeesSection({ view, canEdit, actorUserId }: { view: AdminView; can
           No employees yet.{canEdit ? " Add one to get started." : ""}
         </p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Username</th>
-              <th>Employee code</th>
-              <th>Roles</th>
-              <th>Departments</th>
-              <th>Status</th>
-              <th>Last login</th>
-              <th className="num">Open items</th>
-              {canEdit && <th className="num">Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {view.users.map((u) => {
-              const isSelf = u.id === actorUserId;
-              return (
-                <tr className="row" key={u.id}>
-                  <td>{u.name}</td>
-                  <td className="mono" style={{ color: "var(--muted)" }}>{u.username}</td>
-                  <td className="mono" style={{ color: "var(--muted)" }}>{u.employeeCode ?? "—"}</td>
-                  <td>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {u.roleCodes.map((c) => (
-                        <span className="tag" key={c}>{ROLE_LABEL[c] ?? c}</span>
-                      ))}
-                    </div>
-                  </td>
-                  <td>
-                    {u.departmentNames.length ? (
-                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                        {u.departmentNames.map((n) => (
-                          <span className="tag" key={n}>{n}</span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: "var(--muted)" }}>—</span>
-                    )}
-                  </td>
-                  <td>
-                    {u.active ? (
-                      <span className="chip c-complete"><i />Active</span>
-                    ) : (
-                      <span className="chip c-idle"><i />Inactive</span>
-                    )}
-                  </td>
-                  <td className="mono" style={{ color: "var(--muted)" }}>{formatLastLogin(u.lastLogin)}</td>
-                  <td className="num mono">{u.openItemsCount}</td>
-                  {canEdit && (
-                    <td className="num">
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                        <button className="btn" onClick={() => setEditRow(u)}>Edit</button>
-                        <button className="btn" disabled={pending} onClick={() => resetPasswordFor(u)}>Reset password</button>
-                        {u.active ? (
-                          <button
-                            className="btn"
-                            disabled={isSelf}
-                            title={isSelf ? "You cannot deactivate your own account." : undefined}
-                            onClick={() => setDeactivateRow(u)}
-                          >
-                            Deactivate
-                          </button>
-                        ) : (
-                          <button className="btn" disabled={pending} onClick={() => run(() => setUserActiveAction(u.id, true), "Reactivated.")}>
-                            Reactivate
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  )}
+        <ResponsiveTable
+          table={
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Username</th>
+                  <th>Employee code</th>
+                  <th>Roles</th>
+                  <th>Departments</th>
+                  <th>Status</th>
+                  <th>Last login</th>
+                  <th className="num">Open items</th>
+                  {canEdit && <th className="num">Actions</th>}
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {view.users.map((u) => {
+                  const isSelf = u.id === actorUserId;
+                  return (
+                    <tr className="row" key={u.id}>
+                      <td>{u.name}</td>
+                      <td className="mono" style={{ color: "var(--muted)" }}>{u.username}</td>
+                      <td className="mono" style={{ color: "var(--muted)" }}>{u.employeeCode ?? "—"}</td>
+                      <td>
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                          {u.roleCodes.map((c) => (
+                            <span className="tag" key={c}>{ROLE_LABEL[c] ?? c}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td>
+                        {u.departmentNames.length ? (
+                          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                            {u.departmentNames.map((n) => (
+                              <span className="tag" key={n}>{n}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        )}
+                      </td>
+                      <td>
+                        {u.active ? (
+                          <span className="chip c-complete"><i />Active</span>
+                        ) : (
+                          <span className="chip c-idle"><i />Inactive</span>
+                        )}
+                      </td>
+                      <td className="mono" style={{ color: "var(--muted)" }}>{formatLastLogin(u.lastLogin)}</td>
+                      <td className="num mono">{u.openItemsCount}</td>
+                      {canEdit && (
+                        <td className="num">
+                          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                            <button className="btn" onClick={() => setEditRow(u)}>Edit</button>
+                            <button className="btn" disabled={pending} onClick={() => resetPasswordFor(u)}>Reset password</button>
+                            {u.active ? (
+                              <button
+                                className="btn"
+                                disabled={isSelf}
+                                title={isSelf ? "You cannot deactivate your own account." : undefined}
+                                onClick={() => setDeactivateRow(u)}
+                              >
+                                Deactivate
+                              </button>
+                            ) : (
+                              <button className="btn" disabled={pending} onClick={() => run(() => setUserActiveAction(u.id, true), "Reactivated.")}>
+                                Reactivate
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          }
+          cards={view.users.map((u) => (
+            <EmployeeCardView
+              key={u.id}
+              u={u}
+              isSelf={u.id === actorUserId}
+              canEdit={canEdit}
+              pending={pending}
+              onEdit={() => setEditRow(u)}
+              onResetPassword={() => resetPasswordFor(u)}
+              onDeactivate={() => setDeactivateRow(u)}
+              onReactivate={() => run(() => setUserActiveAction(u.id, true), "Reactivated.")}
+            />
+          ))}
+        />
       )}
 
       {addOpen && canEdit && (
@@ -214,6 +232,69 @@ function EmployeesSection({ view, canEdit, actorUserId }: { view: AdminView; can
       )}
       {credential && (
         <CredentialDialog username={credential.username} tempPassword={credential.tempPassword} onClose={() => setCredential(null)} />
+      )}
+    </div>
+  );
+}
+
+// ── Employees card (<1024px) — same fields/actions as the table row, laid
+// out per SPEC §4: name + status chip + role/department tags + the same
+// action buttons. `AddEmployeeDialog` → full-screen form is explicitly out
+// of scope for this task (see task-2-report.md). ──────────────────────────
+function EmployeeCardView({
+  u,
+  isSelf,
+  canEdit,
+  pending,
+  onEdit,
+  onResetPassword,
+  onDeactivate,
+  onReactivate,
+}: {
+  u: AdminUserRow;
+  isSelf: boolean;
+  canEdit: boolean;
+  pending: boolean;
+  onEdit: () => void;
+  onResetPassword: () => void;
+  onDeactivate: () => void;
+  onReactivate: () => void;
+}) {
+  return (
+    <div className="rt-card">
+      <div className="rt-card-top">
+        <b>{u.name}</b>
+        {u.active ? (
+          <span className="chip c-complete"><i />Active</span>
+        ) : (
+          <span className="chip c-idle"><i />Inactive</span>
+        )}
+      </div>
+      <div className="rt-card-meta mono">{u.username}{u.employeeCode ? ` · ${u.employeeCode}` : ""}</div>
+      <div className="rt-card-row">
+        {u.roleCodes.map((c) => <span className="tag" key={c}>{ROLE_LABEL[c] ?? c}</span>)}
+        {u.departmentNames.map((n) => <span className="tag" key={n}>{n}</span>)}
+      </div>
+      <div className="rt-card-row">
+        Last login {formatLastLogin(u.lastLogin)} · {u.openItemsCount} open item{u.openItemsCount === 1 ? "" : "s"}
+      </div>
+      {canEdit && (
+        <div className="rt-card-action">
+          <button className="btn" onClick={onEdit}>Edit</button>
+          <button className="btn" disabled={pending} onClick={onResetPassword}>Reset password</button>
+          {u.active ? (
+            <button
+              className="btn"
+              disabled={isSelf}
+              title={isSelf ? "You cannot deactivate your own account." : undefined}
+              onClick={onDeactivate}
+            >
+              Deactivate
+            </button>
+          ) : (
+            <button className="btn" disabled={pending} onClick={onReactivate}>Reactivate</button>
+          )}
+        </div>
       )}
     </div>
   );
