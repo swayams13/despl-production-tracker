@@ -38,7 +38,7 @@ Board filter chips are therefore: `Not started · In progress · Awaiting QC · 
 
 ---
 
-## 2. Token layer (Session R1, task 1)
+## 2. Token layer (Session R1, task 6 — see §9's renumbered task list)
 
 ### 2.1 One addition to the existing block
 
@@ -47,8 +47,20 @@ Board filter chips are therefore: `Not started · In progress · Awaiting QC · 
   /* … existing tokens unchanged … */
   --muted-2: #5d646d;        /* third text level: mono meta, section labels */
   --accent-fg: #000;         /* names what .btn-accent already hardcodes */
+  --mixp: 18%;                /* chip fill mix % — dark 18 / light 12 / outdoor 0 */
+  --bordp: 45%;                /* chip border mix % — dark 45 / light 40 / outdoor 100 */
+  --border-width: 1px;         /* dark + light default; outdoor overrides to 2px */
+  --wb: 400;                   /* body weight — dark/light 400, outdoor 500 */
+  --wt: 600;                   /* title weight — dark/light 600, outdoor 700 */
 }
 ```
+
+Two tokens alone (`--muted-2`, `--accent-fg`) don't express everything the
+board actually renders per theme — `--mixp`/`--bordp` (chip fill/border mix,
+§2.3 item 3's chip contract), `--border-width`, and `--wb`/`--wt` (the body
+400→500 / title 600→700 weight steps this section's prose already names but
+didn't give tokens for) are needed too. Values taken verbatim from the
+board's own `themes` map (`design/DESPL Supervisor Handoff.dc.html`).
 
 ### 2.2 Light and outdoor palettes
 
@@ -61,6 +73,7 @@ Both are token blocks that override the same names — never filters, never per-
   --accent: #d9600a; --accent-fg: #ffffff;
   --s-idle: #6b7480; --s-progress: #2c62d6; --s-submitted: #6e3fd1;
   --s-hold: #9a6c05; --s-overdue: #c23a26; --s-complete: #1f7d4c;
+  --mixp: 12%; --bordp: 40%; --wb: 400; --wt: 600;
 }
 .theme-industrial.theme-outdoor {
   --bg: #000; --surface: #000; --surface-2: #0c0f12; --border: #7c8b99;
@@ -69,6 +82,7 @@ Both are token blocks that override the same names — never filters, never per-
   --s-idle: #9aa3ac; --s-progress: #8fb6ff; --s-submitted: #c9a8ff;
   --s-hold: #ffd24d; --s-overdue: #ff8b7a; --s-complete: #5be08f;
   --border-width: 2px;       /* dark/light default 1px */
+  --mixp: 0%; --bordp: 100%; --wb: 500; --wt: 700;
 }
 ```
 
@@ -76,11 +90,11 @@ Outdoor's three real deltas, visible in `P2·O` and required: surfaces collapse 
 
 **This CSS block is authoritative.** The board's own interactive Dark→Light→Outdoor cycler (`design/DESPL Supervisor Handoff.dc.html`, the `themes` object) is a rendering of these values for browser preview, not a second source — where the two ever disagree, this block wins and the board gets corrected to match, never the reverse. (This happened once, 17 Aug 2026: the board's `themes` object had drifted on four values — Light and Outdoor each collapsed `--s-hold`/`--s-overdue` to one shared hex, Dark's `--s-progress` held the accent color instead of its own, and Dark/Light's `--accent-fg` didn't match either — all four corrected against this block; see progress.md.)
 
-### 2.3 Needs approval before it is written (§P6)
+### 2.3 Approved 17 Aug 2026 (§P6) — was "needs approval before it is written"
 
-1. `--muted-2` — a third text level. The board uses it for every mono meta line; without it those lines sit at `--muted` and the hierarchy flattens.
-2. The light and outdoor palettes above. v1 is dark-only today; D27 and D25 require both.
-3. **An icon inside `.chip` on `pointer: coarse`.** The desktop chip is pill + dot + word. A 5px dot is not a shape a gloved supervisor reads in daylight, so on coarse pointers the chip renders `icon + word` (dot dropped, same pill, same tint). Desktop chips are untouched. This keeps CLAUDE.md's "status is never colour alone" true under conditions the desktop rule was not written for.
+1. `--muted-2` — a third text level. The board uses it for every mono meta line; without it those lines sit at `--muted` and the hierarchy flattens. (D28)
+2. The light and outdoor palettes above. v1 is dark-only today; D27 and D25 require both. (D28)
+3. **An icon inside `.chip` on `pointer: coarse`.** The desktop chip is pill + dot + word. A 5px dot is not a shape a gloved supervisor reads in daylight, so on coarse pointers the chip renders `icon + word` (dot dropped, same pill, same tint). Desktop chips are untouched. This keeps CLAUDE.md's "status is never colour alone" true under conditions the desktop rule was not written for. (D28)
 
 ---
 
@@ -104,17 +118,30 @@ Outdoor's three real deltas, visible in `P2·O` and required: surfaces collapse 
 
 | Route | Phone | Tablet | What changes |
 |---|---|---|---|
-| `/login` | `P3-01` | `P4-01` | Two-column on tablet so nothing sits under the landscape keyboard. Email + password (matches `src/app/actions/auth.ts`), language picked before login and stored per user. |
+| `/login` | `P3-01` | `P4-01` | Two-column on tablet so nothing sits under the landscape keyboard. **Username or email** + password (D13, shipped `2a2dc27`; the field label is literally "Username or email" — `e2e/auth.spec.ts:21` asserts it via `getByLabel`, not "Email"), language picked before login and stored per user. Frames `P3-01`/`P4-01` need this same corrected wording, not "Email + password." |
 | `/account/password` | `P3-02` | same split as `P4-01` | Gate: no nav, no back. Button enables only when all three rules pass. |
 | `/my-day` | `P3-03`, `P3-04` | `P4-02` | Phone: mine-first cards, scoreboard as a summary line expanding to 2 × 2. Tablet: master-detail, scoreboard always the 2 × 2 grid, execution panel on the right. |
 | execution sheet | `P3-05` overdue · `P3-06` in progress · `P3-07` hold · `P3-08` submitted | `P4-04` · `P4-02` · `P4-05` · `P4-06` | Full-screen below 640px; the detail panel (556 × 712) inside `/my-day` and the board above it. Reason grid is 2 × 3 on phone, 3 × 2 on tablet. |
-| board | `P3-09` | `P4-03` | Phone: one column + scrolling filter chips. Tablet: list left (440px) / same execution panel right; chips wrap to two rows so all five are reachable. |
-| alerts | `P3-10` | `P4-07` | Tablet gains a detail side because a rejection carries a sentence that gets skipped in a list row. |
-| profile | `P3-11` | `P4-08` | Language list (each option in its own script), theme 3-up, device block including wake-lock support and queued-update count. |
+| `/board` | `P3-09` | `P4-03` | Phone: one column + scrolling filter chips. Tablet: list left (440px) / same execution panel right; chips wrap to two rows so all five are reachable. |
+| `/alerts` | `P3-10` | `P4-07` | Tablet gains a detail side because a rejection carries a sentence that gets skipped in a list row. |
+| `/profile` | `P3-11` | `P4-08` | Language list (each option in its own script), theme 3-up, device block including wake-lock support and queued-update count. |
+
+**Routes (D31):** `/board`, `/alerts`, `/profile` are three new routes under the `(app)` route group, matching `/my-day`'s pattern. `src/middleware.ts` is deny-by-default with a catch-all matcher (`matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"]` over a `PUBLIC_PATHS` allowlist of just `/login` and `/api/health`) — new routes are protected automatically; no middleware change is needed.
 
 ---
 
 ## 5. Measurements (assert these)
+
+**Scope: `pointer: coarse`, not a route list.** Every row below applies where
+`pointer: coarse` matches — the same axis Task 1's density layer already
+keys off (SPEC-responsive-app-v2 §3.1) — not to a fixed set of "supervisor
+routes." Applied unconditionally these would regress desktop: `.chip` is
+~19px today, and 28px would fatten every 36px table row across the whole
+app, contradicting this section's own §5 chip-height intent, which is a
+coarse-pointer floor, not a global resize. Desktop (`pointer: fine`) stays
+6/4 radii and 13px body, unchanged, everywhere — including on `/board`,
+`/alerts`, `/profile` if ever opened with a mouse. "Supervisor surfaces" in
+this spec means "rendered on a coarse pointer," not "these specific routes."
 
 | | |
 |---|---|
@@ -153,6 +180,14 @@ Reuse existing server actions; chain them, never re-implement a rule (CLAUDE.md 
 
 Gates stay server-side. Every disabled control in the board corresponds to a real refusal code (`GATING_BLOCKED`, `REASON_REQUIRED`, `HOLD_POINT_OPEN`, `MAKER_CHECKER_VIOLATION`) and must show that refusal's sentence, localised, with the code unchanged in the log.
 
+**Three clarifications:**
+
+(a) **`nudgeQc` does not exist yet.** `src/lib/services/notifications.service.ts` has no function by that name today — it is new work for R2 (D32), a service function alongside the existing `notify`/`userIdsWithRole`/`markNotificationRead`/`markAllNotificationsRead`/`syncNotifications`. The "disable 30 min" cooldown in the table above is **derived server-side** from the last NUDGE-type `Notification` row for that plan + actor — never client state (a client-held timer resets on refresh/device-switch and a supervisor could nudge repeatedly by reloading; the server row is the only source that survives both).
+
+(b) **"File reason & start" can legitimately half-succeed.** The reason file and the start are chained server-side, but the start half can still be refused by gating (invariant #7's own point: a categorized reason clears the *delay* block, it does not bypass sequential gating or a hold point) — this is correct behavior, not a bug to design around. When that happens: the reason has filed, the sheet stays open, the reason grid collapses to show the now-filed reason, and the primary action re-labels to plain **"Start"** (the reason step is done; only the start remains, and it now shows its own refusal if it fails again).
+
+(c) **Every supervisor-surface action must revalidate `/my-day` and `/board`, not just `/workspace`/`/dashboard`.** Checked directly: `src/app/actions/process.ts`, `delay.ts`, and `assignment.ts` all call `revalidatePath("/workspace")` and `revalidatePath("/dashboard")` today, and none call `revalidatePath("/my-day")` or `revalidatePath("/board")` — meaning a supervisor's own action wouldn't reliably refresh the surfaces this spec puts it on. Every server action reachable from a supervisor surface needs both new paths added alongside the existing two, not in place of them (desktop still reads `/workspace`/`/dashboard`).
+
 ---
 
 ## 7. i18n rules (Session R3, designed here)
@@ -166,7 +201,7 @@ Gates stay server-side. Every disabled control in the board corresponds to a rea
 
 ---
 
-## 8. Playwright viewport matrix (R1, task 4)
+## 8. Playwright viewport matrix (R1, task 7 — see §9's renumbered task list)
 
 `playwright.config.ts` currently has one project (`chromium`, Desktop Chrome). Add:
 
@@ -188,11 +223,39 @@ Per supervisor page, assert:
 6. All three themes hold AA on chips, KPI values and the spine (run the contrast check per theme class, not once).
 7. `hi` and `gu` locales: no overflow at 390, no clipped button text, and no sentinel English word on a localised surface.
 
+**This is three tasks, not one — all needed before the assertions above are runnable at all:**
+
+1. **A real `/login` storageState fixture per project.** `playwright.config.ts` currently has one project (`chromium`) and `e2e/auth.spec.ts` drives the actual login form directly. The three new projects (`phone`/`tablet`/`desktop`) need their own authenticated fixture — CLAUDE.md's "Agent conduct" section forbids forging a session from `AUTH_SECRET` (the 16 Aug portfolio-dashboard incident), so this fixture must drive the real `/login` form once per project and save `storageState`, the same pattern `auth.spec.ts` already establishes, not a hand-built cookie/JWT.
+2. **`testMatch` scoping.** Without it, adding the three viewport projects would run *every* existing spec (including `auth.spec.ts`) three more times each. Scope `phone`/`tablet`/`desktop` to `testMatch` the new supervisor-surface specs only; `auth.spec.ts` stays on a single project (`chromium`/`desktop`) as today.
+3. **A WCAG contrast helper.** Checked: no contrast/WCAG utility exists anywhere in `e2e/` or `src/` today (assertion 6 above has nothing to call). Needs a small helper computing relative luminance + contrast ratio from computed `color`/`background-color`, run per theme class per the assertion above.
+
+**Device registry caution, verified 17 Aug 2026:** `devices['Galaxy Tab S4 landscape']` must be checked against the installed Playwright version's device registry before the config is written — an unknown key throws at config load, not at test run, so a typo here breaks every project, not just the new ones. Verified directly against this repo's installed `playwright-core@1.62.1` (`grep -o '"Galaxy Tab[^"]*"' .../coreBundle.js`): the key exists verbatim (`"Galaxy Tab S4 landscape"`, alongside `"Galaxy Tab S4"`, `"Galaxy Tab S9 landscape"`, `"Galaxy Tab S9"`) — safe to use as written above. Re-verify if the Playwright version ever bumps.
+
+**`webServer.command` must become `pnpm build && pnpm start`, not `pnpm dev`.** The current config runs the dev server (`pnpm dev`, Turbopack) under Playwright; a three-viewport-project matrix multiplies test count and dev-mode's slower first-paint/recompile behavior turns into flaky timing failures at scale. Build once, serve the production build, matching how CI actually deploys.
+
 ---
 
 ## 9. Session amendments
 
-**R1 — foundation + shell.** Unchanged tasks, plus: write §2 exactly as given; extend `app-shell.tsx` with the phone bottom nav and tablet rail per `P2` and any `P4` frame (the board glyph SVG is in the reference — copy it, it is the approved framed-bars form); add the §8 matrix. Gate additionally: `/dashboard`, `/workspace`, `/my-day`, `/admin` correct at all three viewports in all **three** themes via the toggle, no wrong-theme flash, zero desktop regressions.
+**R1 — foundation + shell. Task list replaced (was 5 tasks, now 7)** — the
+original 5 stand, reordered and two split out where v3 adds real new-build
+scope (D28's coarse-pointer chip icon is component code, not just tokens;
+D31 is three routes that didn't exist before), rather than folding
+everything into the original Task 3/Task 5 slots:
+
+1. Density layer (`pointer: coarse` + Tailwind `coarse:`/`fine:` variants) — **done**, unchanged by this amendment.
+2. `<ResponsiveTable>` primitive + adoption in `/my-day` and `/admin` Employees — unchanged by this amendment.
+3. `/board`, `/alerts`, `/profile` route shells (D31) — new. Minimal `page.tsx` per route under `(app)`, deny-by-default already covered by `middleware.ts`'s catch-all matcher (no middleware change). Full page content is R2; R1 only needs these to exist and be reachable so the shell's nav destinations resolve.
+4. Shell variants: extend `app-shell.tsx` with the phone bottom nav (64px + safe-area inset) and tablet icon rail (76px) per `P2`/`P4`, linking to Task 3's routes; board glyph SVG copied verbatim from the v3 board reference (supersedes the v2 artifact as the SVG source, per this spec's §0); theme-cycle control placed at the rail's bottom (tablet) / top bar (phone).
+5. `StatusChip` coarse-pointer icon variant (§2.3 item 3, D28) — `icon + word` replacing `dot + word` on `pointer: coarse`, same pill, same tint; desktop untouched. Isolated as its own task because `status-chip.tsx` is used everywhere in the app, not just supervisor surfaces — its own review, not folded into the token-layer task.
+6. Token layer + theme preference (§2 exactly as given, D27/D28): `--muted-2`/`--accent-fg`/`--mixp`/`--bordp`/`--border-width`/`--wb`/`--wt` on the base block, `.theme-light`/`.theme-outdoor` overrides, the System/Light/Dark selector (D27) with a working Outdoor toggle (D25 — the mechanism, not R2's full shop-floor UX) driven by a no-flash pre-hydration script, one selector in the shell (per the earlier "supervisor top bar" ruling — `AppShell`'s `.topbar`), and the AA contrast audit across all three themes including Task 5's now-finished chip icon variant.
+7. Playwright viewport matrix (§8): the three projects, the real-`/login`-driven `storageState` fixture per project (never a forged session — CLAUDE.md), `testMatch` scoping so `auth.spec.ts` stays single-project, the WCAG contrast helper, and `webServer.command` changed to `pnpm build && pnpm start`.
+
+**Three new gate conditions**, added to the original R1 gate (all still apply: `/dashboard`, `/workspace`, `/my-day`, `/admin` correct at all three viewports, zero desktop regressions, full suite + typecheck/lint/build clean):
+
+- All three viewports correct in all **three** themes — dark, light, **and outdoor** — via the toggle (was two themes in PLAN v1's original gate).
+- `/board`, `/alerts`, `/profile` exist as protected routes (a bare unauthenticated request redirects, matching the app's existing pattern) and are reachable with no dead link from every shell variant — desktop sidebar, tablet rail, phone bottom nav.
+- The Playwright viewport-matrix suite passes end-to-end with its real-login fixture and `testMatch` scoping in place, including the per-theme AA contrast assertion (§8 assertion 6) — not just "the file exists and typechecks."
 
 **R2 — supervisor flow.** Build to the frames named in §4. Gate: the full-day script passes at 390 and 1024 × 768 — overdue → reason → start; in-progress → photo → submit; claim from pool; hold locked + nudge; board single column; theme cycle through outdoor — plus the §5 measurements asserted and desktop `/my-day` unchanged at 1440.
 
@@ -204,7 +267,9 @@ Per supervisor page, assert:
 
 | # | Decision | Status |
 |---|---|---|
-| D28 | `--muted-2`, light + outdoor palettes, coarse-pointer chip icon added to `.theme-industrial` | proposed — §2.3 |
-| D29 | Canonical status labels used on supervisor surfaces; floor wording, if wanted, changes `stage-status.ts` globally | proposed |
-| D30 | Supervisor surfaces use 12 / 10 radii and 15px body on coarse pointers while desktop keeps 6 / 4 and 13px | proposed |
+| D28 | `--muted-2`, light + outdoor palettes, coarse-pointer chip icon added to `.theme-industrial` | **approved (17 Aug 2026)** — §2.3 |
+| D29 | Canonical status labels used on supervisor surfaces; floor wording, if wanted, changes `stage-status.ts` globally | **approved (17 Aug 2026)** |
+| D30 | Supervisor surfaces use 12 / 10 radii and 15px body on coarse pointers while desktop keeps 6 / 4 and 13px | **approved (17 Aug 2026)** |
+| D31 | Three new routes — `/board`, `/alerts`, `/profile` — under the `(app)` route group; no middleware change (existing catch-all matcher covers them) | **approved (17 Aug 2026)** — §4 |
+| D32 | `nudgeQc()` is new work in `notifications.service.ts` (R2); 30-min cooldown derived server-side from the last NUDGE `Notification` row, never client state | **approved (17 Aug 2026)** — §6(a) |
 | C27 | 25 stage names — sheet shows the **process** name with stage n/25 in the chip, which is correct either way (§11.3) | still open, not blocking |

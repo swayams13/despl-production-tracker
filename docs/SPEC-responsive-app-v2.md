@@ -179,6 +179,11 @@ Per session, assert for each new page: no horizontal overflow at 390px; every in
 | D26 | WhatsApp notification delivery lands in Session D | proposed — needs BSP choice |
 | D27 | Theme = per-user preference (System / Light / Dark), no-flash root-class application; outdoor (D25) overrides while active | **approved (user request, 16 Aug)** |
 | D20 | Photo storage = S3-compatible object storage | **still open** — vendor call needed before Session E |
+| D28 | `--muted-2`, light + outdoor palettes, coarse-pointer chip icon added to `.theme-industrial` (SPEC-supervisor-ui-v3.md §2.3) | **approved (17 Aug 2026)** |
+| D29 | Canonical status labels (`stage-status.ts`) used on supervisor surfaces; floor wording, if wanted, changes that file globally (SPEC-supervisor-ui-v3.md §1) | **approved (17 Aug 2026)** |
+| D30 | Supervisor surfaces use 12 / 10 radii and 15px body on `pointer: coarse`; desktop keeps 6 / 4 and 13px (SPEC-supervisor-ui-v3.md §5) | **approved (17 Aug 2026)** |
+| D31 | Three new routes — `/board`, `/alerts`, `/profile` — under the `(app)` route group; no middleware change (existing catch-all matcher covers them) (SPEC-supervisor-ui-v3.md §4) | **approved (17 Aug 2026)** |
+| D32 | `nudgeQc()` is new work in `notifications.service.ts` (R2); 30-min cooldown derived server-side from the last NUDGE `Notification` row, never client state (SPEC-supervisor-ui-v3.md §6(a)) | **approved (17 Aug 2026)** |
 
 ## 11. Open inputs
 
