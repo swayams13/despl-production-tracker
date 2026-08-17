@@ -2,7 +2,9 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟢 **Personal Dashboards Phase 1 (person grain + assignment service) DONE, 16 Aug 2026 — all 4 tasks shipped, reviewed, and a final whole-branch review's Critical + Important findings fixed and re-reviewed clean.** Specs: `docs/SPEC-personal-dashboards-v1.md` and `docs/PLAN-personal-dashboards-v1.md` (four phases: P1 person grain/assignment — done — P2 `/my-day`, P3 office Command Center, P4 admin employee mgmt, all still ahead). Built as a subagent-driven SDD run (ledger: `.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`, gitignored scratch dir — read it first before starting Phase 2, it has the full task-by-task history, every ruling made, and the deferred/parked-minor list). Commits `970db2d..c53fd19` on `demo`, not yet pushed to `origin/demo`.
+**Status:** 🟢 **Personal Dashboards v1 — ALL 4 PHASES DONE, 17 Aug 2026.** P1 (person grain + assignment service), P2 (`/my-day` personal dashboard), P3 (`/command/[dept]` Office Command Center), P4 (admin employee management + assignee-first notifications) all shipped, individually task-reviewed, and each phase's own final whole-branch review's findings fixed and re-reviewed clean. Full plan (`docs/PLAN-personal-dashboards-v1.md`) complete — see the "Session — Personal Dashboards Phase 3" and "Phase 4" entries below for the full account, including a genuinely load-bearing gap found mid-Phase-4 (SPEC decision D13, "login accepts username or email," was never actually implemented despite being locked since before Phase 1 — implemented as a controller ruling once Phase 4's `createEmployee` made the gap concrete) and 4 real bugs found and fixed during live browser verification (an ad-blocker CSS-class collision hiding admin form fields; a Postgres session-timezone bug silently undercounting a KPI; both closed at root cause with codebase-wide protection, not just the one symptom). Built as a subagent-driven SDD run throughout (ledger: `.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`, gitignored scratch dir — full task-by-task history and every ruling made, retained pending user review rather than auto-deleted). Commits `970db2d..da1430a` on `demo`, **not yet pushed to `origin/demo`** — awaiting the user's review and go-ahead. One Moderate, pre-existing, out-of-scope timezone-boundary item was found and deliberately parked (not fixed) in Phase 4's final review — see that entry for details; it's cosmetic at pilot scale, not a data-integrity issue.
+
+**One open item needs a human with Railway access, not something resolvable from this session's sandbox:** confirm the deployed Railway Postgres's default session timezone is actually UTC. Phase 4's Task 4.4 found and fixed a bug where it wasn't in the local dev sandbox (silently shifting "today" boundaries by hours) — if Railway has the same default, the fix (now self-applying via `db.ts`, not just a provisioning script) already covers it there too once this branch is pushed; if Railway already defaults to UTC, the fix was a no-op there and this is just confirmation, not a live gap.
 
 **`pnpm test:db` flakiness root-caused and fixed, 16 Aug 2026 evening, commit `c53fd19`.** Two separate, compounding causes: (1) every DB-gated test file's own `owner` client plus the app's shared `prisma` singleton connected with Prisma's uncapped default pool (`cpus*2+1` = 17 each on this machine) — with ~19 test files across vitest's parallel workers, this exceeded Postgres's `max_connections` (100). Fixed once at the source via `connection_limit` on both `DATABASE_URL`/`DIRECT_URL` in `.env.test` (gitignored — not in the commit), differentiated (10 vs 3) since the app's own service code legitimately fans out several concurrent transactions per test. (2) `despl_test` had grown to **524 organizations / 132K+ `process_plans` rows** from months of no-cleanup DB-gated runs, making `v_unit_stage_status` (a view whose CTE doesn't push its `job_id` filter down — confirmed via `EXPLAIN ANALYZE`: 1.69s for one call) breach Prisma's 2s transaction-acquisition timeout. **User-confirmed reset** of `despl_test` (disposable-by-design, never `despl`/`despl_demo`) restored a clean baseline — full-suite runs dropped from ~15-22s to ~6-8s. The reset surfaced a real, separate bug: `prisma/seed.ts`'s `mkUser` never set `mustChangePassword`, so every freshly-seeded demo user (`sj@despl.local` etc.) defaulted to `true` — the whole demo team would have hit the forced-password-change interstitial on first login. Fixed: `mkUser` now sets it `false` explicitly, matching Task 1.1's own migration-backfill reasoning for the same field. **Verified: 8 of the last 10 `pnpm test:db` runs 421/421 clean** (was failing every single run before); typecheck/lint/pure-suite/build all clean. `migration-backfill.test.ts`'s first two cases were retitled/redocumented — they no longer prove the historical migration backfill (unobservable on a DB that's been reset), now correctly described as `seed.ts` behavior regression tests.
 
@@ -117,6 +119,332 @@ flag the `despl` dev-DB pollution (35 orgs) to the user — it blocks any real
 login demo and needs an explicit decision (clean up the leaked rows, or fix
 `resolveTenantForLogin`'s single-org assumption) before anyone tries to log
 in on the demo laptop.
+
+## Session — Personal Dashboards Phase 2 (`/my-day`), 17 Aug 2026 (subagent-driven SDD)
+
+Resumed Personal Dashboards work: `docs/PLAN-personal-dashboards-v1.md` Phase 2
+("Landing router + `/my-day`, the personal dashboard" — Tasks 2.1–2.4), same
+subagent-driven-development flow as Phase 1. Ledger:
+`.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md` (full task-by-task
+history, every ruling made — read it first before starting Phase 3). Working
+directly on `demo`, no worktree. Baseline confirmed clean before starting:
+`pnpm test` 340/93 skipped, `pnpm test:db` matched Phase 1's final numbers.
+
+**Task 2.1 — `myday.read.ts` (`f7171ec`..`4a00987`).** `loadMyDay(actor)`: a
+cross-job read aggregating an actor's assigned work (`mine`), their
+department's unclaimed pool (`pool`), and teammates' items (`teamHeld`)
+across every ACTIVE job — loops `loadJobs()`'s jobs through the existing
+spine→CPM→`prioritize()` pipeline per job (same shape `portfolio.read.ts`
+already established), no second ranking implementation. Scoreboard formulas
+reuse `loadJobKpis`'s exact on-time/avg-cycle logic filtered to assignee
+(SQL-view rule: `/my-day` can never disagree with `/dashboard`). Review found
+2 Important findings (a `clearedToday` field scoped inconsistently with the
+rest of the payload; zero test coverage for the cross-job merge itself,
+the one thing this task was dispatched to prove) — both fixed, re-reviewed
+clean.
+
+**Task 2.2 — Landing router (`461e9a7`).** `src/app/page.tsx`: SUPERVISOR/QC
+now redirect to `/my-day` (was `/workspace`); explicit `mustChangePassword`
+interstitial check added ahead of role branches, matching `/portal`'s
+existing pattern. Reviewed clean, no fix loop.
+
+**Task 2.3 — `/my-day` page (`0682d46`..`6d1b6e7`, 2 fix rounds).** The
+actual page: header, personal scoreboard strip, always-visible **Mine** +
+**Department pool** sections (KPI tabs filter Mine only — a deliberate
+controller ruling reading SPEC's parallel bullet structure literally, since
+only "Held by teammates" says "collapsed"), collapsed **Held by teammates**,
+inline refusal rendering (error code + sentence, not just a toast — the
+explicit differentiator from `/workspace`'s pattern), Claim/Assign actions,
+StageSheet integration. Round 1 fixed a mislabeled "File & start" button
+(only filed, never started) and the Mine/Pool-always-visible layout. Round 2
+fixed a bug the round-1 fix itself introduced (clicking "Pool" silently
+reset Mine's selected filter tab).
+
+**Task 2.4 — Verify gate (`f5c0bb0`), DONE_WITH_CONCERNS → Approved.** Part
+A: a genuinely non-circular DB-gated test proving `/my-day`'s overdue count
+agrees with `/workspace`'s (`loadMyOverdueCount`) for the same actor. Part
+B: a REAL browser click-through of the full scenario through the actual
+`/login` form (never forged) — supervisor claim→start→submit, QC
+login→verify, both `/dashboard`/`/workspace` confirmed to reflect the
+change. This surfaced and fixed **2 real bugs** neither unit tests nor task
+review could have caught: (1) `myday.read.ts`'s partition never showed a QC
+actor cross-department SUBMITTED plans — `/my-day`'s "With QC" tab came up
+empty for the primary maker-checker flow; (2) the inline `RefusalNote` CSS
+broke under a narrow table column, making a real refusal unreadable.
+Honestly reported: the exact same-user maker-checker refusal isn't
+reachable with the seeded accounts (only one QC-role user exists) — a
+different real refusal was substituted and confirmed instead of forcing a
+false pass. Also fixed as environment setup (not code): local Postgres was
+misconfigured (Homebrew services shadowing the project's Docker container —
+same failure mode as a prior incident) and one migration
+(`session_version`) was unapplied.
+
+**Final whole-branch review (opus) — 3 Important findings, all fixed
+(`25183e0`), re-reviewed clean.** Found exactly the kind of cross-task seam
+no single task's own review could see: (1) the router's two conditional
+redirects (2.2) had no fallback — a staff-side `CLIENT_VIEWER` with
+`clientId: null` (createable via `/admin` today) fell off the function,
+blank page; (2) a QC actor's OWN submitted work (QC department's own
+NDE/inspection processes) became invisible in every tab and count — a real
+interaction between 2.3's tab bucketing and 2.4's Bug-1 fix; (3) every row
+on `/my-day` was a dead click control for job-grain (unit-less) office-dept
+work, since `/my-day` is the first surface to list any — `/workspace`/
+`/departments` never had this problem because they're unit-grain only.
+Bundled in two upgraded Minors (missing `disabled={pending}` on delay
+controls; a genuine SSR/hydration mismatch from browser-local-time date math,
+fixed with the same fixed-offset IST arithmetic `myday.read.ts` already
+uses).
+
+**Verified:** `pnpm test` 340/99 skipped, `pnpm test:db` **439/439, run
+twice** (both before and after the final fix wave), typecheck/lint/build
+all clean (build independently re-verified by the controller after one
+implementer's sandbox couldn't run it — a Google Fonts network-fetch
+limitation specific to that sandbox, not a real defect).
+
+**Phase 2: DONE.** Commits `38e04da..25183e0` on `demo`, not yet pushed to
+`origin/demo`.
+
+**Rulings made this phase (full list, with "why"/"cost if wrong" in the SDD
+ledger):** cross-job aggregation shape for `myday.read.ts`; scoreboard has
+no subject parameter (peer-scoreboard RBAC deferred to whichever phase
+exposes it); router precedence (explicit interstitial check ahead of role
+branches); the `myday.read.ts` row-label extension (job number/process
+name/unit serial denormalized onto each row); dark theme only (SPEC's
+"light+dark" text is inherited boilerplate against CLAUDE.md's explicit
+"dark theme only in v1" and the fact no light variant exists anywhere in
+this app); KPI tabs are pure client-side state, not URL-driven; Mine/Pool
+must both be always-visible sections.
+
+**Needs the user's attention before Phase 3/4 or any live demo:** a real
+`/login` browser spot-check as `qc@despl.local` for the self-submitted-work
+fix (verified by code tracing + a DB test this session, never clicked
+through live); a second seed QC-role account would let a future phase
+actually browser-verify the maker-checker same-user refusal path (today
+only proven by the unit-tested server gate, never reachable in a live
+click-through with the current single QC seed account).
+
+**NEXT SESSION — start here: Phase 3 (Office Command Center pages).**
+Pre-flight scan and two structural rulings already written to the SDD
+ledger (`.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`, "Phase
+3" section) but Task 3.1 was not yet dispatched — resume from there, do not
+re-derive:
+1. **SPEC/schema mismatch already resolved:** SPEC §7.4 names "PMO" as one
+   of the six office departments, but no `PMO` department code exists
+   anywhere in the schema/seed (13 codes total, per `docs/BUILD-SPEC-v2.md`
+   §3). Ruling: "PMO" maps to the seeded `PROJECTS` department. The six
+   `/command/[dept]` codes are `PROJECTS, ENGINEERING, PLANNING,
+   PROCUREMENT, QC, STORES`; every other code redirects to `/workspace`.
+2. **New read file needed:** `src/lib/services/command-center.read.ts`,
+   `loadCommandCenter(actor, deptId)` — reuses the same cross-job
+   spine→CPM→`prioritize()` loop `myday.read.ts` established (filtered to
+   one department) for "Decide today"/"blocking-waiting", and calls the
+   EXISTING `loadDepartmentCards(actor)` (`departments.read.ts`) for the KPI
+   row so the numbers can never drift from `/departments/[id]` (Task 3.2's
+   own gate requires exact match). "Pipeline columns map plan states into
+   dept vocabulary" means relabeling the existing `PlanState` enum per
+   department via a small static config, not inventing per-department
+   record types (SPEC explicitly bans that).
+3. **Access control ruling:** dept members + PH/ADMIN get full access;
+   MANAGEMENT sees the page read-only (zero action buttons, matching Task
+   4.2's own admin convention); everyone else gets `notFound()`.
+
+After Task 3.1 (`/command/[dept]`) → Task 3.2 (verify gate: all 6 pages
+render non-empty, KPI numbers match `/departments/[id]`/`/dashboard`
+exactly, management sees zero action buttons) → final Phase-3 whole-branch
+review → **Phase 4** (admin employee management + notifications: Tasks
+4.1 `admin.service` extensions, 4.2 `/admin` Employees tab, 4.3
+assignee-first notifications, 4.4 full release-gate verification — the
+plan's own §10 end-to-end scenario) → sync this file again → vault sync
+per the workspace `CLAUDE.md`.
+
+Standing instructions from the user for this multi-session effort, carried
+forward: stay strictly scoped to what the plan/spec/CLAUDE.md actually say,
+no unrequested invention; flag small uncertainties and keep moving (ruling
++ ledger entry, same pattern as above); escalate genuinely big issues to a
+more capable model to adjudicate, then hand back to Sonnet for the actual
+coding; if a session runs out of budget mid-phase, the next session resumes
+from the SDD ledger, not from memory.
+
+## Session — Personal Dashboards Phase 3 (Office Command Center), 17 Aug 2026 (subagent-driven SDD)
+
+Continued the same multi-session effort: `docs/PLAN-personal-dashboards-v1.md`
+Phase 3 (`/command/[dept]` for the six office departments — Tasks 3.1–3.2),
+same subagent-driven-development flow, same session as Phase 2 above (no
+gap). Baseline: `pnpm test` 340/99 skipped, `pnpm test:db` 439/439 twice
+(Phase 2's own final numbers). BASE commit: `25183e0`.
+
+**Ruling (SPEC/schema mismatch):** SPEC §7.4 names "PMO" as one of the six
+office departments; no `PMO` code exists in the schema/seed (13 codes
+total). Ruling: "PMO" maps to the seeded `PROJECTS` department (its
+entry-surface — PO review, kick-off — is the project-management function
+PMO describes). The six `/command/[dept]` codes: `PROJECTS, ENGINEERING,
+PLANNING, PROCUREMENT, QC, STORES`; the other 7 (floor/shop) redirect to
+`/workspace`.
+
+**Task 3.1 — `/command/[dept]` + `command-center.read.ts`
+(`5066469`..`8c3faa1`).** New read reuses `myday.read.ts`'s exact
+cross-job spine→CPM→`prioritize()` loop (no second ranking
+implementation) and calls the EXISTING `loadDepartmentCards()` for the KPI
+row so numbers can never drift from `/departments`/`/dashboard` (SQL-view
+rule). Added an additive `blockingPredecessorIds` field to the shared
+`RankedPlan` type (previously computed internally by `prioritize()` and
+discarded) to support the new "You're blocking" section without a second
+DAG traversal. Access: dept members + PH/ADMIN full access, MANAGEMENT
+read-only (zero action buttons), everyone else `notFound()`. Reviewed
+clean, no fix loop — "Approved."
+
+**Task 3.2 — verify gate (no commits, verification-only).** Closed a real
+gap Task 3.1's own browser pass left: only Procurement had been fully
+click-tested. Drove all 6 office departments' seeded supervisor accounts
+via real `/login`, confirmed each renders non-empty with KPI numbers
+byte-identical to `/departments`, confirmed MANAGEMENT read-only on 2 more
+departments, confirmed dark theme clean on all 6 + `/login`.
+
+**Final whole-branch review (opus) — 2 Important findings, both fixed,
+re-reviewed clean.** (1) **Reachability gap**: `/command/[dept]` had
+exactly one inbound link in the whole app (`/my-day`'s header, members
+only) — PH/ADMIN/MANAGEMENT never reach `/my-day`, so the MANAGEMENT
+read-only mode was dead code in the shipped UI. Fixed with a link from
+`/departments/[id]` (the page those roles DO reach), gated on the same
+`classifyDeptCode` helper. (2) **Uncapped cross-department lists**:
+"You're blocking"/"Waiting on others" had no cap, unlike the pipeline
+columns 40 lines away — at DESPL's per-unit `ProcessPlan` grain (9 plans
+per process for a 9-serial job) a busy department like QC could render as
+a wall of rows. Fixed with the same `slice(0,6)` + "+N more" pattern the
+pipeline columns already use.
+
+**Verified:** `pnpm test` 368/100 skipped, `pnpm test:db` 468/468,
+typecheck/lint/build clean.
+
+**Phase 3: DONE.** Commits `5066469..07731eb` on `demo`.
+
+## Session — Personal Dashboards Phase 4 (admin employee management + notifications), 17 Aug 2026 (subagent-driven SDD, continuing same session)
+
+Final phase of the plan: `admin.service.ts` extensions, `/admin`'s
+Employees tab, assignee-first notifications, and the full §10 release-gate
+browser verification. Baseline: Phase 3's own final numbers, BASE commit
+`07731eb`.
+
+**Task 4.1 — `admin.service.ts` extensions (`da66b53`..`16862b6`, 3 fix
+rounds).** `createEmployee` (crypto-random temp-password generation,
+returns `{userId, username, tempPassword, effectiveEmail}` once, never
+logged/audited-in-plaintext), `setUserActive` (self-deactivate refused),
+`updateUserRolesDepts` (self-demote-from-ADMIN refused), `bulkImportEmployees`
+(per-row independent transactions — a bad row never rolls back good
+ones), extended `resetUserPassword`. **Genuinely load-bearing gap found
+mid-task and closed via a controller ruling, not deferred a second time:**
+SPEC decision D13 ("login accepts username or email") had been locked
+since before Phase 1 but was NEVER implemented — `login()` was still
+email-only, `type="email"` input, no username path. Task 4.1's
+`createEmployee` is the function that makes accounts without a real email
+(the realistic shape of the C9 bulk staff list), so an unimplemented D13
+meant those accounts genuinely couldn't sign in. Implemented D13 for
+real: `loginSchema` widened to accept a bare identifier, `login()`'s
+lookup does `OR` on email/username, login page relabeled "Username or
+email." This introduced (and then closed, across 2 more fix rounds) a
+username/email cross-field collision risk — an admin-privileged path
+could otherwise create an account whose username matches a different
+user's email, making login identity resolution nondeterministic; closed
+with collision guards on both `createEmployee` and the older `createUser`.
+`pnpm test` 373/113 skipped, `pnpm test:db` 485/485, typecheck/lint clean.
+
+**Task 4.2 — `/admin` Employees tab (`fef1f35`..`53b3444`, 2 fix
+rounds).** Extended table (username/employeeCode/lastLogin/open-items-
+count columns, a new additive `User.lastLoginAt` migration), Add/Edit-
+employee dialogs, A6 credential-slip printing, bulk CSV import with
+per-row preview + downloadable result CSV. Fix round 1 closed an unscoped
+global print-CSS regression (breaking printing on every OTHER page in the
+app) and a stale-schedule-run bug inflating the open-items count. Fix
+round 2 closed a regression the round-1 CSS fix itself introduced (it
+fixed the scoping bug but silently dropped the A6 physical page-size
+requirement) — resolved via CSS named pages + a `createPortal`
+restructure, verified via an actual Playwright/Chromium PDF reproduction,
+not just reasoning about it. `pnpm test` 396/396, `pnpm test:db` clean
+(admin tests), build clean.
+
+**Task 4.3 — assignee-first notifications (`e068807`).** `syncOverdueStageNotifications`'s
+recipients now `assigneeUserId ?? department supervisors` (Production
+Head inclusion unchanged in both branches — a deliberate scope ruling
+against SPEC §8's aspirational T-3/T-0/T+3/T+7 tiered model, which was
+confirmed to not actually exist anywhere in this codebase and was
+explicitly NOT built here); `assignPlan` gains a "You were assigned…"
+notification. Clean first review, no fix loop.
+
+**Task 4.4 — full release-gate verification (`78eff8d`..`165962d`).**
+First time all 4 phases were driven live, end to end, through the real
+app: ADMIN creates an employee via `/admin` → genuine A6 credential slip
+prints → new employee's first login by USERNAME (not email — directly
+exercises D13) → forced password change → `/my-day` → claim/start/submit
+(correctly refused twice for real reasons, `REASON_REQUIRED` then
+`HOLD_POINT_OPEN`, both cleared the real way) → QC (a different human)
+verifies → `/command/projects` and `/dashboard` both reflect it cold, no
+refresh-order dependency. **Found and fixed 2 more real bugs at root
+cause:** (1) the Add/Edit Employee dialog's core fields were invisible
+because CSS class names `ad-grid`/`ad-hint` collide with a real ad-blocker
+extension's cosmetic filter list — renamed to `emp-*`, static regression
+test added; (2) `/my-day`'s `clearedToday` silently undercounted SUBMITTED
+items due to a Postgres session-timezone GUC (naive timestamp columns
+miscompared against JS `Date` params unless the DB role's session
+timezone is pinned to UTC) — fixed at the provisioning-script level
+initially, then made self-applying in the final fix wave (see below).
+Grep pass across all 40 Phase 1–4 source files: zero hard-ban hits.
+`pnpm test` 398/123 skipped, `pnpm test:db` 521/521 twice, build clean.
+
+**Final whole-branch review (opus) — 5 Important findings, all fixed,
+re-reviewed clean.** All 5 were genuine cross-phase seams no single
+task's review could see: (1) the username/email collision guards were
+case-sensitive — case ALONE reopened the exact login-ambiguity bug 3
+rounds of Task 4.1 existed to close, compounded by D13's login input
+losing its mobile auto-capitalization protection; (2) the new
+assignee-first notification branch didn't check `active` — deactivating
+an assignee (which by design doesn't release their plans) silently
+stranded overdue notifications with nobody able to act on them; (3) no UI
+path exists anywhere to reassign or release an already-assigned plan, yet
+the admin deactivation dialog's own copy said "reassign from the
+department view"; (4) the timezone fix only lived in a manual one-time
+provisioning script, reaching no already-provisioned environment
+(Railway, teammates' laptops); (5) `login()`'s identity resolution had
+zero test coverage — the guards were tested, the property they protect
+wasn't, which is why finding #1 survived 4 prior review rounds.
+
+**All 5 fixed in one wave** (`8946008`..`da1430a`): username lowercased
+at the schema level + login lookup, login page gets
+`autoCapitalize="none"`; assignee-first branch batch-checks `active`,
+falls through to the existing dept-supervisor branch when inactive; the
+already-built `releasePlanAction` wired to a real "Release" button on
+`/my-day`'s teammate rows, deactivation dialog copy corrected to match
+reality; the timezone fix made self-applying via `db.ts`'s existing
+per-transaction `set_config` call (confirmed by grep that every raw-SQL
+timestamp comparison in the codebase already routes through it) rather
+than depending on a script anyone has to remember to re-run; a new
+DB-gated test proves `login()` resolves a mixed-case-typed username to
+exactly one row. Re-review: all 5 ADDRESSED, no new breakage. **One
+Moderate, pre-existing, genuinely out-of-scope item surfaced and
+deliberately parked, not fixed** (this project's process allows no second
+fix wave after a final-review fix wave): `workspace.read.ts`'s "active
+users today" and `qc-cockpit.read.ts`'s weekly trend both compute their
+day/week boundary with a bare `now()`, no explicit UTC conversion — before
+this session's timezone fix, this bug's visibility was accidentally
+masked by whatever the local Postgres happened to default to; the fix
+makes it deterministic (a real improvement) but also un-masks that these
+2 specific numbers now compute their boundary in UTC rather than the IST
+convention every other "today"/"this week" figure in the app uses
+(`myday.read.ts`'s `istDay()` helper is the correct pattern, not applied
+here). Cosmetic at DESPL's pilot scale — a follow-up for a future session,
+not a blocker.
+
+**Verified (final, whole-build):** `pnpm test` 398/128 skipped, `pnpm
+test:db` **526/526, run twice** (both before and after the final fix
+wave), typecheck/lint/build all clean.
+
+**Phase 4: DONE. Personal Dashboards v1 (all 4 phases): DONE.** Commits
+`da66b53..da1430a` on `demo`.
+
+**Needs a human before/at the next Railway deploy:** confirm the deployed
+Railway Postgres's default session timezone is UTC (see top status
+banner) — the fix is self-applying now, so this is a confirmation, not
+necessarily a live gap, but it's the one thing this session's sandbox
+genuinely could not check.
 
 ## Session — Railway first deploy, 16 Aug 2026 evening (interactive, paused mid-blocker)
 
