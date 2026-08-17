@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { startAction, submitAction, holdAction, resumeAction, verifyAction, rejectAction } from "@/app/actions/process";
 import { fileDelayAction } from "@/app/actions/delay";
-import { claimPlanAction, assignPlanAction } from "@/app/actions/assignment";
+import { claimPlanAction, assignPlanAction, releasePlanAction } from "@/app/actions/assignment";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { CountUp } from "@/components/industrial/count-up";
 import type { ActionResult } from "@/app/actions/_action";
@@ -322,6 +322,58 @@ function SelfSubmittedRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage
   );
 }
 
+// ── A teammate's held plan — read-only except a "Release" control for
+// whoever can also assign (SUPERVISOR/PH/ADMIN, matching releasePlan's
+// dept-supervisor/PH/ADMIN allow-paths — see Finding 3, final whole-branch
+// review: releasePlanAction had zero UI callers anywhere). This is the
+// smallest honest fix: wires the already-built, already-tested, already-
+// audited service action to a real button rather than inventing a new
+// department-wide reassignment surface. ─────────────────────────────────
+function TeamHeldRowView({
+  row,
+  canRelease,
+  onOpenStage,
+}: {
+  row: MyDayRow;
+  canRelease: boolean;
+  onOpenStage: () => void;
+}) {
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const { pending, run } = useRun(setRefusal);
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+
+  return (
+    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+      <td style={{ width: 40 }}>
+        <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials(row.assigneeName ?? "—")}</div>
+      </td>
+      <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
+      <td>
+        {row.processName}
+        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.assigneeName ?? "—"} · {row.stageLabel} · {row.deptName}</div>
+      </td>
+      <td className="mono">{fmtDue(row.ranked.plan.plannedFinish)}</td>
+      <td className="num">
+        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }} onClick={stop}>
+          <span className={`chip ${row.ranked.overdue ? "c-overdue" : row.ranked.state === "SUBMITTED" ? "c-submitted" : row.ranked.state === "ON_HOLD" ? "c-hold" : "c-progress"}`}>
+            <i />{row.ranked.overdue ? "Overdue" : row.ranked.reasonText.split(".")[0]}
+          </span>
+          {canRelease && (
+            <button
+              className="btn"
+              disabled={pending}
+              onClick={(e) => { stop(e); run(() => releasePlanAction(row.ranked.plan.id), "Released to pool."); }}
+            >
+              Release
+            </button>
+          )}
+        </div>
+        <RefusalNote refusal={refusal} />
+      </td>
+    </tr>
+  );
+}
+
 const TABS: { key: TabKey; label: string }[] = [
   { key: "attention", label: "Needs attention" },
   { key: "due", label: "Due today" },
@@ -557,27 +609,14 @@ export function MyDayClient({
           ) : (
             <table>
               <tbody>
-                {view.teamHeld.map((r) => {
-                  const clickable = r.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
-                  return (
-                  <tr key={r.ranked.plan.id} className="row" onClick={clickable ? () => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo) : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
-                    <td style={{ width: 40 }}>
-                      <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials(r.assigneeName ?? "—")}</div>
-                    </td>
-                    <td className="mono" style={{ color: "var(--muted)" }}>{r.jobNumber}</td>
-                    <td>
-                      {r.processName}
-                      <div style={{ color: "var(--muted)", fontSize: 11 }}>{r.assigneeName ?? "—"} · {r.stageLabel} · {r.deptName}</div>
-                    </td>
-                    <td className="mono">{fmtDue(r.ranked.plan.plannedFinish)}</td>
-                    <td className="num">
-                      <span className={`chip ${r.ranked.overdue ? "c-overdue" : r.ranked.state === "SUBMITTED" ? "c-submitted" : r.ranked.state === "ON_HOLD" ? "c-hold" : "c-progress"}`}>
-                        <i />{r.ranked.overdue ? "Overdue" : r.ranked.reasonText.split(".")[0]}
-                      </span>
-                    </td>
-                  </tr>
-                  );
-                })}
+                {view.teamHeld.map((r) => (
+                  <TeamHeldRowView
+                    key={r.ranked.plan.id}
+                    row={r}
+                    canRelease={canAssign}
+                    onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+                  />
+                ))}
               </tbody>
             </table>
           )
