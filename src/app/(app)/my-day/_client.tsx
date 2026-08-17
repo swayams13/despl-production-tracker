@@ -157,17 +157,14 @@ function MineActionButton({
   return <span style={{ color: "var(--muted)", fontSize: 11 }}>Blocked</span>;
 }
 
-// ── "Mine" row: state-correct action, delay-reason filing when overdue,
-// row click opens the StageSheet. ────────────────────────────────────────
-function MineRowView({
-  row,
-  categories,
-  onOpenStage,
-}: {
-  row: MyDayRow;
-  categories: Category[];
-  onOpenStage: () => void;
-}) {
+/**
+ * Shared state + handlers for the "Mine" row/card pair (`MineRowView` /
+ * `MineCardView`) — same `useState`s, same `useRun`, same derived values,
+ * same `fileReason` handler, so a future behavior change (validation rule,
+ * toast copy) only needs to happen once. Only the JSX (table row vs. card)
+ * stays split between the two components, per the brief.
+ */
+function useMineRowActions(row: MyDayRow) {
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const { pending, run } = useRun(setRefusal);
   const [categoryId, setCategoryId] = useState<number | "">("");
@@ -195,6 +192,22 @@ function MineRowView({
       return startAction(row.ranked.plan.id); // sequential — only fires once the file succeeds
     }, canStartAfterFile ? "Filed & started." : "Delay reason filed.");
   };
+
+  return { refusal, pending, run, categoryId, setCategoryId, detail, setDetail, overdue, canStartAfterFile, clickable, fileReason };
+}
+
+// ── "Mine" row: state-correct action, delay-reason filing when overdue,
+// row click opens the StageSheet. ────────────────────────────────────────
+function MineRowView({
+  row,
+  categories,
+  onOpenStage,
+}: {
+  row: MyDayRow;
+  categories: Category[];
+  onOpenStage: () => void;
+}) {
+  const { refusal, pending, run, categoryId, setCategoryId, detail, setDetail, overdue, canStartAfterFile, clickable, fileReason } = useMineRowActions(row);
 
   return (
     <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
@@ -240,24 +253,8 @@ function MineCardView({
   categories: Category[];
   onOpenStage: () => void;
 }) {
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const { pending, run } = useRun(setRefusal);
-  const [categoryId, setCategoryId] = useState<number | "">("");
-  const [detail, setDetail] = useState("");
-  const overdue = row.ranked.overdue;
-  const canStartAfterFile = row.ranked.state === "READY";
-  const clickable = row.ranked.plan.unitId != null;
+  const { refusal, pending, run, categoryId, setCategoryId, detail, setDetail, overdue, canStartAfterFile, clickable, fileReason } = useMineRowActions(row);
   const { status, label } = mineDisplayStatus(row);
-
-  const fileReason = (e: MouseEvent) => {
-    stop(e);
-    if (categoryId === "") return toast.error("Choose a delay reason first.");
-    run(async () => {
-      const filed = await fileDelayAction(row.ranked.plan.id, categoryId, detail || undefined);
-      if (!filed.ok || !canStartAfterFile) return filed;
-      return startAction(row.ranked.plan.id);
-    }, canStartAfterFile ? "Filed & started." : "Delay reason filed.");
-  };
 
   return (
     <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
@@ -341,8 +338,13 @@ function PoolRowView({
   );
 }
 
-// ── QC verify queue row (submitted by a teammate) — mirrors /workspace's QcRow. ─
-function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
+/**
+ * Shared state + handlers for the QC verify-queue row/card pair
+ * (`QcQueueRowView` / `QcQueueCardView`) — same `useState`s, same `useRun`,
+ * same `reject` handler, same `clickable` derivation. Only the JSX (table
+ * row vs. card) stays split between the two components, per the brief.
+ */
+function useQcRowActions(row: MyDayRow) {
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const { pending, run } = useRun(setRefusal);
   const [rejecting, setRejecting] = useState(false);
@@ -356,6 +358,13 @@ function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () =
     setReason("");
   };
   const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+
+  return { refusal, pending, run, rejecting, setRejecting, reason, setReason, reject, clickable };
+}
+
+// ── QC verify queue row (submitted by a teammate) — mirrors /workspace's QcRow. ─
+function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
+  const { refusal, pending, run, rejecting, setRejecting, reason, setReason, reject, clickable } = useQcRowActions(row);
 
   return (
     <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
@@ -384,19 +393,7 @@ function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () =
 
 // ── QC verify queue card (<1024px) — same handlers as QcQueueRowView. ────
 function QcQueueCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const { pending, run } = useRun(setRefusal);
-  const [rejecting, setRejecting] = useState(false);
-  const [reason, setReason] = useState("");
-
-  const reject = (e: MouseEvent) => {
-    stop(e);
-    if (!reason.trim()) return toast.error("A reason is required to reject.");
-    run(() => rejectAction(row.ranked.plan.id, reason.trim()), "Rejected — returned to the maker.");
-    setRejecting(false);
-    setReason("");
-  };
-  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+  const { refusal, pending, run, rejecting, setRejecting, reason, setReason, reject, clickable } = useQcRowActions(row);
 
   return (
     <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
