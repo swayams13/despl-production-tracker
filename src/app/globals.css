@@ -633,6 +633,55 @@ body {
 .theme-industrial .rt-card-action { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-industrial .rt-card-action > * { flex: 1 1 120px; }
 
+/* Queue-first /my-day (R2 Task 1, SPEC-supervisor-ui-v3.md P3-03/P3-04):
+   below 640px the tabbed KPI/Mine view is replaced by one flat ranked
+   Mine+Pool queue (rank already comes from prioritizer.ts's own
+   compareRankedPlans — this is a presentation swap, not a new rule).
+   CSS-only breakpoint toggle, same shape as .rt-table/.rt-cards above. */
+.theme-industrial .day-queue { display: block; }
+.theme-industrial .day-standard { display: none; }
+@media (min-width: 640px) {
+  .theme-industrial .day-queue { display: none; }
+  .theme-industrial .day-standard { display: block; }
+}
+.theme-industrial .queue-card { background: var(--surface); border: var(--border-width) solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; }
+.theme-industrial .queue-card.top { border-color: var(--accent); }
+.theme-industrial .queue-ribbon { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: var(--accent); color: var(--accent-fg); font: 700 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: .12em; }
+.theme-industrial .queue-card-body { padding: 13px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.theme-industrial .queue-card-meta { display: flex; justify-content: space-between; gap: 8px; font: 500 11px "JetBrains Mono", ui-monospace, monospace; color: var(--muted-2); }
+.theme-industrial .queue-card-due { font-weight: 600; color: var(--muted); }
+.theme-industrial .queue-card-due.overdue { color: var(--s-overdue); }
+.theme-industrial .queue-card-title { font: var(--wt) 17px/1.35 Inter, system-ui, sans-serif; color: var(--text); }
+.theme-industrial .queue-card-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.theme-industrial .queue-card-action { display: flex; }
+.theme-industrial .queue-card-action > * { flex: 1; }
+.theme-industrial .btn-outline-accent { background: transparent; border: 2px solid var(--accent); color: var(--accent); font-weight: 700; }
+.theme-industrial .btn-outline-accent:hover { filter: brightness(1.15); }
+.theme-industrial .queue-scoreboard { background: var(--surface); border: var(--border-width) solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+.theme-industrial .queue-scoreboard-summary { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px; cursor: pointer; }
+.theme-industrial .queue-scoreboard-summary b { font-size: 13px; font-weight: 600; color: var(--text); }
+.theme-industrial .queue-scoreboard-summary .mono { font: 500 12.5px "JetBrains Mono", ui-monospace, monospace; }
+.theme-industrial .queue-scoreboard-grid { display: grid; grid-template-columns: 1fr 1fr; border-top: var(--border-width) solid var(--border); }
+.theme-industrial .queue-scoreboard-grid > div { padding: 14px; border-right: var(--border-width) solid var(--border); border-bottom: var(--border-width) solid var(--border); }
+.theme-industrial .queue-scoreboard-grid > div:nth-child(2n) { border-right: none; }
+.theme-industrial .queue-scoreboard-grid > div:nth-last-child(-n+2) { border-bottom: none; }
+.theme-industrial .queue-scoreboard-grid .v { font: 700 26px "JetBrains Mono", ui-monospace, monospace; line-height: 1; }
+.theme-industrial .queue-scoreboard-grid .sub { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+.theme-industrial .queue-section-label { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 0; font: 600 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: .12em; color: var(--muted-2); margin-bottom: 10px; }
+
+@media (pointer: coarse) {
+  /* Closes a Task 7-disclosed gap: SPEC §5's separate 56px primary-action
+     floor had no CSS backing anywhere — only the generic 48px .btn rule
+     applied. QueueCard's action buttons (solid AND outline — both are
+     "primary," the ribbon/fill is a rank cue, not a size tier, per the
+     v3 board's own P3-03/04 markup) need it, and it's the correct global
+     fix per SPEC §5's own scoping note (pointer:coarse, not a route list). */
+  .theme-industrial .btn-accent,
+  .theme-industrial .btn-outline-accent {
+    min-height: 56px;
+  }
+}
+
 /* Shell variants (Task 4, SPEC-responsive-app-v2 §3.1): desktop sidebar
    (>=1024px, unchanged) / tablet icon rail (640-1023px) / phone bottom nav
    (<640px). All three are rendered unconditionally in app-shell.tsx; this is

@@ -376,6 +376,25 @@ test("/dashboard and /admin redirect this supervisor to /my-day, not a dead end"
   await expect(page).toHaveURL(/\/my-day$/);
 });
 
+// R2 Task 1 (SPEC-supervisor-ui-v3.md P3-03/P3-04): below 640px the tabbed
+// KPI/Mine view is replaced by one flat ranked queue (.day-queue); at and
+// above 640px the tabbed view (.day-standard) renders instead — CSS-only
+// swap, .queue-card is never present in the DOM's VISIBLE tree on the
+// wrong side of the breakpoint (both branches always render, only one is
+// display:none, matching <ResponsiveTable>'s own established pattern).
+test("/my-day: queue-first view below 640px, tabbed view at and above", async ({ page }, testInfo) => {
+  await page.goto("/my-day");
+  const queueVisible = await page.locator(".day-queue").isVisible();
+  const standardVisible = await page.locator(".day-standard").isVisible();
+  if (testInfo.project.name === "phone") {
+    expect(queueVisible).toBe(true);
+    expect(standardVisible).toBe(false);
+  } else {
+    expect(queueVisible).toBe(false);
+    expect(standardVisible).toBe(true);
+  }
+});
+
 // ── Assertion 6: WCAG AA contrast — chips, KPI values, spine, all 3 themes ──
 //
 // Restricted to the `desktop` project only. The theme preference is

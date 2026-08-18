@@ -9,6 +9,7 @@ import { claimPlanAction, assignPlanAction, releasePlanAction } from "@/app/acti
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { CountUp } from "@/components/industrial/count-up";
 import { ResponsiveTable } from "@/components/industrial/responsive-table";
+import { QueueCard } from "@/components/industrial/queue-card";
 import { StatusChip } from "@/components/industrial/status-chip";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ActionResult } from "@/app/actions/_action";
@@ -661,6 +662,123 @@ function CompletedCardView({ row }: { row: MyDayRow }) {
   );
 }
 
+// ── Queue-first view (<640px, R2 Task 1, SPEC-supervisor-ui-v3.md P3-03/04)
+// One action per card (the mockup's own rule: "a queue card never offers
+// two taps") — a leaner action than MineActionButton's IN_PROGRESS case
+// (which also renders Hold), reusing the same `run`/server actions, not
+// new business logic. Overdue always routes to the sheet ("File reason &
+// start" must open the reason grid per the mockup's own annotation — the
+// full-screen phone version of that grid is Task 2; until it ships this
+// opens the existing StageSheet, itself a real, working action). ─────────
+function QueueMineAction({
+  row,
+  pending,
+  run,
+  onOpenStage,
+  outline,
+}: {
+  row: MyDayRow;
+  pending: boolean;
+  run: (fn: () => Promise<ActionResult>, ok?: string) => void;
+  onOpenStage: () => void;
+  outline: boolean;
+}) {
+  const cls = `btn ${outline ? "btn-outline-accent" : "btn-accent"}`;
+  const planId = row.ranked.plan.id;
+  if (row.ranked.overdue)
+    return <button className={cls} disabled={pending} onClick={(e) => { stop(e); onOpenStage(); }}>File reason &amp; start</button>;
+  if (row.ranked.state === "READY")
+    return <button className={cls} disabled={pending} onClick={(e) => { stop(e); run(() => startAction(planId), "Started."); }}>Start</button>;
+  if (row.ranked.state === "IN_PROGRESS")
+    return <button className={cls} disabled={pending} onClick={(e) => { stop(e); run(() => submitAction(planId), "Submitted for QC."); }}>Submit finish</button>;
+  if (row.ranked.state === "ON_HOLD")
+    return <button className={cls} disabled={pending} onClick={(e) => { stop(e); run(() => resumeAction(planId), "Resumed."); }}>Resume</button>;
+  if (row.ranked.state === "SUBMITTED")
+    return <span style={{ color: "var(--muted)", fontSize: 11 }}>Awaiting QC</span>;
+  return <span style={{ color: "var(--muted)", fontSize: 11 }}>Blocked</span>;
+}
+
+function MineQueueCardView({ row, top, onOpenStage }: { row: MyDayRow; top: boolean; onOpenStage: () => void }) {
+  const { pending, run, overdue, clickable } = useMineRowActions(row);
+  const { status, label } = mineDisplayStatus(row);
+  return (
+    <QueueCard
+      top={top}
+      onClick={clickable ? onOpenStage : undefined}
+      metaLine={`${row.jobNumber}${row.serialNo !== "—" ? ` · ${row.serialNo}` : ""} · ${row.stageLabel}`}
+      due={fmtDue(row.ranked.plan.plannedFinish)}
+      overdue={overdue}
+      title={row.processName}
+      tags={
+        <>
+          <StatusChip status={status} label={label} />
+          {overdue && <span className="chip c-overdue"><i />{daysOverdue(row.ranked.plan.plannedFinish)}d overdue</span>}
+        </>
+      }
+      action={<QueueMineAction row={row} pending={pending} run={run} onOpenStage={onOpenStage} outline={!top} />}
+    />
+  );
+}
+
+function PoolQueueCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
+  const { pending, run, clickable } = usePoolRowActions(row);
+  return (
+    <QueueCard
+      onClick={clickable ? onOpenStage : undefined}
+      metaLine={`${row.jobNumber}${row.serialNo !== "—" ? ` · ${row.serialNo}` : ""} · ${row.stageLabel}`}
+      due={fmtDue(row.ranked.plan.plannedFinish)}
+      title={row.processName}
+      action={
+        <button className="btn btn-outline-accent" disabled={pending} onClick={(e) => { stop(e); run(() => claimPlanAction(row.ranked.plan.id), "Claimed."); }}>
+          Claim
+        </button>
+      }
+    />
+  );
+}
+
+// ── Collapsed summary line <-> 2x2 grid, built entirely from data the page
+// already fetches (scoreboard fields + counts already computed for the
+// KPI tab badges) — no new read-layer work. ───────────────────────────────
+function QueueScoreboard({ view, overdueCount, qcCount }: { view: MyDayView; overdueCount: number; qcCount: number }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="queue-scoreboard">
+      <div className="queue-scoreboard-summary" onClick={() => setExpanded((e) => !e)}>
+        <b>My stats</b>
+        <span className="mono" style={{ color: "var(--s-complete)" }}>
+          {view.scoreboard.onTimePct30d == null ? "—" : `${view.scoreboard.onTimePct30d}% on-time`}
+        </span>
+        <span className="mono" style={{ color: "var(--muted-2)" }}>· {view.scoreboard.doneThisWeek} done</span>
+        <div style={{ flex: 1 }} />
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ transform: expanded ? "rotate(-90deg)" : "rotate(90deg)" }}>
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+      </div>
+      {expanded && (
+        <div className="queue-scoreboard-grid">
+          <div>
+            <div className="v" style={{ color: "var(--s-complete)" }}>{view.scoreboard.onTimePct30d == null ? "—" : `${view.scoreboard.onTimePct30d}%`}</div>
+            <div className="sub">On-time · 30d</div>
+          </div>
+          <div>
+            <div className="v">{view.scoreboard.doneThisWeek}</div>
+            <div className="sub">Done this week</div>
+          </div>
+          <div>
+            <div className="v" style={{ color: overdueCount > 0 ? "var(--s-overdue)" : undefined }}>{overdueCount}</div>
+            <div className="sub">Overdue now</div>
+          </div>
+          <div>
+            <div className="v" style={{ color: "var(--s-submitted)" }}>{qcCount}</div>
+            <div className="sub">Waiting on QC</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TABS: { key: TabKey; label: string }[] = [
   { key: "attention", label: "Needs attention" },
   { key: "due", label: "Due today" },
@@ -765,6 +883,44 @@ export function MyDayClient({
 
   return (
     <>
+      {/* <640px: flat ranked queue replaces the tabbed KPI/Mine view below
+          entirely (CSS-only swap, .day-queue/.day-standard in globals.css —
+          both branches render, only one is visible, matching <ResponsiveTable
+          />'s own pattern). Held-by-teammates and Completed are unaffected —
+          read-only history/status, not actionable queue items, so they stay
+          outside both branches. */}
+      <div className="day-queue">
+        <QueueScoreboard view={view} overdueCount={counts.attention} qcCount={counts.qc} />
+        {isQc && (qcQueueRows.length > 0 || selfSubmittedRows.length > 0) && (
+          <>
+            <div className="queue-section-label"><span>WITH QC · {qcQueueRows.length + selfSubmittedRows.length}</span></div>
+            {[...qcQueueRows, ...selfSubmittedRows].map((r) =>
+              r.ranked.plan.submittedBy === actorUserId ? (
+                <SelfSubmittedCardView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+              ) : (
+                <QcQueueCardView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+              ),
+            )}
+          </>
+        )}
+        <div className="queue-section-label"><span>MINE · {view.mine.length}</span><span>RANKED BY DUE + GATE</span></div>
+        {view.mine.length === 0 ? (
+          <p className="note" style={{ margin: "16px 0" }}>Nothing due right now — you&apos;re caught up.</p>
+        ) : (
+          view.mine.map((r, i) => (
+            <MineQueueCardView key={r.ranked.plan.id} row={r} top={i === 0} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+          ))
+        )}
+        <div className="queue-section-label"><span>POOL · {view.pool.length} UNCLAIMED</span></div>
+        {view.pool.length === 0 ? (
+          <p className="note" style={{ margin: "16px 0" }}>Nothing in the department pool right now.</p>
+        ) : (
+          view.pool.map((r) => (
+            <PoolQueueCardView key={r.ranked.plan.id} row={r} onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)} />
+          ))
+        )}
+      </div>
+      <div className="day-standard">
       <div className="kpis" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <div className="kpi">
           <h6>On-time · 30d</h6>
@@ -923,6 +1079,7 @@ export function MyDayClient({
             ))}
           />
         )}
+      </div>
       </div>
 
       <div className="card ws-card">
