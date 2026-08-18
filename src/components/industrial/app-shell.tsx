@@ -106,6 +106,13 @@ const SHELL_NAV: { href: string; label: string; icon: ReactNode; badge?: "overdu
   { href: "/profile", label: "Profile", icon: icons.navProfile },
 ];
 
+/** Resolves a SHELL_NAV item's badge count from the two real counts AppShell receives. */
+function shellNavBadgeCount(badge: "overdue" | "unread" | undefined, overdueCount: number, unreadCount: number): number {
+  if (badge === "overdue") return overdueCount;
+  if (badge === "unread") return unreadCount;
+  return 0;
+}
+
 const NAV: { group: string; items: { href: string; label: string; icon: ReactNode; badge?: number }[] }[] = [
   {
     group: "Overview",
@@ -178,21 +185,10 @@ export function AppShell({
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
 
-  // Non-management roles' "Dashboard" is /my-day — /dashboard server-redirects
-  // them to /my-day anyway (dashboard/page.tsx's role gate), so the nav link
-  // points there directly instead of round-tripping through a redirect.
-  const isManagementTier = userRole === "ADMIN" || userRole === "MANAGEMENT" || userRole === "PRODUCTION_HEAD";
-  const base = isManagementTier
-    ? NAV
-    : NAV.map((g) =>
-        g.group === "Overview"
-          ? { ...g, items: g.items.map((i) => (i.href === "/dashboard" ? { ...i, href: "/my-day", label: "My Day" } : i)) }
-          : g,
-      );
   const nav =
     userRole === "ADMIN" || userRole === "MANAGEMENT"
-      ? [...base, { group: "Admin", items: [{ href: "/admin", label: "Admin", icon: icons.admin }] }]
-      : base;
+      ? [...NAV, { group: "Admin", items: [{ href: "/admin", label: "Admin", icon: icons.admin }] }]
+      : NAV;
   const active = nav.flatMap((g) => g.items).find((i) => pathname.startsWith(i.href));
 
   const openNotification = async (n: NotificationRow) => {
@@ -257,7 +253,7 @@ export function AppShell({
         <div className="rail-avatar">{initials}</div>
         {SHELL_NAV.map((it) => {
           const isActive = pathname.startsWith(it.href);
-          const count = it.badge === "overdue" ? overdueCount : it.badge === "unread" ? notifications.unreadCount : 0;
+          const count = shellNavBadgeCount(it.badge, overdueCount, notifications.unreadCount);
           return (
             <Link key={it.href} href={it.href} className={`rail-item${isActive ? " active" : ""}`}>
               {it.icon}
@@ -283,7 +279,7 @@ export function AppShell({
       <nav className="bottom-nav" aria-label="Primary">
         {SHELL_NAV.map((it) => {
           const isActive = pathname.startsWith(it.href);
-          const count = it.badge === "overdue" ? overdueCount : it.badge === "unread" ? notifications.unreadCount : 0;
+          const count = shellNavBadgeCount(it.badge, overdueCount, notifications.unreadCount);
           return (
             <Link key={it.href} href={it.href} className={`bn-item${isActive ? " active" : ""}`}>
               <span className="bn-icon-wrap">
