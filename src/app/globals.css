@@ -315,6 +315,14 @@ body {
   --border-width: 1px;
   --wb: 400;
   --wt: 600;
+  /* Hover border for neutral surfaces (.btn, .kpi.clicky, .dept-card, the
+     scrollbar thumb). It used to be a hardcoded #3a3f47 in all five places,
+     which is near-invisible on light's #d3d8de border and DARKER than
+     outdoor's #7c8b99 — i.e. hovering removed the border instead of raising
+     it. Per palette it is simply "one step brighter/darker than --border, in
+     the direction of --text". Dark keeps the exact original hex so the frozen
+     dark palette still renders identically to main. */
+  --hover-border: #3a3f47;
   /* Not from §2.1: the gantt/gbar "target window" rail, which was a literal
      #33383f in five places. Tokenised here because the AA audit found it
      invisible on outdoor's black ground (1.6:1); the dark value is the exact
@@ -328,9 +336,14 @@ body {
 }
 /* Palette overrides (SPEC-supervisor-ui-v3 §2.2, verbatim from the approved
    board). Both classes sit on the SAME element — `theme-industrial` is always
-   present, these only redefine tokens. No modifier = dark, which is what every
-   existing user resolves to (themePreference defaults to SYSTEM, and the
-   server resolves SYSTEM to dark). */
+   present, these only redefine tokens. No modifier = dark.
+
+   Dark stays the default experience because every user who existed when this
+   shipped was back-filled to an explicit DARK preference (migration
+   20260818120000_theme_preference_dark_backfill) — NOT because SYSTEM
+   resolves to dark. SYSTEM (the column default for new accounts only) is
+   resolved to dark server-side, then corrected to `theme-light` by
+   ThemeRoot's inline script if the OS prefers light. */
 .theme-industrial.theme-light {
   --bg: #edeff2; --surface: #ffffff; --surface-2: #f4f6f8; --border: #d3d8de;
   --text: #10141a; --muted: #4e5a65; --muted-2: #78848f;
@@ -339,6 +352,7 @@ body {
   --s-hold: #9a6c05; --s-overdue: #c23a26; --s-complete: #1f7d4c;
   --mixp: 12%; --bordp: 40%; --wb: 400; --wt: 600;
   --track: #79879a;
+  --hover-border: #78848f; /* == --muted-2: darker than --border #d3d8de */
 }
 .theme-industrial.theme-outdoor {
   --bg: #000; --surface: #000; --surface-2: #0c0f12; --border: #7c8b99;
@@ -349,6 +363,7 @@ body {
   --border-width: 2px;
   --mixp: 0%; --bordp: 100%; --wb: 500; --wt: 700;
   --track: #6c7784;
+  --hover-border: #aeb9c2; /* == --muted-2: brighter than --border #7c8b99 */
 }
 
 /* ── AA-audit fixes (D27 task 6) ────────────────────────────────────────
@@ -377,9 +392,17 @@ body {
 .theme-industrial.theme-light .g-actual b { color: rgba(255, 255, 255, .92); }
 
 /* Matrix zero cell and the alert badges hardcode colours that vanish on
-   outdoor's black ground (3.07:1 and 1.44:1). */
+   outdoor's black ground (3.07:1 and 1.44:1).
+
+   `.rail-item .badge-alert` is listed separately on purpose: the shell's icon
+   rail (added AFTER this audit ran) restates `color: #fff` at line ~717 with
+   the same specificity as `.theme-industrial.theme-outdoor .badge-alert`, and
+   being later in the file it won — silently re-shipping the exact 1.44:1
+   failure this block claims to fix, in the badge's ONLY real render context.
+   The bare selector stays for any future non-rail use. */
 .theme-industrial.theme-outdoor .mx-zero { color: var(--muted-2); }
 .theme-industrial.theme-outdoor .badge-alert,
+.theme-industrial.theme-outdoor .rail-item .badge-alert,
 .theme-industrial.theme-outdoor .bn-badge { color: #000; }
 
 /* The welding "standard duration" rail keeps its original dark grey (the dark
@@ -426,11 +449,11 @@ body {
 .theme-industrial .content { padding: 22px 24px 48px; animation: pageFadeUp .28s cubic-bezier(.2, .8, .2, 1); }
 
 /* dark scrollbars (Firefox + WebKit) */
-.theme-industrial, .theme-industrial * { scrollbar-color: #3a3f47 var(--surface); scrollbar-width: thin; }
+.theme-industrial, .theme-industrial * { scrollbar-color: var(--hover-border) var(--surface); scrollbar-width: thin; }
 .theme-industrial ::-webkit-scrollbar { width: 10px; height: 10px; }
 .theme-industrial ::-webkit-scrollbar-track { background: var(--surface); }
-.theme-industrial ::-webkit-scrollbar-thumb { background: #3a3f47; border-radius: 6px; border: 2px solid var(--surface); }
-.theme-industrial ::-webkit-scrollbar-thumb:hover { background: #4a4f57; }
+.theme-industrial ::-webkit-scrollbar-thumb { background: var(--hover-border); border-radius: 6px; border: 2px solid var(--surface); }
+.theme-industrial ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 .theme-industrial .page-h { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
 .theme-industrial .page-h h1 { font-size: 20px; font-weight: 600; }
 .theme-industrial .page-h .sub { color: var(--muted); }
@@ -456,9 +479,15 @@ body {
    treatment (design tokens hard ban), roles/departments are just labels. */
 .theme-industrial .tag { display: inline-flex; align-items: center; font-size: 10.5px; font-weight: 500; padding: 2px 7px; border-radius: 4px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 .theme-industrial .btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: 4px; padding: 5px 12px; font-size: 12px; font-weight: 500; cursor: pointer; transition: border-color .15s, background .15s; font-family: inherit; }
-.theme-industrial .btn:hover { border-color: #3a3f47; }
+.theme-industrial .btn:hover { border-color: var(--hover-border); }
 .theme-industrial .btn-accent { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 600; }
-.theme-industrial .btn-accent:hover { background: #ff8c3d; border-color: #ff8c3d; }
+/* brightness(), not a second hardcoded orange: the old #ff8c3d was the dark
+   accent lightened by hand, so on light it snapped the button back to the DARK
+   palette's orange and on outdoor it went darker than the resting accent —
+   an inverted affordance. A relative filter is correct in all three with no
+   per-palette tuning, and re-stating border-color keeps `.btn:hover`'s
+   neutral border (equal specificity, later in the file) off this button. */
+.theme-industrial .btn-accent:hover { border-color: var(--accent); filter: brightness(1.12); }
 .theme-industrial .btn-ghost { background: transparent; }
 .theme-industrial :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
@@ -734,7 +763,7 @@ body {
 /* dashboard (§4.2) — ported 1:1 from the mockup */
 .theme-industrial .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 10px; }
 .theme-industrial .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; overflow: hidden; transition: border-color .15s; }
-.theme-industrial .kpi.clicky:hover { border-color: #3a3f47; }
+.theme-industrial .kpi.clicky:hover { border-color: var(--hover-border); }
 .theme-industrial .kpi.alert { border-top: 2px solid var(--s-overdue); }
 /* Portfolio band: 7 tiles (Active + the six health buckets). Its own class so the
    single-job KPI row above keeps its 5-column layout untouched. */
@@ -808,7 +837,7 @@ body {
 /* departments (§4.6, §9.7) — ported 1:1 from the mockup */
 .theme-industrial .dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
 .theme-industrial .dept-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; cursor: pointer; transition: border-color .15s; text-decoration: none; display: block; }
-.theme-industrial .dept-card:hover { border-color: #3a3f47; }
+.theme-industrial .dept-card:hover { border-color: var(--hover-border); }
 .theme-industrial .dept-card h4 { font-size: 13px; font-weight: 600; margin-bottom: 2px; color: var(--text); }
 .theme-industrial .dept-card .rep { color: var(--muted); font-size: 11px; margin-bottom: 10px; }
 .theme-industrial .dept-nums { display: flex; gap: 16px; font-size: 11px; color: var(--muted); }

@@ -1,0 +1,21 @@
+-- Data backfill for the theme system (20260818060443_theme_preference).
+--
+-- WHY: that migration gave `theme_preference` a column DEFAULT of 'SYSTEM',
+-- which back-filled every pre-existing row to SYSTEM. The server resolves
+-- SYSTEM to the dark palette, but ThemeRoot's no-flash script then corrects
+-- it to `theme-light` whenever the browser reports
+-- `prefers-color-scheme: light` — and light is the factory default on both
+-- macOS and Windows 11. So SYSTEM silently made LIGHT (the newest, least
+-- tested palette, carrying three known AA gaps) the DEFAULT experience for
+-- most users, against CLAUDE.md's "Dark theme only in v1".
+--
+-- Existing users must see ZERO change from the theme system shipping: they
+-- had dark, they keep dark, until they pick something else with the new
+-- control. `outdoor_mode` is reset for the same reason — nobody could have
+-- deliberately chosen it before the feature existed, so any true value is
+-- test/QA residue, not a user preference.
+--
+-- The column DEFAULT stays 'SYSTEM' on purpose: for a genuinely NEW account
+-- created after this release, "follow the OS" is a legitimate default. The
+-- bug was only ever about silently changing what existing users see.
+UPDATE "users" SET "theme_preference" = 'DARK', "outdoor_mode" = false;

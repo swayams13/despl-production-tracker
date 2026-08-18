@@ -16,10 +16,12 @@ import { test as setup, expect } from "@playwright/test";
 
 const PASSWORD = process.env.SEED_PASSWORD ?? "despl-dev-only";
 const STORAGE_STATE_PATH = "playwright/.auth/supervisor.json";
+/** See THEME_STORAGE_STATE in supervisor-viewport.spec.ts for why this exists. */
+const THEME_STORAGE_STATE_PATH = "playwright/.auth/theme-supervisor.json";
 
-setup("authenticate as the seeded supervisor", async ({ page }) => {
+async function signIn(page: import("@playwright/test").Page, email: string, statePath: string) {
   await page.goto("/login");
-  await page.getByLabel("Username or email").fill("sup.fabrication@despl.local");
+  await page.getByLabel("Username or email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
 
@@ -29,5 +31,28 @@ setup("authenticate as the seeded supervisor", async ({ page }) => {
   await expect(page).not.toHaveURL(/\/login/);
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 
-  await page.context().storageState({ path: STORAGE_STATE_PATH });
+  await page.context().storageState({ path: statePath });
+}
+
+setup("authenticate as the seeded supervisor", async ({ page }) => {
+  await signIn(page, "sup.fabrication@despl.local", STORAGE_STATE_PATH);
+});
+
+/**
+ * A SECOND real login, as a DIFFERENT seeded supervisor, used only by the
+ * theme-cycling tests.
+ *
+ * Those tests are the one place in the suite that writes persistent per-user
+ * state (`users.theme_preference` / `users.outdoor_mode`). The phone/tablet/
+ * desktop projects run in PARALLEL and shared one identity, so the desktop
+ * project's theme cycling could repaint the palette out from under the other
+ * two projects mid-measurement — `test.describe.serial()` only serialises
+ * within a single project, never across them. A separate identity removes the
+ * shared row entirely, which no amount of in-project serialisation can.
+ *
+ * Same department-agnostic SUPERVISOR role as the primary fixture, so every
+ * page the theme tests visit (/kit, /my-day) renders identically.
+ */
+setup("authenticate as the theme-test supervisor", async ({ page }) => {
+  await signIn(page, "sup.machine_shop@despl.local", THEME_STORAGE_STATE_PATH);
 });

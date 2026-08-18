@@ -241,7 +241,10 @@ export function AppShell({
 
   // Guarded: without the in-flight check a double-click silently advances two
   // steps, since each click reads the state the last server round trip has not
-  // written back yet.
+  // written back yet. This guard — not `disabled` on the buttons — is the real
+  // re-entrancy protection; the buttons only advertise the state with
+  // aria-disabled, because a real `disabled` drops them out of the keyboard
+  // tab order mid-click and moves focus off the control the user is using.
   const cycleTheme = () => {
     if (themePending) return;
     startThemeTransition(async () => {
@@ -319,7 +322,7 @@ export function AppShell({
           className="rail-item rail-theme"
           aria-label={`Theme: ${themeText}. Switch theme`}
           aria-busy={themePending}
-          disabled={themePending}
+          aria-disabled={themePending}
           onClick={cycleTheme}
         >
           {themeIcon}
@@ -396,7 +399,7 @@ export function AppShell({
               className="topbar-theme"
               aria-label={`Theme: ${themeText}. Switch theme`}
               aria-busy={themePending}
-              disabled={themePending}
+              aria-disabled={themePending}
               onClick={cycleTheme}
             >
               {themeIcon}

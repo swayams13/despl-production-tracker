@@ -4,8 +4,13 @@
  * Two class names combine on the SAME element: `theme-industrial` is always
  * present (it is the base palette, i.e. dark), and `theme-light` /
  * `theme-outdoor` are modifiers that redefine the tokens (globals.css §
- * INDUSTRIAL THEME). No modifier = dark, which is what every existing user
- * resolves to post-migration.
+ * INDUSTRIAL THEME). No modifier = dark.
+ *
+ * Every user who existed when the theme system shipped was back-filled to an
+ * explicit DARK (migration 20260818120000_theme_preference_dark_backfill), so
+ * they resolve to dark unconditionally, whatever their OS prefers. SYSTEM is
+ * only the column default for accounts created AFTER that release — for those,
+ * an OS on its factory light setting really does resolve to the light palette.
  *
  * The class deliberately lives on a <div>, not <html>: legacy warm-paper
  * pages outside the (app) route group keep a different theme entirely, so the
@@ -23,10 +28,12 @@ export interface ThemeState {
 /**
  * Server-side class resolution. `SYSTEM` always guesses DARK here — the
  * server cannot know the browser's OS preference synchronously, and dark is
- * this app's only theme today, so the guess is right for every existing user.
- * That bounds the possible flash to exactly one case (SYSTEM + an OS that
- * actually prefers light), which <ThemeRoot />'s inline script fixes before
- * the browser paints anything below it.
+ * this app's base palette. That bounds the possible flash to exactly one case
+ * (SYSTEM + an OS that actually prefers light), which <ThemeRoot />'s inline
+ * script fixes before the browser paints anything below it. Note the guess is
+ * genuinely a guess, not a certainty: for a SYSTEM user on a light-preferring
+ * OS the client corrects it to light. Users who predate the theme system are
+ * not in that set — they were back-filled to an explicit DARK.
  *
  * Outdoor wins over light/dark when on: it is a palette in its own right,
  * not a modifier of one (D25).

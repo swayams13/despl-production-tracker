@@ -137,8 +137,19 @@ for (const path of SHELL_PAGES) {
     // per-page loop re-discovering the same known issue element-by-element
     // on every single page.
     const boxes = await page.evaluate(() => {
-      const sel = '.btn, .rail-item, .bn-item, input:not([type="checkbox"]):not([type="radio"]), select';
-      const all = Array.from(document.querySelectorAll<HTMLElement>(sel)).filter((el) => !el.closest(".sidebar"));
+      // `.topbar-theme` is the theme control (Task 6), sized 48x48 by the
+      // phone media block. It is excluded — like everything in `.sidebar` —
+      // whenever the DESKTOP shell is the one that rendered, because then it
+      // takes its small inline desktop styling and is not a touch surface at
+      // all. On the tablet project that happens for the already-documented
+      // 1024px breakpoint collision (see the icon-rail test.fail() below),
+      // which is covered there once rather than re-discovered here.
+      const sidebar = document.querySelector<HTMLElement>(".sidebar");
+      const desktopShell = !!sidebar && getComputedStyle(sidebar).display !== "none";
+      const sel = '.btn, .rail-item, .bn-item, .topbar-theme, input:not([type="checkbox"]):not([type="radio"]), select';
+      const all = Array.from(document.querySelectorAll<HTMLElement>(sel)).filter(
+        (el) => !el.closest(".sidebar") && !(desktopShell && el.classList.contains("topbar-theme")),
+      );
       // Drop elements nested inside another matched element (an icon-in-button
       // etc. always "overlaps" its own ancestor button) — only leaf actionable
       // targets are real, independently-tappable touch targets.
@@ -205,6 +216,66 @@ test.fail(
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(56);
   },
 );
+
+// Closes Task 5's open DONE_WITH_CONCERNS: the StatusChip coarse-pointer
+// variant (globals.css `@media (pointer: coarse)`: `.chip i { display: none }`
+// + `.chip-icon { display: inline-flex }`) had never been exercised under real
+// `pointer: coarse` emulation — only reasoned about. The phone/tablet projects
+// genuinely activate it (hasTouch + a real device descriptor), so the swap is
+// directly assertable. /kit is the deterministic component-kit page: all six
+// StatusChip statuses, independent of seed data.
+test("status chips render the icon variant, not the dot, on coarse pointers", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "desktop", "coarse-pointer concern only — desktop keeps the dot");
+  await page.goto("/kit");
+  const chip = page.locator(".chip.c-complete").first();
+  await expect(chip).toBeVisible();
+  await expect(chip.locator(".chip-icon")).toBeVisible();
+  await expect(chip.locator("i")).toBeHidden();
+});
+
+// The same assertion inverted, so the pair proves the media query is what
+// drives the swap rather than the icon simply always winning.
+test("status chips keep the dot, not the icon, on fine pointers", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "fine-pointer counterpart of the test above");
+  await page.goto("/kit");
+  const chip = page.locator(".chip.c-complete").first();
+  await expect(chip.locator("i")).toBeVisible();
+  await expect(chip.locator(".chip-icon")).toBeHidden();
+});
+
+// ── R1 gate: no flash of the wrong theme on a hard reload ───────────────
+// Named as binding and testable-now by the R1 gate and task-7-brief.md.
+//
+// /login is the target on purpose: it is the one surface that ALWAYS renders
+// `<ThemeRoot themePreference="SYSTEM">` (src/app/login/page.tsx — pre-auth,
+// there is no user row to read a preference from), so the SYSTEM code path is
+// exercised without writing to any user's persisted preference. Authenticated
+// users can no longer serve as the fixture here anyway: every account that
+// predates the theme system was back-filled to an explicit DARK
+// (20260818120000_theme_preference_dark_backfill), which never flashes.
+//
+// Blocking the JS chunks is what makes this a real no-flash assertion rather
+// than a "React eventually fixed it" assertion: with the JS bundles dead,
+// hydration and ThemeRoot's matchMedia effect never run, so a `theme-light`
+// class can ONLY have come from the parse-time inline script that runs before
+// the browser paints anything below it. The CSS chunk (Next emits it under
+// the same /chunks/ path) is deliberately let through — without it there are
+// no palette tokens left to assert a computed colour against.
+test("no flash of the wrong theme: SYSTEM + a light OS paints light at first paint", async ({ browser }) => {
+  const ctx = await browser.newContext({ storageState: undefined, colorScheme: "light" });
+  const page = await ctx.newPage();
+  await page.route("**/_next/static/chunks/**", (route) =>
+    route.request().url().endsWith(".css") ? route.continue() : route.abort(),
+  );
+  await page.goto("/login", { waitUntil: "domcontentloaded" });
+
+  const root = page.locator("div.theme-industrial").first();
+  await expect(root).toHaveClass(/theme-light/);
+  // Computed, not just declared: proves the light palette's --bg actually won.
+  const bg = await root.evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(bg, "themed root should already be painting the light palette's --bg (#edeff2)").toBe("rgb(237, 239, 242)");
+  await ctx.close();
+});
 
 // ── /board /alerts /profile reachability — no dead link from each shell variant ──
 const NAV_TARGETS = [
@@ -344,19 +415,26 @@ test("/dashboard and /admin redirect this supervisor to /my-day, not a dead end"
 //
 // Restricted to the `desktop` project only. The theme preference is
 // persisted server-side PER USER (globals.css hard-bans localStorage for app
-// state — DESIGN_SPEC "Hard bans"), and phone/tablet/desktop all authenticate
-// as the SAME seeded user via the shared `setup` storageState. Running
-// theme-cycling assertions in more than one project would race concurrent
-// writes to that one user row. Colour tokens aren't viewport-scoped, so
+// state — DESIGN_SPEC "Hard bans"). Colour tokens aren't viewport-scoped, so
 // checking once is sufficient — this is a deliberate, disclosed scope
 // decision, not a shortfall in coverage.
+//
+// These tests also run as their OWN seeded supervisor (auth.setup.ts's second
+// login), not the one every other test here shares. `test.describe.serial()`
+// only serialises tests WITHIN one project; phone/tablet/desktop run in
+// parallel, so with a shared identity the desktop project's theme cycling
+// could repaint the palette while the other two were mid-measurement. A
+// second real identity is the only thing that actually removes that race —
+// and it is a real login through the real /login form, never a forged
+// session (CLAUDE.md Agent Conduct).
+const THEME_STORAGE_STATE = "playwright/.auth/theme-supervisor.json";
 const THEME_CYCLE = ["System", "Light", "Dark", "Outdoor"] as const;
 
 /** Drives the real theme toggle (never forged) via repeated real clicks
  * until the visible label reads `target` — self-correcting regardless of
  * starting state, since the cycle order is fixed (System -> Light -> Dark ->
  * Outdoor -> System, src/lib/theme.ts's nextThemeState). */
-async function setTheme(page: Page, target: "Dark" | "Light" | "Outdoor") {
+async function setTheme(page: Page, target: (typeof THEME_CYCLE)[number]) {
   const btn = page.locator(".topbar-theme");
   for (let i = 0; i < THEME_CYCLE.length; i++) {
     const current = ((await btn.textContent()) ?? "").trim();
@@ -395,6 +473,31 @@ async function graphicalRatioOf(el: Locator): Promise<number> {
 // "Light"). `.serial()` forces them onto one worker, in file order, so each
 // completes its full theme cycle before the next begins.
 test.describe.serial("AA contrast (assertion 6) — chips, KPI values, spine", () => {
+  // Dedicated identity — see the THEME_STORAGE_STATE comment above.
+  test.use({ storageState: THEME_STORAGE_STATE });
+
+  /**
+   * These are the only tests in the suite that leave persistent DB state
+   * behind, and they end on Outdoor. Without this they would permanently
+   * park a real seeded user in outdoor mode after every `pnpm e2e` — the
+   * same class of mistake as this project's "DB tests pollute demo DB"
+   * lesson. Restoring through the real control (not a direct DB write) also
+   * keeps the cleanup honest about what a user can actually do.
+   *
+   * Restored to Dark, not System: Dark is this app's known-clean baseline for
+   * every seeded account (migration 20260818120000_theme_preference_dark_
+   * backfill), so leaving this one on System would put a real demo-visible
+   * account back on exactly the setting that fix removed.
+   */
+  test.afterAll(async ({ browser }, testInfo) => {
+    if (testInfo.project.name !== "desktop") return;
+    const ctx = await browser.newContext({ storageState: THEME_STORAGE_STATE });
+    const page = await ctx.newPage();
+    await page.goto("/kit");
+    await setTheme(page, "Dark");
+    await ctx.close();
+  });
+
   test("status chips on /kit hold 4.5:1 across all three themes", async ({ page }, testInfo) => {
     test.skip(
       testInfo.project.name !== "desktop",

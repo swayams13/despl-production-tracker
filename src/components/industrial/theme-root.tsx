@@ -70,8 +70,12 @@ export function ThemeRoot({
    * because the div is not the only consumer: portaled surfaces (StageSheet,
    * the admin dialogs) re-declare the palette class from the context below.
    * A DOM-only correction left them reading the unresolved "theme-industrial"
-   * and rendering a dark sheet over a light page — the default state of every
-   * migrated user on a light-preferring OS.
+   * and rendering a dark sheet over a light page — the state of any SYSTEM
+   * user on a light-preferring OS. (That is no longer the DEFAULT state:
+   * users predating the theme system were back-filled to an explicit DARK,
+   * migration 20260818120000_theme_preference_dark_backfill. It still applies
+   * to new accounts, which keep the SYSTEM column default, and to /login,
+   * which is always SYSTEM because there is no user row to read yet.)
    *
    * It is also the ONLY matchMedia listener in the app: AppShell's theme
    * button reads `systemLight` from the context for its sun/moon icon rather
