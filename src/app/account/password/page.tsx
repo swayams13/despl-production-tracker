@@ -15,5 +15,10 @@ export default async function ChangePasswordPage() {
   const actor = await getActor();
   if (!actor) redirect("/login");
 
-  return <ChangePasswordForm forced={actor.mustChangePassword} />;
+  return (
+    <ChangePasswordForm
+      forced={actor.mustChangePassword}
+      theme={{ themePreference: actor.themePreference, outdoorMode: actor.outdoorMode }}
+    />
+  );
 }

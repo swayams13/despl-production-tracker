@@ -305,12 +305,89 @@ body {
   --text: #e7e9ec; --muted: #8b919a; --accent: #ff7a1a;
   --s-complete: #3fb950; --s-progress: #4c8dff; --s-submitted: #a371f7;
   --s-hold: #d9a62e; --s-overdue: #f0524d; --s-idle: #4a4f57;
+  /* Token layer (SPEC-supervisor-ui-v3 §2.1, D27/D28). Tokens only — this
+     session adds them and the two palette overrides below; retrofitting every
+     border/weight declaration to consume them is deliberately out of scope. */
+  --muted-2: #5d646d;
+  --accent-fg: #000;
+  --mixp: 18%;
+  --bordp: 45%;
+  --border-width: 1px;
+  --wb: 400;
+  --wt: 600;
+  /* Not from §2.1: the gantt/gbar "target window" rail, which was a literal
+     #33383f in five places. Tokenised here because the AA audit found it
+     invisible on outdoor's black ground (1.6:1); the dark value is the exact
+     original hex, so the dark palette is byte-identical to before. */
+  --track: #33383f;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-inter), system-ui, sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
 }
+/* Palette overrides (SPEC-supervisor-ui-v3 §2.2, verbatim from the approved
+   board). Both classes sit on the SAME element — `theme-industrial` is always
+   present, these only redefine tokens. No modifier = dark, which is what every
+   existing user resolves to (themePreference defaults to SYSTEM, and the
+   server resolves SYSTEM to dark). */
+.theme-industrial.theme-light {
+  --bg: #edeff2; --surface: #ffffff; --surface-2: #f4f6f8; --border: #d3d8de;
+  --text: #10141a; --muted: #4e5a65; --muted-2: #78848f;
+  --accent: #d9600a; --accent-fg: #ffffff;
+  --s-idle: #6b7480; --s-progress: #2c62d6; --s-submitted: #6e3fd1;
+  --s-hold: #9a6c05; --s-overdue: #c23a26; --s-complete: #1f7d4c;
+  --mixp: 12%; --bordp: 40%; --wb: 400; --wt: 600;
+  --track: #79879a;
+}
+.theme-industrial.theme-outdoor {
+  --bg: #000; --surface: #000; --surface-2: #0c0f12; --border: #7c8b99;
+  --text: #fff; --muted: #d6dee5; --muted-2: #aeb9c2;
+  --accent: #ff9a4d; --accent-fg: #000;
+  --s-idle: #9aa3ac; --s-progress: #8fb6ff; --s-submitted: #c9a8ff;
+  --s-hold: #ffd24d; --s-overdue: #ff8b7a; --s-complete: #5be08f;
+  --border-width: 2px;
+  --mixp: 0%; --bordp: 100%; --wb: 500; --wt: 700;
+  --track: #6c7784;
+}
+
+/* ── AA-audit fixes (D27 task 6) ────────────────────────────────────────
+   Only rules the computed WCAG check actually failed once light/outdoor went
+   live are touched, and only in the palette that failed — the dark palette is
+   deliberately left byte-identical to `main` (see the report for its own
+   pre-existing shortfalls, which are frozen by that same requirement). */
+
+/* Status chips, light palette. The shipped .c-* tints are fixed rgba values
+   calibrated against a near-black surface; over white they darken the pill
+   enough to drop the label under 4.5:1. Re-tinted with the spec's own --mixp
+   formula. .c-idle additionally hardcoded color:#9aa0a8 (1.76:1 on white —
+   the one catastrophic failure); it now follows --s-idle like its five peers. */
+.theme-industrial.theme-light .c-complete { background: color-mix(in oklab, var(--s-complete) var(--mixp), var(--surface)); }
+.theme-industrial.theme-light .c-progress { background: color-mix(in oklab, var(--s-progress) var(--mixp), var(--surface)); }
+.theme-industrial.theme-light .c-submitted { background: color-mix(in oklab, var(--s-submitted) var(--mixp), var(--surface)); }
+.theme-industrial.theme-light .c-hold { background: color-mix(in oklab, var(--s-hold) var(--mixp), var(--surface)); }
+.theme-industrial.theme-light .c-overdue { background: color-mix(in oklab, var(--s-overdue) var(--mixp), var(--surface)); }
+.theme-industrial.theme-light .c-idle {
+  background: color-mix(in oklab, var(--s-idle) var(--mixp), var(--surface));
+  color: var(--s-idle);
+}
+
+/* Gantt "actual" bar label: rgba(0,0,0,.75) reads on the dark palette's bright
+   fills, not on light's darker ones (1.9:1 against --s-complete #1f7d4c). */
+.theme-industrial.theme-light .g-actual b { color: rgba(255, 255, 255, .92); }
+
+/* Matrix zero cell and the alert badges hardcode colours that vanish on
+   outdoor's black ground (3.07:1 and 1.44:1). */
+.theme-industrial.theme-outdoor .mx-zero { color: var(--muted-2); }
+.theme-industrial.theme-outdoor .badge-alert,
+.theme-industrial.theme-outdoor .bn-badge { color: #000; }
+
+/* The welding "standard duration" rail keeps its original dark grey (the dark
+   palette must render identically to main); the other two palettes take the
+   tokenised value, since #3a3f47 is invisible on outdoor's black. */
+.theme-industrial.theme-light .gbar i.std,
+.theme-industrial.theme-outdoor .gbar i.std { background: var(--track); }
+
 .theme-industrial .mono { font-family: var(--font-jbmono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
 /* shell */
@@ -330,7 +407,7 @@ body {
 .theme-industrial .avatar { width: 28px; height: 28px; border-radius: 6px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--accent); flex: none; }
 .theme-industrial .user small { display: block; color: var(--muted); font-size: 10.5px; }
 .theme-industrial .main { flex: 1; min-width: 0; }
-.theme-industrial .topbar { height: 48px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; padding: 0 20px; position: sticky; top: 0; background: rgba(11, 12, 14, .92); backdrop-filter: blur(6px); z-index: 15; }
+.theme-industrial .topbar { height: 48px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 14px; padding: 0 20px; position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); z-index: 15; }
 .theme-industrial .crumb { color: var(--muted); }
 .theme-industrial .crumb b { color: var(--text); font-weight: 500; }
 .theme-industrial .jobswitch { display: flex; align-items: center; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; position: relative; transition: background .15s; }
@@ -537,6 +614,9 @@ body {
 .theme-industrial .icon-rail { display: none; }
 .theme-industrial .bottom-nav { display: none; }
 .theme-industrial .topbar-theme { display: none; }
+/* Icon-only below desktop — the phone bar has no room for a word, and the
+   tablet band hides this button entirely in favour of the rail's copy. */
+.theme-industrial .topbar-theme .tt-label { display: none; }
 @media (min-width: 640px) {
   .theme-industrial .sidebar { display: none; }
   .theme-industrial .icon-rail {
@@ -592,6 +672,17 @@ body {
 @media (min-width: 1024px) {
   .theme-industrial .sidebar { display: flex; }
   .theme-industrial .icon-rail { display: none; }
+  /* Third position for the theme control (D27): desktop had none until now.
+     Sized to sit next to .kbd, not at the 48×48 touch size the phone bar uses. */
+  .theme-industrial .topbar-theme {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); background: var(--surface); border-radius: 4px;
+    padding: 3px 8px; color: var(--muted); font-size: 11px; font-family: inherit; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .theme-industrial .topbar-theme:hover { background: var(--surface-2); color: var(--text); }
+  .theme-industrial .topbar-theme svg { width: 14px; height: 14px; }
+  .theme-industrial .topbar-theme .tt-label { display: inline; }
 }
 
 .theme-industrial .rail-avatar {
@@ -758,7 +849,7 @@ body {
 .theme-industrial .g-row:hover { background: var(--surface-2); }
 .theme-industrial .g-name { width: 190px; min-width: 190px; font-size: 11.5px; color: var(--muted); padding-right: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .theme-industrial .g-track { flex: 1; position: relative; height: 100%; min-width: 420px; }
-.theme-industrial .g-target { position: absolute; top: 13px; height: 5px; background: #33383f; border-radius: 2px; }
+.theme-industrial .g-target { position: absolute; top: 13px; height: 5px; background: var(--track); border-radius: 2px; }
 .theme-industrial .g-actual { position: absolute; top: 9px; height: 13px; border-radius: 3px; display: flex; align-items: center; overflow: hidden; }
 .theme-industrial .g-actual b { font-size: 9px; color: rgba(0, 0, 0, .75); padding-left: 5px; font-weight: 600; }
 .theme-industrial .g-today { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text); opacity: .5; }

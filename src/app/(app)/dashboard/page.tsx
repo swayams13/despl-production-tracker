@@ -324,7 +324,7 @@ export default async function Dashboard({
           <div className="hd">
             <h3>Cycle time vs standard — worst offenders</h3>
             <div className="legend">
-              <span><i style={{ background: "#33383f", height: 4 }} />Standard</span>
+              <span><i style={{ background: "var(--track)", height: 4 }} />Standard</span>
               <span><i style={{ background: "var(--s-overdue)" }} />Actual over</span>
             </div>
           </div>
@@ -448,24 +448,24 @@ function SCurveCard({ sCurve }: { sCurve: JobKpis["sCurve"] }) {
       <div className="hd">
         <h3>Schedule S-curve — planned vs actual</h3>
         <div className="legend">
-          <span><i style={{ background: "#8B919A" }} />Planned</span>
+          <span><i style={{ background: "var(--muted)" }} />Planned</span>
           <span><i style={{ background: "var(--accent)" }} />Actual{variancePct !== null && ` · ${variancePct > 0 ? "+" : ""}${variancePct}%`}</span>
         </div>
       </div>
       <div style={{ padding: 16 }}>
         <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Planned versus actual plans complete over time">
-          <g stroke="#262A30" strokeDasharray="3 4">
+          <g stroke="var(--border)" strokeDasharray="3 4">
             {[0, 0.25, 0.5, 0.75, 1].map((f) => (
               <line key={f} x1={padL} y1={padT + f * (H - padT - padB)} x2={W - padR} y2={padT + f * (H - padT - padB)} />
             ))}
           </g>
-          <g fill="#8B919A" fontSize="10" fontFamily="'JetBrains Mono',monospace">
+          <g fill="var(--muted)" fontSize="10" fontFamily="'JetBrains Mono',monospace">
             {[0, 0.25, 0.5, 0.75, 1].map((f) => (
               <text key={f} x={4} y={padT + (1 - f) * (H - padT - padB) + 3}>{Math.round(f * maxVal)}</text>
             ))}
             {sCurve.map((p, i) => (i % Math.ceil(sCurve.length / 6) === 0 ? <text key={i} x={xFor(i) - 6} y={H - 8}>{p.label}</text> : null))}
           </g>
-          <polyline points={plannedPts} fill="none" stroke="#8B919A" strokeWidth="1.5" strokeDasharray="5 4" />
+          <polyline points={plannedPts} fill="none" stroke="var(--muted)" strokeWidth="1.5" strokeDasharray="5 4" />
           {actualPts && <polyline points={actualPts} fill="none" stroke="var(--accent)" strokeWidth="2" />}
           {lastActual?.actual !== null && lastActual?.actual !== undefined && (
             <circle cx={xFor(lastActualIdx)} cy={yFor(lastActual.actual)} r="3.5" fill="var(--accent)" />

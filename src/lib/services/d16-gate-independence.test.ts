@@ -98,6 +98,8 @@ describe.skipIf(!RUN_DB)("D16 — assignment never bypasses gating (DB)", async 
       roles: [ROLES.SUPERVISOR],
       departmentIds: [deptId],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   });
 

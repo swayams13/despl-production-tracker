@@ -135,6 +135,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
       roles: [ROLES.SUPERVISOR],
       departmentIds: [deptMine.id],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
 
     let seq = 1;
@@ -480,6 +482,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read — QC cross-department v
       roles: [ROLES.QC],
       departmentIds: [deptQc.id], // QC's OWN department — deliberately NOT deptOther
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
 
     const jp = await owner.jobProcess.create({
@@ -556,6 +560,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read — QC cross-department v
       roles: [ROLES.QC],
       departmentIds: [deptQc.id],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
 
     // QC's own NDE process — maker AND submitter are the same QC actor.

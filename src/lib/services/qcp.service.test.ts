@@ -32,6 +32,8 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   }
 

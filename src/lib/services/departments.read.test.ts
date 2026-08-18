@@ -20,6 +20,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("departments.read (DB)", async () => 
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   }
 

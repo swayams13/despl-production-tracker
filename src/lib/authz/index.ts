@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { readSession } from "@/lib/auth/session";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import type { ThemePreference } from "@/lib/theme";
 
 export const ROLES = {
   ADMIN: "ADMIN",
@@ -25,6 +26,10 @@ export interface Actor {
   departmentIds: number[];
   /** True until the user completes the first-login password change. */
   mustChangePassword: boolean;
+  /** UI appearance preference (D27). "SYSTEM" defers to prefers-color-scheme. */
+  themePreference: ThemePreference;
+  /** Outdoor (high-contrast) palette on/off (D25). */
+  outdoorMode: boolean;
 }
 
 /**
@@ -60,6 +65,8 @@ export async function getActor(): Promise<Actor | null> {
       roles: user.roles.map((r) => r.role.code as RoleCode),
       departmentIds: user.departments.map((d) => d.departmentId),
       mustChangePassword: user.mustChangePassword,
+      themePreference: user.themePreference,
+      outdoorMode: user.outdoorMode,
     };
   });
 }

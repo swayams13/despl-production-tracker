@@ -45,6 +45,8 @@ async function main() {
     roles: [ROLES.ADMIN],
     departmentIds: [],
     mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
   };
 
   const user = await createUser(bootstrapActor, {

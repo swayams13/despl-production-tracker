@@ -13,6 +13,8 @@ function actor(over: Partial<Actor> = {}): Actor {
     roles: [ROLES.ADMIN],
     departmentIds: [],
     mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
     ...over,
   };
 }
@@ -109,6 +111,8 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
       roles: [ROLES.ADMIN],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   });
 
@@ -245,6 +249,8 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
       roles: [ROLES.ADMIN],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   });
 

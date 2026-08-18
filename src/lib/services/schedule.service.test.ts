@@ -21,6 +21,8 @@ function actor(over: Partial<Actor> = {}): Actor {
     roles: [ROLES.PRODUCTION_HEAD],
     departmentIds: [],
     mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
     ...over,
   };
 }

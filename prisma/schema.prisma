@@ -49,6 +49,14 @@ datasource db {
 
 // ── Enums: closed state machines only (see design note 4) ───────────────
 
+/// UI appearance preference (D27). A closed set the code branches on, so it
+/// is an enum and not a reference table (design note 4).
+enum ThemePreference {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
 enum JobPriority {
   LOW
   NORMAL
@@ -249,6 +257,16 @@ model User {
   /// their credentials) — the /admin Employees table (SPEC §7.3) renders
   /// that as "Never", not a fabricated date.
   lastLoginAt        DateTime? @map("last_login_at")
+  /// UI appearance preference (D27, session R1 task 6). Per USER, not per
+  /// browser — CLAUDE.md hard-bans localStorage for app state. SYSTEM defers
+  /// to the OS's prefers-color-scheme; server-side rendering resolves it to
+  /// dark and a tiny inline script corrects it before first paint.
+  themePreference    ThemePreference @default(SYSTEM) @map("theme_preference")
+  /// Outdoor (high-contrast shop-floor) palette on/off. Deliberately a
+  /// SEPARATE column from themePreference even though today's single control
+  /// presents them as one four-step cycle — the data model then survives a
+  /// later UI that splits them back into two controls (D25).
+  outdoorMode        Boolean  @default(false) @map("outdoor_mode")
 
   tenant        Organization     @relation(fields: [tenantId], references: [id])
   client        Client?          @relation(fields: [clientId], references: [id])

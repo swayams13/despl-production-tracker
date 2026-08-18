@@ -2,14 +2,16 @@
 
 import { useActionState } from "react";
 import { changePassword, type ChangePasswordState } from "@/app/actions/account";
+import { ThemeRoot } from "@/components/industrial/theme-root";
+import type { ThemeState } from "@/lib/theme";
 
 const initial: ChangePasswordState = {};
 
-export function ChangePasswordForm({ forced }: { forced: boolean }) {
+export function ChangePasswordForm({ forced, theme }: { forced: boolean; theme: ThemeState }) {
   const [state, formAction, pending] = useActionState(changePassword, initial);
 
   return (
-    <div className="theme-industrial">
+    <ThemeRoot {...theme}>
       <main className="grid min-h-dvh place-items-center px-4">
         <div className="w-full max-w-sm">
           <div className="mb-6 text-center">
@@ -69,6 +71,6 @@ export function ChangePasswordForm({ forced }: { forced: boolean }) {
           </form>
         </div>
       </main>
-    </div>
+    </ThemeRoot>
   );
 }

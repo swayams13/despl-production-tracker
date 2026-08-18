@@ -60,6 +60,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday/workspace overdue-count parity
       roles: [ROLES.SUPERVISOR],
       departmentIds: [deptSolo.id],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
 
     let seq = 1;

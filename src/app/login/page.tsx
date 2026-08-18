@@ -2,14 +2,18 @@
 
 import { useActionState } from "react";
 import { login, type LoginState } from "@/app/actions/auth";
+import { ThemeRoot } from "@/components/industrial/theme-root";
 
 const initial: LoginState = {};
 
 export default function LoginPage() {
   const [state, formAction, pending] = useActionState(login, initial);
 
+  // Pre-authentication: there is no user row to read a preference from, so
+  // /login always resolves as SYSTEM (+ no outdoor) and leans entirely on
+  // ThemeRoot's inline script for the OS-light case.
   return (
-    <div className="theme-industrial">
+    <ThemeRoot themePreference="SYSTEM" outdoorMode={false}>
       <main className="grid min-h-dvh place-items-center px-4">
         <div className="w-full max-w-sm">
           <div className="mb-6 text-center">
@@ -71,6 +75,6 @@ export default function LoginPage() {
           </p>
         </div>
       </main>
-    </div>
+    </ThemeRoot>
   );
 }

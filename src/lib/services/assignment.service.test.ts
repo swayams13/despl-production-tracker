@@ -21,6 +21,8 @@ function actor(over: Partial<Actor> = {}): Actor {
     roles: [ROLES.SUPERVISOR],
     departmentIds: [3],
     mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
     ...over,
   };
 }
@@ -188,7 +190,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("assignment service — claim/assign/
     otherDeptUserId = otherMember.id;
     inactiveDeptMemberUserId = inactiveMember.id;
 
-    const base = { tenantId, clientId: null, email: "x", name: "x", mustChangePassword: false };
+    const base = { tenantId, clientId: null, email: "x", name: "x", mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
     supervisor = { ...base, userId: supUser.id, roles: [ROLES.SUPERVISOR], departmentIds: [deptId] };
     outsideSupervisor = { ...base, userId: outsideSupUser.id, roles: [ROLES.SUPERVISOR], departmentIds: [otherDeptId] };
     phActor = { ...base, userId: phUser.id, roles: [ROLES.PRODUCTION_HEAD], departmentIds: [] };
@@ -378,6 +380,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("assignment service — claim/assign/
         roles: [ROLES.PRODUCTION_HEAD, ROLES.ADMIN],
         departmentIds: [],
         mustChangePassword: false,
+        themePreference: "SYSTEM",
+        outdoorMode: false,
       };
     });
 

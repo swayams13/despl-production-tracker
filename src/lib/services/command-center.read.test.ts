@@ -23,6 +23,8 @@ function actor(over: Partial<Actor> = {}): Actor {
     roles: [ROLES.SUPERVISOR],
     departmentIds: [10],
     mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
     ...over,
   };
 }
@@ -147,6 +149,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — cross-departme
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
 
     const storesView = await loadCommandCenter(viewer, deptStores.id, "STORES", "Stores");

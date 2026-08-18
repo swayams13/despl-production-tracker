@@ -16,6 +16,7 @@ import {
   bulkImportEmployeesAction,
 } from "@/app/actions/admin";
 import { ResponsiveTable } from "@/components/industrial/responsive-table";
+import { useThemeClass } from "@/components/industrial/theme-root";
 import type { AdminView, AdminUserRow } from "@/lib/services/admin.read";
 import {
   parseEmployeeCsv,
@@ -309,6 +310,7 @@ function AddEmployeeDialog({
   onClose: () => void;
   onCreated: (c: { username: string; tempPassword: string }) => void;
 }) {
+  const themeClass = useThemeClass();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [displayName, setDisplayName] = useState("");
@@ -354,7 +356,7 @@ function AddEmployeeDialog({
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-ov" />
-        <Dialog.Content className="theme-industrial admin-dialog" aria-describedby={undefined}>
+        <Dialog.Content className={`${themeClass} admin-dialog`} aria-describedby={undefined}>
           <div className="sh-hd">
             <Dialog.Close asChild>
               <button className="sh-x" aria-label="Close">✕</button>
@@ -413,6 +415,7 @@ function EditEmployeeDialog({
   isSelf: boolean;
   onClose: () => void;
 }) {
+  const themeClass = useThemeClass();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [roles, setRoles] = useState<Set<string>>(new Set(row.roleCodes));
@@ -444,7 +447,7 @@ function EditEmployeeDialog({
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-ov" />
-        <Dialog.Content className="theme-industrial admin-dialog" aria-describedby={undefined}>
+        <Dialog.Content className={`${themeClass} admin-dialog`} aria-describedby={undefined}>
           <div className="sh-hd">
             <Dialog.Close asChild>
               <button className="sh-x" aria-label="Close">✕</button>
@@ -498,11 +501,12 @@ function ConfirmDeactivateDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const themeClass = useThemeClass();
   return (
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-ov" />
-        <Dialog.Content className="theme-industrial admin-dialog" aria-describedby={undefined} style={{ width: 420 }}>
+        <Dialog.Content className={`${themeClass} admin-dialog`} aria-describedby={undefined} style={{ width: 420 }}>
           <div className="sh-hd">
             <Dialog.Close asChild>
               <button className="sh-x" aria-label="Close">✕</button>
@@ -536,12 +540,13 @@ function ConfirmDeactivateDialog({
  * source (SPEC §9).
  */
 function CredentialDialog({ username, tempPassword, onClose }: { username: string; tempPassword: string; onClose: () => void }) {
+  const themeClass = useThemeClass();
   const appUrl = typeof window !== "undefined" ? window.location.origin : "";
   return (
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-ov" />
-        <Dialog.Content className="theme-industrial admin-dialog" aria-describedby={undefined}>
+        <Dialog.Content className={`${themeClass} admin-dialog`} aria-describedby={undefined}>
           <div className="sh-hd">
             <Dialog.Close asChild>
               <button className="sh-x" aria-label="Close" onClick={onClose}>✕</button>
@@ -594,6 +599,7 @@ function CredentialDialog({ username, tempPassword, onClose }: { username: strin
 }
 
 function BulkImportDialog({ view, onClose }: { view: AdminView; onClose: () => void }) {
+  const themeClass = useThemeClass();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [rows, setRows] = useState<ParsedEmployeeRow[]>([]);
@@ -663,7 +669,7 @@ function BulkImportDialog({ view, onClose }: { view: AdminView; onClose: () => v
     <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
       <Dialog.Portal>
         <Dialog.Overlay className="admin-dialog-ov" />
-        <Dialog.Content className="theme-industrial admin-dialog wide" aria-describedby={undefined}>
+        <Dialog.Content className={`${themeClass} admin-dialog wide`} aria-describedby={undefined}>
           <div className="sh-hd">
             <Dialog.Close asChild>
               <button className="sh-x" aria-label="Close">✕</button>

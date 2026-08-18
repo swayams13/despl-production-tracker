@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
 import { Toaster } from "sonner";
 import { AppShell } from "@/components/industrial/app-shell";
+import { ThemeRoot } from "@/components/industrial/theme-root";
 import { getActor } from "@/lib/authz";
 import { loadMyOverdueCount } from "@/lib/services/workspace.read";
 import { loadNotifications } from "@/lib/services/notifications.read";
 import { syncNotifications } from "@/lib/services/notifications.service";
+import { toasterTheme } from "@/lib/theme";
 
 /**
  * Route-group layout for the industrial UI. Everything under (app) renders in
@@ -38,8 +40,13 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
     [overdueCount, notifications] = await Promise.all([loadMyOverdueCount(actor), loadNotifications(actor)]);
   }
 
+  const theme = {
+    themePreference: actor?.themePreference ?? ("SYSTEM" as const),
+    outdoorMode: actor?.outdoorMode ?? false,
+  };
+
   return (
-    <div className="theme-industrial">
+    <ThemeRoot {...theme}>
       <AppShell
         userName={actor?.name ?? "—"}
         userRole={actor?.roles[0] ?? ""}
@@ -48,7 +55,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
       >
         {children}
       </AppShell>
-      <Toaster theme="dark" position="bottom-right" />
-    </div>
+      <Toaster theme={toasterTheme(theme)} position="bottom-right" />
+    </ThemeRoot>
   );
 }

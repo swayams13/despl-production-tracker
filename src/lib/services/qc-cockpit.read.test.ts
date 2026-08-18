@@ -30,6 +30,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadQcCockpit (DB)", async () => {
       roles: [ROLES.QC],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
 
     const cockpit = await loadQcCockpit(actor);

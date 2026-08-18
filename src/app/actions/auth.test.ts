@@ -63,6 +63,8 @@ describe.skipIf(!RUN_DB)("login() — identity resolution (DB)", async () => {
       roles: [ROLES.ADMIN],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   });
 

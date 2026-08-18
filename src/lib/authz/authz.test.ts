@@ -31,6 +31,8 @@ function actor(over: Partial<Actor> = {}): Actor {
     roles: [ROLES.SUPERVISOR],
     departmentIds: [10],
     mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
     ...over,
   };
 }

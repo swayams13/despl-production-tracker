@@ -25,6 +25,8 @@ const state = vi.hoisted(() => ({
     email: string;
     sessionVersion: number;
     mustChangePassword: boolean;
+    themePreference: "SYSTEM" | "LIGHT" | "DARK";
+    outdoorMode: boolean;
     roles: { role: { code: string } }[];
     departments: { departmentId: number }[];
   },
@@ -56,6 +58,8 @@ function seedUser(over: { mustChangePassword?: boolean } = {}) {
     email: "locked@despl.local",
     sessionVersion: 0,
     mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
     roles: [{ role: { code: "SUPERVISOR" } }],
     departments: [{ departmentId: 3 }],
     ...over,

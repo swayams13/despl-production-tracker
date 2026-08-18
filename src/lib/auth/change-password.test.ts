@@ -38,6 +38,8 @@ function pureActor(): Actor {
     roles: [],
     departmentIds: [],
     mustChangePassword: true,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
   };
 }
 
@@ -113,6 +115,8 @@ describe.skipIf(!RUN_DB)("changeOwnPassword (DB)", async () => {
       roles: [],
       departmentIds: [],
       mustChangePassword: true,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
     return { tenantId, userId: user.id, actor };
   }

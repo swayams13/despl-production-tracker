@@ -1,13 +1,16 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { StageSpine } from "./stage-spine";
 import { DEMO_SPINE } from "./_demo";
+import { useTheme } from "./theme-root";
 import { markNotificationReadAction, markAllNotificationsReadAction } from "@/app/actions/notifications";
+import { setThemeAction } from "@/app/actions/preferences";
 import { logout } from "@/app/actions/auth";
+import { nextThemeState, themeLabel } from "@/lib/theme";
 import type { NotificationRow } from "@/lib/services/notifications.read";
 
 // Icons inlined from the mockup (lucide-react is pinned at an atypical 1.x here;
@@ -93,6 +96,21 @@ const icons = {
   themeMoon: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 14.5A8.6 8.6 0 019.5 4a8.6 8.6 0 1010.5 10.5z" />
+    </svg>
+  ),
+  themeSun: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6" />
+    </svg>
+  ),
+  /* Outdoor has no glyph of its own in the reference's <symbol> set — the sun
+     inside a heavy ring reads as "sun, turned up", which is what it is. */
+  themeOutdoor: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="6.6" />
+      <path d="M12 1.8v2.2M12 20v2.2M1.8 12h2.2M20 12h2.2" />
     </svg>
   ),
 };
@@ -204,6 +222,40 @@ export function AppShell({
     router.refresh();
   };
 
+  // ── Theme control (D27/D28) ───────────────────────────────────────────
+  // One control, three positions (desktop topbar, tablet rail, phone topbar),
+  // one click = one step: System → Light → Dark → Outdoor → System.
+  const themeState = useTheme();
+  // "System" has no glyph of its own, so it borrows sun/moon from whatever the
+  // OS currently resolves to. Starts false to match the server's dark guess,
+  // then corrects after hydration — the label text is what actually
+  // distinguishes System from an explicit Light/Dark.
+  const [systemLight, setSystemLight] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const sync = () => setSystemLight(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  const themeText = themeLabel(themeState);
+  const themeIcon = themeState.outdoorMode
+    ? icons.themeOutdoor
+    : themeState.themePreference === "LIGHT" ||
+        (themeState.themePreference === "SYSTEM" && systemLight)
+      ? icons.themeSun
+      : icons.themeMoon;
+
+  const cycleTheme = async () => {
+    const r = await setThemeAction(nextThemeState(themeState));
+    if (!r.ok) {
+      toast.error(r.message);
+      return;
+    }
+    router.refresh();
+  };
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -267,11 +319,11 @@ export function AppShell({
         <button
           type="button"
           className="rail-item rail-theme"
-          aria-label="Theme"
-          onClick={() => toast("Theme selector wires up in a later session")}
+          aria-label={`Theme: ${themeText}. Switch theme`}
+          onClick={cycleTheme}
         >
-          {icons.themeMoon}
-          <span>Theme</span>
+          {themeIcon}
+          <span>{themeText}</span>
         </button>
       </nav>
 
@@ -333,13 +385,20 @@ export function AppShell({
             <button className="kbd" onClick={() => toast("Command palette (⌘K) wires up in a later session")}>
               ⌘K&nbsp;&nbsp;Search
             </button>
+            {/* One button, two of the three positions: the phone top bar
+                (48×48 touch target, Task 4) and — new here — the desktop
+                topbar, sized like .kbd next to it. A literal second element
+                would just be two theme buttons in the same bar; CSS decides
+                which sizing applies, and the tablet band hides it in favour
+                of the rail's copy. */}
             <button
               type="button"
               className="topbar-theme"
-              aria-label="Theme"
-              onClick={() => toast("Theme selector wires up in a later session")}
+              aria-label={`Theme: ${themeText}. Switch theme`}
+              onClick={cycleTheme}
             >
-              {icons.themeMoon}
+              {themeIcon}
+              <span className="tt-label">{themeText}</span>
             </button>
             <button className="bell" onClick={() => setBellOpen((v) => !v)} aria-label="Notifications">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>

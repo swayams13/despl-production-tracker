@@ -104,6 +104,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("admin.read — Employees table exten
       roles: [ROLES.ADMIN],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   });
 

@@ -55,7 +55,7 @@ export function JobGantt({
       <div className="hd">
         <h3>{unit ? `Unit ${unit.serialNo} — target vs actual` : "Timeline"}</h3>
         <div className="legend">
-          <span><i style={{ background: "#33383f", height: 4 }} />Target window</span>
+          <span><i style={{ background: "var(--track)", height: 4 }} />Target window</span>
           <span><i style={{ background: "var(--s-complete)" }} />Done</span>
           <span><i style={{ background: "var(--s-progress)" }} />Active</span>
           <span><i style={{ background: "var(--s-overdue)" }} />Overdue</span>
@@ -164,7 +164,7 @@ function DependencyElbow({
   const toY = toIndex * ROW_H + ROW_H / 2;
   const midX = Math.max(fromEnd, toStart - 1);
   const line = (style: CSSProperties, key: string) => (
-    <div key={key} style={{ position: "absolute", background: "#33383f", opacity: 0.6, ...style }} />
+    <div key={key} style={{ position: "absolute", background: "var(--track)", opacity: 0.6, ...style }} />
   );
   return (
     <>

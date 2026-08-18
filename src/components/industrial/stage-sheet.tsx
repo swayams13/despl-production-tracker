@@ -5,6 +5,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { StatusChip } from "./status-chip";
 import { StageSpine } from "./stage-spine";
 import { type StageDisplayStatus, type StageSegment } from "./stage-status";
+import { useThemeClass } from "./theme-root";
 
 /**
  * StageSheet — 460px right sheet, opens from any stage reference (spine
@@ -15,7 +16,9 @@ import { type StageDisplayStatus, type StageSegment } from "./stage-status";
  * later sessions; `body`/`footer` are slots so those can fill in.
  *
  * NOTE: radix portals Content to <body>, OUTSIDE the (app) `.theme-industrial`
- * wrapper — so Content re-declares the class, or the dark tokens wouldn't resolve.
+ * wrapper — so Content re-declares the class, or the tokens wouldn't resolve.
+ * It reads the live class (which palette is active) from ThemeRoot's context
+ * rather than a hardcoded string, or the sheet would stay dark in light mode.
  */
 export function StageSheet({
   open,
@@ -39,11 +42,12 @@ export function StageSheet({
   body?: ReactNode;
   footer?: ReactNode;
 }) {
+  const themeClass = useThemeClass();
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="stage-sheet-ov" />
-        <Dialog.Content className="theme-industrial stage-sheet" aria-describedby={undefined}>
+        <Dialog.Content className={`${themeClass} stage-sheet`} aria-describedby={undefined}>
           <div className="sh-hd">
             <Dialog.Close asChild>
               <button className="sh-x" aria-label="Close">

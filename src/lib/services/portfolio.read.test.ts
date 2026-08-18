@@ -23,6 +23,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("portfolio.read (DB)", async () => {
       roles: [ROLES.PRODUCTION_HEAD],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
   }
 
@@ -67,6 +69,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("portfolio.read (DB)", async () => {
       roles: [ROLES.CLIENT_VIEWER],
       departmentIds: [],
       mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
     };
     const p = await loadPortfolio(actor);
 

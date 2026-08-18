@@ -83,7 +83,7 @@ export function DepartmentDetailClient({ dept, commandCenterCode }: { dept: Dept
           <div className="hd">
             <h3>Cycle time vs standard</h3>
             <div className="legend">
-              <span><i style={{ background: "#33383f", height: 4 }} />Standard</span>
+              <span><i style={{ background: "var(--track)", height: 4 }} />Standard</span>
               <span><i style={{ background: "var(--s-progress)" }} />Actual</span>
             </div>
           </div>
