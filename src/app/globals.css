@@ -523,6 +523,119 @@ body {
 .theme-industrial .rt-card-action { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-industrial .rt-card-action > * { flex: 1 1 120px; }
 
+/* Shell variants (Task 4, SPEC-responsive-app-v2 §3.1): desktop sidebar
+   (>=1024px, unchanged) / tablet icon rail (640-1023px) / phone bottom nav
+   (<640px). All three are rendered unconditionally in app-shell.tsx; this is
+   a CSS-only toggle, same shape as .rt-table/.rt-cards above — never a JS
+   matchMedia swap (the server can't know viewport width; a JS-driven swap
+   would hydration-mismatch and flash). Rules below come after each
+   element's base rule so they win the cascade at equal specificity. */
+.theme-industrial .icon-rail { display: none; }
+.theme-industrial .bottom-nav { display: none; }
+.theme-industrial .topbar-theme { display: none; }
+@media (min-width: 640px) {
+  .theme-industrial .sidebar { display: none; }
+  .theme-industrial .icon-rail {
+    display: flex;
+    width: 76px;
+    min-width: 76px;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0 14px;
+    gap: 8px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    z-index: 20;
+  }
+}
+@media (max-width: 639px) {
+  .theme-industrial .sidebar { display: none; }
+  .theme-industrial .icon-rail { display: none; }
+  .theme-industrial .bottom-nav {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 25;
+  }
+  .theme-industrial .topbar-theme {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    padding: 4px;
+    color: var(--muted);
+    background: none;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .theme-industrial .topbar-theme:hover { background: var(--surface-2); color: var(--text); }
+  .theme-industrial .topbar-theme svg { width: 18px; height: 18px; }
+  .theme-industrial .content { padding-bottom: calc(48px + 64px + env(safe-area-inset-bottom)); }
+}
+@media (max-width: 1023px) {
+  .theme-industrial .jobswitch { display: none; }
+  .theme-industrial .kbd { display: none; }
+}
+@media (min-width: 1024px) {
+  .theme-industrial .sidebar { display: flex; }
+  .theme-industrial .icon-rail { display: none; }
+}
+
+.theme-industrial .rail-avatar {
+  width: 44px; height: 44px; border-radius: 10px; border: 2px solid var(--accent);
+  display: flex; align-items: center; justify-content: center; flex: none;
+  color: var(--accent); font-family: var(--font-jbmono), ui-monospace, monospace; font-weight: 600; font-size: 13px;
+}
+.theme-industrial .rail-item {
+  width: 60px; height: 60px; border-radius: 11px; flex: none; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  color: var(--muted); background: none; border: 1px solid transparent; text-decoration: none;
+  cursor: pointer; font-family: inherit; transition: background .15s, color .15s, border-color .15s;
+}
+.theme-industrial .rail-item svg { width: 19px; height: 19px; flex: none; }
+.theme-industrial .rail-item span { font-size: 9.5px; font-weight: 500; }
+.theme-industrial .rail-item:hover { color: var(--text); }
+.theme-industrial .rail-item.active {
+  background: color-mix(in oklab, var(--accent) 12%, var(--surface));
+  border-color: var(--accent); color: var(--accent);
+}
+.theme-industrial .rail-item.active span { font-weight: 600; }
+.theme-industrial .rail-item .badge, .theme-industrial .rail-item .badge-alert {
+  position: absolute; top: 4px; right: 8px; font-size: 9.5px; font-weight: 700;
+  padding: 1px 5px; border-radius: 8px; line-height: 1.4;
+}
+.theme-industrial .rail-item .badge { background: rgba(240, 82, 77, .14); color: var(--s-overdue); }
+.theme-industrial .rail-item .badge-alert { background: var(--s-hold); color: #fff; }
+.theme-industrial .rail-spacer { flex: 1; }
+.theme-industrial .rail-theme { background: var(--surface-2); border-color: var(--border); }
+
+.theme-industrial .bn-item {
+  flex: 1; min-height: 64px; padding-bottom: env(safe-area-inset-bottom); position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  color: var(--muted); text-decoration: none; font-weight: 500;
+}
+.theme-industrial .bn-item svg { width: 20px; height: 20px; flex: none; }
+.theme-industrial .bn-item span { font-size: 11px; }
+.theme-industrial .bn-item.active {
+  box-shadow: inset 0 3px 0 var(--accent);
+  background: color-mix(in oklab, var(--accent) 10%, var(--surface));
+  color: var(--accent); font-weight: 600;
+}
+.theme-industrial .bn-icon-wrap { position: relative; display: flex; }
+.theme-industrial .bn-badge {
+  position: absolute; top: -4px; right: -8px; background: var(--s-hold); color: #fff;
+  font-style: normal; font-size: 9px; font-weight: 700; border-radius: 7px; padding: 0 4px;
+}
+
 /* dashboard (§4.2) — ported 1:1 from the mockup */
 .theme-industrial .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 10px; }
 .theme-industrial .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; overflow: hidden; transition: border-color .15s; }

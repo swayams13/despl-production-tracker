@@ -64,7 +64,47 @@ const icons = {
       <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.6 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.6a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9c.14.36.5.6 1 .6H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1.4z" />
     </svg>
   ),
+  // Rounder/thicker stroke set for the tablet rail + phone bottom nav (Task 4):
+  // pixel-matched to design/DESPL Supervisor Handoff.dc.html's nav symbols, a
+  // deliberately different icon style from the desktop sidebar set above.
+  navToday: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 6.5h16M4 12h16M4 17.5h10" />
+    </svg>
+  ),
+  navBoard: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.2" y="3.2" width="17.6" height="17.6" rx="2.4" />
+      <path d="M9 17v-4.2M15 17V8.4" />
+    </svg>
+  ),
+  navAlerts: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 9.5a6 6 0 0112 0v4.5l2 3H4l2-3z" />
+      <path d="M9.8 20.2a2.6 2.6 0 004.4 0" />
+    </svg>
+  ),
+  navProfile: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="3.8" />
+      <path d="M4.5 20.5c1.4-3.8 4.2-5.6 7.5-5.6s6.1 1.8 7.5 5.6" />
+    </svg>
+  ),
+  themeMoon: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 14.5A8.6 8.6 0 019.5 4a8.6 8.6 0 1010.5 10.5z" />
+    </svg>
+  ),
 };
+
+// The four destinations shared by the tablet icon rail and phone bottom nav
+// (Task 4, SPEC-supervisor-ui-v3 §3 SupervisorNav row). Order is exact.
+const SHELL_NAV: { href: string; label: string; icon: ReactNode; badge?: "overdue" | "unread" }[] = [
+  { href: "/my-day", label: "Today", icon: icons.navToday, badge: "overdue" },
+  { href: "/board", label: "Board", icon: icons.navBoard },
+  { href: "/alerts", label: "Alerts", icon: icons.navAlerts, badge: "unread" },
+  { href: "/profile", label: "Profile", icon: icons.navProfile },
+];
 
 const NAV: { group: string; items: { href: string; label: string; icon: ReactNode; badge?: number }[] }[] = [
   {
@@ -138,10 +178,21 @@ export function AppShell({
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
 
+  // Non-management roles' "Dashboard" is /my-day — /dashboard server-redirects
+  // them to /my-day anyway (dashboard/page.tsx's role gate), so the nav link
+  // points there directly instead of round-tripping through a redirect.
+  const isManagementTier = userRole === "ADMIN" || userRole === "MANAGEMENT" || userRole === "PRODUCTION_HEAD";
+  const base = isManagementTier
+    ? NAV
+    : NAV.map((g) =>
+        g.group === "Overview"
+          ? { ...g, items: g.items.map((i) => (i.href === "/dashboard" ? { ...i, href: "/my-day", label: "My Day" } : i)) }
+          : g,
+      );
   const nav =
     userRole === "ADMIN" || userRole === "MANAGEMENT"
-      ? [...NAV, { group: "Admin", items: [{ href: "/admin", label: "Admin", icon: icons.admin }] }]
-      : NAV;
+      ? [...base, { group: "Admin", items: [{ href: "/admin", label: "Admin", icon: icons.admin }] }]
+      : base;
   const active = nav.flatMap((g) => g.items).find((i) => pathname.startsWith(i.href));
 
   const openNotification = async (n: NotificationRow) => {
@@ -197,6 +248,54 @@ export function AppShell({
         </div>
       </aside>
 
+      {/* Tablet icon rail (640-1023px, SPEC-responsive-app-v2 §3.1) — rendered
+          unconditionally alongside the sidebar and bottom nav; a plain CSS
+          media query decides which is visible (same pattern as
+          <ResponsiveTable />'s .rt-table/.rt-cards, globals.css:509-514), never
+          a JS matchMedia toggle. */}
+      <nav className="icon-rail" aria-label="Primary">
+        <div className="rail-avatar">{initials}</div>
+        {SHELL_NAV.map((it) => {
+          const isActive = pathname.startsWith(it.href);
+          const count = it.badge === "overdue" ? overdueCount : it.badge === "unread" ? notifications.unreadCount : 0;
+          return (
+            <Link key={it.href} href={it.href} className={`rail-item${isActive ? " active" : ""}`}>
+              {it.icon}
+              <span>{it.label}</span>
+              {count > 0 && it.badge === "overdue" && <span className="badge">{count}</span>}
+              {count > 0 && it.badge === "unread" && <span className="badge-alert">{count}</span>}
+            </Link>
+          );
+        })}
+        <div className="rail-spacer" />
+        <button
+          type="button"
+          className="rail-item rail-theme"
+          aria-label="Theme"
+          onClick={() => toast("Theme selector wires up in a later session")}
+        >
+          {icons.themeMoon}
+          <span>Theme</span>
+        </button>
+      </nav>
+
+      {/* Phone bottom nav (<640px) — same unconditional-render + CSS-toggle pattern. */}
+      <nav className="bottom-nav" aria-label="Primary">
+        {SHELL_NAV.map((it) => {
+          const isActive = pathname.startsWith(it.href);
+          const count = it.badge === "overdue" ? overdueCount : it.badge === "unread" ? notifications.unreadCount : 0;
+          return (
+            <Link key={it.href} href={it.href} className={`bn-item${isActive ? " active" : ""}`}>
+              <span className="bn-icon-wrap">
+                {it.icon}
+                {count > 0 && it.badge === "unread" && <em className="bn-badge">{count}</em>}
+              </span>
+              <span>{it.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
       <div className="main">
         <div className="topbar">
           <span className="crumb">
@@ -237,6 +336,14 @@ export function AppShell({
           <div className="right">
             <button className="kbd" onClick={() => toast("Command palette (⌘K) wires up in a later session")}>
               ⌘K&nbsp;&nbsp;Search
+            </button>
+            <button
+              type="button"
+              className="topbar-theme"
+              aria-label="Theme"
+              onClick={() => toast("Theme selector wires up in a later session")}
+            >
+              {icons.themeMoon}
             </button>
             <button className="bell" onClick={() => setBellOpen((v) => !v)} aria-label="Notifications">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
