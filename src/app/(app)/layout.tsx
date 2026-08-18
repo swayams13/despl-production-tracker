@@ -5,6 +5,7 @@ import { AppShell } from "@/components/industrial/app-shell";
 import { ThemeRoot } from "@/components/industrial/theme-root";
 import { getActor } from "@/lib/authz";
 import { loadMyOverdueCount } from "@/lib/services/workspace.read";
+import { loadJobs } from "@/lib/services/jobs.read";
 import { loadNotifications } from "@/lib/services/notifications.read";
 import { syncNotifications } from "@/lib/services/notifications.service";
 import { toasterTheme } from "@/lib/theme";
@@ -35,9 +36,14 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
 
   let overdueCount = 0;
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };
+  let jobs: Awaited<ReturnType<typeof loadJobs>> = [];
   if (actor) {
     await syncNotifications(actor).catch((e) => console.error("[notifications] sync failed", e));
-    [overdueCount, notifications] = await Promise.all([loadMyOverdueCount(actor), loadNotifications(actor)]);
+    [overdueCount, notifications, jobs] = await Promise.all([
+      loadMyOverdueCount(actor),
+      loadNotifications(actor),
+      loadJobs(actor),
+    ]);
   }
 
   const theme = {
@@ -52,6 +58,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
         userRole={actor?.roles[0] ?? ""}
         overdueCount={overdueCount}
         notifications={notifications}
+        jobs={jobs}
       >
         {children}
       </AppShell>

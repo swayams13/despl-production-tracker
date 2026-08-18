@@ -12,6 +12,7 @@ import { setThemeAction } from "@/app/actions/preferences";
 import { logout } from "@/app/actions/auth";
 import { nextThemeState, themeLabel } from "@/lib/theme";
 import type { NotificationRow } from "@/lib/services/notifications.read";
+import type { JobListItem } from "@/lib/services/jobs.read";
 
 // Icons inlined from the mockup (lucide-react is pinned at an atypical 1.x here;
 // the approved SVGs are the pixel reference anyway).
@@ -189,12 +190,14 @@ export function AppShell({
   userRole,
   overdueCount,
   notifications,
+  jobs,
 }: {
   children: ReactNode;
   userName: string;
   userRole: string;
   overdueCount: number;
   notifications: { unreadCount: number; recent: NotificationRow[] };
+  jobs: JobListItem[];
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -370,16 +373,32 @@ export function AppShell({
             </svg>
             {jobOpen && (
               <div className="drop" style={{ left: 0, right: "auto", minWidth: 320 }}>
-                {[
-                  ["DESPL-320", "HP Air Receiver", "9 units · 18.2% · forecast +4d"],
-                  ["DE0467", 'Pressure Pipe 8" / Suction 10" / SAV 24"', "3 units · 41.0% · on schedule"],
-                  ["DE0463", "SS Tank", "2 units · 63.5% · forecast −2d"],
-                ].map(([code, name, sub]) => (
-                  <div className="d-row" key={code} onClick={() => toast("Job switching wires up in a later session")}>
-                    <span className="mono">{code}</span> · {name}
-                    <small>{sub}</small>
+                {jobs.length === 0 ? (
+                  <div className="d-row" style={{ color: "var(--muted)" }}>
+                    No jobs yet
                   </div>
-                ))}
+                ) : (
+                  jobs.map((j) => (
+                    <div
+                      className="d-row"
+                      key={j.id}
+                      onClick={() => {
+                        setJobOpen(false);
+                        router.push(`/jobs/${j.id}`);
+                      }}
+                    >
+                      <span className="mono">{j.jobNumber}</span> · {j.projectName ?? j.familyName}
+                      <small>
+                        {j.unitCount} units · {j.percentComplete.toFixed(1)}% ·{" "}
+                        {j.forecastVarianceDays == null
+                          ? "no schedule"
+                          : j.forecastVarianceDays === 0
+                            ? "on schedule"
+                            : `forecast ${j.forecastVarianceDays > 0 ? "+" : "−"}${Math.abs(j.forecastVarianceDays)}d`}
+                      </small>
+                    </div>
+                  ))
+                )}
               </div>
             )}
           </div>
