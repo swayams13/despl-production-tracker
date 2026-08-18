@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -225,35 +225,33 @@ export function AppShell({
   // ── Theme control (D27/D28) ───────────────────────────────────────────
   // One control, three positions (desktop topbar, tablet rail, phone topbar),
   // one click = one step: System → Light → Dark → Outdoor → System.
-  const themeState = useTheme();
   // "System" has no glyph of its own, so it borrows sun/moon from whatever the
-  // OS currently resolves to. Starts false to match the server's dark guess,
-  // then corrects after hydration — the label text is what actually
-  // distinguishes System from an explicit Light/Dark.
-  const [systemLight, setSystemLight] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: light)");
-    const sync = () => setSystemLight(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
+  // OS resolved to — read from ThemeRoot's context, which owns the app's single
+  // matchMedia listener, rather than opening a second one for the same fact.
+  const { themePreference, outdoorMode, systemLight } = useTheme();
+  const themeState = { themePreference, outdoorMode };
+  const [themePending, startThemeTransition] = useTransition();
 
   const themeText = themeLabel(themeState);
-  const themeIcon = themeState.outdoorMode
+  const themeIcon = outdoorMode
     ? icons.themeOutdoor
-    : themeState.themePreference === "LIGHT" ||
-        (themeState.themePreference === "SYSTEM" && systemLight)
+    : themePreference === "LIGHT" || (themePreference === "SYSTEM" && systemLight)
       ? icons.themeSun
       : icons.themeMoon;
 
-  const cycleTheme = async () => {
-    const r = await setThemeAction(nextThemeState(themeState));
-    if (!r.ok) {
-      toast.error(r.message);
-      return;
-    }
-    router.refresh();
+  // Guarded: without the in-flight check a double-click silently advances two
+  // steps, since each click reads the state the last server round trip has not
+  // written back yet.
+  const cycleTheme = () => {
+    if (themePending) return;
+    startThemeTransition(async () => {
+      const r = await setThemeAction(nextThemeState(themeState));
+      if (!r.ok) {
+        toast.error(r.message);
+        return;
+      }
+      router.refresh();
+    });
   };
 
   return (
@@ -320,6 +318,8 @@ export function AppShell({
           type="button"
           className="rail-item rail-theme"
           aria-label={`Theme: ${themeText}. Switch theme`}
+          aria-busy={themePending}
+          disabled={themePending}
           onClick={cycleTheme}
         >
           {themeIcon}
@@ -395,6 +395,8 @@ export function AppShell({
               type="button"
               className="topbar-theme"
               aria-label={`Theme: ${themeText}. Switch theme`}
+              aria-busy={themePending}
+              disabled={themePending}
               onClick={cycleTheme}
             >
               {themeIcon}

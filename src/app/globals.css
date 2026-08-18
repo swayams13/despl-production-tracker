@@ -357,20 +357,20 @@ body {
    deliberately left byte-identical to `main` (see the report for its own
    pre-existing shortfalls, which are frozen by that same requirement). */
 
-/* Status chips, light palette. The shipped .c-* tints are fixed rgba values
-   calibrated against a near-black surface; over white they darken the pill
-   enough to drop the label under 4.5:1. Re-tinted with the spec's own --mixp
-   formula. .c-idle additionally hardcoded color:#9aa0a8 (1.76:1 on white —
-   the one catastrophic failure); it now follows --s-idle like its five peers. */
-.theme-industrial.theme-light .c-complete { background: color-mix(in oklab, var(--s-complete) var(--mixp), var(--surface)); }
-.theme-industrial.theme-light .c-progress { background: color-mix(in oklab, var(--s-progress) var(--mixp), var(--surface)); }
-.theme-industrial.theme-light .c-submitted { background: color-mix(in oklab, var(--s-submitted) var(--mixp), var(--surface)); }
-.theme-industrial.theme-light .c-hold { background: color-mix(in oklab, var(--s-hold) var(--mixp), var(--surface)); }
-.theme-industrial.theme-light .c-overdue { background: color-mix(in oklab, var(--s-overdue) var(--mixp), var(--surface)); }
-.theme-industrial.theme-light .c-idle {
-  background: color-mix(in oklab, var(--s-idle) var(--mixp), var(--surface));
-  color: var(--s-idle);
-}
+/* Status chips. The six .c-* rgba tints stay exactly as shipped — measured
+   against the light surface they still carry their labels (complete 4.62,
+   progress 4.84, submitted 5.62, overdue 4.62), so there is nothing to fix
+   there and a blanket re-tint would only make them worse. Two rules do fail:
+
+   .c-idle hardcodes color:#9aa0a8, a grey picked for a near-black chip — 1.76:1
+   over the light tint. --s-idle itself is no better (3.16), because the dot and
+   the label want different luminances; --muted is the readable neutral. 4.71.
+   .c-hold's label is --s-hold #9a6c05, whose ceiling on pure white is 4.64, so
+   no background can carry it to 4.5 on --surface-2. Halving the tint recovers
+   most of the gap (4.24 -> 4.45); the rest is a spec-level hue question. */
+.theme-industrial.theme-light .c-idle { color: var(--muted); }
+.theme-industrial.theme-outdoor .c-idle { color: var(--s-idle); }
+.theme-industrial.theme-light .c-hold { background: rgba(217, 166, 46, .06); }
 
 /* Gantt "actual" bar label: rgba(0,0,0,.75) reads on the dark palette's bright
    fills, not on light's darker ones (1.9:1 against --s-complete #1f7d4c). */

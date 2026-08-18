@@ -1,7 +1,7 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, type RefObject, type ReactNode } from "react";
-import { themeClassName, type ThemePreference, type ThemeState } from "@/lib/theme";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { themeClassName, type ThemeState } from "@/lib/theme";
 
 /**
  * ThemeRoot — the single element that carries the industrial palette classes,
@@ -26,10 +26,18 @@ const SYSTEM_THEME_SCRIPT =
   "if(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)" +
   "e.classList.add('theme-light');})();";
 
-const ThemeContext = createContext<ThemeState & { themeClass: string }>({
+interface ThemeContextValue extends ThemeState {
+  /** The class string for THIS render, with SYSTEM already resolved. */
+  themeClass: string;
+  /** SYSTEM resolved to light by the OS. False under an explicit preference. */
+  systemLight: boolean;
+}
+
+const ThemeContext = createContext<ThemeContextValue>({
   themePreference: "SYSTEM",
   outdoorMode: false,
   themeClass: "theme-industrial",
+  systemLight: false,
 });
 
 /**
@@ -41,27 +49,8 @@ export function useThemeClass(): string {
   return useContext(ThemeContext).themeClass;
 }
 
-export function useTheme(): ThemeState {
+export function useTheme(): ThemeContextValue {
   return useContext(ThemeContext);
-}
-
-/**
- * Keeps a SYSTEM preference in sync after first paint: the inline script above
- * only runs once per document load, so it cannot cover (a) cycling back to
- * System via router.refresh(), or (b) the OS flipping light/dark while the app
- * is open. Both are pure client-side concerns, so an effect is the right tool;
- * it is never the thing that prevents the flash.
- */
-function useSystemThemeSync(pref: ThemePreference, outdoor: boolean, ref: RefObject<HTMLDivElement | null>) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || outdoor || pref !== "SYSTEM") return;
-    const mq = window.matchMedia("(prefers-color-scheme: light)");
-    const apply = () => el.classList.toggle("theme-light", mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, [pref, outdoor, ref]);
 }
 
 export function ThemeRoot({
@@ -70,16 +59,48 @@ export function ThemeRoot({
   className,
   children,
 }: ThemeState & { className?: string; children: ReactNode }) {
-  const themeClass = themeClassName(themePreference, outdoorMode);
-  const ref = useRef<HTMLDivElement | null>(null);
-  useSystemThemeSync(themePreference, outdoorMode, ref);
+  const isSystem = themePreference === "SYSTEM" && !outdoorMode;
+
+  /**
+   * Whether SYSTEM currently resolves to light. Starts false so the first
+   * client render matches the server's dark guess (same reasoning as the
+   * script above), then the effect corrects it.
+   *
+   * This is REACT STATE and not an imperative classList.toggle on the div,
+   * because the div is not the only consumer: portaled surfaces (StageSheet,
+   * the admin dialogs) re-declare the palette class from the context below.
+   * A DOM-only correction left them reading the unresolved "theme-industrial"
+   * and rendering a dark sheet over a light page — the default state of every
+   * migrated user on a light-preferring OS.
+   *
+   * It is also the ONLY matchMedia listener in the app: AppShell's theme
+   * button reads `systemLight` from the context for its sun/moon icon rather
+   * than running a second one for the same fact.
+   */
+  const [systemLight, setSystemLight] = useState(false);
+  useEffect(() => {
+    if (!isSystem) {
+      setSystemLight(false);
+      return;
+    }
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const sync = () => setSystemLight(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, [isSystem]);
+
+  const themeClass = themeClassName(isSystem && systemLight ? "LIGHT" : themePreference, outdoorMode);
 
   return (
-    <div ref={ref} className={className ? `${themeClass} ${className}` : themeClass}>
-      {themePreference === "SYSTEM" && !outdoorMode ? (
-        <script dangerouslySetInnerHTML={{ __html: SYSTEM_THEME_SCRIPT }} />
-      ) : null}
-      <ThemeContext.Provider value={{ themePreference, outdoorMode, themeClass }}>{children}</ThemeContext.Provider>
+    // suppressHydrationWarning: the inline script below mutates this element's
+    // class between SSR and hydration, on purpose. Nothing else about the
+    // element is dynamic, so this suppresses exactly the mismatch we caused.
+    <div suppressHydrationWarning className={className ? `${themeClass} ${className}` : themeClass}>
+      {isSystem ? <script dangerouslySetInnerHTML={{ __html: SYSTEM_THEME_SCRIPT }} /> : null}
+      <ThemeContext.Provider value={{ themePreference, outdoorMode, themeClass, systemLight }}>
+        {children}
+      </ThemeContext.Provider>
     </div>
   );
 }
