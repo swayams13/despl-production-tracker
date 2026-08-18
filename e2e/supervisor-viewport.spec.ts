@@ -57,11 +57,15 @@ const SHELL_PAGES = ["/my-day", "/workspace", "/board", "/alerts", "/profile"] a
 //   main per-process unit table, QC queue table and hold-points table are
 //   ALL plain `<table>` — `<ResponsiveTable>` isn't used anywhere in this
 //   file. Overflows by 82px at 390px width.
-// PLAN-responsive-supervisor-v1.md's own Session R1 task list named
-// "/my-day and /admin Employees" as the `<ResponsiveTable>` adoption
-// targets — /workspace was never named, and /my-day's adoption turns out to
-// be partial (3 of 4 tables), not complete. Both are real 390px overflow
-// bugs against two of the R1 Gate's four named pages today.
+// Both are pre-existing, deliberately-deferred scope, not incomplete work:
+// task-2-brief.md named only /my-day's "Mine" table and /admin's Employees
+// table as this session's targets ("the two highest-traffic tables"),
+// explicitly calling out Pool/teamHeld as tables that "migrate
+// opportunistically" — left as plain tables on purpose. /workspace was never
+// named at all. Task 2's own commit (882ba44) touches only Mine + Employees,
+// confirming this was the intended scope, not a gap. Still real 390px
+// overflow bugs against two of the R1 Gate's four named pages today — just
+// not a Task 2 shortfall.
 for (const path of SHELL_PAGES) {
   test(`${path}: no horizontal overflow`, async ({ page }, testInfo) => {
     // Confirmed phone-only (390px): both genuinely pass at tablet (1024px)

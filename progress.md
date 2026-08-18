@@ -66,9 +66,17 @@ expected-to-fail — not silenced) with the exact cause in the code comment:
 1. **`/my-day` and `/workspace` overflow at 390px.** `/my-day/_client.tsx`
    lines 786/821 ("Department pool", "Held by teammates") and
    `/workspace/page.tsx` lines 77/105/118 (main unit table, QC queue, hold
-   points) all use plain `<table>`, never `<ResponsiveTable>` — Task 2's own
-   adoption only reached `/my-day`'s "Completed" table (line 848), and
-   `/workspace` was never in scope for any prior task's adoption pass.
+   points) all use plain `<table>`, never `<ResponsiveTable>`. This is
+   pre-existing, deliberately-deferred scope, not an incomplete adoption:
+   `task-2-brief.md` named only `/my-day`'s "Mine" table and `/admin`'s
+   Employees table as Task 2's targets, explicitly calling out Pool/teamHeld
+   as tables that "migrate opportunistically" — left as plain tables on
+   purpose (Task 2's own commit, `882ba44`, touches only Mine + Employees).
+   `/my-day`'s "Completed" table (line 848), which *is* wrapped in
+   `<ResponsiveTable>`, was added later still — by this same session's own
+   earlier "non-management Dashboard nav bug fixed" work (`ec17ad6`), which
+   reused the already-existing primitive for its new table. `/workspace`
+   was never named in any prior task's adoption scope at all.
    Second-order consequence: while actually on `/my-day` at 390px,
    `window.innerHeight` measures 1243px instead of 844 (mobile auto-zoom
    fitting the overflow), which relocates the fixed bottom nav off the
