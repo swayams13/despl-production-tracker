@@ -86,7 +86,7 @@ export default async function Dashboard({
   const actor = await getActor();
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
-  if (!hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect("/workspace");
+  if (!hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect("/my-day");
 
   const sp = await searchParams;
   const portfolio = await loadPortfolio(actor);

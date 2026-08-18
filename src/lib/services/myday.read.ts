@@ -91,6 +91,10 @@ export interface MyDayView {
   mine: MyDayRow[];
   pool: MyDayRow[];
   teamHeld: MyDayRow[];
+  /** My own COMPLETE plans, actualFinish in the last 30 days — same window
+   * the scoreboard's onTimePct30d/avgCycleVsStdDays use. Read-only history,
+   * not part of the actionable mine/pool/teamHeld boards. */
+  completed: MyDayRow[];
   clearedToday: number;
   scoreboard: MyDayScoreboard;
   week: MyDayWeekDay[];
@@ -134,6 +138,7 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   const mine: MyDayRow[] = [];
   const pool: MyDayRow[] = [];
   const teamHeld: MyDayRow[] = [];
+  const completed: MyDayRow[] = [];
 
   // Scoreboard accumulators — over MY COMPLETE plans in the same active-job
   // universe as mine/pool/teamHeld (ponytail: reuses each job's spine/
@@ -216,8 +221,16 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       // only ever land in exactly one of mine/pool/teamHeld.
       for (const rows of rankedByDept.values()) {
         for (const r of rows) {
-          if (r.state === "DONE") continue; // actionable/live boards only, not a history log
           const assignee = r.plan.assigneeUserId;
+          if (r.state === "DONE") {
+            // Completed history, not an actionable board — mine only (not
+            // pool/teamHeld, which have no "someone else's completed" concept
+            // here), same 30-day window as the scoreboard above.
+            if (assignee === actor.userId && r.plan.actualFinish && r.plan.actualFinish >= thirtyDaysAgo) {
+              completed.push(toRow(r));
+            }
+            continue;
+          }
           if (assignee === actor.userId) {
             mine.push(toRow(r));
           } else if (actor.departmentIds.includes(r.plan.ownerDepartmentId)) {
@@ -346,6 +359,9 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   mine.sort((a, b) => compareRankedPlans(a.ranked, b.ranked));
   pool.sort((a, b) => compareRankedPlans(a.ranked, b.ranked));
   teamHeld.sort((a, b) => compareRankedPlans(a.ranked, b.ranked));
+  // Most recently finished first — compareRankedPlans is an urgency ordering
+  // (float/overdue/due-date) that doesn't apply to already-DONE rows.
+  completed.sort((a, b) => (b.ranked.plan.actualFinish?.getTime() ?? 0) - (a.ranked.plan.actualFinish?.getTime() ?? 0));
 
   const scoreboard: MyDayScoreboard = {
     onTimePct30d: onTimeTotal > 0 ? Math.round((onTimeCount / onTimeTotal) * 100) : null,
@@ -382,5 +398,5 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
     week.push({ date, mineCount, poolCount, hotCount });
   }
 
-  return { mine, pool, teamHeld, clearedToday, scoreboard, week, deptMembers, delayCategories };
+  return { mine, pool, teamHeld, completed, clearedToday, scoreboard, week, deptMembers, delayCategories };
 }

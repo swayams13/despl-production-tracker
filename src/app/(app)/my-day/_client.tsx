@@ -16,7 +16,7 @@ import type { MyDayView, MyDayRow } from "@/lib/services/myday.read";
 
 type Category = { id: number; name: string };
 type Refusal = { code: string; message: string };
-type TabKey = "attention" | "due" | "qc" | "upnext" | "pool";
+type TabKey = "attention" | "due" | "qc" | "upnext" | "hold" | "pool";
 
 // Fixed UTC+5:30 offset — same convention myday.read.ts's istDay() uses
 // server-side. This component renders both on the server (UTC) and the
@@ -48,11 +48,14 @@ function initials(name: string): string {
   return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "—";
 }
 
-/** Which of the 4 non-pool KPI tabs a "mine" row belongs to — mutually
+/** Which of the 5 non-pool KPI tabs a "mine" row belongs to — mutually
  * exclusive, priority order matches the prioritizer's own bucket()
- * precedence (overdue beats everything, then awaiting-QC, then due-today). */
+ * precedence (overdue beats everything, then held, then awaiting-QC, then
+ * due-today). ON_HOLD checked before SUBMITTED/due-today so a held task is
+ * never buried in a due-date tab it can't act on anyway. */
 function mineBucket(row: MyDayRow): Exclude<TabKey, "pool"> {
   if (row.ranked.overdue) return "attention";
+  if (row.ranked.state === "ON_HOLD") return "hold";
   if (row.ranked.state === "SUBMITTED") return "qc";
   if (isToday(row.ranked.plan.plannedFinish)) return "due";
   return "upnext";
@@ -514,13 +517,54 @@ function TeamHeldRowView({
   );
 }
 
+// ── Completed history — read-only, no actions (the work is done). ────────
+function CompletedRowView({ row }: { row: MyDayRow }) {
+  const finish = row.ranked.plan.actualFinish;
+  const planned = row.ranked.plan.plannedFinish;
+  const late = finish != null && planned != null && finish > planned;
+  return (
+    <tr className="row">
+      <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
+      <td>
+        {row.processName}
+        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+      </td>
+      <td className="mono">{fmtDue(finish)}</td>
+      <td className="num">
+        <span className={`chip ${late ? "c-overdue" : "c-complete"}`}><i />{late ? "Late" : "On time"}</span>
+      </td>
+    </tr>
+  );
+}
+
+function CompletedCardView({ row }: { row: MyDayRow }) {
+  const finish = row.ranked.plan.actualFinish;
+  const planned = row.ranked.plan.plannedFinish;
+  const late = finish != null && planned != null && finish > planned;
+  return (
+    <div className="rt-card">
+      <div className="rt-card-top">
+        <b>{row.processName}</b>
+        <StatusChip status="complete" label={late ? "Late" : "On time"} />
+      </div>
+      <div className="rt-card-meta">{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+      <div className="rt-card-row">
+        <span className="tag mono">{row.serialNo !== "—" ? row.serialNo : row.jobNumber}</span>
+        <span>Completed {fmtDue(finish)}</span>
+      </div>
+    </div>
+  );
+}
+
 const TABS: { key: TabKey; label: string }[] = [
   { key: "attention", label: "Needs attention" },
   { key: "due", label: "Due today" },
   { key: "qc", label: "With QC" },
   { key: "upnext", label: "Up next" },
+  { key: "hold", label: "On hold" },
   { key: "pool", label: "Pool" },
 ];
+const TAB_BY_KEY = new Map(TABS.map((t) => [t.key, t]));
 
 export function MyDayClient({
   view,
@@ -569,10 +613,14 @@ export function MyDayClient({
     due: view.mine.filter((r) => mineBucket(r) === "due").length,
     qc: isQc ? qcQueueRows.length + selfSubmittedRows.length : qcQueueRows.length,
     upnext: view.mine.filter((r) => mineBucket(r) === "upnext").length,
+    hold: view.mine.filter((r) => mineBucket(r) === "hold").length,
     pool: view.pool.length,
   };
 
-  const orderedTabs = isQc ? [TABS[2], TABS[0], TABS[1], TABS[3], TABS[4]] : TABS;
+  // QC actors want their verify queue first; everyone else keeps TABS' order.
+  const orderedTabs = isQc
+    ? (["qc", "attention", "due", "hold", "upnext", "pool"] as TabKey[]).map((k) => TAB_BY_KEY.get(k)!)
+    : TABS;
   const defaultMineTab: Exclude<TabKey, "pool"> = isQc ? "qc" : "attention";
   const [tab, setTab] = useState<TabKey>(defaultMineTab);
   // The last-selected non-pool tab — what Mine actually shows. Kept separate
@@ -583,6 +631,7 @@ export function MyDayClient({
   // discarded whatever the user had actually selected, e.g. "Due today").
   const [mineTab, setMineTab] = useState<Exclude<TabKey, "pool">>(defaultMineTab);
   const [teamHeldOpen, setTeamHeldOpen] = useState(false);
+  const [completedOpen, setCompletedOpen] = useState(false);
   const poolRef = useRef<HTMLDivElement | null>(null);
 
   const selectTab = (key: TabKey) => {
@@ -781,6 +830,41 @@ export function MyDayClient({
                 ))}
               </tbody>
             </table>
+          )
+        )}
+      </div>
+
+      <div className="card ws-card">
+        <div className="hd" style={{ cursor: "pointer" }} onClick={() => setCompletedOpen((o) => !o)}>
+          <b>Completed</b>
+          <span className="meta">Last 30 days · read-only</span>
+          <span className="chip c-idle"><i />{view.completed.length}</span>
+          <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{completedOpen ? "Hide ▲" : "Show ▼"}</span>
+        </div>
+        {completedOpen && (
+          view.completed.length === 0 ? (
+            <p className="note" style={{ margin: "16px 0" }}>Nothing completed in the last 30 days.</p>
+          ) : (
+            <ResponsiveTable
+              table={
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 130 }}>Job</th>
+                      <th>Process</th>
+                      <th style={{ width: 80 }}>Completed</th>
+                      <th className="num" style={{ width: 100 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {view.completed.map((r) => (
+                      <CompletedRowView key={r.ranked.plan.id} row={r} />
+                    ))}
+                  </tbody>
+                </table>
+              }
+              cards={view.completed.map((r) => <CompletedCardView key={r.ranked.plan.id} row={r} />)}
+            />
           )
         )}
       </div>
