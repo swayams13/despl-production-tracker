@@ -13,7 +13,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { generateSchedule } = await import("./schedule.service");
   const { startProcess, submitProcess, rejectProcess } = await import("./process.service");
-  const { syncNotifications } = await import("./notifications.service");
+  const { syncNotifications, nudgeQc } = await import("./notifications.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   afterAll(async () => {
@@ -242,6 +242,73 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
       // log in to act on it) — the fallback set is active dept members + PH,
       // same as the unassigned case above.
       expect(notifs.map((n) => n.recipientId).sort()).toEqual([memberAId, memberBId, phUserId].sort());
+    });
+  });
+
+  // ── D32: nudgeQc — recipients (QC + PH, not an unrelated dept member) and
+  // the per-(plan, actor) cooldown. Own throwaway tenant/plan, same pattern
+  // as the assignee-first fixture above. ────────────────────────────────
+  describe("nudgeQc", () => {
+    let tenantId = 0;
+    let qcUserId = 0;
+    let phUserId = 0;
+    let otherSupervisorId = 0;
+    let planId = 0;
+
+    beforeAll(async () => {
+      const org = await owner.organization.create({ data: { code: `NUDGE-${Date.now()}`, name: "Nudge test" } });
+      tenantId = org.id;
+      const dept = await owner.department.create({ data: { tenantId, code: "PROD", name: "Production" } });
+
+      const qcRole = await owner.role.create({ data: { tenantId, code: "QC", name: "QC" } });
+      const phRole = await owner.role.create({ data: { tenantId, code: "PRODUCTION_HEAD", name: "Production Head" } });
+      const supRole = await owner.role.create({ data: { tenantId, code: "SUPERVISOR", name: "Supervisor" } });
+
+      const mkUser = async (suffix: string, roleId: number) => {
+        const u = await owner.user.create({
+          data: { tenantId, email: `${suffix}-${Date.now()}@x`, username: `${suffix}-${Date.now()}`, name: suffix, passwordHash: "x" },
+        });
+        await owner.userRole.create({ data: { userId: u.id, roleId } });
+        return u;
+      };
+      qcUserId = (await mkUser("nudgeqc", qcRole.id)).id;
+      phUserId = (await mkUser("nudgeph", phRole.id)).id;
+      otherSupervisorId = (await mkUser("nudgesup-other", supRole.id)).id;
+
+      const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-NUDGE-${Date.now()}` } });
+      const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+      const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+      const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+      const job = await owner.job.create({
+        data: { tenantId, publicId: `pub-nudge-${Date.now()}`, clientId: client.id, familyId: family.id, templateVersionId: tv.id, jobNumber: `NUDGE-TEST-${Date.now()}` },
+      });
+      const run = await owner.scheduleRun.create({ data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true } });
+      const jp = await owner.jobProcess.create({ data: { jobId: job.id, seq: 1, code: "N1", name: "Held process", departmentId: dept.id, workOrderStages: [1] } });
+      const plan = await owner.processPlan.create({
+        data: { scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status: "ON_HOLD" },
+      });
+      planId = plan.id;
+    });
+
+    it("notifies exactly QC + Production Head, not an unrelated supervisor", async () => {
+      const sup = actor(tenantId, otherSupervisorId, [ROLES.SUPERVISOR]);
+      await nudgeQc(sup, planId, 3);
+      const notifs = await owner.notification.findMany({ where: { type: "NUDGE", entityType: "ProcessPlan", entityId: planId } });
+      expect(notifs.map((n) => n.recipientId).sort()).toEqual([qcUserId, phUserId].sort());
+      expect(notifs[0].body).toContain("held 3d");
+    });
+
+    it("refuses a second nudge from the SAME actor within the cooldown window", async () => {
+      const sup = actor(tenantId, otherSupervisorId, [ROLES.SUPERVISOR]);
+      await expect(nudgeQc(sup, planId, 3)).rejects.toMatchObject({ code: "NUDGE_COOLDOWN" });
+    });
+
+    it("does NOT block a DIFFERENT actor nudging the same plan", async () => {
+      const otherActor = actor(tenantId, qcUserId, [ROLES.QC]); // any other user id, cooldown is per-(plan,actor)
+      await nudgeQc(otherActor, planId, 3);
+      const notifs = await owner.notification.findMany({ where: { type: "NUDGE", entityType: "ProcessPlan", entityId: planId } });
+      // 2 recipients from the first nudge + 2 more from this second, different-actor nudge.
+      expect(notifs).toHaveLength(4);
     });
   });
 });

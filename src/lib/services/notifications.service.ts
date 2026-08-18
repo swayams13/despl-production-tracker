@@ -1,7 +1,7 @@
 import { withTenant, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { HOLD_POINT_AGE_ALERT_DAYS } from "@/lib/shared/constants";
+import { HOLD_POINT_AGE_ALERT_DAYS, NUDGE_COOLDOWN_MINUTES } from "@/lib/shared/constants";
 import { loadPlanNotifyContext } from "./_shared";
 import { loadQcCockpit } from "./qc-cockpit.read";
 import type { ProcessPlan } from "@/generated/prisma/client";
@@ -173,6 +173,59 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
         })),
       );
     }
+  });
+}
+
+/**
+ * D32 (SPEC-supervisor-ui-v3.md §6(a)): notifies QC + Production Head that a
+ * held plan needs attention, from the execution sheet's "Nudge QC" action.
+ * The 30-min cooldown is derived server-side from the last NUDGE-type
+ * Notification row for this exact (plan, actor) pair — stored via `payload.
+ * actorId` since `recipientId` is the notified QC/PH user, not the nudging
+ * supervisor. Never client state: a client-held timer resets on refresh/
+ * device-switch and would let a supervisor spam by reloading.
+ *
+ * `ageDays` is caller-supplied display copy (the execution sheet already
+ * computed and rendered it from the same server-side hold-point data a
+ * moment earlier via stage-detail.read.ts) — not an authoritative
+ * `actual_*`/`*_at` field, so invariant #1 doesn't apply; it only shapes the
+ * notification's title text.
+ */
+export async function nudgeQc(actor: Actor, planId: number, ageDays: number): Promise<void> {
+  await withTenant(actor.tenantId, async (tx) => {
+    const plan = await tx.processPlan.findFirst({
+      where: { id: planId, jobProcess: { job: { tenantId: actor.tenantId } } },
+    });
+    if (!plan) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessPlan", id: planId });
+
+    const last = await tx.notification.findFirst({
+      where: { type: "NUDGE", entityType: "ProcessPlan", entityId: planId, payload: { path: ["actorId"], equals: actor.userId } },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    if (last && Date.now() - last.createdAt.getTime() < NUDGE_COOLDOWN_MINUTES * 60_000) {
+      throw new AppError(ERROR_CODES.NUDGE_COOLDOWN, { planId, cooldownMinutes: NUDGE_COOLDOWN_MINUTES });
+    }
+
+    const ctx = await loadPlanNotifyContext(tx, plan);
+    const recipients = [
+      ...new Set([...(await userIdsWithRole(tx, actor.tenantId, "QC")), ...(await userIdsWithRole(tx, actor.tenantId, "PRODUCTION_HEAD"))]),
+    ];
+    if (recipients.length === 0) return;
+
+    await notify(
+      tx,
+      actor.tenantId,
+      recipients.map((recipientId) => ({
+        recipientId,
+        type: "NUDGE",
+        entityType: "ProcessPlan",
+        entityId: planId,
+        title: `Nudge: ${ctx.processName} on hold${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}`,
+        body: `${ctx.jobNumber} · ${ctx.deptName} · held ${ageDays}d`,
+        payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo, actorId: actor.userId },
+      })),
+    );
   });
 }
 

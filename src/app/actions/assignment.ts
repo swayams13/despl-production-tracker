@@ -8,6 +8,8 @@ export async function claimPlanAction(processPlanId: number): Promise<ActionResu
   try {
     await claimPlan(await requireActor(), { processPlanId });
     revalidatePath("/workspace");
+    revalidatePath("/my-day");
+    revalidatePath("/board");
     return { ok: true };
   } catch (e) {
     return toActionError(e);
@@ -18,6 +20,8 @@ export async function assignPlanAction(processPlanId: number, userId: number): P
   try {
     await assignPlan(await requireActor(), { processPlanId, userId });
     revalidatePath("/workspace");
+    revalidatePath("/my-day");
+    revalidatePath("/board");
     return { ok: true };
   } catch (e) {
     return toActionError(e);
@@ -28,6 +32,8 @@ export async function releasePlanAction(processPlanId: number): Promise<ActionRe
   try {
     await releasePlan(await requireActor(), { processPlanId });
     revalidatePath("/workspace");
+    revalidatePath("/my-day");
+    revalidatePath("/board");
     return { ok: true };
   } catch (e) {
     return toActionError(e);

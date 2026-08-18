@@ -51,7 +51,11 @@ export function StageSheet({
           <div className="sh-hd">
             <Dialog.Close asChild>
               <button className="sh-x" aria-label="Close">
-                ✕
+                <span className="sh-x-close">✕</span>
+                <svg className="sh-x-back" width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 12H5" />
+                  <path d="M12 19l-7-7 7-7" />
+                </svg>
               </button>
             </Dialog.Close>
             <StatusChip status={status} />

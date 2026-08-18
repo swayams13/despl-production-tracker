@@ -7,6 +7,7 @@ import { StageSheet } from "./stage-sheet";
 import { StatusChip } from "./status-chip";
 import { startAction, submitAction, verifyAction, rejectAction } from "@/app/actions/process";
 import { fileDelayBulkAction } from "@/app/actions/delay";
+import { nudgeQcAction } from "@/app/actions/notifications";
 import type { ActionResult } from "@/app/actions/_action";
 import type { StageDetail, StageBackingPlan } from "@/lib/services/stage-detail.read";
 
@@ -95,6 +96,11 @@ export function StageSheetLauncher({
   const { pending, run } = useRun();
   const [rejecting, setRejecting] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  // Phone reason-grid selection — lifted here (not local to ExecPhoneBody)
+  // because the grid (body slot) and "File reason & start" (footer slot)
+  // are rendered as SIBLING props, not nested components.
+  const [reasonCategoryId, setReasonCategoryId] = useState<number | "">("");
+  const [reasonDetail, setReasonDetail] = useState("");
 
   if (sheet.loading || !sheet.detail) {
     return (
@@ -151,6 +157,19 @@ export function StageSheetLauncher({
       ]}
       body={
         <>
+          <div className="sh-body-phone">
+            <ExecPhoneBody
+              detail={d}
+              governing={governing}
+              overdueReasonPending={overdueReasonPending}
+              categories={d.delayCategories}
+              categoryId={reasonCategoryId}
+              setCategoryId={setReasonCategoryId}
+              detailText={reasonDetail}
+              setDetailText={setReasonDetail}
+            />
+          </div>
+          <div className="sh-body-desktop">
           {d.backingPlans.length > 1 && (
             <>
               <div className="sh-sec">Backing processes ({d.backingPlans.length})</div>
@@ -218,26 +237,234 @@ export function StageSheetLauncher({
               ))}
             </>
           )}
+          </div>
         </>
       }
       footer={
         governing && (
-          <StageSheetFooter
-            governing={governing}
-            overdue={overdueReasonPending}
-            unreasonedOverduePlanIds={unreasonedOverduePlanIds}
-            categories={d.delayCategories}
-            pending={pending}
-            run={run}
-            onChanged={onChanged}
-            rejecting={rejecting}
-            setRejecting={setRejecting}
-            rejectReason={rejectReason}
-            setRejectReason={setRejectReason}
-          />
+          <>
+            <div className="sh-ft-phone">
+              <ExecPhoneFooter
+                detail={d}
+                governing={governing}
+                overdueReasonPending={overdueReasonPending}
+                categoryId={reasonCategoryId}
+                detailText={reasonDetail}
+                resetReason={() => { setReasonCategoryId(""); setReasonDetail(""); }}
+                pending={pending}
+                run={run}
+                onChanged={onChanged}
+              />
+            </div>
+            <div className="sh-ft-desktop">
+              <StageSheetFooter
+                governing={governing}
+                overdue={overdueReasonPending}
+                unreasonedOverduePlanIds={unreasonedOverduePlanIds}
+                categories={d.delayCategories}
+                pending={pending}
+                run={run}
+                onChanged={onChanged}
+                rejecting={rejecting}
+                setRejecting={setRejecting}
+                rejectReason={rejectReason}
+                setRejectReason={setRejectReason}
+              />
+            </div>
+          </>
         )
       }
     />
+  );
+}
+
+type Category = { id: number; name: string };
+
+// ── Full-screen execution sheet body (<640px, R2 Task 2,
+// SPEC-supervisor-ui-v3.md §4 P3-05..08). Four states, all built from real
+// StageDetail fields — no invented ITP references, "raised by" names, or a
+// hold-trail timeline (stage-detail.read.ts's holdPoints only ever carries
+// srNo/activity/classCode/status/ageDays, confirmed before writing this).
+// Photo evidence (P3-06's camera/geotag section) is deliberately omitted —
+// R4 scope, blocked on the D20 object-storage decision, out of R2's own
+// stated global constraint. ─────────────────────────────────────────────
+function ExecPhoneBody({
+  detail: d,
+  governing,
+  overdueReasonPending,
+  categories,
+  categoryId,
+  setCategoryId,
+  detailText,
+  setDetailText,
+}: {
+  detail: StageDetail;
+  governing: StageBackingPlan | null;
+  overdueReasonPending: boolean;
+  categories: Category[];
+  categoryId: number | "";
+  setCategoryId: (v: number | "") => void;
+  detailText: string;
+  setDetailText: (v: string) => void;
+}) {
+  if (overdueReasonPending) {
+    return (
+      <>
+        <div className="sh-phone-banner c-overdue">
+          Due {fmtDate(d.plannedFinish)}, started nothing yet. <b>Pick why it is late</b> — that files the delay and starts the job in one go.
+        </div>
+        <div className="sh-sec">Why is it late?</div>
+        <div className="reason-grid">
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={`reason-cell${categoryId === c.id ? " sel" : ""}`}
+              onClick={() => setCategoryId(c.id)}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+        <div className="sh-sec">Detail (optional)</div>
+        <textarea
+          className="ws-detail"
+          style={{ width: "100%", minHeight: 56, resize: "vertical" }}
+          placeholder="Add detail…"
+          value={detailText}
+          onChange={(e) => setDetailText(e.target.value)}
+        />
+      </>
+    );
+  }
+
+  if (governing?.status === "ON_HOLD") {
+    const openHold = d.holdPoints.find((h) => h.status !== "Cleared") ?? null;
+    return (
+      <>
+        <div className="sh-phone-banner c-hold">
+          <b>Held{openHold ? ` — ${openHold.activity}` : ""}</b>
+          <div>You cannot finish this operation until the hold point is cleared. Nothing you do here is lost.</div>
+        </div>
+        {openHold && (
+          <div className="sh-hold-card">
+            <div><span className="mono">{openHold.srNo}</span> · {openHold.classCode}</div>
+            <div className="age">{openHold.ageDays}d</div>
+            <div className="sub">held</div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  if (governing?.status === "SUBMITTED") {
+    return (
+      <div className="sh-phone-banner c-submitted">
+        <b>Submitted{governing.actualFinish ? ` ${fmtDate(governing.actualFinish)}` : ""} — waiting for QC</b>
+        <div>You recorded this work, so you cannot verify it. QC checks it and marks it done — that separation is the record&apos;s value.</div>
+      </div>
+    );
+  }
+
+  // IN_PROGRESS / NOT_STARTED (not overdue): a short status line — no
+  // photo/geo capture here, see the comment above. Deliberately doesn't
+  // claim "Ready to start" for NOT_STARTED — a gating-blocked predecessor
+  // is a real possibility stage-detail.read.ts's StageBackingPlan doesn't
+  // expose here, and the footer's "Start" button (below) already surfaces
+  // that refusal for real if it happens, matching the desktop sheet's own
+  // existing behavior (always show Start, let the server refuse).
+  return (
+    <p className="note" style={{ margin: "16px 0", textAlign: "left" }}>
+      {governing?.status === "IN_PROGRESS" ? "In progress." : "Not started."}
+    </p>
+  );
+}
+
+// ── Full-screen execution sheet footer — one primary action, 56px,
+// pinned to the bottom (CSS, see globals.css .sh-ft-phone). ──────────────
+function ExecPhoneFooter({
+  detail: d,
+  governing,
+  overdueReasonPending,
+  categoryId,
+  detailText,
+  resetReason,
+  pending,
+  run,
+  onChanged,
+}: {
+  detail: StageDetail;
+  governing: StageBackingPlan | null;
+  overdueReasonPending: boolean;
+  categoryId: number | "";
+  detailText: string;
+  resetReason: () => void;
+  pending: boolean;
+  run: (fn: () => Promise<ActionResult>, ok: string, after?: () => void) => void;
+  onChanged: () => void;
+}) {
+  if (!governing) return null;
+
+  if (overdueReasonPending) {
+    const fileAndStart = () => {
+      run(
+        async () => {
+          const filed = await fileDelayBulkAction([governing.planId], categoryId as number, detailText || undefined);
+          if (!filed.ok) return filed;
+          return startAction(governing.planId); // may itself refuse (gating) — §6(b)'s legitimate partial success; the reason still filed, re-fetch shows it
+        },
+        "Filed & started.",
+        () => { resetReason(); onChanged(); },
+      );
+    };
+    return (
+      <button className="btn btn-accent" style={{ width: "100%" }} disabled={pending || categoryId === ""} onClick={fileAndStart}>
+        {categoryId === "" ? "Pick a reason to start" : "File reason & start"}
+      </button>
+    );
+  }
+
+  if (governing.status === "ON_HOLD") {
+    const openHold = d.holdPoints.find((h) => h.status !== "Cleared") ?? null;
+    return (
+      <div style={{ display: "flex", gap: 8, width: "100%" }}>
+        <button className="btn" style={{ flex: 1 }} disabled>Finish — held</button>
+        <NudgeQcButton planId={governing.planId} ageDays={openHold?.ageDays ?? 0} pending={pending} onChanged={onChanged} />
+      </div>
+    );
+  }
+
+  if (governing.status === "SUBMITTED") return null; // read-only — verify/reject stay on the queue card (Task 1), not duplicated here
+
+  if (governing.status === "NOT_STARTED")
+    return <button className="btn btn-accent" style={{ width: "100%" }} disabled={pending} onClick={() => run(() => startAction(governing.planId), "Started.", onChanged)}>Start</button>;
+
+  if (governing.status === "IN_PROGRESS")
+    return <button className="btn btn-accent" style={{ width: "100%" }} disabled={pending} onClick={() => run(() => submitAction(governing.planId), "Submitted for QC.", onChanged)}>Submit finish</button>;
+
+  return null;
+}
+
+// ── Nudge QC (D32) — its own local pending state so a cooldown refusal
+// (NUDGE_COOLDOWN, thrown by the server, never a client timer) disables the
+// button without touching the sheet's shared `run`/`pending`. ────────────
+function NudgeQcButton({ planId, ageDays, pending, onChanged }: { planId: number; ageDays: number; pending: boolean; onChanged: () => void }) {
+  const [nudging, startNudge] = useTransition();
+  const [nudged, setNudged] = useState(false);
+  const nudge = () =>
+    startNudge(async () => {
+      const r = await nudgeQcAction(planId, ageDays);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("QC nudged.");
+        setNudged(true);
+        onChanged();
+      }
+    });
+  return (
+    <button className="btn btn-outline-accent" style={{ flex: 1 }} disabled={pending || nudging || nudged} onClick={nudge}>
+      {nudged ? "Nudged" : "Nudge QC"}
+    </button>
   );
 }
 

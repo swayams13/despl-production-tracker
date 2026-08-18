@@ -12,6 +12,8 @@ export async function fileDelayAction(
   try {
     await fileDelayReason(await requireActor(), { processPlanId, categoryId, detail });
     revalidatePath("/workspace");
+    revalidatePath("/my-day");
+    revalidatePath("/board");
     return { ok: true };
   } catch (e) {
     return toActionError(e);
@@ -43,6 +45,8 @@ export async function fileDelayBulkAction(
   }
   revalidatePath("/workspace");
   revalidatePath("/dashboard");
+  revalidatePath("/my-day");
+  revalidatePath("/board");
   if (firstError && filed === 0) return firstError;
   return { ok: true, filed };
 }

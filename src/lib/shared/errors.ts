@@ -59,6 +59,8 @@ export const ERROR_CODES = {
   CANNOT_SELF_DEACTIVATE: "CANNOT_SELF_DEACTIVATE",
   /** updateUserRolesDepts: an admin tried to remove their own ADMIN role. */
   CANNOT_SELF_DEMOTE: "CANNOT_SELF_DEMOTE",
+  /** nudgeQc: this actor already nudged for this plan within the cooldown window. */
+  NUDGE_COOLDOWN: "NUDGE_COOLDOWN",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -95,6 +97,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   MUST_CHANGE_PASSWORD: "Change your password before doing anything else.",
   CANNOT_SELF_DEACTIVATE: "You cannot deactivate your own account.",
   CANNOT_SELF_DEMOTE: "You cannot remove your own admin role.",
+  NUDGE_COOLDOWN: "You already nudged QC for this within the last 30 minutes.",
 };
 
 /**

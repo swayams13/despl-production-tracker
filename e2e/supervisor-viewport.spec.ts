@@ -395,6 +395,30 @@ test("/my-day: queue-first view below 640px, tabbed view at and above", async ({
   }
 });
 
+// R2 Task 2 (SPEC-supervisor-ui-v3.md P3-05..08): below 640px the same
+// StageSheet becomes full-screen (back arrow, no right-panel width); at and
+// above 640px it stays the 460px right-side panel. Uses /kit's stable,
+// data-independent demo trigger — the real business-data states (overdue
+// reason grid, hold, submitted) depend on live seed data this repo's
+// current demo DB doesn't happen to have reachable right now (verified
+// manually against a real claimed item instead — see progress.md); this
+// assertion locks down the structural CSS toggle so it can't silently
+// regress. ─────────────────────────────────────────────────────────────
+test("StageSheet: full-screen below 640px, 460px right panel at and above", async ({ page }, testInfo) => {
+  await page.goto("/kit");
+  await page.getByRole("button", { name: "Open stage sheet (Stage 9)" }).click();
+  const sheet = page.locator(".stage-sheet");
+  await expect(sheet).toBeVisible();
+  const box = await sheet.boundingBox();
+  if (testInfo.project.name === "phone") {
+    await expect(page.locator(".sh-x-back")).toBeVisible();
+    expect(box?.width).toBeGreaterThan(380); // fills the 390px viewport
+  } else {
+    await expect(page.locator(".sh-x-close")).toBeVisible();
+    expect(box?.width).toBeLessThan(465); // the fixed 460px right panel
+  }
+});
+
 // ── Assertion 6: WCAG AA contrast — chips, KPI values, spine, all 3 themes ──
 //
 // Restricted to the `desktop` project only. The theme preference is

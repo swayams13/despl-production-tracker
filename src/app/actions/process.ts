@@ -57,6 +57,8 @@ export async function startBulkAction(
   }
   revalidatePath("/workspace");
   revalidatePath("/dashboard");
+  revalidatePath("/my-day");
+  revalidatePath("/board");
   if (firstError && started === 0) return firstError;
   return { ok: true, started };
 }
