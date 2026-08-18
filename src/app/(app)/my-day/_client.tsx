@@ -289,6 +289,19 @@ function MineCardView({
   );
 }
 
+/**
+ * Shared state + handlers for the Department pool row/card pair
+ * (`PoolRowView` / `PoolCardView`) — same `useState`s, same `useRun`, same
+ * `clickable` derivation. Only the JSX (table row vs. card) stays split
+ * between the two components, per the brief.
+ */
+function usePoolRowActions(row: MyDayRow) {
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const { pending, run } = useRun(setRefusal);
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+  return { refusal, pending, run, clickable };
+}
+
 // ── Department pool row: Claim (+ Assign-to… for supervisors). ───────────
 function PoolRowView({
   row,
@@ -301,9 +314,7 @@ function PoolRowView({
   members: { id: number; name: string }[];
   onOpenStage: () => void;
 }) {
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const { pending, run } = useRun(setRefusal);
-  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+  const { refusal, pending, run, clickable } = usePoolRowActions(row);
 
   return (
     <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
@@ -338,6 +349,57 @@ function PoolRowView({
         <RefusalNote refusal={refusal} />
       </td>
     </tr>
+  );
+}
+
+// ── Department pool card (<1024px) — same handlers as PoolRowView. ───────
+function PoolCardView({
+  row,
+  canAssign,
+  members,
+  onOpenStage,
+}: {
+  row: MyDayRow;
+  canAssign: boolean;
+  members: { id: number; name: string }[];
+  onOpenStage: () => void;
+}) {
+  const { refusal, pending, run, clickable } = usePoolRowActions(row);
+
+  return (
+    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+      <div className="rt-card-top">
+        <b>{row.processName}</b>
+        <StatusChip status="idle" label="Unassigned" />
+      </div>
+      <div className="rt-card-meta">{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+      <div className="rt-card-row">
+        <span className="tag mono">{row.serialNo !== "—" ? row.serialNo : row.jobNumber}</span>
+        <span>Due {fmtDue(row.ranked.plan.plannedFinish)}</span>
+      </div>
+      <div className="rt-card-action" onClick={stop}>
+        {canAssign && members.length > 0 && (
+          <select
+            className="btn"
+            defaultValue=""
+            disabled={pending}
+            aria-label={`Assign ${row.processName} to…`}
+            onChange={(e) => {
+              const userId = Number(e.target.value);
+              if (userId) run(() => assignPlanAction(row.ranked.plan.id, userId), "Assigned.");
+              e.target.value = "";
+            }}
+          >
+            <option value="">Assign to…</option>
+            {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        )}
+        <button className="btn btn-accent" disabled={pending} onClick={(e) => { stop(e); run(() => claimPlanAction(row.ranked.plan.id), "Claimed."); }}>
+          Claim
+        </button>
+      </div>
+      <RefusalNote refusal={refusal} />
+    </div>
   );
 }
 
@@ -472,6 +534,15 @@ function SelfSubmittedCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStag
 // smallest honest fix: wires the already-built, already-tested, already-
 // audited service action to a real button rather than inventing a new
 // department-wide reassignment surface. ─────────────────────────────────
+function useTeamHeldRowActions(row: MyDayRow) {
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
+  const { pending, run } = useRun(setRefusal);
+  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+  const status: StageDisplayStatus = row.ranked.overdue ? "overdue" : row.ranked.state === "SUBMITTED" ? "submitted" : row.ranked.state === "ON_HOLD" ? "hold" : "progress";
+  const label = row.ranked.overdue ? "Overdue" : row.ranked.reasonText.split(".")[0];
+  return { refusal, pending, run, clickable, status, label };
+}
+
 function TeamHeldRowView({
   row,
   canRelease,
@@ -481,9 +552,7 @@ function TeamHeldRowView({
   canRelease: boolean;
   onOpenStage: () => void;
 }) {
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const { pending, run } = useRun(setRefusal);
-  const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
+  const { refusal, pending, run, clickable, status, label } = useTeamHeldRowActions(row);
 
   return (
     <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
@@ -498,9 +567,7 @@ function TeamHeldRowView({
       <td className="mono">{fmtDue(row.ranked.plan.plannedFinish)}</td>
       <td className="num">
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", alignItems: "center" }} onClick={stop}>
-          <span className={`chip ${row.ranked.overdue ? "c-overdue" : row.ranked.state === "SUBMITTED" ? "c-submitted" : row.ranked.state === "ON_HOLD" ? "c-hold" : "c-progress"}`}>
-            <i />{row.ranked.overdue ? "Overdue" : row.ranked.reasonText.split(".")[0]}
-          </span>
+          <StatusChip status={status} label={label} />
           {canRelease && (
             <button
               className="btn"
@@ -514,6 +581,44 @@ function TeamHeldRowView({
         <RefusalNote refusal={refusal} />
       </td>
     </tr>
+  );
+}
+
+// ── Held-by-teammates card (<1024px) — same handlers as TeamHeldRowView. ──
+function TeamHeldCardView({
+  row,
+  canRelease,
+  onOpenStage,
+}: {
+  row: MyDayRow;
+  canRelease: boolean;
+  onOpenStage: () => void;
+}) {
+  const { refusal, pending, run, clickable, status, label } = useTeamHeldRowActions(row);
+
+  return (
+    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+      <div className="rt-card-top">
+        <b>{row.processName}</b>
+        <StatusChip status={status} label={label} />
+      </div>
+      <div className="rt-card-meta">
+        <div className="avatar" style={{ width: 20, height: 20, fontSize: 9, display: "inline-flex", verticalAlign: "middle", marginRight: 6 }}>{initials(row.assigneeName ?? "—")}</div>
+        {row.assigneeName ?? "—"} · {row.stageLabel} · {row.deptName}
+      </div>
+      <div className="rt-card-row">
+        <span className="tag mono">{row.serialNo !== "—" ? row.serialNo : row.jobNumber}</span>
+        <span>Due {fmtDue(row.ranked.plan.plannedFinish)}</span>
+      </div>
+      {canRelease && (
+        <div className="rt-card-action" onClick={stop}>
+          <button className="btn" disabled={pending} onClick={(e) => { stop(e); run(() => releasePlanAction(row.ranked.plan.id), "Released to pool."); }}>
+            Release
+          </button>
+        </div>
+      )}
+      <RefusalNote refusal={refusal} />
+    </div>
   );
 }
 
@@ -783,27 +888,40 @@ export function MyDayClient({
         {view.pool.length === 0 ? (
           <p className="note" style={{ margin: "16px 0" }}>Nothing in the department pool right now.</p>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th style={{ width: 130 }}>Job</th>
-                <th>Process</th>
-                <th style={{ width: 80 }}>Due</th>
-                <th style={{ width: 220 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {view.pool.map((r) => (
-                <PoolRowView
-                  key={r.ranked.plan.id}
-                  row={r}
-                  canAssign={canAssign}
-                  members={view.deptMembers[r.ranked.plan.ownerDepartmentId] ?? []}
-                  onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
-                />
-              ))}
-            </tbody>
-          </table>
+          <ResponsiveTable
+            table={
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: 130 }}>Job</th>
+                    <th>Process</th>
+                    <th style={{ width: 80 }}>Due</th>
+                    <th style={{ width: 220 }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {view.pool.map((r) => (
+                    <PoolRowView
+                      key={r.ranked.plan.id}
+                      row={r}
+                      canAssign={canAssign}
+                      members={view.deptMembers[r.ranked.plan.ownerDepartmentId] ?? []}
+                      onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            }
+            cards={view.pool.map((r) => (
+              <PoolCardView
+                key={r.ranked.plan.id}
+                row={r}
+                canAssign={canAssign}
+                members={view.deptMembers[r.ranked.plan.ownerDepartmentId] ?? []}
+                onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+              />
+            ))}
+          />
         )}
       </div>
 
@@ -818,18 +936,30 @@ export function MyDayClient({
           view.teamHeld.length === 0 ? (
             <p className="note" style={{ margin: "16px 0" }}>Nothing held by teammates right now.</p>
           ) : (
-            <table>
-              <tbody>
-                {view.teamHeld.map((r) => (
-                  <TeamHeldRowView
-                    key={r.ranked.plan.id}
-                    row={r}
-                    canRelease={canAssign}
-                    onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
-                  />
-                ))}
-              </tbody>
-            </table>
+            <ResponsiveTable
+              table={
+                <table>
+                  <tbody>
+                    {view.teamHeld.map((r) => (
+                      <TeamHeldRowView
+                        key={r.ranked.plan.id}
+                        row={r}
+                        canRelease={canAssign}
+                        onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              }
+              cards={view.teamHeld.map((r) => (
+                <TeamHeldCardView
+                  key={r.ranked.plan.id}
+                  row={r}
+                  canRelease={canAssign}
+                  onOpenStage={() => openStage(r.jobId, r.ranked.plan.unitId ?? undefined, r.stageNo)}
+                />
+              ))}
+            />
           )
         )}
       </div>

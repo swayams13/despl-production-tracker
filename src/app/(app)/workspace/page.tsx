@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { loadWorkspaceView } from "@/lib/services/workspace.read";
-import { UnitRow, CardBulkActions, QcRow, HoldRow, FilterChip, SortSelect } from "./_client";
+import { UnitRow, UnitCardView, CardBulkActions, QcRow, QcCardView, HoldRow, HoldCardView, FilterChip, SortSelect } from "./_client";
+import { ResponsiveTable } from "@/components/industrial/responsive-table";
 
 async function pilotJobId(tenantId: number): Promise<number | null> {
   return withTenant(tenantId, async (tx) => {
@@ -74,23 +75,30 @@ export default async function Workspace({
               )}
               <CardBulkActions overduePlanIds={overduePlanIds} startablePlanIds={startablePlanIds} categories={view.delayCategories} />
             </div>
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: 90 }}>Unit</th>
-                  <th style={{ width: 80 }}>Due</th>
-                  <th className="num" style={{ width: 80 }}>Overdue</th>
-                  <th>Delay reason / status</th>
-                  <th />
-                  <th style={{ width: 200 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {card.units.map((u) => (
-                  <UnitRow key={u.planId} row={u} categories={view.delayCategories} />
-                ))}
-              </tbody>
-            </table>
+            <ResponsiveTable
+              table={
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 90 }}>Unit</th>
+                      <th style={{ width: 80 }}>Due</th>
+                      <th className="num" style={{ width: 80 }}>Overdue</th>
+                      <th>Delay reason / status</th>
+                      <th />
+                      <th style={{ width: 200 }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {card.units.map((u) => (
+                      <UnitRow key={u.planId} row={u} categories={view.delayCategories} />
+                    ))}
+                  </tbody>
+                </table>
+              }
+              cards={card.units.map((u) => (
+                <UnitCardView key={u.planId} row={u} categories={view.delayCategories} />
+              ))}
+            />
           </div>
         );
       })}
@@ -102,9 +110,10 @@ export default async function Workspace({
             <span className="meta">QC gate · maker / checker</span>
             <span className="chip c-submitted"><i />{view.qcQueue.length} item{view.qcQueue.length === 1 ? "" : "s"}</span>
           </div>
-          <table><tbody>
-            {view.qcQueue.map((r) => <QcRow key={r.planId} row={r} />)}
-          </tbody></table>
+          <ResponsiveTable
+            table={<table><tbody>{view.qcQueue.map((r) => <QcRow key={r.planId} row={r} />)}</tbody></table>}
+            cards={view.qcQueue.map((r) => <QcCardView key={r.planId} row={r} />)}
+          />
         </div>
       )}
 
@@ -115,11 +124,18 @@ export default async function Workspace({
             <span className="meta">Clear to unblock completion</span>
             <span className="chip c-hold"><i />{view.holdPoints.length} open</span>
           </div>
-          <table><tbody>
-            {view.holdPoints.map((h) => (
-              <HoldRow key={`${h.qcpItemId}-${h.unitId}`} qcpItemId={h.qcpItemId} unitId={h.unitId} activity={h.activity} serialNo={h.serialNo} />
+          <ResponsiveTable
+            table={
+              <table><tbody>
+                {view.holdPoints.map((h) => (
+                  <HoldRow key={`${h.qcpItemId}-${h.unitId}`} qcpItemId={h.qcpItemId} unitId={h.unitId} activity={h.activity} serialNo={h.serialNo} />
+                ))}
+              </tbody></table>
+            }
+            cards={view.holdPoints.map((h) => (
+              <HoldCardView key={`${h.qcpItemId}-${h.unitId}`} qcpItemId={h.qcpItemId} unitId={h.unitId} activity={h.activity} serialNo={h.serialNo} />
             ))}
-          </tbody></table>
+          />
         </div>
       )}
 

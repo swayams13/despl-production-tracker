@@ -13,6 +13,8 @@ import {
 } from "@/app/actions/process";
 import { fileDelayAction, fileDelayBulkAction } from "@/app/actions/delay";
 import { recordQcpAction } from "@/app/actions/qcp";
+import { StatusChip } from "@/components/industrial/status-chip";
+import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ActionResult } from "@/app/actions/_action";
 import type { WsUnitRow, WsQcRow } from "@/lib/services/workspace.read";
 
@@ -35,8 +37,12 @@ function useRun() {
   return { pending, run };
 }
 
-// ── One unit row inside a process card ───────────────────────────────────
-export function UnitRow({ row, categories }: { row: WsUnitRow; categories: Category[] }) {
+/**
+ * Shared state + handlers for the unit row/card pair (`UnitRow` /
+ * `UnitCardView`) — same `useState`s, same `useRun`, same `fileReason`
+ * handler. Only the JSX (table row vs. card) stays split between the two.
+ */
+function useUnitRowActions(row: WsUnitRow) {
   const { pending, run } = useRun();
   const [categoryId, setCategoryId] = useState<number | "">("");
   const [detail, setDetail] = useState("");
@@ -45,6 +51,23 @@ export function UnitRow({ row, categories }: { row: WsUnitRow; categories: Categ
     if (categoryId === "") return toast.error("Choose a delay reason first.");
     run(() => fileDelayAction(row.planId, categoryId, detail || undefined), "Delay reason filed.");
   };
+
+  const status: StageDisplayStatus = row.overdue
+    ? "overdue"
+    : row.state === "IN_PROGRESS"
+      ? "progress"
+      : row.state === "ON_HOLD"
+        ? "hold"
+        : row.state === "READY"
+          ? "idle"
+          : "hold"; // BLOCKED
+
+  return { pending, run, categoryId, setCategoryId, detail, setDetail, fileReason, status };
+}
+
+// ── One unit row inside a process card ───────────────────────────────────
+export function UnitRow({ row, categories }: { row: WsUnitRow; categories: Category[] }) {
+  const { pending, run, categoryId, setCategoryId, detail, setDetail, fileReason } = useUnitRowActions(row);
 
   return (
     <tr className="row">
@@ -118,6 +141,52 @@ function UnitActionButton({
   return <span style={{ color: "var(--muted)", fontSize: 11 }}>Blocked</span>;
 }
 
+// ── One unit card (<1024px) — same handlers as UnitRow. ──────────────────
+export function UnitCardView({ row, categories }: { row: WsUnitRow; categories: Category[] }) {
+  const { pending, run, categoryId, setCategoryId, detail, setDetail, fileReason, status } = useUnitRowActions(row);
+
+  return (
+    <div className="rt-card">
+      <div className="rt-card-top">
+        <b className="mono">{row.serialNo}</b>
+        <StatusChip status={status} />
+      </div>
+      <div className="rt-card-row">
+        <span>Due {fmtDue(row.plannedFinish)}</span>
+        {row.overdue && <span className="mono" style={{ color: "var(--s-overdue)" }}>{row.daysOverdue}d overdue</span>}
+      </div>
+      {row.overdue ? (
+        <div className="rt-card-delay">
+          <select
+            className="btn"
+            value={categoryId}
+            onChange={(e) => setCategoryId(e.target.value ? Number(e.target.value) : "")}
+            aria-label={`Delay reason for ${row.serialNo}`}
+          >
+            <option value="">Delay reason…</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <input
+            className="ws-detail"
+            placeholder="Detail (optional)"
+            value={detail}
+            onChange={(e) => setDetail(e.target.value)}
+            aria-label={`Delay detail for ${row.serialNo}`}
+          />
+          <button className="btn" disabled={pending} onClick={fileReason}>File</button>
+        </div>
+      ) : (
+        <p className="note" style={{ margin: 0, textAlign: "left" }}>{row.reasonText}</p>
+      )}
+      <div className="rt-card-action">
+        <UnitActionButton row={row} pending={pending} run={run} />
+      </div>
+    </div>
+  );
+}
+
 // ── Card header bulk actions ─────────────────────────────────────────────
 export function CardBulkActions({
   overduePlanIds,
@@ -180,8 +249,12 @@ export function CardBulkActions({
   );
 }
 
-// ── QC verification row ──────────────────────────────────────────────────
-export function QcRow({ row }: { row: WsQcRow }) {
+/**
+ * Shared state + handlers for the QC verification row/card pair (`QcRow` /
+ * `QcCardView`) — same `useState`s, same `useRun`, same `reject` handler.
+ * Only the JSX (table row vs. card) stays split between the two.
+ */
+function useQcRowActions(row: WsQcRow) {
   const { pending, run } = useRun();
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
@@ -192,6 +265,13 @@ export function QcRow({ row }: { row: WsQcRow }) {
     setRejecting(false);
     setReason("");
   };
+
+  return { pending, run, rejecting, setRejecting, reason, setReason, reject };
+}
+
+// ── QC verification row ──────────────────────────────────────────────────
+export function QcRow({ row }: { row: WsQcRow }) {
+  const { pending, run, rejecting, setRejecting, reason, setReason, reject } = useQcRowActions(row);
 
   return (
     <tr className="row">
@@ -217,6 +297,36 @@ export function QcRow({ row }: { row: WsQcRow }) {
   );
 }
 
+// ── QC verification card (<1024px) — same handlers as QcRow. ─────────────
+export function QcCardView({ row }: { row: WsQcRow }) {
+  const { pending, run, rejecting, setRejecting, reason, setReason, reject } = useQcRowActions(row);
+
+  return (
+    <div className="rt-card">
+      <div className="rt-card-top">
+        <b className="mono">{row.serialNo}</b>
+        <StatusChip status="submitted" />
+      </div>
+      <div className="rt-card-meta">
+        {row.processName}
+        {row.submittedBy && <> — submitted by {row.submittedBy}</>}
+      </div>
+      {rejecting && (
+        <div className="rt-card-delay">
+          <input className="ws-detail" placeholder="Reason for rejection" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Rejection reason" autoFocus />
+        </div>
+      )}
+      <div className="rt-card-action">
+        {!rejecting && <button className="btn" disabled={pending} onClick={() => setRejecting(true)}>Reject…</button>}
+        {rejecting && <button className="btn" disabled={pending} onClick={() => setRejecting(false)}>Cancel</button>}
+        <button className="btn btn-accent" disabled={pending} onClick={rejecting ? reject : () => run(() => verifyAction(row.planId), "Verified — next stage unlocked.")}>
+          {rejecting ? "Confirm reject" : "Verify"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── QC hold-point clearance row ──────────────────────────────────────────
 export function HoldRow({ qcpItemId, unitId, activity, serialNo }: { qcpItemId: number; unitId: number; activity: string; serialNo: string }) {
   const { pending, run } = useRun();
@@ -228,6 +338,23 @@ export function HoldRow({ qcpItemId, unitId, activity, serialNo }: { qcpItemId: 
         <button className="btn btn-accent" disabled={pending} onClick={() => run(() => recordQcpAction(qcpItemId, unitId, "ACCEPTED"), "Hold point cleared.")}>Record clearance</button>
       </td>
     </tr>
+  );
+}
+
+// ── QC hold-point clearance card (<1024px) — same handlers as HoldRow. ───
+export function HoldCardView({ qcpItemId, unitId, activity, serialNo }: { qcpItemId: number; unitId: number; activity: string; serialNo: string }) {
+  const { pending, run } = useRun();
+  return (
+    <div className="rt-card">
+      <div className="rt-card-top">
+        <b className="mono">{serialNo}</b>
+        <StatusChip status="hold" />
+      </div>
+      <div className="rt-card-meta">{activity}</div>
+      <div className="rt-card-action">
+        <button className="btn btn-accent" disabled={pending} onClick={() => run(() => recordQcpAction(qcpItemId, unitId, "ACCEPTED"), "Hold point cleared.")}>Record clearance</button>
+      </div>
+    </div>
   );
 }
 

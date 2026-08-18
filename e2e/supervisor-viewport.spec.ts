@@ -44,37 +44,15 @@ test.beforeEach(({}, testInfo) => {
 // — both untouched by R1).
 const SHELL_PAGES = ["/my-day", "/workspace", "/board", "/alerts", "/profile"] as const;
 
-// REAL, SIGNIFICANT FINDING, discovered while writing this test (not
-// introduced by this task, not fixable within it — test infra only, no
-// src/ changes), directly relevant to the R1 Gate's own "no horizontal
-// overflow" condition:
-// - /my-day (src/app/(app)/my-day/_client.tsx lines 786 and 821): the
-//   "Department pool" and "Held by teammates" tables are plain `<table>`,
-//   never wrapped in `<ResponsiveTable>` — unlike the "Completed" table 27
-//   lines below (848) which IS wrapped correctly. Overflows by 184px at
-//   390px width.
-// - /workspace (src/app/(app)/workspace/page.tsx lines 77, 105, 118): its
-//   main per-process unit table, QC queue table and hold-points table are
-//   ALL plain `<table>` — `<ResponsiveTable>` isn't used anywhere in this
-//   file. Overflows by 82px at 390px width.
-// Both are pre-existing, deliberately-deferred scope, not incomplete work:
-// task-2-brief.md named only /my-day's "Mine" table and /admin's Employees
-// table as this session's targets ("the two highest-traffic tables"),
-// explicitly calling out Pool/teamHeld as tables that "migrate
-// opportunistically" — left as plain tables on purpose. /workspace was never
-// named at all. Task 2's own commit (882ba44) touches only Mine + Employees,
-// confirming this was the intended scope, not a gap. Still real 390px
-// overflow bugs against two of the R1 Gate's four named pages today — just
-// not a Task 2 shortfall.
+// R2's first item (progress.md, 18 Aug 2026): /my-day's "Department pool"
+// and "Held by teammates" tables, and /workspace's per-process unit table,
+// QC queue table and hold-points table, are now all wrapped in
+// <ResponsiveTable> with real card views (PoolCardView/TeamHeldCardView in
+// my-day/_client.tsx; UnitCardView/QcCardView/HoldCardView in
+// workspace/_client.tsx) — closing the 390px overflow this loop used to
+// `test.fail()` on both pages.
 for (const path of SHELL_PAGES) {
-  test(`${path}: no horizontal overflow`, async ({ page }, testInfo) => {
-    // Confirmed phone-only (390px): both genuinely pass at tablet (1024px)
-    // and desktop (1440px) — there's just enough width there for the
-    // unwrapped tables' natural size.
-    test.fail(
-      testInfo.project.name === "phone" && (path === "/my-day" || path === "/workspace"),
-      `${path}: unwrapped <table> (not <ResponsiveTable>) overflows at 390px — real, pre-existing, out of scope; see the comment above this loop for exact file:line locations`,
-    );
+  test(`${path}: no horizontal overflow`, async ({ page }) => {
     await page.goto(path);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -325,12 +303,10 @@ test("shell reachability: tablet — /board /alerts /profile are live, protected
   }
 });
 
-// Starts from /board, not /my-day: see the dedicated test.fail() below for
-// why /my-day itself is a broken starting point on phone today (same
-// already-disclosed root cause as the overflow finding above this file).
-// This proves Board -> Alerts -> Profile -> Today(/my-day) is fully
-// reachable via the bottom nav for real, everywhere except the one disclosed
-// page.
+// Starts from /board, not /my-day — the dedicated test below covers /my-day
+// itself as a starting point (it used to be a broken one; see that test's
+// comment). This proves Board -> Alerts -> Profile -> Today(/my-day) is
+// fully reachable via the bottom nav.
 test("shell reachability: phone bottom nav reaches Board/Alerts/Profile/Today", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "phone", "phone-specific nav surface (.bottom-nav)");
   await page.goto("/board");
@@ -341,29 +317,18 @@ test("shell reachability: phone bottom nav reaches Board/Alerts/Profile/Today", 
   }
 });
 
-// REAL, SIGNIFICANT FINDING, discovered while writing this test — a further,
-// more severe consequence of the SAME already-disclosed /my-day overflow bug
-// (see the comment above the assertion-1 loop, top of this file): while
-// actually on /my-day at 390px, `.bottom-nav` (position:fixed, bottom:0) is
-// unreachable. Measured directly: `window.innerHeight` is 1243px on /my-day,
-// not the configured 844px — mobile browsers (this project emulates a real
-// Pixel 7) auto-zoom-out to fit horizontally-overflowing content, which
-// inflates the visual viewport and relocates any `position:fixed;bottom:0`
-// element to the bottom of that LARGER viewport, off the actually-visible
-// (unzoomed) fold. A real phone user landing on /my-day (every SUPERVISOR's
-// post-login destination) cannot reach Board/Alerts/Profile — or even
-// re-tap Today — without first manually zooming/scrolling. Not fixable here
-// (test infra only, no src/ changes; the real fix is the same
-// <ResponsiveTable> adoption that closes the overflow finding above).
-test.fail(
-  "shell reachability: phone bottom nav is NOT reachable while ON /my-day itself — window.innerHeight " +
-    "inflates from 844 to ~1243 due to the same disclosed horizontal-overflow bug (see comment above)",
-  async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== "phone", "phone-specific nav surface (.bottom-nav)");
-    await page.goto("/my-day");
-    await page.locator(".bottom-nav .bn-item", { hasText: "Board" }).click({ timeout: 3000 });
-  },
-);
+// Was a disclosed test.fail() (window.innerHeight inflating 844 -> ~1243 on
+// /my-day, pushing .bottom-nav off the visible fold) — a second-order
+// consequence of the same overflow bug the assertion-1 loop closed above.
+// Now a real assertion: window.innerHeight stays at the configured viewport
+// height (no auto-zoom-out), and the bottom nav is reachable from /my-day.
+test("shell reachability: phone bottom nav is reachable while ON /my-day itself", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "phone", "phone-specific nav surface (.bottom-nav)");
+  await page.goto("/my-day");
+  expect(await page.evaluate(() => window.innerHeight)).toBeLessThanOrEqual(900);
+  await page.locator(".bottom-nav .bn-item", { hasText: "Board" }).click({ timeout: 3000 });
+  await expect(page).toHaveURL(/\/board$/);
+});
 
 // Desktop's sidebar deliberately has NO Board/Alerts/Profile link — a
 // reviewed, binding decision from Task 4 (task-4-report.md "Fix report":
