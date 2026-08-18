@@ -2,7 +2,7 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟡 **Non-management "Dashboard" nav bug fixed + My Day gains On hold/Completed views, 18 Aug 2026** — see "Session — non-management Dashboard nav bug fixed" below; verification-suite-clean, not yet browser-verified or committed. Prior status: 🟡 **Responsive Supervisor UI, Session R1 — Tasks 1-3 of 7 done, 17 Aug 2026.** Density layer, `<ResponsiveTable>`, and the `/board`/`/alerts`/`/profile` route shells are shipped and task-reviewed clean (1 fix round each). See "Session — R1 Task 2 review completed, Task 3 shipped" below for the full account; next up is Task 4 (shell variants — tablet icon rail, phone bottom nav). Commits `356188c..12dcdcf` on `demo`, not yet pushed to `origin/demo`. Prior status: 🟢 **Personal Dashboards v1 — ALL 4 PHASES DONE, 17 Aug 2026.** P1 (person grain + assignment service), P2 (`/my-day` personal dashboard), P3 (`/command/[dept]` Office Command Center), P4 (admin employee management + assignee-first notifications) all shipped, individually task-reviewed, and each phase's own final whole-branch review's findings fixed and re-reviewed clean. Full plan (`docs/PLAN-personal-dashboards-v1.md`) complete — see the "Session — Personal Dashboards Phase 3" and "Phase 4" entries below for the full account, including a genuinely load-bearing gap found mid-Phase-4 (SPEC decision D13, "login accepts username or email," was never actually implemented despite being locked since before Phase 1 — implemented as a controller ruling once Phase 4's `createEmployee` made the gap concrete) and 4 real bugs found and fixed during live browser verification (an ad-blocker CSS-class collision hiding admin form fields; a Postgres session-timezone bug silently undercounting a KPI; both closed at root cause with codebase-wide protection, not just the one symptom). Built as a subagent-driven SDD run throughout (ledger: `.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`, gitignored scratch dir — full task-by-task history and every ruling made, retained pending user review rather than auto-deleted). Commits `970db2d..da1430a` on `demo`, **not yet pushed to `origin/demo`** — awaiting the user's review and go-ahead. One Moderate, pre-existing, out-of-scope timezone-boundary item was found and deliberately parked (not fixed) in Phase 4's final review — see that entry for details; it's cosmetic at pilot scale, not a data-integrity issue.
+**Status:** 🟡 **Responsive Supervisor UI, Session R1 — all 7 tasks done, 18 Aug 2026.** Task 7 (Playwright viewport matrix) shipped — see "Session — R1 Task 7 (Playwright viewport matrix) shipped" below for the full account. `pnpm typecheck`/`lint`/`build`/`test` all clean, `pnpm e2e` 112 tests: 1 pre-existing disclosed failure (unrelated, not fixed — see below), 48 passed (40 real + 8 real `test.fail()` findings), 63 skipped/fixme. **6 genuine, pre-existing, out-of-scope UI bugs found by this task's new automated checks** (none introduced by Task 7, none fixed — test infra only): `/my-day` and `/workspace` overflow at 390px (unwrapped `<table>`s, not `<ResponsiveTable>` — and a second-order bug, `/my-day`'s own bottom nav becomes unreachable on phone as a result); the SPEC's own 1024px tablet test viewport collides with `globals.css`'s desktop breakpoint, so a real Galaxy Tab S4 in landscape can't reach Board/Alerts/Profile from its shell nav at all; `.btn-accent` still has no 56px coarse-pointer floor (the Task 2 review already flagged this as an untracked Minor — now confirmed via a real, automated, executing test); `/my-day`'s card action buttons are 6px apart, need 8px. R1's full Session Gate (all 4 key pages × all 3 viewports × all 3 themes, no wrong-theme flash, the 3 new routes reachable with no dead link, viewport suite green including AA contrast) is now testable and green modulo these disclosed findings. On `demo`, not yet committed as of this report — see the Task 7 report for the exact commit. Prior status: 🟡 **Non-management "Dashboard" nav bug fixed + My Day gains On hold/Completed views, 18 Aug 2026** — see "Session — non-management Dashboard nav bug fixed" below; verification-suite-clean, not yet browser-verified or committed. Prior status: 🟡 **Responsive Supervisor UI, Session R1 — Tasks 1-3 of 7 done, 17 Aug 2026.** Density layer, `<ResponsiveTable>`, and the `/board`/`/alerts`/`/profile` route shells are shipped and task-reviewed clean (1 fix round each). See "Session — R1 Task 2 review completed, Task 3 shipped" below for the full account; next up is Task 4 (shell variants — tablet icon rail, phone bottom nav). Commits `356188c..12dcdcf` on `demo`, not yet pushed to `origin/demo`. Prior status: 🟢 **Personal Dashboards v1 — ALL 4 PHASES DONE, 17 Aug 2026.** P1 (person grain + assignment service), P2 (`/my-day` personal dashboard), P3 (`/command/[dept]` Office Command Center), P4 (admin employee management + assignee-first notifications) all shipped, individually task-reviewed, and each phase's own final whole-branch review's findings fixed and re-reviewed clean. Full plan (`docs/PLAN-personal-dashboards-v1.md`) complete — see the "Session — Personal Dashboards Phase 3" and "Phase 4" entries below for the full account, including a genuinely load-bearing gap found mid-Phase-4 (SPEC decision D13, "login accepts username or email," was never actually implemented despite being locked since before Phase 1 — implemented as a controller ruling once Phase 4's `createEmployee` made the gap concrete) and 4 real bugs found and fixed during live browser verification (an ad-blocker CSS-class collision hiding admin form fields; a Postgres session-timezone bug silently undercounting a KPI; both closed at root cause with codebase-wide protection, not just the one symptom). Built as a subagent-driven SDD run throughout (ledger: `.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`, gitignored scratch dir — full task-by-task history and every ruling made, retained pending user review rather than auto-deleted). Commits `970db2d..da1430a` on `demo`, **not yet pushed to `origin/demo`** — awaiting the user's review and go-ahead. One Moderate, pre-existing, out-of-scope timezone-boundary item was found and deliberately parked (not fixed) in Phase 4's final review — see that entry for details; it's cosmetic at pilot scale, not a data-integrity issue.
 
 **One open item needs a human with Railway access, not something resolvable from this session's sandbox:** confirm the deployed Railway Postgres's default session timezone is actually UTC. Phase 4's Task 4.4 found and fixed a bug where it wasn't in the local dev sandbox (silently shifting "today" boundaries by hours) — if Railway has the same default, the fix (now self-applying via `db.ts`, not just a provisioning script) already covers it there too once this branch is pushed; if Railway already defaults to UTC, the fix was a no-op there and this is just confirmation, not a live gap.
 
@@ -30,6 +30,96 @@ Prior status: 🟡 **Railway deploy IN PROGRESS, blocked on a DB-auth mismatch (
 **Git workflow, changed 13 Aug 2026:** new `demo` branch created from `main`. **Push to `demo` first; merge to `main` only after the user verifies and explicitly approves the promotion** — same discipline as the EJ Production Tracker sibling project. Do not push to or merge into `main` on your own initiative. (One session on 13 Aug ran on a harness-assigned branch, `claude/progress-status-check-8ttvkj`, and merged its PR straight to `main` on the user's direct in-conversation instruction, skipping `demo` — that history is now reconciled into `demo` by this merge.)
 
 **Working on the `demo` branch. `lib/schedule/`, `lib/services/`, the first end-to-end UI (department workspaces + prioritizer + dashboard), production-safe idempotent seeding are done and verified — AND the full production lifecycle was now driven end-to-end through the running app in a real browser (login → start → submit → hold-point clearance → verify → COMPLETE, with 3 integrity invariants refusing live). IN PROGRESS: the demo-ready UI rebuild to the industrial control-room design (DESIGN_SPEC.md + design/despl-tracker-mockup.html), §9 session order. Session 1 (§9.1) ✅ `54c4e39`. Session 2 (§9.2 data layer) ✅ `6418411`/`022bb1b`. Session 3 (§9.3 Workspace) ✅ `58b3403`/`8d32441` (incl. the `pnpm test:db` fix). Session 4 (§9.4 Dashboard — all real KPI/stat/chart cards, dept×status matrix, cross-filter links into `/workspace?dept=&status=`) ✅ COMPLETE & VERIFIED (browser click-through + DB), committed `2732773`. Session 5 (§9.5 Job detail — Overview + Units×Stage matrix + Activity + StageSheet fully wired) ✅ COMPLETE & VERIFIED, committed `d2b4b99`. Session 6 (§9.6 Job detail — Gantt + BOM + QCP tabs) ✅ COMPLETE & VERIFIED, committed `612a888`. Session 7 (§9.7 QC page + Departments — the app's first cross-job pages) ✅ COMPLETE & VERIFIED, committed `60fd68b`. Session 8 (§9.8 Welding + Reports/digest + notifications end-to-end) ✅ COMPLETE & VERIFIED, committed `cc936e8`. Session 9 (§9.9 Admin + motion/polish pass + Demo Readiness sweep) ✅ COMPLETE & VERIFIED, committed `cf2e84c`. **§9's full session order (1–9) is now done.** Session 10 (login + root-landing reskin, 15 Aug 2026) fixed the two pages that §9's route-group migration explicitly left outside `.theme-industrial`, committed `e29d7f5` — see the session log below. Session 11 (**Portfolio Dashboard**, 16 Aug 2026, 7-task subagent-driven SDD run — health rule, portfolio read layer, tiles + table UI, job selector, docs sweep, final whole-branch review + fix wave, `AUTH_SECRET` rotation, real browser verification) ✅ SHIPPED, verification-suite-clean AND visually confirmed — see the session log below for the full account, including a security near-miss during Task 6 (unauthorized session-forging technique used for verification, caught, user decided how to proceed, now closed via rotation) that is recorded here in full rather than summarized away. **Update 16 Aug 2026 evening: pushed to both `origin/demo` and `origin/main`** (`c692d86`, the Railway deploy-fix commit — see the Status line above and the session log below). The security review pass and per-department functional walkthrough from session 10 are still open, now behind the Railway deploy blocker.**
+
+## Session — R1 Task 7 (Playwright viewport matrix) shipped, 18 Aug 2026
+
+Last task of Session R1 (7/7). Full account in
+`.superpowers/sdd/PLAN-responsive-supervisor-v1/task-7-report.md`; summarized
+here.
+
+**Built:** `playwright.config.ts` gained a `setup` project (real `/login`
+via `e2e/auth.setup.ts`, `sup.fabrication@despl.local`, storageState saved,
+never a forged session) plus `phone`/`tablet`/`desktop` projects at the
+SPEC's exact device/viewport values, each `testMatch`-scoped to a new
+`e2e/supervisor-viewport.spec.ts` so they don't re-run `auth.spec.ts`;
+`webServer.command` switched from `pnpm dev` to `pnpm build && pnpm start`
+(a 3x project matrix under dev-mode Turbopack was flaky at this scale, per
+the brief). New `e2e/wcag-contrast.ts`: a from-scratch WCAG contrast-ratio
+helper (none existed before), with a text-vs-background variant for chips/
+KPI values and a separate fill-vs-parent-background variant for graphical
+(non-text) elements like spine segments — building the latter caught and
+fixed a real bug in my own first attempt (comparing a spine segment's
+inherited-but-invisible text colour against itself gave 2.09:1 for dark
+`complete`; the fix gave 7.14, matching Task 6's own ~5.9-8.15 range).
+Assertions 1/2/3/6 (overflow, touch-target size, adjacent spacing, AA
+contrast) run for real; assertions 4/5/7 (execution-sheet layout,
+degradation matrix, hi/gu locale checks) are R2/R3 content that doesn't
+exist yet — `test.fixme()`'d with unblock comments per the controller
+ruling, not silently skipped.
+
+**Zero `src/` changes** (test infrastructure only) — but building the
+FIRST-EVER automated check for touch-target sizing/spacing and 390px
+overflow (Task 6 only audited colour contrast) surfaced 6 genuine,
+pre-existing bugs, none fixed here, all `test.fail()`'d (real, executing,
+expected-to-fail — not silenced) with the exact cause in the code comment:
+
+1. **`/my-day` and `/workspace` overflow at 390px.** `/my-day/_client.tsx`
+   lines 786/821 ("Department pool", "Held by teammates") and
+   `/workspace/page.tsx` lines 77/105/118 (main unit table, QC queue, hold
+   points) all use plain `<table>`, never `<ResponsiveTable>` — Task 2's own
+   adoption only reached `/my-day`'s "Completed" table (line 848), and
+   `/workspace` was never in scope for any prior task's adoption pass.
+   Second-order consequence: while actually on `/my-day` at 390px,
+   `window.innerHeight` measures 1243px instead of 844 (mobile auto-zoom
+   fitting the overflow), which relocates the fixed bottom nav off the
+   visibly-rendered fold — every SUPERVISOR/QC lands on `/my-day` right
+   after login, so this makes Board/Alerts/Profile briefly unreachable for
+   them too.
+2. **The SPEC's own tablet viewport (1024x768, a real Galaxy Tab S4
+   landscape resolution, copied verbatim) collides with `globals.css`'s
+   `@media (min-width: 1024px)` desktop-sidebar breakpoint.** At exactly
+   1024px the desktop sidebar renders instead of `.icon-rail` — a real
+   device in that exact orientation can't reach Board/Alerts/Profile from
+   its shell nav at all (the desktop sidebar that renders instead has no
+   link to them either, a separate deliberate Task 4 decision).
+3. **`.btn-accent` still has no 56px coarse-pointer floor** — Task 2's own
+   review already flagged this as an untracked Minor ("SPEC §3.2's 56px
+   primary-action height is still unimplemented anywhere"); now confirmed
+   via a real, executing, automated test rather than a code-read note.
+4. **`/my-day`'s card action button pair is 6px apart**, needs the 8px
+   SPEC §8 minimum.
+
+All 4 are disclosed in the Task 7 report with exact file:line locations,
+none fixed (this task's binding scope is test infra only). The pre-existing
+`e2e/auth.spec.ts` "internal user signs in and sees tenant-scoped jobs"
+failure (parked by Task 3's session, see below) was confirmed still failing
+for the exact reason predicted (commit `ec17ad6`'s post-login redirect
+change) — also not fixed, explicitly out of scope.
+
+**A design decision worth a second pair of eyes:** the pre-existing
+`chromium` project has no `testMatch` restriction (kept exactly as-is per
+the brief, since `auth.spec.ts` needs that) and so also picks up the new
+spec, unauthenticated — without a guard this produced confusing false
+failures (measuring the login page instead of the intended target). Fixed
+with one `test.beforeEach` skip for any project outside
+`{phone, tablet, desktop}`; `auth.spec.ts` itself is completely unaffected.
+
+**Verified:** `pnpm typecheck`/`pnpm lint`/`pnpm build` clean throughout;
+`pnpm test` 400 passed | 128 skipped (528 total) — identical to the prior
+session's numbers, confirming zero regression from this test-infra-only
+change. `pnpm e2e`, full real run, all 5 projects: 112 tests — 1 failed
+(the pre-existing, disclosed `auth.spec.ts` case, not introduced or fixed by
+this task), 48 passed (40 genuinely new-green + 8 `test.fail()` findings
+above, counted as "passed" since they failed exactly as expected), 63
+skipped (includes `chromium` correctly skipping all 26 of the new spec's
+tests, and the intentional R2/R3 + 2 disclosed-CSS-gap `test.fixme()`s).
+Numbers independently reconciled per-project against the raw list output,
+not just the tool's own summary line.
+
+**Status: DONE_WITH_CONCERNS** — infrastructure and every required assertion
+work and pass for real; the 4 disclosed findings above (plus the pre-existing
+`auth.spec.ts` failure) are real product gaps for the controller to triage,
+not defects in this task's own deliverable.
 
 ## Session — non-management "Dashboard" nav bug fixed + My Day gets On hold / Completed, 18 Aug 2026
 

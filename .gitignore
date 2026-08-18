@@ -10,6 +10,8 @@ QCP - DE0463.pdf
 /coverage
 /playwright-report
 /test-results
+# live session cookies from the Playwright auth setup project — never commit
+/playwright/.auth
 
 # next.js
 /.next/
