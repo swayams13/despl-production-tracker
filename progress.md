@@ -2,7 +2,7 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟡 **Responsive Supervisor UI, Session R1 — all 7 tasks done, 18 Aug 2026.** Task 7 (Playwright viewport matrix) shipped — see "Session — R1 Task 7 (Playwright viewport matrix) shipped" below for the full account. `pnpm typecheck`/`lint`/`build`/`test` all clean, `pnpm e2e` 112 tests: 1 pre-existing disclosed failure (unrelated, not fixed — see below), 48 passed (40 real + 8 real `test.fail()` findings), 63 skipped/fixme. **6 genuine, pre-existing, out-of-scope UI bugs found by this task's new automated checks** (none introduced by Task 7, none fixed — test infra only): `/my-day` and `/workspace` overflow at 390px (unwrapped `<table>`s, not `<ResponsiveTable>` — and a second-order bug, `/my-day`'s own bottom nav becomes unreachable on phone as a result); the SPEC's own 1024px tablet test viewport collides with `globals.css`'s desktop breakpoint, so a real Galaxy Tab S4 in landscape can't reach Board/Alerts/Profile from its shell nav at all; `.btn-accent` still has no 56px coarse-pointer floor (the Task 2 review already flagged this as an untracked Minor — now confirmed via a real, automated, executing test); `/my-day`'s card action buttons are 6px apart, need 8px. R1's full Session Gate (all 4 key pages × all 3 viewports × all 3 themes, no wrong-theme flash, the 3 new routes reachable with no dead link, viewport suite green including AA contrast) is now testable and green modulo these disclosed findings. On `demo`, not yet committed as of this report — see the Task 7 report for the exact commit. Prior status: 🟡 **Non-management "Dashboard" nav bug fixed + My Day gains On hold/Completed views, 18 Aug 2026** — see "Session — non-management Dashboard nav bug fixed" below; verification-suite-clean, not yet browser-verified or committed. Prior status: 🟡 **Responsive Supervisor UI, Session R1 — Tasks 1-3 of 7 done, 17 Aug 2026.** Density layer, `<ResponsiveTable>`, and the `/board`/`/alerts`/`/profile` route shells are shipped and task-reviewed clean (1 fix round each). See "Session — R1 Task 2 review completed, Task 3 shipped" below for the full account; next up is Task 4 (shell variants — tablet icon rail, phone bottom nav). Commits `356188c..12dcdcf` on `demo`, not yet pushed to `origin/demo`. Prior status: 🟢 **Personal Dashboards v1 — ALL 4 PHASES DONE, 17 Aug 2026.** P1 (person grain + assignment service), P2 (`/my-day` personal dashboard), P3 (`/command/[dept]` Office Command Center), P4 (admin employee management + assignee-first notifications) all shipped, individually task-reviewed, and each phase's own final whole-branch review's findings fixed and re-reviewed clean. Full plan (`docs/PLAN-personal-dashboards-v1.md`) complete — see the "Session — Personal Dashboards Phase 3" and "Phase 4" entries below for the full account, including a genuinely load-bearing gap found mid-Phase-4 (SPEC decision D13, "login accepts username or email," was never actually implemented despite being locked since before Phase 1 — implemented as a controller ruling once Phase 4's `createEmployee` made the gap concrete) and 4 real bugs found and fixed during live browser verification (an ad-blocker CSS-class collision hiding admin form fields; a Postgres session-timezone bug silently undercounting a KPI; both closed at root cause with codebase-wide protection, not just the one symptom). Built as a subagent-driven SDD run throughout (ledger: `.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`, gitignored scratch dir — full task-by-task history and every ruling made, retained pending user review rather than auto-deleted). Commits `970db2d..da1430a` on `demo`, **not yet pushed to `origin/demo`** — awaiting the user's review and go-ahead. One Moderate, pre-existing, out-of-scope timezone-boundary item was found and deliberately parked (not fixed) in Phase 4's final review — see that entry for details; it's cosmetic at pilot scale, not a data-integrity issue.
+**Status:** 🟢 **Responsive Supervisor UI, Session R1 — ALL 7 TASKS COMPLETE, final-reviewed, fix-verified, 18 Aug 2026.** Built as a subagent-driven SDD run (ledger: `.superpowers/sdd/PLAN-responsive-supervisor-v1/progress.md`, gitignored scratch dir — full task-by-task history, every controller ruling, every review). All 7 tasks individually task-reviewed (fix rounds where needed), then a final whole-branch review (opus, scoped to `ec17ad6..6da4927` — see note below on why not the full plan diff) found 1 Critical + 5 Important cross-task-seam issues no single task's own reviewer could have seen — most significantly, `theme_preference`'s `SYSTEM` default silently made the untested LIGHT palette the default experience for any user on a factory-default OS (macOS/Windows both default light), contradicting CLAUDE.md's "dark theme only in v1" right before the MD/CEO demo. One fix wave (commit `2c483df`) addressed all of it: existing users backfilled to DARK via a new migration, a dead outdoor-badge contrast override fixed, hover states retrofitted across all 3 palettes (previously hardcoded dark-only), a missing no-flash-on-reload e2e assertion added, Task 5's still-open coarse-pointer chip verification finally closed, and theme-e2e-test DB pollution fixed (dedicated second seeded identity + real cleanup). Scoped re-review (opus): all 7 addressed clean, no new breakage — surfaced exactly 2 residual items, both adjudicated directly by the controller rather than a prohibited second fix wave: (1) `prisma/seed.ts` never set `themePreference`, so any pre-demo `pnpm db:seed` would have silently reintroduced the Critical bug for every demo account — fixed directly, one line, mirrors the backfill migration's exact reasoning; (2) a documentation note about 5 unconsumed theme tokens (`--border-width`/`--wb`/`--wt`/`--mixp`/`--bordp` — Outdoor today is a pure colour swap, not R2's full "shop-floor UX" treatment) had landed in the gitignored SDD scratch ledger instead of this canonical file — now folded in right here. **Scoping note:** `main` locally already includes this plan's Tasks 1-4 plus an unrelated concurrent-session nav/redirect fix (`ec17ad6`) — `git merge-base main HEAD` resolves to `ec17ad6` itself, meaning a large amount of previously-"not yet pushed" work has apparently already landed on `main` outside this session's visibility; flagged for the user to confirm, not something this session pushed or merged itself. R1's full Session Gate (all 4 key pages × 3 viewports × 3 themes, no wrong-theme flash, the 3 new routes reachable with no dead link, viewport suite green including AA contrast) is genuinely green now. **6 pre-existing, out-of-scope UI bugs remain, individually triaged and none attributable to this session's own work** (3 are deliberately-deferred scope from Tasks 1/2's own briefs) — most urgent for whoever picks up Session R2: `/my-day`'s Pool/teamHeld table overflow at 390px makes its own bottom nav unreachable on phone, a real demo blocker on the primary daily-use page. Full account below in "Session — Final review + fix wave, Session R1 complete." Prior status: 🟡 **Responsive Supervisor UI, Session R1 — all 7 tasks done, 18 Aug 2026.** Task 7 (Playwright viewport matrix) shipped — see "Session — R1 Task 7 (Playwright viewport matrix) shipped" below for the full account. `pnpm typecheck`/`lint`/`build`/`test` all clean, `pnpm e2e` 112 tests: 1 pre-existing disclosed failure (unrelated, not fixed — see below), 48 passed (40 real + 8 real `test.fail()` findings), 63 skipped/fixme. **6 genuine, pre-existing, out-of-scope UI bugs found by this task's new automated checks** (none introduced by Task 7, none fixed — test infra only): `/my-day` and `/workspace` overflow at 390px (unwrapped `<table>`s, not `<ResponsiveTable>` — and a second-order bug, `/my-day`'s own bottom nav becomes unreachable on phone as a result); the SPEC's own 1024px tablet test viewport collides with `globals.css`'s desktop breakpoint, so a real Galaxy Tab S4 in landscape can't reach Board/Alerts/Profile from its shell nav at all; `.btn-accent` still has no 56px coarse-pointer floor (the Task 2 review already flagged this as an untracked Minor — now confirmed via a real, automated, executing test); `/my-day`'s card action buttons are 6px apart, need 8px. R1's full Session Gate (all 4 key pages × all 3 viewports × all 3 themes, no wrong-theme flash, the 3 new routes reachable with no dead link, viewport suite green including AA contrast) is now testable and green modulo these disclosed findings. On `demo`, not yet committed as of this report — see the Task 7 report for the exact commit. Prior status: 🟡 **Non-management "Dashboard" nav bug fixed + My Day gains On hold/Completed views, 18 Aug 2026** — see "Session — non-management Dashboard nav bug fixed" below; verification-suite-clean, not yet browser-verified or committed. Prior status: 🟡 **Responsive Supervisor UI, Session R1 — Tasks 1-3 of 7 done, 17 Aug 2026.** Density layer, `<ResponsiveTable>`, and the `/board`/`/alerts`/`/profile` route shells are shipped and task-reviewed clean (1 fix round each). See "Session — R1 Task 2 review completed, Task 3 shipped" below for the full account; next up is Task 4 (shell variants — tablet icon rail, phone bottom nav). Commits `356188c..12dcdcf` on `demo`, not yet pushed to `origin/demo`. Prior status: 🟢 **Personal Dashboards v1 — ALL 4 PHASES DONE, 17 Aug 2026.** P1 (person grain + assignment service), P2 (`/my-day` personal dashboard), P3 (`/command/[dept]` Office Command Center), P4 (admin employee management + assignee-first notifications) all shipped, individually task-reviewed, and each phase's own final whole-branch review's findings fixed and re-reviewed clean. Full plan (`docs/PLAN-personal-dashboards-v1.md`) complete — see the "Session — Personal Dashboards Phase 3" and "Phase 4" entries below for the full account, including a genuinely load-bearing gap found mid-Phase-4 (SPEC decision D13, "login accepts username or email," was never actually implemented despite being locked since before Phase 1 — implemented as a controller ruling once Phase 4's `createEmployee` made the gap concrete) and 4 real bugs found and fixed during live browser verification (an ad-blocker CSS-class collision hiding admin form fields; a Postgres session-timezone bug silently undercounting a KPI; both closed at root cause with codebase-wide protection, not just the one symptom). Built as a subagent-driven SDD run throughout (ledger: `.superpowers/sdd/PLAN-personal-dashboards-v1/progress.md`, gitignored scratch dir — full task-by-task history and every ruling made, retained pending user review rather than auto-deleted). Commits `970db2d..da1430a` on `demo`, **not yet pushed to `origin/demo`** — awaiting the user's review and go-ahead. One Moderate, pre-existing, out-of-scope timezone-boundary item was found and deliberately parked (not fixed) in Phase 4's final review — see that entry for details; it's cosmetic at pilot scale, not a data-integrity issue.
 
 **One open item needs a human with Railway access, not something resolvable from this session's sandbox:** confirm the deployed Railway Postgres's default session timezone is actually UTC. Phase 4's Task 4.4 found and fixed a bug where it wasn't in the local dev sandbox (silently shifting "today" boundaries by hours) — if Railway has the same default, the fix (now self-applying via `db.ts`, not just a provisioning script) already covers it there too once this branch is pushed; if Railway already defaults to UTC, the fix was a no-op there and this is just confirmation, not a live gap.
 
@@ -145,6 +145,194 @@ not defects in this task's own deliverable.
 4. **Completed section** (`myday.read.ts` + `_client.tsx`): the DONE-skip in `loadMyDay`'s per-job loop now routes the actor's own completed plans (last 30 days, same window the scoreboard already uses) into a new `MyDayView.completed` array instead of dropping them — no new query, reuses the same `prioritize()` output. Rendered as a new read-only "Completed" card (collapsed by default, same pattern as "Held by teammates"), no action buttons since the work is done.
 
 Brainstormed via the brainstorming skill (bounded path — existing flow, existing pages), design approved by the user before implementation. **Verified:** `pnpm typecheck`, `pnpm lint`, `pnpm test` (398/398 pure, 128 skipped) all clean. Not yet visually verified in a real browser — next session should log in as a non-management role (e.g. a supervisor) and click through Dashboard → My Day → On hold / Completed to confirm the fix in the actual app before committing/pushing.
+
+## Session — Final review + fix wave, Session R1 complete, 18 Aug 2026
+
+Continuation of "R1 Task 7 (Playwright viewport matrix) shipped" below —
+subagent-driven-development against
+`.superpowers/sdd/PLAN-responsive-supervisor-v1/progress.md`.
+
+**Scoping note.** This branch (`demo`) is long-lived; unrelated concurrent
+work landed on `main` during this session (`ec17ad6`, a legitimate
+non-management-Dashboard-redirect fix from a different session — not
+touched by this one). `git merge-base main HEAD` resolves to `ec17ad6`
+itself, meaning `main` already includes this plan's Tasks 1-4. The final
+review was therefore scoped to `ec17ad6..6da4927` (Tasks 5-7 + their fix
+rounds) — the portion that hadn't been through a cross-task review yet.
+Tasks 1-4 already passed their own task-scoped reviews earlier this
+session (see the entries below).
+
+**Task 5 (StatusChip coarse-pointer icon variant, D28)** — implemented
+(sonnet), commit `6ca907e`. All six status icons, exact CSS values,
+cascade-order placement, CSS-only toggle mechanism all verified spec-
+compliant by the task reviewer. 1 Important, not a code defect: coarse-
+pointer rendering was never exercised via real `pointer: coarse` device
+emulation (tooling limitation, honestly disclosed), but the report
+initially labeled status DONE instead of DONE_WITH_CONCERNS. Fixed by
+relabeling only (no code change). Complete.
+
+**Task 6 (token layer + theme preference, D27/D28)** — the session's
+largest task: the first per-user preference this codebase has ever built,
+including a Prisma migration. Implemented (opus), commit `a5920e9`, self-
+reported DONE_WITH_CONCERNS with 7 disclosed deviations, all judged sound
+by the task reviewer except 2 real bugs: (1) the React theme context
+exported the *unresolved* SSR class for `SYSTEM` preference, so portaled
+surfaces (StageSheet, 5 admin dialogs) rendered dark-on-light for any
+user on the default state; (2) a blanket light-palette chip re-tint
+(`color-mix`) overshot the task's own bounded-audit ruling and regressed
+2 of 6 chips from passing to failing contrast. Fix round 1 (commit
+`4b910ba`) hoisted SYSTEM resolution to shared state feeding both the div
+class and the context (collapsing to one `matchMedia` listener app-wide),
+reverted the chip mechanism to the original `rgba(...)` approach with only
+2 targeted overrides, added an in-flight guard to the theme cycle. Real
+re-verification this time (page-level `matchMedia` override, not a
+stubbed re-run) confirmed a genuinely-portaled StageSheet correctly
+inherits the resolved palette. 3 controller rulings on things correctly
+flagged rather than resolved: residual light-palette AA gaps (`.c-hold`,
+`.c-idle`'s ceiling) trace to verbatim-mandated spec tokens — mandated
+tokens win, shipped as documented residual gaps, real fix is a future
+spec correction; `--accent-fg` (light) stays a mandated-but-unwired dead
+token (wiring it would be a real regression); light `--accent`-as-text
+(3.73:1, systemic) accepted, deferred. Complete.
+
+**Task 7 (Playwright viewport matrix)** — implemented (sonnet), commit
+`85776de`. New `phone`/`tablet`/`desktop` projects at exact SPEC device
+values, a real-`/login` `setup` project + `storageState` dependency
+pattern (never forged), a from-scratch WCAG contrast helper, `testMatch`
+scoping, `webServer` switched to a production build. Controller ruling
+before dispatch: 3 of SPEC §8's 7 assertion categories describe Session
+R2/R3 page content that doesn't exist yet — written as real
+`test.fixme()`s with unblock comments, not silently dropped. The new
+suite immediately found 6 genuine pre-existing UI bugs (table overflow,
+a tablet/desktop breakpoint collision, missing touch floors, insufficient
+gaps) via honest `test.fail()` assertions — task reviewer individually
+git-blamed each to confirm none are attributable to this session's own
+Tasks 1-6 (3 are deliberately-deferred scope from Tasks 1/2's own
+briefs). 1 Important, wording-only: initial framing implied Task 2 left
+work unfinished when its brief explicitly deferred it — corrected
+(commit `6da4927`), no logic change. Complete.
+
+**Final whole-branch review** (opus, full diff, independently swept the
+whole `src/` tree for `createPortal`/`Dialog.Portal` to confirm portal
+coverage, recomputed contrast pairs, verified migration/RLS/grant
+safety): architecture sound, anticipated seams (portals, cascade order,
+storageState scoping) genuinely closed. 1 **Critical**: `theme_preference`
+defaults to `SYSTEM`, which resolves to **light** for any user on a
+factory-default OS (macOS/Windows 11 both ship light) — silently making
+the least-tested palette (3 known AA gaps) the *default* experience for
+most users, contradicting CLAUDE.md's "dark theme only in v1," right
+before the MD/CEO demo click-through. 5 Important: a dead outdoor-badge
+contrast override (later, more-specific rule silently won the cascade,
+re-shipping a 1.44:1 failure Task 6's own audit had reported fixed);
+hover states never retrofitted across 3 palettes (still hardcoded dark-
+only, inverting the primary-action affordance on light/outdoor); the R1
+gate's own "no flash-of-wrong-theme on hard reload" condition had no test
+despite being named as binding and testable-now; Task 5's coarse-pointer
+chip variant still uncovered by the exact tooling Task 7 built to cover
+it; theme e2e tests mutated the seeded supervisor's persisted DB state
+with no cleanup and a cross-project race Playwright's `.serial()` doesn't
+actually contain.
+
+**One fix wave** (opus, commit `2c483df`, the only fix wave this review
+allows per process): existing users backfilled to DARK via a **new**
+migration (`20260818120000_theme_preference_dark_backfill` — the earlier
+migration was already applied, never edited; also clears `outdoor_mode`
+on the same reasoning, since it wins over `themePreference` and no
+pre-feature user could have deliberately chosen it), 3 false code
+comments corrected; the dead outdoor-badge override fixed; a new
+`--hover-border` token added per palette and swept through every hover
+rule (`.btn`, `.btn-accent`, `.kpi.clicky`, `.dept-card`, scrollbar
+thumb) — zero hardcoded hover hex values remain; a real no-flash e2e
+assertion added (`colorScheme: 'light'` context + hard reload + asserts
+the correct class at first paint, proving the inline pre-hydration script
+is what's actually holding, not luck); Task 5's coarse-icon variant
+finally covered on real `pointer: coarse` phone/tablet projects; theme
+e2e tests moved to a dedicated second seeded identity
+(`sup.machine_shop@despl.local`) with a real `afterAll` reset, closing
+both the DB-pollution and the cross-project race. Plus 3 bundled Minors:
+`.topbar-theme` added to the touch-target assertion list, theme buttons
+switched from `disabled` to `aria-disabled` (keyboard focus no longer
+drops mid-transition), and the unconsumed-token clarification (see
+below).
+
+**Scoped re-review** (opus, independently traced cascade specificity for
+every claim, confirmed the migration ownership/RLS/trigger safety,
+verified the theme-cycle math for the new test fixture, confirmed the
+committed diff excludes an unrelated concurrent session's in-progress,
+unstaged `layout.tsx`/`app-shell.tsx` changes): **all 7 findings
+ADDRESSED, no new Critical/Important breakage.** 2 items surfaced needing
+a controller ruling rather than a second fix-wave dispatch (explicitly
+disallowed by this review's own process) — both adjudicated directly:
+
+1. **`prisma/seed.ts`'s `mkUser` never set `themePreference`**, so any
+   `pnpm db:seed` run before the demo would silently reintroduce the
+   Critical bug for every demo account (`admin@`, `md@`, `ceo@`, `sj@`,
+   `qc@`, the per-department supervisors, `client@`). Ruled: fixed
+   directly (one line, zero ambiguity, mirrors the backfill migration's
+   exact reasoning) rather than dispatched — `themePreference: "DARK"`
+   added to `mkUser`'s `data` block. `pnpm typecheck` clean.
+2. **The unconsumed-token clarification** — `--border-width`/`--wb`/
+   `--wt`/`--mixp`/`--bordp`/`--accent-fg` are declared per-palette in all
+   three themes but have **zero** consumers anywhere in `src/`, so
+   **Outdoor mode today is a pure colour swap** — no border-width, font-
+   weight, or chip-fill changes yet, despite `.theme-outdoor` looking
+   "complete" from the token block alone. This is in-plan (the original
+   plan text scopes Task 6 to "the on/off mechanism only; R2 owns
+   outdoor's full shop-floor UX") — not a defect, just something a future
+   session shouldn't assume shipped further than it did. Landed in the
+   gitignored SDD scratch ledger first; folded into this canonical file
+   now per the ruling above.
+
+**Rulings made this session, collected** (every one recorded live in the
+SDD ledger at the point it was made; listed here per finishing-a-
+development-branch discipline):
+- Task 5: the P2 mockup's `color-mix()`/border chip treatment depends on
+  Task 6's (then-unbuilt) tokens — kept the existing rgba mechanism,
+  changed only shape/typography/icon. Cost if wrong: cosmetic mismatch
+  against the mockup until Task 6-style token retrofit, never shipped.
+- Task 6 (4 rulings): AA retrofit bounded to audit-and-fix, not a
+  speculative rewrite; preference storage is 2 Postgres columns, never a
+  cookie/localStorage; the write is unaudited account bookkeeping (mirrors
+  `lastLoginAt`), not routed through `lib/services/`; one single control
+  cycling 4 states (System→Light→Dark→Outdoor→System) rather than 2
+  separate controls, since Task 4 shipped exactly one button-slot per
+  position. Cost if wrong for each: a follow-up migration/UI rework, no
+  data loss in any case — the 2 DB columns stay independent of UI
+  presentation regardless.
+- Task 6 fix-round rulings (3): mandated verbatim tokens win over
+  achieving full AA in the light palette — shipped as documented residual
+  gaps, real fix is a future spec correction; `--accent-fg` (light) stays
+  unwired (wiring it would be a real accessibility regression); light
+  `--accent`-as-text accepted, deferred to a future token decision.
+- Task 7: 3 of SPEC §8's 7 assertion categories describe unbuilt R2/R3
+  content — `test.fixme()`'d with unblock comments rather than silently
+  dropped or written as false-green stubs.
+- Final review adjudication (2, above): the seed.ts fix, applied
+  directly; the token-clarification note, relocated to this file.
+
+**Not fixed, explicitly out of scope, flagged for whoever picks up
+Session R2:** the 6 pre-existing UI bugs Task 7's tests found (listed in
+the Task 7 entry above) — most urgent: `/my-day`'s Pool/teamHeld table
+overflow at 390px makes the page's own bottom nav unreachable on phone,
+which blocks the primary daily-use page on the primary target device.
+Correctly not attributable to any R1 task, but should be R2's first item,
+not just a parked test finding.
+
+**Verified:** `pnpm typecheck`/`lint`/`build` clean throughout every
+round. `pnpm test` 400/400 (128 skipped), `pnpm test:db` 528/528 (against
+`despl_test` only, per this project's DB-test discipline). `pnpm e2e`:
+55 passed / 69 skipped / 1 failed (the one pre-existing, disclosed,
+unrelated `auth.spec.ts` redirect-target failure — confirmed present,
+not fixed, out of scope for this whole session). Real browser
+verification throughout via the actual `/login` form as real seeded
+users (`sj@despl.local`, `qc@despl.local`, `sup.fabrication@despl.local`,
+`sup.machine_shop@despl.local`) — never a forged session at any point in
+this 7-task, 2-review-round session.
+
+⚠️ **On `demo`, commits `ec9f0fb..2c483df` plus the direct seed.ts ruling
+above — not yet pushed to `origin/demo`, awaiting the user's review and
+go-ahead**, per this project's git workflow (push to `demo` first, merge
+to `main` only after explicit human approval).
 
 ## Session — R1 Task 2 review completed, Task 3 (route shells) shipped, 17 Aug 2026 (continuation)
 

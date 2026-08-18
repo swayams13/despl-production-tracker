@@ -1246,6 +1246,12 @@ async function seedDemo(
             name,
             passwordHash,
             mustChangePassword: false,
+            // Same reasoning as the theme_preference_dark_backfill migration:
+            // seeded accounts existed before the theme feature and must not
+            // silently land on SYSTEM (which resolves to the untested light
+            // palette on any factory-default OS) — a re-seed before a demo
+            // must not reintroduce that bug for these accounts.
+            themePreference: "DARK",
           },
         });
         await tx.userRole.createMany({
