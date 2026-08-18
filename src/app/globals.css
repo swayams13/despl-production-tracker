@@ -364,6 +364,10 @@ body {
 .theme-industrial .card .hd h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
 .theme-industrial .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
 .theme-industrial .chip i { width: 5px; height: 5px; border-radius: 50%; display: block; }
+/* coarse-pointer icon variant (Task 5, D28): icon hidden by default (fine
+   pointer stays dot-only, unchanged); shown/enabled in the pointer:coarse
+   block below, which must stay last in the cascade — see comment there. */
+.theme-industrial .chip-icon { display: none; }
 .theme-industrial .c-complete { background: rgba(63, 185, 80, .12); color: var(--s-complete); } .theme-industrial .c-complete i { background: var(--s-complete); }
 .theme-industrial .c-progress { background: rgba(76, 141, 255, .12); color: var(--s-progress); } .theme-industrial .c-progress i { background: var(--s-progress); }
 .theme-industrial .c-submitted { background: rgba(163, 113, 247, .12); color: var(--s-submitted); } .theme-industrial .c-submitted i { background: var(--s-submitted); }
@@ -819,4 +823,23 @@ body {
     min-height: 48px;
   }
   .theme-industrial td { font-size: 15px; padding: 0 17px; }
+
+  /* StatusChip icon variant (Task 5, D28): icon+word replaces dot+word —
+     a 5px dot isn't a shape a gloved supervisor reads in daylight. Same
+     tint as desktop (.c-* background/color rules above already apply at
+     every pointer type, untouched here) — shape/typography only. Values
+     from design/DESPL Supervisor Handoff.dc.html lines 213-218, minus the
+     color-mix()/border treatment (needs --mixp/--bordp/--lw, Task 6). */
+  .theme-industrial .chip {
+    height: 28px;
+    padding: 0 9px;
+    border-radius: 6px;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 11.5px;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  .theme-industrial .chip i { display: none; }
+  .theme-industrial .chip-icon { display: inline-flex; }
 }
