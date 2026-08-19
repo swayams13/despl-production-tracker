@@ -176,6 +176,9 @@ function fmtWhen(iso: string): string {
 function notificationHref(n: NotificationRow): string | null {
   const p = n.payload as { jobId?: number; unitId?: number; stageNo?: number; date?: string } | null;
   if (n.type === "DIGEST_PUBLISHED") return p?.date ? `/reports?date=${p.date}` : "/reports";
+  if (n.type === "CLIENT_UPDATE_PUBLISHED" || n.type === "CLIENT_UPDATE_REJECTED") {
+    return p?.jobId != null ? `/jobs/${p.jobId}?tab=client` : null;
+  }
   if (p?.jobId != null && p.stageNo != null) {
     return p.unitId != null
       ? `/jobs/${p.jobId}?openUnit=${p.unitId}&openStage=${p.stageNo}`
