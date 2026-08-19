@@ -20,10 +20,6 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
   const { publishSnapshot, verifySnapshot, rejectSnapshot } = await import("./client-snapshot.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
-  afterAll(async () => {
-    await owner.$disconnect();
-  });
-
   // Serialize this whole file's DB-backed tests against
   // client-snapshot.read.test.ts, which races on the same DESPL-320 same-day
   // ProgressSnapshot rows when vitest runs both files in parallel workers
@@ -44,6 +40,7 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
   }, 60000);
   afterAll(async () => {
     await owner.$executeRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`;
+    await owner.$disconnect();
   }, 60000);
 
   function actorBase(tenantId: number): Actor {
@@ -192,6 +189,25 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
     await publishSnapshot(ph(job.tenantId), { jobId: job.id });
     const selfCheckActor: Actor = { ...md(job.tenantId), userId: 4 }; // same id as the PH actor above
     await expectCode(verifySnapshot(selfCheckActor, { jobId: job.id }), ERROR_CODES.MAKER_CHECKER_VIOLATION);
+  });
+
+  it("verifySnapshot self-check catches an orphaned row with a different publishedBy, not just row[0]", async () => {
+    // Final-review fix: the self-check used to read only pending[0].publishedBy,
+    // which only caught self-verification if every row in the batch shared one
+    // publisher. Simulate the scenario the reviewer named — a stale row left
+    // behind with a different publishedBy than the rest of today's batch
+    // (e.g. a unit that dropped out of a later republish) — and confirm the
+    // self-check still refuses when the ACTOR matches that one orphaned row,
+    // even though it isn't necessarily the first row returned.
+    const { job } = await fixture();
+    await cleanup(job.id);
+    await publishSnapshot(ph(job.tenantId), { jobId: job.id }); // all rows publishedBy: 4
+    const rows = await owner.progressSnapshot.findMany({ where: { jobId: job.id, status: "PUBLISHED" } });
+    // Give exactly one row a different publisher (id 99), simulating the orphan.
+    await owner.progressSnapshot.update({ where: { id: rows[0].id }, data: { publishedBy: 99 } });
+
+    const orphanPublisher: Actor = { ...md(job.tenantId), userId: 99 };
+    await expectCode(verifySnapshot(orphanPublisher, { jobId: job.id }), ERROR_CODES.MAKER_CHECKER_VIOLATION);
   });
 
   it("verifySnapshot moves every row to VERIFIED and locks it", async () => {

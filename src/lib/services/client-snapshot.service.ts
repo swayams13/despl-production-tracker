@@ -21,6 +21,8 @@ interface BatchResult {
   unitCount: number;
 }
 
+// Noon UTC, not midnight — IST is UTC+5:30, so noon UTC always renders as the
+// correct IST calendar day, matching this app's "store UTC, display IST" convention.
 /** Today, stamped server-side at noon UTC — never a caller-supplied date (invariant #1). */
 function todayAsOf(): Date {
   const now = new Date();
@@ -77,7 +79,13 @@ export async function publishSnapshot(actor: Actor, input: PublishSnapshotInput)
     }
 
     return audited(tx, actor, async () => {
-      const before = existing.map((r) => ({ id: r.id, status: r.status }));
+      const before = existing.map((r) => ({
+        id: r.id,
+        status: r.status,
+        overallPct: r.overallPct,
+        detail: r.detail,
+        rejectionReason: r.rejectionReason,
+      }));
       for (const spine of spines) {
         const stage = currentStage(spine);
         const percentComplete = unitPercentComplete(spine);
@@ -145,14 +153,14 @@ export async function verifySnapshot(actor: Actor, input: VerifySnapshotInput): 
   requireRole(actor, ROLES.MANAGEMENT, ROLES.ADMIN);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const pending = await tx.progressSnapshot.findMany({ where: { jobId, status: "PUBLISHED" } });
+    const pending = await tx.progressSnapshot.findMany({ where: { jobId, status: "PUBLISHED" }, orderBy: { asOf: "asc" } });
     if (pending.length === 0) throw new AppError(ERROR_CODES.SNAPSHOT_NOT_PUBLISHED, { jobId });
 
-    const publishedBy = pending[0].publishedBy;
-    if (publishedBy != null && publishedBy === actor.userId) {
-      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { publishedBy });
+    if (pending.some((r) => r.publishedBy === actor.userId)) {
+      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { publishedBy: actor.userId });
     }
 
+    const publishedBy = pending[0].publishedBy;
     const asOf = pending[0].asOf;
 
     return audited(tx, actor, async () => {
@@ -183,14 +191,14 @@ export async function rejectSnapshot(actor: Actor, input: RejectSnapshotInput): 
   requireRole(actor, ROLES.MANAGEMENT, ROLES.ADMIN);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const pending = await tx.progressSnapshot.findMany({ where: { jobId, status: "PUBLISHED" } });
+    const pending = await tx.progressSnapshot.findMany({ where: { jobId, status: "PUBLISHED" }, orderBy: { asOf: "asc" } });
     if (pending.length === 0) throw new AppError(ERROR_CODES.SNAPSHOT_NOT_PUBLISHED, { jobId });
 
-    const publishedBy = pending[0].publishedBy;
-    if (publishedBy != null && publishedBy === actor.userId) {
-      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { publishedBy });
+    if (pending.some((r) => r.publishedBy === actor.userId)) {
+      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { publishedBy: actor.userId });
     }
 
+    const publishedBy = pending[0].publishedBy;
     const asOf = pending[0].asOf;
 
     const result = await audited(tx, actor, async () => {
