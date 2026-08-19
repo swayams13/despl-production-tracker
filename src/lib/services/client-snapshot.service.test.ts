@@ -1,6 +1,11 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES, isAppError } from "@/lib/shared/errors";
+
+// Arbitrary shared lock key for DESPL-320's ProgressSnapshot rows,
+// coordinated with client-snapshot.read.test.ts — the only two files that
+// touch this job's same-day rows. Must match that file's LOCK_KEY exactly.
+const LOCK_KEY = 987654321;
 
 /**
  * publishSnapshot/verifySnapshot/rejectSnapshot have no pure logic worth
@@ -17,6 +22,21 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
 
   afterAll(async () => {
     await owner.$disconnect();
+  });
+
+  // Serialize this whole file's DB-backed tests against
+  // client-snapshot.read.test.ts, which races on the same DESPL-320 same-day
+  // ProgressSnapshot rows when vitest runs both files in parallel workers
+  // (see task-10 race-fix report). Held for the entire describe block, not
+  // per-test: client-snapshot.read.test.ts has a test that depends on state
+  // left behind by the PRECEDING test in the same file, so a per-test lock
+  // still lets this file's cleanup()/deleteMany calls interleave BETWEEN
+  // those two tests in the other worker and wipe the row out from under it.
+  beforeAll(async () => {
+    await owner.$executeRaw`SELECT pg_advisory_lock(${LOCK_KEY})`;
+  });
+  afterAll(async () => {
+    await owner.$executeRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`;
   });
 
   function actorBase(tenantId: number): Actor {

@@ -1,4 +1,4 @@
-import { describe, expect, it, afterAll } from "vitest";
+import { describe, expect, it, afterAll, beforeAll } from "vitest";
 import { toClientStatus, sanitizeDetail } from "./client-snapshot.read";
 // Type-only import: erased at compile time, so it doesn't force-load
 // @/lib/authz for the pure (non-DB) test tier — only the dynamic `await
@@ -40,8 +40,29 @@ describe.skipIf(!RUN_DB)("client-snapshot.read (DB-backed)", async () => {
   const { ROLES } = await import("@/lib/authz");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
+  // Arbitrary shared lock key for DESPL-320's ProgressSnapshot rows,
+  // coordinated with client-snapshot.service.test.ts — the only two files
+  // that touch this job's same-day rows. Must match that file's LOCK_KEY exactly.
+  const LOCK_KEY = 987654321;
+
   afterAll(async () => {
     await owner.$disconnect();
+  });
+
+  // Serialize this whole file's DB-backed tests against
+  // client-snapshot.service.test.ts, which races on the same DESPL-320
+  // same-day ProgressSnapshot rows when vitest runs both files in parallel
+  // workers (see task-10 race-fix report). Held for the entire describe
+  // block, not per-test: the "returns the verified batch" test below depends
+  // on state left behind by the PRECEDING test in this same file, so a
+  // per-test lock still lets client-snapshot.service.test.ts's own
+  // cleanup()/deleteMany calls interleave BETWEEN those two tests in the
+  // other worker and wipe the row out from under it.
+  beforeAll(async () => {
+    await owner.$executeRaw`SELECT pg_advisory_lock(${LOCK_KEY})`;
+  });
+  afterAll(async () => {
+    await owner.$executeRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`;
   });
 
   function actorBase(tenantId: number) {
