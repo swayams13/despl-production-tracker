@@ -45,10 +45,6 @@ describe.skipIf(!RUN_DB)("client-snapshot.read (DB-backed)", async () => {
   // that touch this job's same-day rows. Must match that file's LOCK_KEY exactly.
   const LOCK_KEY = 987654321;
 
-  afterAll(async () => {
-    await owner.$disconnect();
-  });
-
   // Serialize this whole file's DB-backed tests against
   // client-snapshot.service.test.ts, which races on the same DESPL-320
   // same-day ProgressSnapshot rows when vitest runs both files in parallel
@@ -70,6 +66,7 @@ describe.skipIf(!RUN_DB)("client-snapshot.read (DB-backed)", async () => {
   }, 60000);
   afterAll(async () => {
     await owner.$executeRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`;
+    await owner.$disconnect();
   }, 60000);
 
   function actorBase(tenantId: number) {

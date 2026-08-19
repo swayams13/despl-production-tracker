@@ -2,6 +2,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { publishSnapshotAction, verifySnapshotAction, rejectSnapshotAction } from "@/app/actions/client-snapshot";
+import type { ActionResult } from "@/app/actions/_action";
 import type { ClientPreview } from "@/lib/services/client-snapshot.read";
 
 function fmtWhen(iso: string): string {
@@ -13,7 +14,7 @@ export function ClientReviewBanner({ jobId, preview }: { jobId: number; preview:
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
 
-  function run(action: () => Promise<{ ok: true } | { ok: false; message: string }>) {
+  function run(action: () => Promise<ActionResult>) {
     startTransition(async () => {
       const result = await action();
       if (result.ok) {
@@ -35,7 +36,7 @@ export function ClientReviewBanner({ jobId, preview }: { jobId: number; preview:
           {status === "NONE" && "Draft — not yet published"}
           {status === "PUBLISHED" && "Published, awaiting Management review"}
           {status === "REJECTED" && `Rejected: ${preview.rejectionReason ?? ""}`}
-          {status === "VERIFIED" && `Verified — visible to client since ${preview.hasUpdate ? fmtWhen(preview.asOf) : "—"}`}
+          {status === "VERIFIED" && `Verified — visible to client since ${preview.verifiedAt ? fmtWhen(preview.verifiedAt) : "—"}`}
         </b>
         {preview.publishedByName && status !== "NONE" && (
           <span className="sub"> · published by {preview.publishedByName}</span>

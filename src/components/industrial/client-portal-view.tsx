@@ -1,6 +1,5 @@
 import { StatusChip } from "./status-chip";
 import type { ClientStatus, ClientJobView, ClientUnitRow } from "@/lib/services/client-snapshot.read";
-import type { StageDisplayStatus } from "./stage-status";
 import type { ReactNode } from "react";
 
 /** Client-facing label, overriding <StatusChip>'s internal default (spec §7/§8). */
@@ -11,11 +10,6 @@ const CLIENT_STATUS_LABEL: Record<ClientStatus, string> = {
   overdue: "Delayed",
   idle: "Not started",
 };
-
-/** ClientStatus is a subset of StageDisplayStatus by construction (see toClientStatus) — safe 1:1 pass-through for the chip's icon. */
-function chipStatus(status: ClientStatus): StageDisplayStatus {
-  return status;
-}
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -31,7 +25,7 @@ function JobSection({ job }: { job: ClientJobView }) {
           <span className="sub">{job.equipmentName ?? "—"}</span>
         </div>
         <p className="note" style={{ margin: "8px 0 0" }}>
-          Your update will appear here once it&apos;s confirmed.
+          Your order progress will appear here once your update is confirmed.
         </p>
       </section>
     );
@@ -46,14 +40,24 @@ function JobSection({ job }: { job: ClientJobView }) {
           As of {fmtDate(job.asOf)}
         </span>
       </div>
-      <div className="rt-card-row">
-        <span>Overall</span>
-        <b className="mono">{job.overallPct}%</b>
-      </div>
+      {job.overallPct != null && (
+        <div className="rt-card-row">
+          <span>Overall</span>
+          <b className="mono">{job.overallPct}%</b>
+        </div>
+      )}
       {job.forecastDispatch && (
         <div className="rt-card-row">
           <span>Forecast dispatch</span>
           <b className="mono">{fmtDate(job.forecastDispatch)}</b>
+        </div>
+      )}
+      {job.unitsUnderInspection != null && (
+        <div className="rt-card-row">
+          <span>Quality</span>
+          <b className="mono">
+            {job.unitsUnderInspection} unit{job.unitsUnderInspection === 1 ? "" : "s"} under inspection
+          </b>
         </div>
       )}
       <table style={{ width: "100%", marginTop: 12 }}>
@@ -71,7 +75,7 @@ function JobSection({ job }: { job: ClientJobView }) {
               <td className="mono">{u.serialNo}</td>
               <td>{u.stageName}</td>
               <td>
-                <StatusChip status={chipStatus(u.status)} label={CLIENT_STATUS_LABEL[u.status]} />
+                <StatusChip status={u.status} label={CLIENT_STATUS_LABEL[u.status]} />
               </td>
               <td className="num mono">{u.percentComplete}%</td>
             </tr>
