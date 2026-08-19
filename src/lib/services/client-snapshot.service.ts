@@ -59,6 +59,18 @@ export async function publishSnapshot(actor: Actor, input: PublishSnapshotInput)
   }
 
   return withTenant(actor.tenantId, async (tx) => {
+    // At most one PUBLISHED asOf per job at a time (write-time invariant) —
+    // an earlier day's batch left un-reviewed must be verified or rejected
+    // before a new one can be published, otherwise verify/rejectSnapshot's
+    // `pending[0]` would pick an arbitrary batch across two undistinguished
+    // PUBLISHED days.
+    const priorDayPublished = await tx.progressSnapshot.findFirst({
+      where: { jobId, status: "PUBLISHED", asOf: { not: asOf } },
+    });
+    if (priorDayPublished) {
+      throw new AppError(ERROR_CODES.SNAPSHOT_PRIOR_DAY_PENDING, { jobId });
+    }
+
     const existing = await loadTodayBatch(tx, jobId, asOf);
     if (existing.some((r) => r.status === "VERIFIED")) {
       throw new AppError(ERROR_CODES.SNAPSHOT_ALREADY_VERIFIED, { jobId, asOf });

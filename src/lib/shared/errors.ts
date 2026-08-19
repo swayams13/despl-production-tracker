@@ -65,6 +65,8 @@ export const ERROR_CODES = {
   SNAPSHOT_ALREADY_VERIFIED: "SNAPSHOT_ALREADY_VERIFIED",
   /** verifySnapshot/rejectSnapshot: there is no PUBLISHED batch waiting for review. */
   SNAPSHOT_NOT_PUBLISHED: "SNAPSHOT_NOT_PUBLISHED",
+  /** publishSnapshot: an earlier day's batch is still PUBLISHED (never verified/rejected). */
+  SNAPSHOT_PRIOR_DAY_PENDING: "SNAPSHOT_PRIOR_DAY_PENDING",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -106,6 +108,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "Today's client update is already verified and locked. It cannot be republished.",
   SNAPSHOT_NOT_PUBLISHED:
     "There is no published update waiting for review right now.",
+  SNAPSHOT_PRIOR_DAY_PENDING:
+    "An earlier day's update is still awaiting Management review. It must be verified or rejected before a new one can be published.",
 };
 
 /**

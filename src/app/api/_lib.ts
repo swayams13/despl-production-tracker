@@ -33,6 +33,7 @@ const STATUS: Record<ErrorCode, number> = {
   NUDGE_COOLDOWN: 429,
   SNAPSHOT_ALREADY_VERIFIED: 409,
   SNAPSHOT_NOT_PUBLISHED: 409,
+  SNAPSHOT_PRIOR_DAY_PENDING: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

@@ -56,6 +56,82 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
     await expectCode(publishSnapshot(supervisor(job.tenantId), { jobId: job.id }), ERROR_CODES.FORBIDDEN);
   });
 
+  it("verifySnapshot refuses a Supervisor (role gate)", async () => {
+    const { job } = await fixture();
+    await cleanup(job.id);
+    await publishSnapshot(ph(job.tenantId), { jobId: job.id });
+    await expectCode(verifySnapshot(supervisor(job.tenantId), { jobId: job.id }), ERROR_CODES.FORBIDDEN);
+  });
+
+  it("rejectSnapshot refuses a Supervisor (role gate)", async () => {
+    const { job } = await fixture();
+    await cleanup(job.id);
+    await publishSnapshot(ph(job.tenantId), { jobId: job.id });
+    await expectCode(
+      rejectSnapshot(supervisor(job.tenantId), { jobId: job.id, reason: "needs a second look" }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("rejectSnapshot by the same user who published is refused (maker–checker self-check)", async () => {
+    const { job } = await fixture();
+    await cleanup(job.id);
+    await publishSnapshot(ph(job.tenantId), { jobId: job.id });
+    const selfCheckActor: Actor = { ...md(job.tenantId), userId: 4 }; // same id as the PH actor above
+    await expectCode(
+      rejectSnapshot(selfCheckActor, { jobId: job.id, reason: "needs a second look" }),
+      ERROR_CODES.MAKER_CHECKER_VIOLATION,
+    );
+  });
+
+  it("publishSnapshot refuses with NOT_FOUND when the job has zero units", async () => {
+    // A job with no equipment/units at all — loadJobSpines returns an empty
+    // array, which publishSnapshot treats the same as "not found" (nothing to
+    // publish). Reuses DESPL-320's own tenant/client/family/templateVersion
+    // FKs rather than hardcoded seed ids, so this doesn't assume a particular
+    // seed id layout.
+    const { job: seedJob } = await fixture();
+    const stamp = Date.now();
+    const noUnitJob = await owner.job.create({
+      data: {
+        tenantId: seedJob.tenantId,
+        publicId: `test-no-units-${stamp}`,
+        clientId: seedJob.clientId,
+        familyId: seedJob.familyId,
+        templateVersionId: seedJob.templateVersionId,
+        jobNumber: `TEST-NO-UNITS-${stamp}`,
+      },
+    });
+    try {
+      await expectCode(publishSnapshot(ph(noUnitJob.tenantId), { jobId: noUnitJob.id }), ERROR_CODES.NOT_FOUND);
+    } finally {
+      await owner.job.delete({ where: { id: noUnitJob.id } });
+    }
+  });
+
+  it("publishSnapshot refuses with SNAPSHOT_PRIOR_DAY_PENDING when an earlier day's batch is still PUBLISHED", async () => {
+    const { job } = await fixture();
+    await cleanup(job.id);
+    const priorAsOf = new Date(Date.UTC(2020, 0, 1, 12, 0, 0));
+    // Simulate an un-reviewed earlier day's batch by inserting it directly
+    // (no need to make real time pass) — one row is enough to trip the guard.
+    const unit = await owner.unit.findFirst({ where: { equipment: { jobId: job.id } } });
+    if (!unit) throw new Error("seed missing units for DESPL-320");
+    await owner.progressSnapshot.create({
+      data: {
+        tenantId: job.tenantId,
+        jobId: job.id,
+        unitId: unit.id,
+        asOf: priorAsOf,
+        overallPct: 10,
+        status: "PUBLISHED",
+        publishedBy: 4,
+        publishedAt: priorAsOf,
+      },
+    });
+    await expectCode(publishSnapshot(ph(job.tenantId), { jobId: job.id }), ERROR_CODES.SNAPSHOT_PRIOR_DAY_PENDING);
+  });
+
   it("publishSnapshot creates one PUBLISHED row per real unit", async () => {
     const { job, unitCount } = await fixture();
     await cleanup(job.id);
