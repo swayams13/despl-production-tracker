@@ -242,3 +242,15 @@ export const applyDurationOverrideSchema = z
   })
   .strict();
 export type ApplyDurationOverrideInput = z.infer<typeof applyDurationOverrideSchema>;
+
+/** Production Head publishes today's per-unit progress for a job (client-portal-daily-updates, 2026-08-19). */
+export const publishSnapshotSchema = z.object({ jobId: id }).strict();
+export type PublishSnapshotInput = z.infer<typeof publishSnapshotSchema>;
+
+/** Management verifies today's published batch — the only thing that makes it client-visible. */
+export const verifySnapshotSchema = z.object({ jobId: id }).strict();
+export type VerifySnapshotInput = z.infer<typeof verifySnapshotSchema>;
+
+/** Management rejects today's published batch with a mandatory reason. */
+export const rejectSnapshotSchema = z.object({ jobId: id, reason }).strict();
+export type RejectSnapshotInput = z.infer<typeof rejectSnapshotSchema>;
