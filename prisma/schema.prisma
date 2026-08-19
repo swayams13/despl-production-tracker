@@ -1348,24 +1348,44 @@ model ClientVisibilityPolicy {
 /// mis-entered figure never reaches a client before SJ sees it, and LIVE /
 /// DAILY / WEEKLY cadences share one code path. Doubles as the internal
 /// dashboard rollup, so 15M rows collapse to ~50k here.
+enum ProgressSnapshotStatus {
+  PUBLISHED
+  VERIFIED
+  REJECTED
+}
+
+/// DAILY / WEEKLY cadences share one code path. Doubles as the internal
+/// dashboard rollup, so 15M rows collapse to ~50k here.
+///
+/// Review workflow (2026-08-19 client-portal-daily-updates spec): a row is
+/// created PUBLISHED by Production Head each evening, and only the client
+/// read query (loadClientPortalView) selects VERIFIED rows — a PUBLISHED
+/// row is a draft under review, never client-visible. Once VERIFIED a row
+/// is frozen forever (invariant #6); REJECTED flips back to PUBLISHED on
+/// the next publish for the same day, never mutated after that.
 model ProgressSnapshot {
-  id          Int       @id @default(autoincrement())
-  tenantId    Int       @map("tenant_id")
-  jobId       Int       @map("job_id")
-  equipmentId Int?      @map("equipment_id")
-  unitId      Int?      @map("unit_id")
-  asOf        DateTime  @map("as_of")
-  overallPct  Int       @map("overall_pct")
+  id              Int                    @id @default(autoincrement())
+  tenantId        Int                    @map("tenant_id")
+  jobId           Int                    @map("job_id")
+  equipmentId     Int?                   @map("equipment_id")
+  unitId          Int?                   @map("unit_id")
+  asOf            DateTime               @map("as_of")
+  overallPct      Int                    @map("overall_pct")
   /// Per-process/stage detail, plus forecast dates and current stage.
-  detail      Json?
-  publishedBy Int?      @map("published_by")
-  publishedAt DateTime? @map("published_at")
+  detail          Json?
+  status          ProgressSnapshotStatus @default(PUBLISHED)
+  publishedBy     Int?                   @map("published_by")
+  publishedAt     DateTime?              @map("published_at")
+  verifiedBy      Int?                   @map("verified_by")
+  verifiedAt      DateTime?              @map("verified_at")
+  rejectionReason String?                @map("rejection_reason")
 
   tenant    Organization @relation(fields: [tenantId], references: [id])
   job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
   equipment Equipment?   @relation(fields: [equipmentId], references: [id])
   unit      Unit?        @relation(fields: [unitId], references: [id])
 
+  @@unique([jobId, unitId, asOf])
   @@index([tenantId])
   @@index([jobId, asOf])
   @@index([equipmentId])

@@ -795,7 +795,7 @@ async function seedDemo(
         },
       });
       await tx.clientVisibilityPolicy.create({
-        data: { clientId: client.id, cadence: SnapshotCadence.WEEKLY, requiresApproval: true },
+        data: { clientId: client.id, cadence: SnapshotCadence.DAILY, requiresApproval: true },
       });
 
       const csvColumnToOperation = new Map<string, string>();
