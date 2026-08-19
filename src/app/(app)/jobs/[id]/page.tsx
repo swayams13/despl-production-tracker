@@ -1,14 +1,15 @@
 import { notFound, redirect } from "next/navigation";
-import { getActor } from "@/lib/authz";
+import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { loadJobHeader } from "@/lib/services/job-detail.read";
 import { loadJobSpines, rollupJobSpine } from "@/lib/services/spine.read";
 import { loadEvents } from "@/lib/services/events.read";
 import { loadJobGantt } from "@/lib/services/gantt.read";
 import { loadBomTree } from "@/lib/services/bom.read";
 import { loadQcpGrid } from "@/lib/services/qcp-grid.read";
+import { loadClientPreview } from "@/lib/services/client-snapshot.read";
 import { JobDetailClient } from "./_client";
 
-const TABS = ["overview", "gantt", "bom", "qcp", "activity"] as const;
+const TABS = ["overview", "gantt", "bom", "qcp", "activity", "client"] as const;
 type Tab = (typeof TABS)[number];
 
 function first(v: string | string[] | undefined): string | undefined {
@@ -32,6 +33,8 @@ export default async function JobDetail({
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
 
+  const canReviewClientUpdates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
+
   const { id } = await params;
   const jobId = Number(id);
   if (!Number.isInteger(jobId) || jobId <= 0) notFound();
@@ -44,13 +47,14 @@ export default async function JobDetail({
   const openUnit = toInt(sp.openUnit);
   const openStage = toInt(sp.openStage);
 
-  const [header, unitSpines, events, gantt, bom, qcp] = await Promise.all([
+  const [header, unitSpines, events, gantt, bom, qcp, clientPreview] = await Promise.all([
     loadJobHeader(actor, jobId),
     loadJobSpines(actor, jobId),
     loadEvents(actor, { jobId, limit: tab === "activity" ? 100 : 5 }),
     tab === "gantt" ? loadJobGantt(actor, jobId) : Promise.resolve(null),
     tab === "bom" ? loadBomTree(actor, jobId, equipmentParam) : Promise.resolve(null),
     tab === "qcp" ? loadQcpGrid(actor, jobId, unitParam) : Promise.resolve(null),
+    tab === "client" && canReviewClientUpdates ? loadClientPreview(actor, jobId) : Promise.resolve(null),
   ]);
   if (!header) notFound();
 
@@ -67,6 +71,8 @@ export default async function JobDetail({
       gantt={gantt}
       bom={bom}
       qcp={qcp}
+      clientPreview={clientPreview}
+      canReviewClientUpdates={canReviewClientUpdates}
       tab={tab}
       openUnit={openUnit}
       openStage={openStage}

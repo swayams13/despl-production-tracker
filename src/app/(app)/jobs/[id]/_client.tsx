@@ -9,12 +9,15 @@ import { JobGantt } from "@/components/industrial/job-gantt";
 import { BomPanel } from "@/components/industrial/bom-panel";
 import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
+import { ClientPortalView } from "@/components/industrial/client-portal-view";
+import { ClientReviewBanner } from "@/components/industrial/client-review-banner";
 import type { JobHeader } from "@/lib/services/job-detail.read";
 import type { UnitSpine } from "@/lib/services/spine.read";
 import type { ActivityEvent } from "@/lib/services/events.read";
 import type { JobGanttData } from "@/lib/services/gantt-layout";
 import type { BomTree } from "@/lib/services/bom.read";
 import type { QcpGrid as QcpGridData } from "@/lib/services/qcp-grid.read";
+import type { ClientPreview } from "@/lib/services/client-snapshot.read";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -38,6 +41,8 @@ export function JobDetailClient({
   gantt,
   bom,
   qcp,
+  clientPreview,
+  canReviewClientUpdates,
   tab,
   openUnit,
   openStage: openStageParam,
@@ -50,7 +55,9 @@ export function JobDetailClient({
   gantt: JobGanttData | null;
   bom: BomTree | null;
   qcp: QcpGridData | null;
-  tab: "overview" | "gantt" | "bom" | "qcp" | "activity";
+  clientPreview: ClientPreview | null;
+  canReviewClientUpdates: boolean;
+  tab: "overview" | "gantt" | "bom" | "qcp" | "activity" | "client";
   /** Deep-link from a notification (`?openUnit=&openStage=`) — auto-opens the StageSheet once on mount. */
   openUnit?: number;
   openStage?: number;
@@ -104,6 +111,9 @@ export function JobDetailClient({
         <Link href={`/jobs/${jobId}?tab=bom`} className={`tab${tab === "bom" ? " on" : ""}`}>BOM &amp; Components</Link>
         <Link href={`/jobs/${jobId}?tab=qcp`} className={`tab${tab === "qcp" ? " on" : ""}`}>QCP / Hold points</Link>
         <Link href={`/jobs/${jobId}?tab=activity`} className={`tab${tab === "activity" ? " on" : ""}`}>Activity</Link>
+        {canReviewClientUpdates && (
+          <Link href={`/jobs/${jobId}?tab=client`} className={`tab${tab === "client" ? " on" : ""}`}>Client View</Link>
+        )}
       </div>
 
       {tab === "gantt" ? (
@@ -112,6 +122,15 @@ export function JobDetailClient({
         bom ? <BomPanel jobId={jobId} bom={bom} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
       ) : tab === "qcp" ? (
         qcp ? <QcpGrid jobId={jobId} data={qcp} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
+      ) : tab === "client" ? (
+        clientPreview ? (
+          <ClientPortalView
+            jobs={[clientPreview]}
+            reviewBanner={<ClientReviewBanner jobId={jobId} preview={clientPreview} />}
+          />
+        ) : (
+          <p className="note" style={{ margin: "16px 0" }}>You don&apos;t have permission to review client updates for this job.</p>
+        )
       ) : tab === "overview" ? (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
