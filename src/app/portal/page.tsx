@@ -3,6 +3,7 @@ import { getActor } from "@/lib/authz";
 import { logout } from "@/app/actions/auth";
 import { loadClientPortalView } from "@/lib/services/client-snapshot.read";
 import { ClientPortalView } from "@/components/industrial/client-portal-view";
+import { ThemeRoot } from "@/components/industrial/theme-root";
 
 /**
  * Client portal. Reads exclusively through loadClientPortalView, which
@@ -18,25 +19,27 @@ export default async function PortalPage() {
   const jobs = await loadClientPortalView(actor);
 
   return (
-    <main className="mx-auto max-w-3xl px-5 py-8">
-      <header className="flex items-start justify-between gap-4 border-b border-[var(--hairline)] pb-5">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">Your orders</h1>
-          <p className="mt-1 text-sm text-[var(--muted-fg)]">{actor.name}</p>
-        </div>
-        <form action={logout}>
-          <button
-            type="submit"
-            className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
-          >
-            Sign out
-          </button>
-        </form>
-      </header>
+    <ThemeRoot themePreference={actor.themePreference} outdoorMode={actor.outdoorMode}>
+      <main className="mx-auto max-w-3xl px-5 py-8">
+        <header className="flex items-start justify-between gap-4 border-b border-[var(--hairline)] pb-5">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Your orders</h1>
+            <p className="mt-1 text-sm text-[var(--muted-fg)]">{actor.name}</p>
+          </div>
+          <form action={logout}>
+            <button
+              type="submit"
+              className="rounded-lg border border-[var(--hairline)] bg-[var(--surface)] px-3 py-1.5 text-sm hover:bg-[var(--surface-sunken)]"
+            >
+              Sign out
+            </button>
+          </form>
+        </header>
 
-      <div className="mt-6">
-        <ClientPortalView jobs={jobs} />
-      </div>
-    </main>
+        <div className="mt-6">
+          <ClientPortalView jobs={jobs} />
+        </div>
+      </main>
+    </ThemeRoot>
   );
 }
