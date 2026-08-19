@@ -1381,6 +1381,10 @@ model ProgressSnapshot {
   equipment Equipment?   @relation(fields: [equipmentId], references: [id])
   unit      Unit?        @relation(fields: [unitId], references: [id])
 
+  // Postgres treats NULL as distinct in a unique index, so this constraint gives no
+  // duplicate protection when unitId is null (equipment/job-grain rollups) — not
+  // exercised by this feature (publish always passes a real unitId), but worth
+  // flagging for whoever adds equipment-level rollups later.
   @@unique([jobId, unitId, asOf])
   @@index([tenantId])
   @@index([jobId, asOf])

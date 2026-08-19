@@ -1,5 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { requireRole, ROLES, type Actor } from "@/lib/authz";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ProgressSnapshot, ProgressSnapshotStatus } from "@/generated/prisma/client";
 
@@ -29,10 +30,11 @@ interface ClientJobViewBase {
 export type ClientJobView =
   | (ClientJobViewBase & {
       hasUpdate: true;
-      asOf: string;
-      overallPct: number;
+      asOf: string | null;
+      overallPct: number | null;
       forecastDispatch: string | null;
       units: ClientUnitRow[];
+      unitsUnderInspection?: number;
     })
   | (ClientJobViewBase & { hasUpdate: false });
 
@@ -49,6 +51,8 @@ export type ClientPreview = ClientJobView & {
   rejectionReason: string | null;
   /** Internal-only — never present on plain `ClientJobView` reads, only on a preview. */
   publishedByName: string | null;
+  /** The real verify event time (vs. `asOf`, always noon-UTC calendar marker) — for "Verified since" copy. */
+  verifiedAt: string | null;
 };
 
 /**
@@ -102,6 +106,13 @@ export async function loadClientPortalView(actor: Actor): Promise<ClientJobView[
       orderBy: { jobNumber: "asc" },
     });
 
+    // Per-client, not per-job — loaded once. A client with no policy row
+    // defaults every toggle to true, matching the schema's own @default(true).
+    const policy = await tx.clientVisibilityPolicy.findUnique({ where: { clientId: actor.clientId! } });
+    const showProgress = policy?.showProgress ?? true;
+    const showDates = policy?.showDates ?? true;
+    const showQcp = policy?.showQcp ?? true;
+
     const views: ClientJobView[] = [];
     for (const job of jobs) {
       const latestVerified = await tx.progressSnapshot.findFirst({
@@ -125,10 +136,11 @@ export async function loadClientPortalView(actor: Actor): Promise<ClientJobView[
         jobNumber: job.jobNumber,
         equipmentName,
         hasUpdate: true,
-        asOf: latestVerified.asOf.toISOString(),
-        overallPct: overallFromUnits(units),
-        forecastDispatch: job.deliveryDate?.toISOString() ?? null,
+        asOf: showDates ? latestVerified.asOf.toISOString() : null,
+        overallPct: showProgress ? overallFromUnits(units) : null,
+        forecastDispatch: showDates ? (job.deliveryDate?.toISOString() ?? null) : null,
         units,
+        ...(showQcp ? { unitsUnderInspection: units.filter((u) => u.status === "hold").length } : {}),
       });
     }
     return views;
@@ -148,16 +160,17 @@ export async function loadClientPreview(actor: Actor, jobId: number): Promise<Cl
   requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const job = await tx.job.findFirstOrThrow({
+    const job = await tx.job.findFirst({
       where: { id: jobId },
       include: { equipments: { take: 1 } },
     });
+    if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { jobId });
     const equipmentName = job.equipments[0]?.name ?? null;
 
     const latest = await tx.progressSnapshot.findFirst({
       where: { jobId },
       orderBy: { asOf: "desc" },
-      select: { asOf: true, status: true, publishedBy: true, rejectionReason: true },
+      select: { asOf: true, status: true, publishedBy: true, rejectionReason: true, verifiedAt: true },
     });
 
     if (!latest) {
@@ -169,6 +182,7 @@ export async function loadClientPreview(actor: Actor, jobId: number): Promise<Cl
         reviewStatus: "NONE",
         rejectionReason: null,
         publishedByName: null,
+        verifiedAt: null,
       };
     }
 
@@ -190,6 +204,7 @@ export async function loadClientPreview(actor: Actor, jobId: number): Promise<Cl
       // publishedByName surfaced here only, never on a plain ClientJobView
       // read — an internal reviewer needs to know who to ask; a client never does.
       publishedByName: publisher?.name ?? null,
+      verifiedAt: latest.verifiedAt?.toISOString() ?? null,
     };
   });
 }
