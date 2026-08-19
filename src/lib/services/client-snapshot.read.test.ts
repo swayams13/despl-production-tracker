@@ -58,12 +58,19 @@ describe.skipIf(!RUN_DB)("client-snapshot.read (DB-backed)", async () => {
   // per-test lock still lets client-snapshot.service.test.ts's own
   // cleanup()/deleteMany calls interleave BETWEEN those two tests in the
   // other worker and wipe the row out from under it.
+  // 60s, not the 10s vitest default: under full-suite pool contention (8
+  // workers sharing .env.test's connection_limit=10, plus the known
+  // unrelated contention in files like portfolio.read.test.ts), the other
+  // file's 13 sequential DB-gated tests can legitimately take longer than
+  // 10s to finish and release this lock — that's real queueing, not a
+  // deadlock. Applied to afterAll too for symmetry, though unlock+disconnect
+  // shouldn't need it in practice.
   beforeAll(async () => {
     await owner.$executeRaw`SELECT pg_advisory_lock(${LOCK_KEY})`;
-  });
+  }, 60000);
   afterAll(async () => {
     await owner.$executeRaw`SELECT pg_advisory_unlock(${LOCK_KEY})`;
-  });
+  }, 60000);
 
   function actorBase(tenantId: number) {
     return { userId: 1, tenantId, clientId: null as number | null, name: "Test", email: "t@x", roles: [] as (typeof ROLES)[keyof typeof ROLES][], departmentIds: [] as number[], mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
