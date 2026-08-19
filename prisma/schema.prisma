@@ -1344,10 +1344,6 @@ model ClientVisibilityPolicy {
   @@map("client_visibility_policies")
 }
 
-/// The only thing client users read. Frozen, published, auditable — so a
-/// mis-entered figure never reaches a client before SJ sees it, and LIVE /
-/// DAILY / WEEKLY cadences share one code path. Doubles as the internal
-/// dashboard rollup, so 15M rows collapse to ~50k here.
 enum ProgressSnapshotStatus {
   PUBLISHED
   VERIFIED
