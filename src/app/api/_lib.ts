@@ -31,6 +31,8 @@ const STATUS: Record<ErrorCode, number> = {
   CANNOT_SELF_DEACTIVATE: 409,
   CANNOT_SELF_DEMOTE: 409,
   NUDGE_COOLDOWN: 429,
+  SNAPSHOT_ALREADY_VERIFIED: 409,
+  SNAPSHOT_NOT_PUBLISHED: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

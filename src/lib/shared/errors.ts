@@ -61,6 +61,10 @@ export const ERROR_CODES = {
   CANNOT_SELF_DEMOTE: "CANNOT_SELF_DEMOTE",
   /** nudgeQc: this actor already nudged for this plan within the cooldown window. */
   NUDGE_COOLDOWN: "NUDGE_COOLDOWN",
+  /** publishSnapshot: today's batch for this job is already VERIFIED and locked. */
+  SNAPSHOT_ALREADY_VERIFIED: "SNAPSHOT_ALREADY_VERIFIED",
+  /** verifySnapshot/rejectSnapshot: there is no PUBLISHED batch waiting for review. */
+  SNAPSHOT_NOT_PUBLISHED: "SNAPSHOT_NOT_PUBLISHED",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -98,6 +102,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   CANNOT_SELF_DEACTIVATE: "You cannot deactivate your own account.",
   CANNOT_SELF_DEMOTE: "You cannot remove your own admin role.",
   NUDGE_COOLDOWN: "You already nudged QC for this within the last 30 minutes.",
+  SNAPSHOT_ALREADY_VERIFIED:
+    "Today's client update is already verified and locked. It cannot be republished.",
+  SNAPSHOT_NOT_PUBLISHED:
+    "There is no published update waiting for review right now.",
 };
 
 /**
