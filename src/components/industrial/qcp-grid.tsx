@@ -53,6 +53,7 @@ export function QcpGrid({ jobId, data }: { jobId: number; data: QcpGridData }) {
         >
           {data.units.map((u) => <option key={u.id} value={u.id}>Unit {u.serialNo}</option>)}
         </select>
+        <a className="btn" style={{ marginLeft: 8 }} href={`/api/jobs/${jobId}/qcp/export?unit=${data.unitId}`}>Download (Excel)</a>
       </div>
       {data.sections.length === 0 ? (
         <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
