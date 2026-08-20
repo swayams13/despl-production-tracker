@@ -462,7 +462,12 @@ body {
 .theme-industrial .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 .theme-industrial .card .hd { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .theme-industrial .card .hd h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
-.theme-industrial .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.theme-industrial .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 10px; max-width: 100%; overflow: hidden; }
+.theme-industrial .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* Narrow pipeline columns (dept-grid) can't guarantee enough room for a
+   department's full status label (e.g. "Ready for QCP checkpoint") — clip to
+   the card instead of bleeding text into the neighboring column. */
+.theme-industrial .dept-grid .card { overflow: hidden; }
 .theme-industrial .chip i { width: 5px; height: 5px; border-radius: 50%; display: block; }
 /* coarse-pointer icon variant (Task 5, D28): icon hidden by default (fine
    pointer stays dot-only, unchanged); shown/enabled in the pointer:coarse

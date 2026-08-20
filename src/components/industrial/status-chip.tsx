@@ -47,8 +47,9 @@ export function StatusChip({
   label?: string;
 }) {
   const meta = STAGE_STATUS[status];
+  const text = label ?? meta.label;
   return (
-    <span className={`chip ${meta.chipClass}`}>
+    <span className={`chip ${meta.chipClass}`} title={text}>
       <i />
       <svg
         className="chip-icon"
@@ -63,7 +64,7 @@ export function StatusChip({
       >
         {CHIP_ICON_PATHS[status]}
       </svg>
-      {label ?? meta.label}
+      <span>{text}</span>
     </span>
   );
 }

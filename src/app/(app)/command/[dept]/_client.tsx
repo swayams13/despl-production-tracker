@@ -91,11 +91,17 @@ function CommandRow({
   label?: string;
 }) {
   const clickable = canAct && row.ranked.plan.unitId != null;
-  // Pipeline columns (label set) always show the dept-vocabulary label for
-  // their bucket. Everywhere else, an overdue row shows the generic
-  // "Overdue" chip (StatusChip's own default for that status) — the more
-  // urgent signal — otherwise the generic PlanState label.
-  const chipLabel = label ?? (row.ranked.overdue ? undefined : PLAN_STATE_LABEL[row.ranked.state]);
+  // Pipeline columns (label set) are already grouped by that exact bucket —
+  // the column header (e.g. "Ready for QCP checkpoint") says it once, so a
+  // per-row chip repeating the same dept-vocabulary text is redundant and,
+  // in the narrow dept-grid cards, doesn't have room to render without
+  // overflowing into the neighboring column. Show it there only when the row
+  // is overdue (the one per-row signal the column header can't carry), using
+  // the short generic "Overdue" chip. Everywhere else (wide cards), keep the
+  // full per-row label as before.
+  const inPipeline = label !== undefined;
+  const showChip = !inPipeline || row.ranked.overdue;
+  const chipLabel = inPipeline ? undefined : row.ranked.overdue ? undefined : PLAN_STATE_LABEL[row.ranked.state];
   return (
     <tr className="row" onClick={clickable ? onOpen : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
       <td className="mono" style={{ color: "var(--muted)", width: 90 }}>{row.jobNumber}</td>
@@ -108,8 +114,8 @@ function CommandRow({
         </div>
       </td>
       <td className="mono" style={{ width: 70 }}>{fmtDue(row.ranked.plan.plannedFinish)}</td>
-      <td className="num" style={{ width: 140 }}>
-        <StatusChip status={displayStatus(row.ranked)} label={chipLabel} />
+      <td className="num" style={{ width: 140, maxWidth: 140 }}>
+        {showChip && <StatusChip status={displayStatus(row.ranked)} label={chipLabel} />}
       </td>
     </tr>
   );
