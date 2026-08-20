@@ -441,7 +441,7 @@ body {
 .theme-industrial .bell { position: relative; cursor: pointer; color: var(--muted); display: flex; padding: 4px; border-radius: 5px; background: none; border: none; }
 .theme-industrial .bell:hover { background: var(--surface-2); color: var(--text); }
 .theme-industrial .bell em { position: absolute; top: -2px; right: -3px; background: var(--accent); color: #000; font-style: normal; font-size: 9px; font-weight: 700; border-radius: 7px; padding: 0 4px; }
-.theme-industrial .drop { position: absolute; top: calc(100% + 6px); right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 290px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); z-index: 40; overflow: hidden; }
+.theme-industrial .drop { position: absolute; top: calc(100% + 6px); right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 290px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); z-index: 40; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
 .theme-industrial .drop .d-row { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; }
 .theme-industrial .drop .d-row:last-child { border-bottom: none; }
 .theme-industrial .drop .d-row:hover { background: var(--surface-2); }
