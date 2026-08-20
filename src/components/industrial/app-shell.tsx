@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { StageSpine } from "./stage-spine";
-import { DEMO_SPINE } from "./_demo";
 import { useTheme } from "./theme-root";
 import { markNotificationReadAction, markAllNotificationsReadAction } from "@/app/actions/notifications";
 import { setThemeAction } from "@/app/actions/preferences";
@@ -215,6 +214,13 @@ export function AppShell({
       : NAV;
   const active = nav.flatMap((g) => g.items).find((i) => pathname.startsWith(i.href));
 
+  // Job switcher badge: the job the URL is scoped to (/jobs/:id), falling
+  // back to the first real job when browsing cross-job pages. No demo/mock
+  // fallback — CLAUDE.md hard-bans mock data inside components, so with zero
+  // jobs this renders the same honest empty state as the dropdown below.
+  const jobIdMatch = pathname.match(/^\/jobs\/(\d+)/);
+  const currentJob = (jobIdMatch ? jobs.find((j) => j.id === Number(jobIdMatch[1])) : undefined) ?? jobs[0];
+
   const openNotification = async (n: NotificationRow) => {
     if (!n.readAt) await markNotificationReadAction(n.id);
     setBellOpen(false);
@@ -366,11 +372,19 @@ export function AppShell({
           </span>
 
           <div className="jobswitch" onClick={() => setJobOpen((v) => !v)}>
-            <span className="mono" style={{ fontSize: 12 }}>
-              DESPL-320
-            </span>
-            <span style={{ color: "var(--muted)", fontSize: 12 }}>HP Air Receiver</span>
-            <StageSpine variant="mini" segments={DEMO_SPINE} />
+            {currentJob ? (
+              <>
+                <span className="mono" style={{ fontSize: 12 }}>
+                  {currentJob.jobNumber}
+                </span>
+                <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                  {currentJob.projectName ?? currentJob.familyName}
+                </span>
+                <StageSpine variant="mini" segments={currentJob.unitRollup} />
+              </>
+            ) : (
+              <span style={{ color: "var(--muted)", fontSize: 12 }}>No jobs yet</span>
+            )}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8B919A" strokeWidth={2}>
               <path d="M6 9l6 6 6-6" />
             </svg>
