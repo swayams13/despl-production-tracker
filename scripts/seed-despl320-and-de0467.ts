@@ -376,19 +376,19 @@ async function main() {
   const de0467Source = liveJobs.jobs.find((j) => j.job === "DE0467");
   if (!de0467Source) throw new Error("DE0467 not found in seed/live-jobs.json");
 
+  // Split into two independent transactions (rather than one covering both
+  // jobs) because a single interactive transaction spanning DE0467's full
+  // BOM/procurement/component/operation ingestion PLUS DESPL-320's QCP
+  // template turned out to run long enough over Railway's public Postgres
+  // proxy (~1-5s per round trip observed) that the connection got dropped
+  // mid-transaction ("Transaction not found") before COMMIT — verified safe
+  // (Postgres rolled back atomically, zero partial rows) but wasteful to
+  // repeat. Each job's own idempotency guard still applies independently.
   await prisma.$transaction(
     async (tx) => {
       const org = await tx.organization.findUniqueOrThrow({ where: { code: "DESPL" } });
       const refs = await loadRefIds(tx, org.id);
-
-      const [existingDespl320, existingDe0467] = await Promise.all([
-        tx.job.findFirst({ where: { tenantId: org.id, jobNumber: "DESPL-320" } }),
-        tx.job.findFirst({ where: { tenantId: org.id, jobNumber: "DE0467" } }),
-      ]);
-      if (existingDespl320 && existingDe0467) {
-        console.log("Both DESPL-320 and DE0467 already exist — nothing to do.");
-        return;
-      }
+      const existingDe0467 = await tx.job.findFirst({ where: { tenantId: org.id, jobNumber: "DE0467" } });
 
       const csvColumnToOperation = new Map<string, string>();
       for (const [opCode, meta] of Object.entries(routesFile.canonicalOperations)) {
@@ -583,6 +583,18 @@ async function main() {
       } else {
         console.log("DE0467 already exists — skipped.");
       }
+    },
+    { timeout: 300_000, maxWait: 15_000 },
+  );
+
+  await prisma.$transaction(
+    async (tx) => {
+      const org = await tx.organization.findUniqueOrThrow({ where: { code: "DESPL" } });
+      const refs = await loadRefIds(tx, org.id);
+      const existingDespl320 = await tx.job.findFirst({ where: { tenantId: org.id, jobNumber: "DESPL-320" } });
+      const client = await tx.client.findFirst({
+        where: { tenantId: org.id, name: { startsWith: "Unknown client — pending DESPL confirmation" } },
+      });
 
       if (!existingDespl320) {
         const pilotLabel = qcpFile.template.job;
