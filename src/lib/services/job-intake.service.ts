@@ -1,0 +1,411 @@
+import { randomUUID } from "node:crypto";
+import { withTenant, type Tx } from "@/lib/db";
+import { audited } from "@/lib/audit";
+import { ROLES, requireRole, assertNotClientUser, type Actor } from "@/lib/authz";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { createJobSchema, type CreateJobInput } from "@/lib/shared/schemas";
+import { validateSpecs } from "@/lib/shared/specs";
+
+/**
+ * Job intake (docs/superpowers/specs/2026-08-22-job-intake-design.md).
+ *
+ * Creating a job is not one insert. A usable job needs, atomically: the Job
+ * row, its OWN copy of the pinned template's processes and edges, at least one
+ * Equipment, its Unit serials, and an audit record. Get any of that wrong and
+ * the job renders in the list, then breaks on every screen that reads the
+ * spine.
+ *
+ * Scheduling is deliberately NOT part of this transaction — see the note on
+ * the return type.
+ */
+
+export interface CreateJobResult {
+  jobId: number;
+  publicId: string;
+  processCount: number;
+  edgeCount: number;
+  unitCount: number;
+  qcpItemCount: number;
+  bomItemCount: number;
+  /**
+   * QCP source items whose linked process code has no counterpart in the new
+   * job's route. Reported, never silently dropped — the wizard lists them.
+   */
+  unmatchedQcpProcessCodes: string[];
+}
+
+export async function createJob(actor: Actor, input: CreateJobInput): Promise<CreateJobResult> {
+  const parsed = createJobSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    // ── Validate everything before writing anything ──────────────────────
+    const duplicate = await tx.job.findFirst({
+      where: { tenantId: actor.tenantId, jobNumber: parsed.jobNumber },
+      select: { id: true },
+    });
+    if (duplicate) {
+      throw new AppError(ERROR_CODES.DUPLICATE_JOB_NUMBER, {
+        jobNumber: parsed.jobNumber,
+        existingJobId: duplicate.id,
+      });
+    }
+
+    const client = await tx.client.findFirst({
+      where: { id: parsed.clientId, tenantId: actor.tenantId },
+    });
+    if (!client) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Client", clientId: parsed.clientId });
+
+    const family = await tx.productFamily.findFirst({
+      where: { id: parsed.familyId, tenantId: actor.tenantId },
+    });
+    if (!family) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProductFamily", familyId: parsed.familyId });
+
+    const version = await tx.processTemplateVersion.findFirst({
+      where: { id: parsed.templateVersionId, template: { tenantId: actor.tenantId } },
+      include: { template: true, processes: true, edges: true },
+    });
+    if (!version) {
+      throw new AppError(ERROR_CODES.NOT_FOUND, {
+        entity: "ProcessTemplateVersion",
+        templateVersionId: parsed.templateVersionId,
+      });
+    }
+    if (version.status !== "PUBLISHED") {
+      // Filtering the dropdown is not enforcement.
+      throw new AppError(ERROR_CODES.TEMPLATE_VERSION_NOT_PUBLISHED, {
+        templateVersionId: version.id,
+        status: version.status,
+      });
+    }
+    if (version.template.familyId !== parsed.familyId) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { templateVersionId: version.id, familyId: parsed.familyId },
+        "That process route belongs to a different type of equipment.",
+      );
+    }
+    if (version.processes.length === 0) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { templateVersionId: version.id },
+        "That process route has no processes.",
+      );
+    }
+
+    if (parsed.calendarId != null) {
+      const cal = await tx.workCalendar.findFirst({
+        where: { id: parsed.calendarId, tenantId: actor.tenantId },
+      });
+      if (!cal) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "WorkCalendar", calendarId: parsed.calendarId });
+    }
+
+    const typeIds = parsed.equipments
+      .map((e) => e.equipmentTypeId)
+      .filter((x): x is number => x != null);
+    if (typeIds.length > 0) {
+      const types = await tx.equipmentTypeRef.findMany({
+        where: { id: { in: typeIds }, tenantId: actor.tenantId },
+      });
+      if (types.length !== new Set(typeIds).size) {
+        throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "EquipmentTypeRef", equipmentTypeIds: typeIds });
+      }
+      const wrongFamily = types.filter((t) => t.familyId !== parsed.familyId);
+      if (wrongFamily.length > 0) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { equipmentTypeCodes: wrongFamily.map((t) => t.code) },
+          "An equipment type does not belong to this job's type of equipment.",
+        );
+      }
+    }
+
+    const templateCodes = new Set(version.processes.map((p) => p.code));
+    const unknownExclusions = parsed.excludedProcessCodes.filter((c) => !templateCodes.has(c));
+    if (unknownExclusions.length > 0) {
+      throw new AppError(ERROR_CODES.NOT_FOUND, {
+        entity: "TemplateProcess",
+        processCodes: unknownExclusions,
+      });
+    }
+
+    const specs = parsed.specs ? validateSpecs(family.code, parsed.specs) : null;
+
+    // ── Write ────────────────────────────────────────────────────────────
+    return audited(tx, actor, async () => {
+      const job = await tx.job.create({
+        data: {
+          tenantId: actor.tenantId,
+          // Opaque id for client-facing URLs — sequential ids leak order volume.
+          publicId: randomUUID(),
+          clientId: parsed.clientId,
+          familyId: parsed.familyId,
+          templateVersionId: version.id,
+          calendarId: parsed.calendarId,
+          jobNumber: parsed.jobNumber,
+          clientOrderNo: parsed.clientOrderNo,
+          projectName: parsed.projectName,
+          poRef: parsed.poRef,
+          designCode: parsed.designCode,
+          orderDate: parsed.orderDate,
+          committedDeliveryDate: parsed.committedDeliveryDate,
+          targetDispatchDate: parsed.targetDispatchDate,
+          priority: parsed.priority,
+          remarks: parsed.remarks,
+          specs: specs === null ? undefined : (specs as never),
+        },
+      });
+
+      const excluded = new Set(parsed.excludedProcessCodes);
+      await tx.jobProcess.createMany({
+        data: version.processes.map((tp) => ({
+          jobId: job.id,
+          templateProcessId: tp.id,
+          seq: tp.seq,
+          code: tp.code,
+          name: tp.name,
+          departmentId: tp.defaultDepartmentId,
+          durationMinDays: tp.durationMinDays,
+          durationMaxDays: tp.durationMaxDays,
+          envelopeFinishByMinDays: tp.envelopeFinishByMinDays,
+          envelopeFinishByMaxDays: tp.envelopeFinishByMaxDays,
+          envelopeStartByMinDays: tp.envelopeStartByMinDays,
+          envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
+          workOrderStages: tp.workOrderStages,
+          provisional: tp.provisional,
+          included: !excluded.has(tp.code),
+        })),
+      });
+
+      const jobProcesses = await tx.jobProcess.findMany({
+        where: { jobId: job.id },
+        select: { id: true, code: true },
+      });
+      const jpIdByCode = new Map(jobProcesses.map((p) => [p.code, p.id]));
+      const tpCodeById = new Map(version.processes.map((p) => [p.id, p.code]));
+
+      // Edges are copied for ALL processes, including excluded ones.
+      // lib/schedule/exclude.ts::bypassExcluded splices an excluded node out by
+      // composing lag = lagPX + duration(X) + lagXS across it, so an excluded
+      // process must keep both its edges and its durations. Dropping either
+      // would treat it as taking zero days and drag every successor early —
+      // that function's own comment calls this invariant #10 territory.
+      await tx.jobProcessEdge.createMany({
+        data: version.edges.map((e) => ({
+          processId: jpIdByCode.get(tpCodeById.get(e.processId)!)!,
+          predecessorId: jpIdByCode.get(tpCodeById.get(e.predecessorId)!)!,
+          type: e.type,
+          lagDays: e.lagDays,
+        })),
+      });
+
+      let unitCount = 0;
+      let firstEquipmentId: number | null = null;
+      for (const block of parsed.equipments) {
+        const equipment = await tx.equipment.create({
+          data: {
+            jobId: job.id,
+            equipmentTypeId: block.equipmentTypeId,
+            name: block.name,
+            blockNo: block.blockNo,
+            remarks: block.remarks,
+          },
+        });
+        firstEquipmentId ??= equipment.id;
+        await tx.unit.createMany({
+          data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo })),
+        });
+        unitCount += block.serials.length;
+      }
+
+      const qcp = parsed.qcpTemplateSourceId
+        ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdByCode, actor.tenantId)
+        : { itemCount: 0, unmatchedProcessCodes: [] as string[] };
+
+      const bomItemCount =
+        parsed.copyBomFromEquipmentId != null && firstEquipmentId != null
+          ? await copyBom(tx, parsed.copyBomFromEquipmentId, firstEquipmentId, actor.tenantId)
+          : 0;
+
+      const result: CreateJobResult = {
+        jobId: job.id,
+        publicId: job.publicId,
+        processCount: version.processes.length,
+        edgeCount: version.edges.length,
+        unitCount,
+        qcpItemCount: qcp.itemCount,
+        bomItemCount,
+        unmatchedQcpProcessCodes: qcp.unmatchedProcessCodes,
+      };
+
+      return {
+        result,
+        audit: {
+          action: "job.create",
+          entityType: "Job",
+          entityId: job.id,
+          after: {
+            jobNumber: job.jobNumber,
+            clientId: job.clientId,
+            familyId: job.familyId,
+            templateVersionId: job.templateVersionId,
+            committedDeliveryDate: job.committedDeliveryDate,
+            targetDispatchDate: job.targetDispatchDate,
+            processCount: result.processCount,
+            equipmentCount: parsed.equipments.length,
+            unitCount: result.unitCount,
+            excludedProcessCodes: parsed.excludedProcessCodes,
+          },
+          eventType: "JobCreated",
+          eventPayload: { jobId: job.id, jobNumber: job.jobNumber, familyId: job.familyId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Deep-copy a QCP template onto a new job: parties, items, party codes, and
+ * the item→process links rebuilt by matching process CODE (not id).
+ *
+ * Code-matching is what makes this safe across template versions: if the
+ * source QCP was built against a route where a process has since been
+ * renumbered, the code still resolves. A code with no counterpart is
+ * collected and returned, never silently dropped.
+ *
+ * QcpExecution rows are NOT copied — those are the source job's actual
+ * inspection results.
+ */
+async function cloneQcpTemplate(
+  tx: Tx,
+  sourceId: number,
+  jobId: number,
+  jpIdByCode: Map<string, number>,
+  tenantId: number,
+): Promise<{ itemCount: number; unmatchedProcessCodes: string[] }> {
+  const source = await tx.qcpTemplate.findFirst({
+    // Anchored through job → tenant: qcp_templates is a job-child with no
+    // tenant_id of its own, so a bare findUnique would happily return another
+    // tenant's row (the ProcessPlan lesson in _shared.ts).
+    where: {
+      id: sourceId,
+      OR: [{ job: { tenantId } }, { jobId: null }],
+    },
+    include: {
+      parties: true,
+      items: {
+        include: {
+          partyCodes: true,
+          processLinks: { include: { jobProcess: { select: { code: true } } } },
+        },
+        orderBy: { sequence: "asc" },
+      },
+    },
+  });
+  if (!source) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "QcpTemplate", qcpTemplateId: sourceId });
+
+  const copy = await tx.qcpTemplate.create({
+    data: {
+      jobId,
+      jobLabel: source.jobLabel,
+      vessel: source.vessel,
+      revision: source.revision,
+      designCode: source.designCode,
+    },
+  });
+
+  const partyIdMap = new Map<number, number>();
+  for (const p of source.parties) {
+    const created = await tx.inspectionParty.create({
+      data: { qcpTemplateId: copy.id, code: p.code, name: p.name },
+    });
+    partyIdMap.set(p.id, created.id);
+  }
+
+  const unmatched = new Set<string>();
+  for (const item of source.items) {
+    const created = await tx.qcpItem.create({
+      data: {
+        qcpTemplateId: copy.id,
+        sequence: item.sequence,
+        srNo: item.srNo,
+        kind: item.kind,
+        section: item.section,
+        activity: item.activity,
+        characteristic: item.characteristic,
+        extentOfCheck: item.extentOfCheck,
+        applicableDocument: item.applicableDocument,
+        acceptanceCriteria: item.acceptanceCriteria,
+        record: item.record,
+        remarks: item.remarks,
+      },
+    });
+
+    for (const pc of item.partyCodes) {
+      const newPartyId = partyIdMap.get(pc.inspectionPartyId);
+      if (newPartyId == null) continue;
+      await tx.qcpItemPartyCode.create({
+        data: {
+          qcpItemId: created.id,
+          inspectionPartyId: newPartyId,
+          qcpCodeId: pc.qcpCodeId,
+        },
+      });
+    }
+
+    for (const link of item.processLinks) {
+      const code = link.jobProcess.code;
+      const newJobProcessId = jpIdByCode.get(code);
+      if (newJobProcessId == null) {
+        unmatched.add(code);
+        continue;
+      }
+      await tx.qcpItemProcess.create({
+        data: { qcpItemId: created.id, jobProcessId: newJobProcessId },
+      });
+    }
+  }
+
+  return { itemCount: source.items.length, unmatchedProcessCodes: [...unmatched] };
+}
+
+/**
+ * Copy BOM lines from an existing equipment into a new one.
+ *
+ * Deliberately copies ONLY the BomItem rows. Procurement, MaterialIdentification,
+ * Component and ItemTest are execution records belonging to the source job —
+ * heat numbers, MTC references, PO numbers. Copying them would fabricate
+ * traceability, which is the opposite of what this system exists for.
+ */
+async function copyBom(
+  tx: Tx,
+  sourceEquipmentId: number,
+  targetEquipmentId: number,
+  tenantId: number,
+): Promise<number> {
+  const source = await tx.equipment.findFirst({
+    where: { id: sourceEquipmentId, job: { tenantId } },
+    include: { bomItems: { orderBy: { itemNo: "asc" } } },
+  });
+  if (!source) {
+    throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Equipment", equipmentId: sourceEquipmentId });
+  }
+  if (source.bomItems.length === 0) return 0;
+
+  await tx.bomItem.createMany({
+    data: source.bomItems.map((b) => ({
+      equipmentId: targetEquipmentId,
+      itemNo: b.itemNo,
+      blockNo: b.blockNo,
+      partName: b.partName,
+      description: b.description,
+      material: b.material,
+      qty: b.qty,
+      unit: b.unit,
+      componentTypeId: b.componentTypeId,
+      remarks: b.remarks,
+    })),
+  });
+  return source.bomItems.length;
+}
