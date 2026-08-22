@@ -1,4 +1,4 @@
-import { withTenant } from "@/lib/db";
+import { withTenant, type Tx } from "@/lib/db";
 import { audited } from "@/lib/audit";
 import { ROLES, requireRole, assertNotClientUser, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -6,12 +6,16 @@ import {
   createTemplateSchema,
   cloneVersionSchema,
   saveDraftVersionSchema,
+  publishVersionSchema,
   type CreateTemplateInput,
   type CloneVersionInput,
   type SaveDraftVersionInput,
+  type PublishVersionInput,
+  type TemplateWarningCode,
 } from "@/lib/shared/schemas";
 import { copyVersionContents } from "./template-copy";
-import type { ProcessTemplateVersion } from "@/generated/prisma/client";
+import { analyzeGraph, computeEnvelope, DEFAULT_CALENDAR, type ScheduleProcess, type ScheduleEdge } from "@/lib/schedule";
+import type { ProcessTemplateVersion, TemplateProcess, TemplateEdge } from "@/generated/prisma/client";
 
 /**
  * Process route authoring (docs/superpowers/specs/2026-08-22-route-authoring-design.md).
@@ -293,6 +297,250 @@ export async function saveDraftVersion(
           after: { processCount: processes.length, edgeCount: edges.length },
           eventType: "ProcessTemplateDraftSaved",
           eventPayload: { versionId, processCount: processes.length, edgeCount: edges.length },
+        },
+      };
+    });
+  });
+}
+
+export interface TemplateWarning {
+  code: TemplateWarningCode;
+  message: string;
+  /** TemplateProcess.code values this warning is about; empty when route-wide. */
+  processCodes: string[];
+}
+
+export interface PublishResult {
+  version: ProcessTemplateVersion;
+  warnings: TemplateWarning[];
+  /** Computed lead time in days, or null when the route is not schedulable. */
+  envelopeDays: number | null;
+}
+
+/** TemplateProcess → the pure engine's shape. Mirrors _shared.ts's jobProcessToScheduleProcess. */
+function templateProcessToScheduleProcess(p: TemplateProcess): ScheduleProcess {
+  return {
+    id: p.id,
+    code: p.code,
+    name: p.name,
+    durationMinDays: p.durationMinDays,
+    durationMaxDays: p.durationMaxDays,
+    envelopeFinishByMinDays: p.envelopeFinishByMinDays,
+    envelopeFinishByMaxDays: p.envelopeFinishByMaxDays,
+    envelopeStartByMinDays: p.envelopeStartByMinDays,
+    envelopeStartByMaxDays: p.envelopeStartByMaxDays,
+    provisional: p.provisional,
+  };
+}
+
+function templateEdgeToScheduleEdge(e: TemplateEdge): ScheduleEdge {
+  return { processId: e.processId, predecessorId: e.predecessorId, type: e.type, lagDays: e.lagDays };
+}
+
+/**
+ * Everything that decides whether a route may be published, split out so the
+ * publish dialog can dry-run it without writing.
+ *
+ * Throws on a blocking failure; returns warnings otherwise. Each throw's
+ * `detail.processCodes` names the offending processes so the UI can say
+ * "Process 14 'PWHT' cannot be reached from the start of the route" rather
+ * than "invalid graph" (invariant #12).
+ */
+export async function validateVersionForPublish(
+  tx: Tx,
+  versionId: number,
+  expectedEnvelopeDays: number | null,
+): Promise<{ warnings: TemplateWarning[]; envelopeDays: number | null }> {
+  const processes = await tx.templateProcess.findMany({ where: { versionId }, orderBy: { seq: "asc" } });
+  const edges = await tx.templateEdge.findMany({ where: { versionId } });
+
+  if (processes.length === 0) {
+    throw new AppError(ERROR_CODES.TEMPLATE_INCOMPLETE, {
+      reason: "a route needs at least one process",
+      processCodes: [],
+    });
+  }
+
+  const codeById = new Map(processes.map((p) => [p.id, p.code]));
+  const namesFor = (ids: number[]) => ids.map((i) => codeById.get(i)!).filter(Boolean);
+
+  // Contiguous seq from 1. Duplicates are already refused at save time, so a
+  // gap is the only way to get here.
+  const seqs = processes.map((p) => p.seq).sort((a, b) => a - b);
+  const gap = seqs.findIndex((s, i) => s !== i + 1);
+  if (gap !== -1) {
+    throw new AppError(ERROR_CODES.TEMPLATE_INCOMPLETE, {
+      reason: "sequence numbers must run 1, 2, 3 … with no gaps",
+      seq: seqs[gap],
+      processCodes: [processes.find((p) => p.seq === seqs[gap])!.code],
+    });
+  }
+
+  const diag = analyzeGraph(processes.map(templateProcessToScheduleProcess), edges.map(templateEdgeToScheduleEdge));
+
+  if (diag.danglingEdges.length > 0 || diag.selfEdges.length > 0) {
+    throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+      reason: "an edge points at a process that is not part of this route, or at itself",
+      processCodes: namesFor([
+        ...diag.danglingEdges.map((e) => e.processId),
+        ...diag.selfEdges.map((e) => e.processId),
+      ]),
+    });
+  }
+  if (diag.cycleNodeIds.length > 0) {
+    throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+      reason: "these processes form a loop, so none of them could ever start",
+      processCodes: namesFor(diag.cycleNodeIds),
+    });
+  }
+  if (diag.rootIds.length === 0) {
+    throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+      reason: "no process can start first — every process has a predecessor",
+      processCodes: [],
+    });
+  }
+  if (diag.unreachableIds.length > 0) {
+    throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+      reason: "these processes cannot be reached from the start of the route and would never begin",
+      processCodes: namesFor(diag.unreachableIds),
+    });
+  }
+
+  const warnings: TemplateWarning[] = [];
+
+  const provisional = processes.filter(
+    (p) => p.provisional || p.durationMinDays == null || p.durationMaxDays == null,
+  );
+  if (provisional.length > 0) {
+    warnings.push({
+      code: "PROVISIONAL_DURATIONS",
+      message:
+        `${provisional.length} process${provisional.length === 1 ? "" : "es"} have no confirmed duration. ` +
+        "This route can be published and will drive gating and progress, but dates cannot be computed " +
+        "for any job that uses it until the durations are confirmed.",
+      processCodes: provisional.map((p) => p.code),
+    });
+  }
+
+  if (diag.terminalIds.length > 1) {
+    warnings.push({
+      code: "MULTIPLE_TERMINALS",
+      message:
+        `${diag.terminalIds.length} processes end without feeding another. That is normal for branches ` +
+        "that genuinely finish on their own — check none of them is a wiring mistake.",
+      processCodes: namesFor(diag.terminalIds),
+    });
+  }
+
+  const noStages = processes.filter((p) => p.workOrderStages.length === 0);
+  if (noStages.length > 0) {
+    warnings.push({
+      code: "EMPTY_WORK_ORDER_STAGES",
+      message:
+        `${noStages.length} process${noStages.length === 1 ? "" : "es"} are not mapped to a work-order stage. ` +
+        "That is correct for families with no 25-stage reporting view.",
+      processCodes: noStages.map((p) => p.code),
+    });
+  }
+
+  // Envelope check (invariant #10). computeEnvelope refuses a provisional or
+  // duration-less spine outright, so this only runs when nothing is
+  // provisional — the two warnings never both fire.
+  let envelopeDays: number | null = null;
+  if (provisional.length === 0) {
+    const anchor = new Date("2000-01-03T00:00:00.000Z"); // a Monday; only the span matters
+    const dates = computeEnvelope(
+      processes.map(templateProcessToScheduleProcess),
+      anchor,
+      DEFAULT_CALENDAR,
+    );
+    const latest = Math.max(...dates.map((d) => d.plannedFinishMax.getTime()));
+    envelopeDays = Math.round((latest - anchor.getTime()) / 86_400_000);
+
+    if (expectedEnvelopeDays != null) {
+      const drift = Math.abs(envelopeDays - expectedEnvelopeDays);
+      // 7 days: the printed lead-time table is rounded to whole weeks
+      // (BUILD-SPEC-v2 §1), so anything inside a week is rounding, not error.
+      if (drift > 7) {
+        warnings.push({
+          code: "ENVELOPE_MISMATCH",
+          message:
+            `This route computes to ${envelopeDays} days, but the expected lead time is ` +
+            `${expectedEnvelopeDays} days — a gap of ${drift} days. Check the lags between processes: ` +
+            "summing durations instead of overlapping concurrent work is the usual cause.",
+          processCodes: [],
+        });
+      }
+    }
+  }
+
+  return { warnings, envelopeDays };
+}
+
+/**
+ * Validate a DRAFT and publish it. After this the version is immutable and
+ * jobs may pin it (invariant #9).
+ *
+ * `acknowledgedWarnings` is not security — it is a receipt that the author was
+ * shown what publishing this route means, particularly that a provisional
+ * route will refuse to produce dates.
+ */
+export async function publishVersion(
+  actor: Actor,
+  input: PublishVersionInput,
+): Promise<PublishResult> {
+  const { versionId, notes, acknowledgedWarnings, expectedEnvelopeDays } =
+    publishVersionSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const version = await tx.processTemplateVersion.findFirst({
+      where: { id: versionId, template: { tenantId: actor.tenantId } },
+    });
+    if (!version) {
+      throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessTemplateVersion", versionId });
+    }
+    if (version.status !== "DRAFT") {
+      throw new AppError(ERROR_CODES.TEMPLATE_VERSION_LOCKED, { versionId, status: version.status });
+    }
+
+    const { warnings, envelopeDays } = await validateVersionForPublish(tx, versionId, expectedEnvelopeDays);
+
+    const unacknowledged = warnings.filter((w) => !acknowledgedWarnings.includes(w.code));
+    if (unacknowledged.length > 0) {
+      throw new AppError(ERROR_CODES.TEMPLATE_INCOMPLETE, {
+        reason: "confirm the warnings before publishing",
+        unacknowledgedWarnings: unacknowledged.map((w) => w.code),
+        processCodes: [],
+      });
+    }
+
+    return audited(tx, actor, async () => {
+      const published = await tx.processTemplateVersion.update({
+        where: { id: versionId },
+        data: {
+          status: "PUBLISHED",
+          publishedAt: new Date(), // server clock, invariant #1
+          publishedBy: actor.userId,
+          notes,
+        },
+      });
+      return {
+        result: { version: published, warnings, envelopeDays },
+        audit: {
+          action: "template.publish",
+          entityType: "ProcessTemplateVersion",
+          entityId: versionId,
+          before: { status: version.status },
+          after: {
+            status: "PUBLISHED",
+            notes,
+            envelopeDays,
+            warnings: warnings.map((w) => w.code),
+          },
+          eventType: "ProcessTemplateVersionPublished",
+          eventPayload: { versionId, templateId: version.templateId, envelopeDays },
         },
       };
     });
