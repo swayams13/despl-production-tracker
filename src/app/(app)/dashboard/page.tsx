@@ -193,12 +193,12 @@ export default async function Dashboard({
           <h6>Forecast dispatch</h6>
           <div className="v mono" style={{ fontSize: 22, paddingTop: 4 }}>{fmtDate(k.forecastDispatch)}</div>
           <div className="sub">
-            {k.deliveryDate ? (
+            {k.committedDeliveryDate ? (
               <>
                 <span className="delta" style={{ color: (k.forecastVarianceDays ?? 0) > 0 ? "var(--s-overdue)" : "var(--s-complete)" }}>
                   {(k.forecastVarianceDays ?? 0) > 0 ? "+" : ""}{k.forecastVarianceDays}d
                 </span>
-                {" "}vs contractual <span className="mono">{fmtDate(k.deliveryDate)}</span>
+                {" "}vs contractual <span className="mono">{fmtDate(k.committedDeliveryDate)}</span>
               </>
             ) : (
               "No contractual date set yet"

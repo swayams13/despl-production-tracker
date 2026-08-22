@@ -423,7 +423,7 @@ async function main() {
       if (!mtcOp) throw new Error("component-routes.json has no csvColumn mapping to MTC_VERIFICATION");
       const routedTypeCodes = routesFile.routes.map((r) => r.componentType);
 
-      let jobIdByNumber = new Map<string, number>();
+      const jobIdByNumber = new Map<string, number>();
       let client = await tx.client.findFirst({
         where: { tenantId: org.id, name: { startsWith: "Unknown client — pending DESPL confirmation" } },
       });
@@ -454,7 +454,7 @@ async function main() {
             clientOrderNo: de0467Source.workOrderNoInFile,
             projectName: de0467Source.projectName,
             orderDate: firstDate(de0467Source.orderGenerateDate),
-            deliveryDate: firstDate(de0467Source.dispatchDate),
+            committedDeliveryDate: firstDate(de0467Source.dispatchDate),
             remarks: buildJobRemarks(
               issues,
               de0467Source.job,

@@ -625,7 +625,20 @@ model Job {
   poRef             String?     @map("po_ref")
   designCode        String?     @map("design_code")
   orderDate         DateTime?   @map("order_date")
-  deliveryDate      DateTime?   @map("delivery_date")
+  /// The contractual date given to the client. BACKWARD scheduling anchors on
+  /// this by default, and every overdue / KPI / forecast-vs-due calculation
+  /// measures against it. Renamed from `deliveryDate` (22 Aug 2026): the CSV
+  /// import was writing a *dispatch* date into a field the scheduler read as a
+  /// *required delivery* date, conflating two different commitments.
+  committedDeliveryDate DateTime? @map("committed_delivery_date")
+  /// DESPL's own internal target, normally earlier than the committed date and
+  /// carrying their buffer. Never shown to a client user.
+  targetDispatchDate    DateTime? @map("target_dispatch_date")
+  /// Family-shaped design configuration (design pressure, MDMT, MOC, …).
+  /// Display and reference data ONLY. Nothing in lib/schedule/ or the gating
+  /// path may read it — the moment a schedule depends on a free-shaped blob,
+  /// refusals stop being explainable (invariant #12).
+  specs                 Json?
   priority          JobPriority @default(NORMAL)
   status            JobStatus   @default(ACTIVE)
   remarks           String?

@@ -138,7 +138,7 @@ export async function loadClientPortalView(actor: Actor): Promise<ClientJobView[
         hasUpdate: true,
         asOf: showDates ? latestVerified.asOf.toISOString() : null,
         overallPct: showProgress ? overallFromUnits(units) : null,
-        forecastDispatch: showDates ? (job.deliveryDate?.toISOString() ?? null) : null,
+        forecastDispatch: showDates ? (job.committedDeliveryDate?.toISOString() ?? null) : null,
         units,
         ...(showQcp ? { unitsUnderInspection: units.filter((u) => u.status === "hold").length } : {}),
       });
@@ -197,7 +197,7 @@ export async function loadClientPreview(actor: Actor, jobId: number): Promise<Cl
       hasUpdate: true,
       asOf: latest.asOf.toISOString(),
       overallPct: overallFromUnits(units),
-      forecastDispatch: job.deliveryDate?.toISOString() ?? null,
+      forecastDispatch: job.committedDeliveryDate?.toISOString() ?? null,
       units,
       reviewStatus: latest.status as ProgressSnapshotStatus,
       rejectionReason: latest.rejectionReason,

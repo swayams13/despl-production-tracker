@@ -18,7 +18,7 @@ export interface JobListItem {
   projectName: string | null;
   familyName: string;
   status: string;
-  deliveryDate: string | null;
+  committedDeliveryDate: string | null;
   forecastDispatch: string | null;
   forecastVarianceDays: number | null;
   equipmentCount: number;
@@ -56,7 +56,7 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
         jobNumber: true,
         projectName: true,
         status: true,
-        deliveryDate: true,
+        committedDeliveryDate: true,
         family: { select: { name: true } },
         equipments: { select: { _count: { select: { units: true } } } },
       },
@@ -118,10 +118,10 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
         projectName: j.projectName,
         familyName: j.family.name,
         status: j.status,
-        deliveryDate: j.deliveryDate,
+        committedDeliveryDate: j.committedDeliveryDate,
         forecastDispatch,
         forecastVarianceDays:
-          forecastDispatch && j.deliveryDate ? Math.round((forecastDispatch.getTime() - j.deliveryDate.getTime()) / 864e5) : null,
+          forecastDispatch && j.committedDeliveryDate ? Math.round((forecastDispatch.getTime() - j.committedDeliveryDate.getTime()) / 864e5) : null,
         equipmentCount: j.equipments.length,
         unitCount: j.equipments.reduce((n, e) => n + e._count.units, 0),
         totalPlans: total,
@@ -149,7 +149,7 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
     const extra = extrasByJob.get(j.id)!;
     return {
       ...j,
-      deliveryDate: j.deliveryDate ? j.deliveryDate.toISOString() : null,
+      committedDeliveryDate: j.committedDeliveryDate ? j.committedDeliveryDate.toISOString() : null,
       forecastDispatch: j.forecastDispatch ? j.forecastDispatch.toISOString() : null,
       lastActivityAt: j.lastActivityAt ? j.lastActivityAt.toISOString() : null,
       openHoldPoints: extra.openHoldPoints,

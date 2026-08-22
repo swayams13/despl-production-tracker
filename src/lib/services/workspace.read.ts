@@ -482,12 +482,12 @@ export interface JobKpis {
   designCode: string | null;
   unitCount: number;
   /** Contractual dispatch date (null for jobs DESPL hasn't confirmed yet — e.g. the DESPL-320 pilot). */
-  deliveryDate: string | null;
+  committedDeliveryDate: string | null;
   /** The schedule engine's own computed makespan: max(plannedFinish) across the
    * current run's plans. Not a live re-forecast from actual progress — that's
    * Phase 2 (would need to re-run CPM from today using remaining durations). */
   forecastDispatch: string | null;
-  /** forecastDispatch − deliveryDate, calendar days. Null when there's no contractual date to compare against. */
+  /** forecastDispatch − committedDeliveryDate, calendar days. Null when there's no contractual date to compare against. */
   forecastVarianceDays: number | null;
   totalPlans: number;
   percentComplete: number;
@@ -511,7 +511,7 @@ export interface JobKpis {
   };
   criticalPathBlocking: { planId: number; processName: string; departmentId: number; deptName: string; serialNo: string; daysOverdue: number }[];
   throughputByWeek: { label: string; count: number }[];
-  /** Plans/week needed to hit the contractual date from today. Null with no deliveryDate. */
+  /** Plans/week needed to hit the contractual date from today. Null with no committedDeliveryDate. */
   throughputTargetPerWeek: number | null;
   cycleTimeOffenders: { processName: string; deptName: string; standardDays: number; avgActualDays: number; deltaDays: number }[];
   overdueAgingByDept: { departmentId: number; department: string; d1to3: number; d3to7: number; d7plus: number }[];
@@ -549,7 +549,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
   return withTenant(actor.tenantId, async (tx) => {
     const job = await tx.job.findUnique({
       where: { id: jobId },
-      select: { clientId: true, jobNumber: true, designCode: true, deliveryDate: true },
+      select: { clientId: true, jobNumber: true, designCode: true, committedDeliveryDate: true },
     });
     if (!job) return null;
     assertClientScope(actor, job.clientId);
@@ -623,8 +623,8 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     const finishDates = run.processPlans.map((p) => p.plannedFinish).filter((d): d is Date => d != null);
     const forecastDispatch = finishDates.length ? new Date(Math.max(...finishDates.map((d) => d.getTime()))) : null;
     const forecastVarianceDays =
-      forecastDispatch && job.deliveryDate
-        ? Math.round((forecastDispatch.getTime() - job.deliveryDate.getTime()) / 864e5)
+      forecastDispatch && job.committedDeliveryDate
+        ? Math.round((forecastDispatch.getTime() - job.committedDeliveryDate.getTime()) / 864e5)
         : null;
 
     // ── Domain-event stream: submit/reject/verify counts for this run's plans ─
@@ -655,9 +655,9 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     const throughputByWeek = buildThroughput(verifiedRows.map((r) => r.at), 7, new Date());
 
     let throughputTargetPerWeek: number | null = null;
-    if (job.deliveryDate) {
+    if (job.committedDeliveryDate) {
       const remaining = totalPlans - completeCount;
-      const weeksUntilDue = Math.max(1, Math.ceil((job.deliveryDate.getTime() - Date.now()) / (7 * 864e5)));
+      const weeksUntilDue = Math.max(1, Math.ceil((job.committedDeliveryDate.getTime() - Date.now()) / (7 * 864e5)));
       throughputTargetPerWeek = remaining > 0 ? Math.ceil(remaining / weeksUntilDue) : 0;
     }
 
@@ -752,7 +752,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
       equipmentName: equipment?.name ?? null,
       designCode: job.designCode,
       unitCount,
-      deliveryDate: job.deliveryDate ? job.deliveryDate.toISOString() : null,
+      committedDeliveryDate: job.committedDeliveryDate ? job.committedDeliveryDate.toISOString() : null,
       forecastDispatch: forecastDispatch ? forecastDispatch.toISOString() : null,
       forecastVarianceDays,
       totalPlans,

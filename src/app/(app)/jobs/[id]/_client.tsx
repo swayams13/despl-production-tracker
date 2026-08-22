@@ -85,9 +85,9 @@ export function JobDetailClient({
         </span>
         <StatusChip status={header.displayStatus} />
         <span className="sub" style={{ marginLeft: "auto" }}>
-          {header.deliveryDate ? (
+          {header.committedDeliveryDate ? (
             <>
-              Due <b className="mono" style={{ color: "var(--text)" }}>{fmtDate(header.deliveryDate)}</b>
+              Due <b className="mono" style={{ color: "var(--text)" }}>{fmtDate(header.committedDeliveryDate)}</b>
               {header.forecastDispatch && (
                 <>
                   {" "}

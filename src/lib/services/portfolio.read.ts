@@ -130,9 +130,9 @@ export async function loadPortfolio(actor: Actor): Promise<Portfolio> {
       health,
       clientName: extra.clientByJob.get(j.id) ?? "—",
       daysToPromise:
-        j.deliveryDate === null
+        j.committedDeliveryDate === null
           ? null
-          : Math.round((new Date(j.deliveryDate).getTime() - now.getTime()) / DAY_MS),
+          : Math.round((new Date(j.committedDeliveryDate).getTime() - now.getTime()) / DAY_MS),
       verifiedLast24h: c?.verified ?? 0,
       newlyOverdueLast24h: c?.newly_overdue ?? 0,
       holdsOpenedLast24h: c?.holds_opened ?? 0,

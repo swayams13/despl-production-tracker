@@ -167,7 +167,7 @@ function Row({ r }: { r: PortfolioRow }) {
           <StageSpine variant="mini" segments={r.unitRollup} />
         )}
       </td>
-      <td className="mono">{fmtDate(r.deliveryDate)}</td>
+      <td className="mono">{fmtDate(r.committedDeliveryDate)}</td>
       <td className="mono">{fmtDate(r.forecastDispatch)}</td>
       <td className="mono" style={{ color: v === null ? undefined : v > 0 ? "var(--s-overdue)" : "var(--s-complete)" }}>
         {v === null ? "—" : `${v > 0 ? "+" : ""}${v}d`}

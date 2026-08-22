@@ -30,7 +30,7 @@ export type JobHealthRaw = JobHealth | "CANCELLED";
 /** Exactly the fields `loadJobs()` already returns. Nothing new is queried for this. */
 export interface HealthInput {
   status: string;
-  deliveryDate: string | null;
+  committedDeliveryDate: string | null;
   forecastDispatch: string | null;
   totalPlans: number;
   overduePlans: number;
@@ -75,14 +75,14 @@ export function classifyJobHealth(job: HealthInput, today: Date): JobHealthRaw {
   // An accepted order nobody has scheduled. A real management signal, not a gap.
   if (job.totalPlans === 0) return "NOT_PLANNED";
 
-  if (job.deliveryDate !== null) {
+  if (job.committedDeliveryDate !== null) {
     // Date-vs-date, never timestamp: the promised day itself is not yet late.
-    // `deliveryDate < now()` would flip a job red at 00:00 on the very day it
+    // `committedDeliveryDate < now()` would flip a job red at 00:00 on the very day it
     // was promised — a full day early, and a number SJ would rightly dispute.
-    if (toUtcDay(job.deliveryDate) < toUtcDay(today)) return "DELAYED";
+    if (toUtcDay(job.committedDeliveryDate) < toUtcDay(today)) return "DELAYED";
 
     // Strictly greater: landing exactly on the promised date is on time.
-    if (job.forecastDispatch !== null && toUtcDay(job.forecastDispatch) > toUtcDay(job.deliveryDate)) {
+    if (job.forecastDispatch !== null && toUtcDay(job.forecastDispatch) > toUtcDay(job.committedDeliveryDate)) {
       return "DELAYED";
     }
   }

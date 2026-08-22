@@ -30,7 +30,7 @@ export type LoginInput = z.infer<typeof loginSchema>;
  * that a planner legitimately chooses at tender stage (projectStartDate,
  * requiredDeliveryDate) are NOT actuals and are allowed on the generate
  * schema; they are optional because the service falls back to Job.orderDate /
- * Job.deliveryDate when omitted.
+ * Job.committedDeliveryDate when omitted.
  */
 
 const id = z.number().int().positive();

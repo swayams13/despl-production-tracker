@@ -18,7 +18,7 @@ export interface JobHeader {
   designCode: string | null;
   equipmentName: string | null;
   unitCount: number;
-  deliveryDate: string | null;
+  committedDeliveryDate: string | null;
   forecastDispatch: string | null;
   forecastVarianceDays: number | null;
   totalPlans: number;
@@ -38,7 +38,7 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
         jobNumber: true,
         projectName: true,
         designCode: true,
-        deliveryDate: true,
+        committedDeliveryDate: true,
         family: { select: { name: true } },
         equipments: { select: { name: true, _count: { select: { units: true } } }, orderBy: { id: "asc" } },
       },
@@ -68,8 +68,8 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
     const finishDates = plans.map((p) => p.plannedFinish).filter((d): d is Date => d != null);
     const forecastDispatch = finishDates.length ? new Date(Math.max(...finishDates.map((d) => d.getTime()))) : null;
     const forecastVarianceDays =
-      forecastDispatch && job.deliveryDate
-        ? Math.round((forecastDispatch.getTime() - job.deliveryDate.getTime()) / 864e5)
+      forecastDispatch && job.committedDeliveryDate
+        ? Math.round((forecastDispatch.getTime() - job.committedDeliveryDate.getTime()) / 864e5)
         : null;
 
     return {
@@ -80,7 +80,7 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
       designCode: job.designCode,
       equipmentName: job.equipments[0]?.name ?? null,
       unitCount: job.equipments.reduce((n, e) => n + e._count.units, 0),
-      deliveryDate: job.deliveryDate ? job.deliveryDate.toISOString() : null,
+      committedDeliveryDate: job.committedDeliveryDate ? job.committedDeliveryDate.toISOString() : null,
       forecastDispatch: forecastDispatch ? forecastDispatch.toISOString() : null,
       forecastVarianceDays,
       totalPlans,

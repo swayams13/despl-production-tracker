@@ -78,7 +78,7 @@ export default async function JobsList() {
                     </div>
                   </td>
                   <td>
-                    {j.deliveryDate == null ? (
+                    {j.committedDeliveryDate == null ? (
                       <span style={{ color: "var(--muted)" }}>No date set</span>
                     ) : j.forecastVarianceDays == null ? (
                       <span style={{ color: "var(--muted)" }}>—</span>

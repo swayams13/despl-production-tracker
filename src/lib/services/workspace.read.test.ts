@@ -103,7 +103,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
     // shape and invariants, not specific numbers).
     expect(kpis!.jobNumber).toBe("DESPL-320");
     expect(kpis!.unitCount).toBe(9);
-    expect(kpis!.deliveryDate).toBeNull(); // DESPL-320's contractual date is deliberately unset (pending DESPL)
+    expect(kpis!.committedDeliveryDate).toBeNull(); // DESPL-320's contractual date is deliberately unset (pending DESPL)
     expect(kpis!.forecastVarianceDays).toBeNull(); // no contractual date → no variance to compute
     // deptMatrix rows now carry a departmentId + onTimePct alongside the counts.
     for (const row of kpis!.deptMatrix) {

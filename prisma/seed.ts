@@ -839,7 +839,7 @@ async function seedDemo(
             // that risk before an order is signed, so it must measure against
             // the date first promised. The full raw range is preserved verbatim
             // in `remarks` by buildJobRemarks below, so nothing is lost.
-            deliveryDate: firstDate(job.dispatchDate),
+            committedDeliveryDate: firstDate(job.dispatchDate),
             remarks: buildJobRemarks(issues, job.job, job.orderGenerateDate, job.dispatchDate),
           },
         });

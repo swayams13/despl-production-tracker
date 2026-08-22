@@ -78,7 +78,7 @@ export async function generateSchedule(
     // actuals (invariant #1) — the request schema is .strict(); these fall back
     // to the job's own order/delivery dates.
     const orderDate = parsed.projectStartDate ?? spine.job.orderDate;
-    const deliveryDate = parsed.requiredDeliveryDate ?? spine.job.deliveryDate;
+    const deliveryDate = parsed.requiredDeliveryDate ?? spine.job.committedDeliveryDate;
 
     // Project-start anchor per mode.
     let projectStart: Date;

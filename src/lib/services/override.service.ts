@@ -160,7 +160,7 @@ export async function applyDurationOverride(
     );
 
     const projectStartDate = priorRun?.projectStartDate ?? spine.job.orderDate ?? new Date();
-    const requiredDeliveryDate = priorRun?.requiredDeliveryDate ?? spine.job.deliveryDate ?? null;
+    const requiredDeliveryDate = priorRun?.requiredDeliveryDate ?? spine.job.committedDeliveryDate ?? null;
     const deptByPid = new Map(spine.rawProcesses.map((p) => [p.id, p.departmentId]));
 
     const plans: PlanInput[] = maxNodes.map((n) => {
