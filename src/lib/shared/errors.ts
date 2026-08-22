@@ -71,6 +71,12 @@ export const ERROR_CODES = {
   TEMPLATE_VERSION_NOT_PUBLISHED: "TEMPLATE_VERSION_NOT_PUBLISHED",
   /** createJob: this job number is already used in this tenant. */
   DUPLICATE_JOB_NUMBER: "DUPLICATE_JOB_NUMBER",
+  /** An edit was attempted against a PUBLISHED template version (invariant #9). */
+  TEMPLATE_VERSION_LOCKED: "TEMPLATE_VERSION_LOCKED",
+  /** A template version is missing information required to publish it. */
+  TEMPLATE_INCOMPLETE: "TEMPLATE_INCOMPLETE",
+  /** The row changed under the caller since it was loaded; the write was refused. */
+  STALE_WRITE: "STALE_WRITE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -117,6 +123,12 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   TEMPLATE_VERSION_NOT_PUBLISHED:
     "That process route is still a draft and cannot be used for a job. Publish it first.",
   DUPLICATE_JOB_NUMBER: "A job with this number already exists.",
+  TEMPLATE_VERSION_LOCKED:
+    "This process route is published and cannot be changed. Create a new version to make edits.",
+  TEMPLATE_INCOMPLETE:
+    "This process route is missing information it needs before it can be published.",
+  STALE_WRITE:
+    "Someone else changed this while you were editing. Reload the page and reapply your changes.",
 };
 
 /**

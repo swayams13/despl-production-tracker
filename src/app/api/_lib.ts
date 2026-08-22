@@ -36,6 +36,9 @@ const STATUS: Record<ErrorCode, number> = {
   SNAPSHOT_PRIOR_DAY_PENDING: 409,
   TEMPLATE_VERSION_NOT_PUBLISHED: 409,
   DUPLICATE_JOB_NUMBER: 409,
+  TEMPLATE_VERSION_LOCKED: 409,
+  TEMPLATE_INCOMPLETE: 409,
+  STALE_WRITE: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */
