@@ -322,47 +322,72 @@ async function seedQcpTemplate(
       designCode: spec.designCode ?? null,
     },
   });
+  // Batched instead of one-row-at-a-time: over Railway's public Postgres
+  // proxy, a sequential per-item await loop (create + N party-codes + M
+  // process-links per item, ~250+ round trips for DESPL-320's 62-item
+  // template) ran long enough to get the connection dropped mid-transaction
+  // before COMMIT ("Transaction not found") — verified safe (Postgres rolled
+  // back atomically) but wasteful to retry. `id: item.id` is set explicitly
+  // (reserved via nextval below) purely so this one createMany can replace
+  // ~250 individual awaits with ~4; ids are otherwise still DB-generated
+  // autoincrement values, same as every other seeded row in this file.
   const partyIdByCode = new Map<string, number>();
   for (const code of spec.parties) {
     const party = await tx.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code } });
     partyIdByCode.set(code, party.id);
   }
-  let sequence = 0;
-  for (const item of spec.items) {
-    const qcpItem = await tx.qcpItem.create({
-      data: {
-        qcpTemplateId: qcpTemplate.id,
-        sequence: ++sequence,
-        srNo: item.srNo,
-        kind: item.kind as QcpItemKind,
-        section: item.section ?? null,
-        activity: item.activity,
-        characteristic: item.characteristic ?? null,
-        extentOfCheck: item.extentOfCheck ?? null,
-        applicableDocument: item.applicableDocument ?? null,
-        acceptanceCriteria: item.acceptanceCriteria ?? null,
-        record: item.record ?? null,
-        remarks: item.remarks || null,
-      },
-    });
+
+  const [{ nextval: startId }] = await tx.$queryRaw<
+    { nextval: bigint }[]
+  >(Prisma.sql`SELECT nextval(pg_get_serial_sequence('qcp_items', 'id')) AS nextval`);
+  for (let i = 1; i < spec.items.length; i++) {
+    await tx.$queryRaw(Prisma.sql`SELECT nextval(pg_get_serial_sequence('qcp_items', 'id'))`);
+  }
+  const itemIds = Array.from({ length: spec.items.length }, (_, i) => Number(startId) + i);
+
+  await tx.qcpItem.createMany({
+    data: spec.items.map((item, i) => ({
+      id: itemIds[i],
+      qcpTemplateId: qcpTemplate.id,
+      sequence: i + 1,
+      srNo: item.srNo,
+      kind: item.kind as QcpItemKind,
+      section: item.section ?? null,
+      activity: item.activity,
+      characteristic: item.characteristic ?? null,
+      extentOfCheck: item.extentOfCheck ?? null,
+      applicableDocument: item.applicableDocument ?? null,
+      acceptanceCriteria: item.acceptanceCriteria ?? null,
+      record: item.record ?? null,
+      remarks: item.remarks || null,
+    })),
+  });
+
+  const partyCodeRows: { qcpItemId: number; inspectionPartyId: number; qcpCodeId: number }[] = [];
+  const processLinkRows: { qcpItemId: number; jobProcessId: number }[] = [];
+  spec.items.forEach((item, i) => {
+    const qcpItemId = itemIds[i];
     if (item.kind === "CHECKPOINT" && item.codes) {
       for (const [partyCode, code] of Object.entries(item.codes)) {
         const inspectionPartyId = partyIdByCode.get(partyCode);
         if (!inspectionPartyId) throw new Error(`QcpItem ${item.srNo}: unknown party "${partyCode}"`);
         const qcpCodeId = refs.qcpCodeIdByCode.get(code);
         if (!qcpCodeId) throw new Error(`QcpItem ${item.srNo}: unknown QCP code "${code}"`);
-        await tx.qcpItemPartyCode.create({ data: { qcpItemId: qcpItem.id, inspectionPartyId, qcpCodeId } });
+        partyCodeRows.push({ qcpItemId, inspectionPartyId, qcpCodeId });
       }
     }
     if (spec.jobProcessIdByCode) {
       for (const processCode of item.leadTimeProcesses ?? []) {
         const jobProcessId = spec.jobProcessIdByCode.get(String(processCode));
         if (!jobProcessId) throw new Error(`QcpItem ${item.srNo}: unknown process ${processCode}`);
-        await tx.qcpItemProcess.create({ data: { qcpItemId: qcpItem.id, jobProcessId } });
+        processLinkRows.push({ qcpItemId, jobProcessId });
       }
     }
-  }
-  return sequence;
+  });
+  if (partyCodeRows.length) await tx.qcpItemPartyCode.createMany({ data: partyCodeRows });
+  if (processLinkRows.length) await tx.qcpItemProcess.createMany({ data: processLinkRows });
+
+  return spec.items.length;
 }
 
 async function main() {
