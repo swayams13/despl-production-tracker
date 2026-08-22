@@ -72,8 +72,9 @@ refuses a route the scheduling engine would choke on later.
 - Importing a route from a spreadsheet or PDF. Clone-and-edit covers the
   real case; an importer can come later if DESPL hands over documents in a
   consistent shape.
-- Any change to `lib/schedule/`. This spec consumes that engine's existing
-  functions as validators; it does not modify them.
+- Any change to `lib/schedule/`'s existing modules. This spec consumes them
+  as validators and modifies none of them. It does add one new pure sibling
+  module, `lib/schedule/validate.ts` (§3), which nothing existing imports.
 
 ## 3. What already exists and gets reused
 
@@ -101,12 +102,21 @@ operation in this spec is that function with the duration-edit logic removed
 and `status: "DRAFT"` instead of `PUBLISHED`. Extract the copy loop into a
 shared helper rather than writing it twice.
 
-**`lib/schedule/cpm.ts::topologicalOrder`** (Kahn's algorithm, throws on a
-cycle) and **`lib/schedule/envelope.ts::computeEnvelope`** are the two
-validators. Publish runs the draft through them and reports what they say.
-This matters: the definition of "a valid route" becomes "a route the actual
-scheduling engine accepts", not a second, drifting reimplementation of the
-same rules in the admin service.
+**`lib/schedule/envelope.ts::computeEnvelope`** is reused directly as the
+duration/envelope validator — publish runs the draft through it and reports
+what it says, so "schedulable" means "the actual engine accepts it" rather
+than a second, drifting reimplementation of the same rules.
+
+Graph validation needs one new pure module, `lib/schedule/validate.ts`.
+`cpm.ts` already contains Kahn's algorithm, but its `topologicalOrder` is
+private and throws a bare `Error` with no node identity — it exists to guard
+an invariant on a hot path, not to explain a problem to a person. Publish
+needs the opposite: never throw, and name every offending process. Rather
+than loosen `cpm.ts`'s guard, add a sibling that computes the same in-degree
+pass once and *returns* diagnostics (dangling edges, self-edges, cycle
+members, roots, terminals, unreachable nodes). Both are ~20 lines of Kahn's;
+they have genuinely different contracts, and merging them would make the
+scheduling hot path do reporting work it never needs.
 
 ## 4. Service layer
 
@@ -201,22 +211,30 @@ clock — invariant #1), `publishedBy: actor.userId`, `notes`.
 | At least one process | `TEMPLATE_INCOMPLETE` |
 | Every `code` unique, every `seq` unique and contiguous from 1 | `TEMPLATE_INCOMPLETE` |
 | Every process has a `defaultDepartmentId` resolving in-tenant | `TEMPLATE_INCOMPLETE` |
-| Every edge's endpoints belong to this version | `SCHEDULE_GRAPH_INVALID` |
-| Graph is acyclic — run `topologicalOrder` and catch its throw | `SCHEDULE_GRAPH_INVALID` |
-| Exactly one process with no predecessors, or a documented reason for more — see below | `SCHEDULE_GRAPH_INVALID` |
-| Every process except the terminal has ≥1 successor | `SCHEDULE_GRAPH_INVALID` |
+| Every edge's endpoints belong to this version, and no edge points at itself | `SCHEDULE_GRAPH_INVALID` |
+| Graph is acyclic | `SCHEDULE_GRAPH_INVALID` |
+| At least one root (process with no predecessors) | `SCHEDULE_GRAPH_INVALID` |
+| Every process is reachable from some root | `SCHEDULE_GRAPH_INVALID` |
 
-On "exactly one initial process": multiple roots are legitimate (drawing
-approval and long-lead procurement genuinely start on day zero together —
-the seeded PV route has more than one). So the rule is *≥1 root*, and the
-check that actually matters is the no-orphans one: every process must be
-reachable from some root, or nothing will ever gate it and it will sit
-`NOT_STARTED` forever. Reachability from the root set is computed in the same
-pass as the topological sort.
+**Dead-end processes are NOT a blocking check, and this was verified against
+the real data before it was written down.** The shipped `PRESSURE_VESSEL` v1
+route — the authoritative one, seeded from DESPL's own Lead Time table — has
+**one root and three terminals**: process 36 "Dispatch" plus processes 5
+"Client Drawing Approval" and 6 "BOM & MTO Finalization", both of which
+legitimately end their own branch without feeding a successor. A rule
+requiring a single terminal would refuse to publish the only route in the
+system that works. Multiple terminals is a **warning** (below), never a
+refusal.
 
-Every blocking error carries the offending process `code` and `name` in its
-`details`, so the UI can say "Process 14 'PWHT' has no successor" rather than
-"invalid graph".
+The check that does the real work is reachability: a process no root can
+reach will never be gated into starting and will sit `NOT_STARTED` forever.
+That is always a wiring mistake, and unlike a dead end it has no legitimate
+form.
+
+Every blocking error carries the offending process `code` and `name` in the
+`AppError`'s `detail` object (the field is `detail`, singular — see
+`errors.ts`), so the UI can say "Process 14 'PWHT' cannot be reached from the
+start of the route" rather than "invalid graph".
 
 **Non-blocking warnings** — publish proceeds, but the UI must show them and
 the caller must echo them back in `acknowledgedWarnings` to confirm they were
@@ -226,6 +244,7 @@ seen:
 |---|---|
 | ≥1 process is `provisional`, or has a null `durationMinDays`/`MaxDays` | A route with a real sequence but unconfirmed durations is legitimately publishable — it drives gating, the Stage Spine and department workspaces perfectly well. It just cannot be scheduled. `computeEnvelope` will refuse with `SCHEDULE_DATA_MISSING` for any job that pins it, and the author needs to know that now, not when a planner hits it. |
 | Computed envelope total differs from a printed/expected total the author entered | Invariant #10's tripwire. Naive duration summing gives 11.6–24 weeks against DESPL's stated ~17. If the author enters an expected total and the engine computes something far off, the lags are wrong. Surfacing this *before* a job pins the route is the entire point. |
+| More than one terminal process (no successor) | Legitimate — the real PV route has three. But an accidental dead end looks identical to a deliberate one, so the author is shown the list and confirms it. |
 | ≥1 process has empty `workOrderStages` | Only meaningful for pressure vessels; empty is correct for families with no 25-stage reporting view. Informational. |
 
 The envelope warning runs `computeEnvelope` against the draft's processes and
@@ -336,8 +355,16 @@ error code *and* that `details` names the offending process code:
 - empty version, duplicate code, duplicate seq, non-contiguous seq
 - edge referencing a process from a different version
 - a two-process cycle, and a longer cycle that only Kahn's algorithm catches
+- a graph of nothing but a cycle, so there is no root at all
 - an orphan process unreachable from any root
-- a non-terminal process with no successor
+- a self-edge (process is its own predecessor)
+
+Plus the regression that motivated the rule change: **the real seeded
+`PRESSURE_VESSEL` v1 route publishes cleanly**, with its one root and its
+three terminals (36 Dispatch, 5 Client Drawing Approval, 6 BOM & MTO
+Finalization) producing the multiple-terminals *warning* and no blocking
+error. If a future validation change breaks this test, the validator has
+become stricter than DESPL's own process.
 
 **Publish warnings**
 - a version with one `provisional` process publishes, and returns the
