@@ -30,6 +30,7 @@ import {
   type CreateClientInput,
 } from "@/lib/shared/schemas";
 import type { User, DelayCategoryRef, ProcessTemplateVersion, EquipmentTypeRef, Client } from "@/generated/prisma/client";
+import { copyVersionContents } from "./template-copy";
 
 /**
  * §4.10 Admin — "minimal but real": users, master delay-reason list,
@@ -273,7 +274,6 @@ export async function updateStandardDurations(
     });
     if (!source) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessTemplateVersion", templateVersionId });
 
-    const editByProcessId = new Map(edits.map((e) => [e.templateProcessId, e]));
     const sourceProcessIds = new Set(source.processes.map((p) => p.id));
     for (const e of edits) {
       if (!sourceProcessIds.has(e.templateProcessId)) {
@@ -299,42 +299,20 @@ export async function updateStandardDurations(
         },
       });
 
-      const oldToNewProcessId = new Map<number, number>();
-      for (const p of source.processes) {
-        const edit = editByProcessId.get(p.id);
-        const copy = await tx.templateProcess.create({
-          data: {
-            versionId: created.id,
-            seq: p.seq,
-            code: p.code,
-            name: p.name,
-            mainActivities: p.mainActivities,
-            durationMinDays: edit?.durationMinDays ?? p.durationMinDays,
-            durationMaxDays: edit?.durationMaxDays ?? p.durationMaxDays,
-            cumulativePrinted: p.cumulativePrinted,
-            defaultDepartmentId: p.defaultDepartmentId,
-            workOrderStages: p.workOrderStages,
-            envelopeFinishByMinDays: p.envelopeFinishByMinDays,
-            envelopeFinishByMaxDays: p.envelopeFinishByMaxDays,
-            envelopeStartByMinDays: p.envelopeStartByMinDays,
-            envelopeStartByMaxDays: p.envelopeStartByMaxDays,
-            optional: p.optional,
-            provisional: edit ? false : p.provisional,
+      const overrides = new Map(
+        edits.map((e) => [
+          e.templateProcessId,
+          {
+            durationMinDays: e.durationMinDays,
+            durationMaxDays: e.durationMaxDays,
+            // An explicit duration edit is a confirmation: it clears
+            // `provisional`, matching the behaviour this function has always
+            // had. Processes with no edit keep whatever they had.
+            provisional: false,
           },
-        });
-        oldToNewProcessId.set(p.id, copy.id);
-      }
-      for (const e of source.edges) {
-        await tx.templateEdge.create({
-          data: {
-            versionId: created.id,
-            processId: oldToNewProcessId.get(e.processId)!,
-            predecessorId: oldToNewProcessId.get(e.predecessorId)!,
-            type: e.type,
-            lagDays: e.lagDays,
-          },
-        });
-      }
+        ]),
+      );
+      await copyVersionContents(tx, source.id, created.id, overrides);
 
       return {
         result: created,
