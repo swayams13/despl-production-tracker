@@ -5,8 +5,10 @@ import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import {
   createTemplateSchema,
   cloneVersionSchema,
+  saveDraftVersionSchema,
   type CreateTemplateInput,
   type CloneVersionInput,
+  type SaveDraftVersionInput,
 } from "@/lib/shared/schemas";
 import { copyVersionContents } from "./template-copy";
 import type { ProcessTemplateVersion } from "@/generated/prisma/client";
@@ -129,6 +131,159 @@ export async function cloneVersion(
           after: { templateId, version, status: "DRAFT", processCount: idMap.size, notes },
           eventType: "ProcessTemplateVersionCloned",
           eventPayload: { sourceVersionId: source.id, newVersionId: draft.id, templateId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Full replace of a DRAFT's processes and edges.
+ *
+ * Full replace, not a per-row diff: the editor is a spreadsheet-shaped screen
+ * where an author reorders, renumbers and rewires in one pass, and a diff
+ * protocol for that is more code and more ways to half-apply. The cost is
+ * that two concurrent editors would clobber each other, which the
+ * `expectedUpdatedAt` check below is what prevents.
+ *
+ * Validation here is deliberately thin — an author mid-edit is allowed to
+ * hold a broken graph. Only structural impossibilities are refused now;
+ * everything about whether the route makes SENSE waits for publishVersion.
+ */
+export async function saveDraftVersion(
+  actor: Actor,
+  input: SaveDraftVersionInput,
+): Promise<ProcessTemplateVersion> {
+  const { versionId, expectedUpdatedAt, processes, edges } = saveDraftVersionSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  // Cheap, caller-shape-only checks before any DB round trip.
+  const keys = new Set<string>();
+  for (const p of processes) {
+    if (keys.has(p.key)) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "duplicate process key", key: p.key });
+    }
+    keys.add(p.key);
+  }
+  const codes = new Set<string>();
+  const seqs = new Set<number>();
+  for (const p of processes) {
+    if (codes.has(p.code)) {
+      throw new AppError(ERROR_CODES.TEMPLATE_INCOMPLETE, { reason: "duplicate process code", code: p.code });
+    }
+    codes.add(p.code);
+    if (seqs.has(p.seq)) {
+      throw new AppError(ERROR_CODES.TEMPLATE_INCOMPLETE, { reason: "duplicate sequence number", seq: p.seq });
+    }
+    seqs.add(p.seq);
+  }
+  for (const e of edges) {
+    if (!keys.has(e.processKey) || !keys.has(e.predecessorKey)) {
+      throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+        reason: "edge references a process that is not in this route",
+        processKey: e.processKey,
+        predecessorKey: e.predecessorKey,
+      });
+    }
+    if (e.processKey === e.predecessorKey) {
+      throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+        reason: "a process cannot be its own predecessor",
+        processKey: e.processKey,
+      });
+    }
+  }
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const version = await tx.processTemplateVersion.findFirst({
+      where: { id: versionId, template: { tenantId: actor.tenantId } },
+    });
+    if (!version) {
+      throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessTemplateVersion", versionId });
+    }
+    if (version.status !== "DRAFT") {
+      // Invariant #9 enforced at the service layer — the UI hiding the Save
+      // button is not enforcement.
+      throw new AppError(ERROR_CODES.TEMPLATE_VERSION_LOCKED, { versionId, status: version.status });
+    }
+    const currentStamp = version.updatedAt?.getTime() ?? null;
+    const expectedStamp = expectedUpdatedAt?.getTime() ?? null;
+    if (currentStamp !== expectedStamp) {
+      throw new AppError(ERROR_CODES.STALE_WRITE, { versionId });
+    }
+
+    const departmentIds = [...new Set(processes.map((p) => p.defaultDepartmentId))];
+    if (departmentIds.length > 0) {
+      const found = await tx.department.count({
+        where: { id: { in: departmentIds }, tenantId: actor.tenantId },
+      });
+      if (found !== departmentIds.length) {
+        throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Department", departmentIds });
+      }
+    }
+
+    const before = {
+      processCount: await tx.templateProcess.count({ where: { versionId } }),
+      edgeCount: await tx.templateEdge.count({ where: { versionId } }),
+    };
+
+    return audited(tx, actor, async () => {
+      // TemplateEdge cascades on both its process FKs, so deleting the
+      // processes takes the edges with them; the explicit edge delete first
+      // is belt-and-braces for a draft that somehow holds orphan edges.
+      await tx.templateEdge.deleteMany({ where: { versionId } });
+      await tx.templateProcess.deleteMany({ where: { versionId } });
+
+      const idByKey = new Map<string, number>();
+      for (const p of processes) {
+        const row = await tx.templateProcess.create({
+          data: {
+            versionId,
+            seq: p.seq,
+            code: p.code,
+            name: p.name,
+            mainActivities: p.mainActivities,
+            defaultDepartmentId: p.defaultDepartmentId,
+            durationMinDays: p.durationMinDays,
+            durationMaxDays: p.durationMaxDays,
+            envelopeStartByMinDays: p.envelopeStartByMinDays,
+            envelopeStartByMaxDays: p.envelopeStartByMaxDays,
+            envelopeFinishByMinDays: p.envelopeFinishByMinDays,
+            envelopeFinishByMaxDays: p.envelopeFinishByMaxDays,
+            workOrderStages: p.workOrderStages,
+            optional: p.optional,
+            provisional: p.provisional,
+          },
+        });
+        idByKey.set(p.key, row.id);
+      }
+      for (const e of edges) {
+        await tx.templateEdge.create({
+          data: {
+            versionId,
+            processId: idByKey.get(e.processKey)!,
+            predecessorId: idByKey.get(e.predecessorKey)!,
+            type: e.type,
+            lagDays: e.lagDays,
+          },
+        });
+      }
+
+      const saved = await tx.processTemplateVersion.update({
+        where: { id: versionId },
+        data: { updatedAt: new Date() },
+      });
+
+      return {
+        result: saved,
+        audit: {
+          action: "template.saveDraft",
+          entityType: "ProcessTemplateVersion",
+          entityId: versionId,
+          before,
+          after: { processCount: processes.length, edgeCount: edges.length },
+          eventType: "ProcessTemplateDraftSaved",
+          eventPayload: { versionId, processCount: processes.length, edgeCount: edges.length },
         },
       };
     });

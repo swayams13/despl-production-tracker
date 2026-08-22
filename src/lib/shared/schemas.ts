@@ -7,6 +7,12 @@ import { z } from "zod";
  * INVARIANT #1: no request schema in this file may ever contain an `actual_*`
  * or `*_at` field. Actual timestamps are set server-side from the database
  * clock. If you find yourself adding one here, the design is wrong.
+ *
+ * Carve-out: a comparison-only optimistic-lock token (e.g.
+ * `expectedUpdatedAt` on `saveDraftVersionSchema`) is not covered by this
+ * ban — it is never persisted or trusted as event provenance, only echoed
+ * back by the client and compared server-side to detect a concurrent edit,
+ * the same pattern as an HTTP `If-Match` header.
  */
 
 /** D13: login identifier is username OR email — not email-only, and not `.email()`-shaped. */

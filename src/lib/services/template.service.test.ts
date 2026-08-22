@@ -1,7 +1,27 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES } from "@/lib/shared/errors";
-import { createTemplate, cloneVersion } from "./template.service";
+import { createTemplate, cloneVersion, saveDraftVersion } from "./template.service";
+import type { SaveDraftVersionInput } from "@/lib/shared/schemas";
+
+type DraftProcessInput = SaveDraftVersionInput["processes"][number];
+
+/** Fills the schema's defaulted fields so literals below only spell out what a test cares about. */
+function proc(over: Partial<DraftProcessInput> & Pick<DraftProcessInput, "key" | "seq" | "code" | "name" | "defaultDepartmentId">): DraftProcessInput {
+  return {
+    mainActivities: null,
+    envelopeStartByMinDays: null,
+    envelopeStartByMaxDays: null,
+    envelopeFinishByMinDays: null,
+    envelopeFinishByMaxDays: null,
+    workOrderStages: [],
+    optional: false,
+    provisional: true,
+    durationMinDays: null,
+    durationMaxDays: null,
+    ...over,
+  };
+}
 
 function actor(over: Partial<Actor> = {}): Actor {
   return {
@@ -56,6 +76,61 @@ describe("template.service — pure refusals", () => {
     await expect(
       // @ts-expect-error — .strict() schema; no timestamp field exists on this input
       createTemplate(actor(), { familyId: 1, name: "X", publishedAt: new Date() }),
+    ).rejects.toThrow();
+  });
+
+  it("saveDraftVersion refuses a QC caller", async () => {
+    await expect(
+      saveDraftVersion(actor({ roles: [ROLES.QC] }), {
+        versionId: 1,
+        expectedUpdatedAt: null,
+        processes: [],
+        edges: [],
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("rejects a process claiming confirmed durations it does not have", async () => {
+    await expect(
+      saveDraftVersion(actor(), {
+        versionId: 1,
+        expectedUpdatedAt: null,
+        processes: [
+          proc({
+            key: "a",
+            seq: 1,
+            code: "1",
+            name: "Kickoff",
+            defaultDepartmentId: 1,
+            provisional: false, // says confirmed…
+            durationMinDays: null, // …but has no duration (invariant #10)
+            durationMaxDays: null,
+          }),
+        ],
+        edges: [],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a process whose minimum duration exceeds its maximum", async () => {
+    await expect(
+      saveDraftVersion(actor(), {
+        versionId: 1,
+        expectedUpdatedAt: null,
+        processes: [
+          proc({
+            key: "a",
+            seq: 1,
+            code: "1",
+            name: "Kickoff",
+            defaultDepartmentId: 1,
+            provisional: false,
+            durationMinDays: 9,
+            durationMaxDays: 3,
+          }),
+        ],
+        edges: [],
+      }),
     ).rejects.toThrow();
   });
 });
@@ -164,5 +239,81 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("template.service — clone (DB)", as
     await expect(
       cloneVersion(actor({ tenantId: 999 }), { sourceVersionId: source.id, notes: "n" }),
     ).rejects.toMatchObject({ code: ERROR_CODES.NOT_FOUND });
+  });
+});
+
+/**
+ * Same `owner`-client rationale as the clone suite above: process_template_
+ * versions / template_processes / template_edges carry no RLS of their own,
+ * so `owner` (DIRECT_URL) is fine here purely for setup/teardown reads —
+ * `saveDraftVersion` itself always goes through its own `withTenant`, which
+ * is the real request path being verified.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("template.service — saveDraftVersion (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  async function freshDraft() {
+    const source = await owner.processTemplateVersion.findFirstOrThrow({
+      where: { status: "PUBLISHED", template: { family: { code: "PRESSURE_VESSEL" } } },
+      orderBy: { version: "desc" },
+    });
+    return cloneVersion(actor(), { sourceVersionId: source.id, notes: "save test" });
+  }
+
+  it("replaces the draft's contents wholesale", async () => {
+    const draft = await freshDraft();
+    const loaded = await owner.processTemplateVersion.findUniqueOrThrow({ where: { id: draft.id } });
+    const dept = await owner.department.findFirstOrThrow({ where: { tenantId: 1 } });
+
+    await saveDraftVersion(actor(), {
+      versionId: draft.id,
+      expectedUpdatedAt: loaded.updatedAt,
+      processes: [
+        proc({ key: "a", seq: 1, code: "1", name: "Start", defaultDepartmentId: dept.id }),
+        proc({ key: "b", seq: 2, code: "2", name: "End", defaultDepartmentId: dept.id }),
+      ],
+      edges: [{ processKey: "b", predecessorKey: "a", type: "FINISH_TO_START", lagDays: 0 }],
+    });
+
+    expect(await owner.templateProcess.count({ where: { versionId: draft.id } })).toBe(2);
+    expect(await owner.templateEdge.count({ where: { versionId: draft.id } })).toBe(1);
+
+    await owner.processTemplateVersion.delete({ where: { id: draft.id } });
+  });
+
+  it("refuses a save against a PUBLISHED version (invariant #9)", async () => {
+    const published = await owner.processTemplateVersion.findFirstOrThrow({
+      where: { status: "PUBLISHED", template: { family: { code: "PRESSURE_VESSEL" } } },
+    });
+    await expect(
+      saveDraftVersion(actor(), {
+        versionId: published.id,
+        expectedUpdatedAt: published.updatedAt,
+        processes: [],
+        edges: [],
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.TEMPLATE_VERSION_LOCKED });
+  });
+
+  it("refuses a stale write and leaves the draft unchanged", async () => {
+    const draft = await freshDraft();
+    const countBefore = await owner.templateProcess.count({ where: { versionId: draft.id } });
+
+    await expect(
+      saveDraftVersion(actor(), {
+        versionId: draft.id,
+        expectedUpdatedAt: new Date(0), // definitely not the current stamp
+        processes: [],
+        edges: [],
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.STALE_WRITE });
+
+    expect(await owner.templateProcess.count({ where: { versionId: draft.id } })).toBe(countBefore);
+    await owner.processTemplateVersion.delete({ where: { id: draft.id } });
   });
 });
