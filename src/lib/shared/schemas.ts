@@ -254,3 +254,38 @@ export type VerifySnapshotInput = z.infer<typeof verifySnapshotSchema>;
 /** Management rejects today's published batch with a mandatory reason. */
 export const rejectSnapshotSchema = z.object({ jobId: id, reason }).strict();
 export type RejectSnapshotInput = z.infer<typeof rejectSnapshotSchema>;
+
+// ── Job intake: equipment catalog and clients ───────────────────────────
+
+export const createEquipmentTypeSchema = z
+  .object({
+    familyId: id,
+    code: z.string().trim().toUpperCase().min(1, "A code is required"),
+    name: z.string().trim().min(1, "A name is required"),
+    defaultDesignCode: z.string().trim().min(1).nullable().default(null),
+    /** Shape-checked against the family's SPEC_FIELDS in the service, not here. */
+    defaultSpecs: z.record(z.string(), z.unknown()).nullable().default(null),
+  })
+  .strict();
+export type CreateEquipmentTypeInput = z.infer<typeof createEquipmentTypeSchema>;
+
+/** Deactivate rather than delete — Equipment rows reference these (invariant #6). */
+export const updateEquipmentTypeSchema = z
+  .object({
+    id,
+    name: z.string().trim().min(1).optional(),
+    defaultDesignCode: z.string().trim().min(1).nullable().optional(),
+    defaultSpecs: z.record(z.string(), z.unknown()).nullable().optional(),
+    active: z.boolean().optional(),
+  })
+  .strict();
+export type UpdateEquipmentTypeInput = z.infer<typeof updateEquipmentTypeSchema>;
+
+/** Inline client creation from the intake wizard. Name + optional code only. */
+export const createClientSchema = z
+  .object({
+    name: z.string().trim().min(1, "A client name is required"),
+    code: z.string().trim().toUpperCase().min(1).nullable().default(null),
+  })
+  .strict();
+export type CreateClientInput = z.infer<typeof createClientSchema>;

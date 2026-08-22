@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES, isAppError } from "@/lib/shared/errors";
-import { createEmployee, setUserActive, updateUserRolesDepts } from "./admin.service";
+import { createEmployee, setUserActive, updateUserRolesDepts, createEquipmentType, createClientRecord } from "./admin.service";
 
 function actor(over: Partial<Actor> = {}): Actor {
   return {
@@ -69,6 +69,36 @@ describe("admin.service — pure refusals", () => {
         createdAt: new Date(),
       }),
     ).rejects.toBeTruthy();
+  });
+
+  it("createEquipmentType refuses a SUPERVISOR caller", async () => {
+    await expect(
+      createEquipmentType(actor({ roles: [ROLES.SUPERVISOR] }), {
+        familyId: 1,
+        code: "X",
+        name: "X",
+        defaultDesignCode: null,
+        defaultSpecs: null,
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("createEquipmentType refuses a client user", async () => {
+    await expect(
+      createEquipmentType(actor({ clientId: 7, roles: [ROLES.CLIENT_VIEWER] }), {
+        familyId: 1,
+        code: "X",
+        name: "X",
+        defaultDesignCode: null,
+        defaultSpecs: null,
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("createClientRecord refuses a QC caller", async () => {
+    await expect(
+      createClientRecord(actor({ roles: [ROLES.QC] }), { name: "Acme", code: null }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
   });
 });
 

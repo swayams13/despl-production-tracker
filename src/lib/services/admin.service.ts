@@ -4,6 +4,7 @@ import { audited } from "@/lib/audit";
 import { requireRole, assertNotClientUser, hasRole, ROLES, type Actor, type RoleCode } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { hashPassword } from "@/lib/auth/password";
+import { validateSpecs } from "@/lib/shared/specs";
 import {
   createUserSchema,
   resetPasswordSchema,
@@ -13,6 +14,9 @@ import {
   createEmployeeSchema,
   setUserActiveSchema,
   updateUserRolesDeptsSchema,
+  createEquipmentTypeSchema,
+  updateEquipmentTypeSchema,
+  createClientSchema,
   type CreateUserInput,
   type ResetPasswordInput,
   type CreateDelayCategoryInput,
@@ -21,8 +25,11 @@ import {
   type CreateEmployeeInput,
   type SetUserActiveInput,
   type UpdateUserRolesDeptsInput,
+  type CreateEquipmentTypeInput,
+  type UpdateEquipmentTypeInput,
+  type CreateClientInput,
 } from "@/lib/shared/schemas";
-import type { User, DelayCategoryRef, ProcessTemplateVersion } from "@/generated/prisma/client";
+import type { User, DelayCategoryRef, ProcessTemplateVersion, EquipmentTypeRef, Client } from "@/generated/prisma/client";
 
 /**
  * §4.10 Admin — "minimal but real": users, master delay-reason list,
@@ -643,4 +650,167 @@ export async function bulkImportEmployees(actor: Actor, rows: unknown[]): Promis
     }
   }
   return results;
+}
+
+/**
+ * Equipment catalog CRUD. Mirrors createDelayCategory/updateDelayCategory
+ * exactly — same role gate, same audited shape, same deactivate-never-delete
+ * rule (invariant #6): Equipment rows reference these, so a delete would
+ * orphan real job data.
+ *
+ * PRODUCTION_HEAD is allowed here alongside ADMIN, unlike the delay-category
+ * pair: the catalog is production's own vocabulary, not a system setting.
+ */
+export async function createEquipmentType(
+  actor: Actor,
+  input: CreateEquipmentTypeInput,
+): Promise<EquipmentTypeRef> {
+  const { familyId, code, name, defaultDesignCode, defaultSpecs } =
+    createEquipmentTypeSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const family = await tx.productFamily.findFirst({
+      where: { id: familyId, tenantId: actor.tenantId },
+    });
+    if (!family) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProductFamily", familyId });
+
+    const existing = await tx.equipmentTypeRef.findFirst({
+      where: { tenantId: actor.tenantId, code },
+    });
+    if (existing) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { code },
+        "An equipment type with this code already exists.",
+      );
+    }
+
+    // Defaults are filtered through the family's own field map, so the catalog
+    // cannot seed a job with a key no form will ever show.
+    const specs = defaultSpecs ? validateSpecs(family.code, defaultSpecs) : null;
+
+    return audited(tx, actor, async () => {
+      const row = await tx.equipmentTypeRef.create({
+        data: {
+          tenantId: actor.tenantId,
+          familyId,
+          code,
+          name,
+          defaultDesignCode,
+          defaultSpecs: specs === null ? undefined : (specs as never),
+        },
+      });
+      return {
+        result: row,
+        audit: {
+          action: "admin.createEquipmentType",
+          entityType: "EquipmentTypeRef",
+          entityId: row.id,
+          after: { code, name, familyId, defaultDesignCode, defaultSpecs: specs },
+          eventType: "EquipmentTypeCreated",
+          eventPayload: { equipmentTypeId: row.id, code, familyId },
+        },
+      };
+    });
+  });
+}
+
+export async function updateEquipmentType(
+  actor: Actor,
+  input: UpdateEquipmentTypeInput,
+): Promise<EquipmentTypeRef> {
+  const parsed = updateEquipmentTypeSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const row = await tx.equipmentTypeRef.findFirst({
+      where: { id: parsed.id, tenantId: actor.tenantId },
+      include: { family: true },
+    });
+    if (!row) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "EquipmentTypeRef", id: parsed.id });
+
+    const specs =
+      parsed.defaultSpecs === undefined
+        ? undefined
+        : parsed.defaultSpecs === null
+          ? null
+          : validateSpecs(row.family.code, parsed.defaultSpecs);
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.equipmentTypeRef.update({
+        where: { id: parsed.id },
+        data: {
+          name: parsed.name,
+          defaultDesignCode: parsed.defaultDesignCode,
+          active: parsed.active,
+          ...(specs === undefined ? {} : { defaultSpecs: specs as never }),
+        },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "admin.updateEquipmentType",
+          entityType: "EquipmentTypeRef",
+          entityId: updated.id,
+          before: {
+            name: row.name,
+            defaultDesignCode: row.defaultDesignCode,
+            active: row.active,
+            defaultSpecs: row.defaultSpecs,
+          },
+          after: {
+            name: updated.name,
+            defaultDesignCode: updated.defaultDesignCode,
+            active: updated.active,
+            defaultSpecs: updated.defaultSpecs,
+          },
+          eventType: "EquipmentTypeUpdated",
+          eventPayload: { equipmentTypeId: updated.id },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Inline client creation from the intake wizard.
+ *
+ * Named createClientRecord, not createClient: this file already exports
+ * createUser/createEmployee for *people*, and a bare `createClient` in a
+ * codebase full of "client user" language reads as the wrong thing.
+ */
+export async function createClientRecord(actor: Actor, input: CreateClientInput): Promise<Client> {
+  const { name, code } = createClientSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    if (code) {
+      const existing = await tx.client.findFirst({ where: { tenantId: actor.tenantId, code } });
+      if (existing) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { code },
+          "A client with this code already exists.",
+        );
+      }
+    }
+    return audited(tx, actor, async () => {
+      const client = await tx.client.create({ data: { tenantId: actor.tenantId, name, code } });
+      return {
+        result: client,
+        audit: {
+          action: "admin.createClient",
+          entityType: "Client",
+          entityId: client.id,
+          after: { name, code },
+          eventType: "ClientCreated",
+          eventPayload: { clientId: client.id, name },
+        },
+      };
+    });
+  });
 }
