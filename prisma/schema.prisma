@@ -190,6 +190,7 @@ model Organization {
   processTemplates ProcessTemplate[]
   jobs             Job[]
   componentTypes   ComponentTypeRef[]
+  equipmentTypes   EquipmentTypeRef[]
   operations       OperationRef[]
   testTypes        TestTypeRef[]
   drawingTypes     DrawingTypeRef[]
@@ -361,6 +362,32 @@ model ComponentTypeRef {
   @@map("component_type_refs")
 }
 
+/// Equipment catalog. The "type" of thing being built (HP Air Receiver,
+/// 2000 L), distinct from ProductFamily (the process route it follows) and
+/// from Equipment (one job's actual block). Carries tenant_id, so it is a
+/// tenant-root table and has its own RLS policy — see the migration.
+model EquipmentTypeRef {
+  id                Int      @id @default(autoincrement())
+  tenantId          Int      @map("tenant_id")
+  familyId          Int      @map("family_id")
+  /// Stable short code, e.g. HP-AIR-RCVR-2000
+  code              String
+  name              String
+  defaultDesignCode String?  @map("default_design_code")
+  /// Family-shaped design defaults, copied into Job.specs at intake.
+  defaultSpecs      Json?    @map("default_specs")
+  active            Boolean  @default(true)
+
+  tenant     Organization  @relation(fields: [tenantId], references: [id])
+  family     ProductFamily @relation(fields: [familyId], references: [id])
+  equipments Equipment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([familyId])
+  @@map("equipment_type_refs")
+}
+
 /// Canonical manufacturing operation. Grows per product family
 /// (e.g. EXPANSION for heat-exchanger tubes).
 model OperationRef {
@@ -496,10 +523,11 @@ model ProductFamily {
   name     String
   active   Boolean @default(true)
 
-  tenant    Organization      @relation(fields: [tenantId], references: [id])
-  templates ProcessTemplate[]
-  jobs      Job[]
-  routes    RouteTemplate[]
+  tenant         Organization       @relation(fields: [tenantId], references: [id])
+  templates      ProcessTemplate[]
+  jobs           Job[]
+  routes         RouteTemplate[]
+  equipmentTypes EquipmentTypeRef[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -673,15 +701,21 @@ model Equipment {
   name    String
   blockNo Int?    @map("block_no")
   remarks String?
+  /// Nullable: the seeded DE0463/DE0467 blocks came from CSV with free-text
+  /// labels and no catalog entry. Backfilling them would mean inventing
+  /// catalog rows, so they stay unlinked.
+  equipmentTypeId Int? @map("equipment_type_id")
 
-  job          Job                @relation(fields: [jobId], references: [id])
-  units        Unit[]
-  bomItems     BomItem[]
-  components   Component[]
-  scheduleRuns ScheduleRun[]
-  snapshots    ProgressSnapshot[]
+  job           Job                @relation(fields: [jobId], references: [id])
+  equipmentType EquipmentTypeRef?  @relation(fields: [equipmentTypeId], references: [id])
+  units         Unit[]
+  bomItems      BomItem[]
+  components    Component[]
+  scheduleRuns  ScheduleRun[]
+  snapshots     ProgressSnapshot[]
 
   @@index([jobId])
+  @@index([equipmentTypeId])
   @@map("equipments")
 }
 
