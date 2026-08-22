@@ -112,4 +112,72 @@ describe.skipIf(!RUN_DB)("client-snapshot.read (DB-backed)", async () => {
     const sup: Actor = { ...actorBase(job.tenantId), userId: 14, roles: [ROLES.SUPERVISOR] };
     await expect(loadClientPreview(sup, job.id)).rejects.toThrow();
   });
+
+  it("never exposes a Job column outside ClientJobView's documented key set", async () => {
+    // The portal's protection is the RETURN TYPE, not the query:
+    // client-snapshot.read.ts:103 calls tx.job.findMany with no `select`, so it
+    // loads every column of Job — including targetDispatchDate, which is
+    // DESPL's internal buffer and must never reach a client. Nothing asserted
+    // that until now. A key-set comparison (not a spot check) means any future
+    // column accidentally spread into the view fails here instead of shipping.
+    const allowed = new Set([
+      "jobId",
+      "jobNumber",
+      "equipmentName",
+      "hasUpdate",
+      "asOf",
+      "overallPct",
+      "forecastDispatch",
+      "units",
+      "unitsUnderInspection",
+    ]);
+
+    const { job, clientUser } = await fixture();
+    const asClient: Actor = { ...actorBase(job.tenantId), userId: clientUser.id, clientId: clientUser.clientId, roles: [ROLES.CLIENT_VIEWER] };
+    const views = await loadClientPortalView(asClient);
+    expect(views.length).toBeGreaterThan(0);
+    for (const v of views) {
+      const unexpected = Object.keys(v).filter((k) => !allowed.has(k));
+      expect(unexpected, `unexpected keys on ClientJobView for job ${v.jobNumber}`).toEqual([]);
+    }
+  });
+
+  it("sources forecastDispatch from the committed date, never the internal target", async () => {
+    const { job, clientUser } = await fixture();
+    // DESPL-320's committedDeliveryDate is null in the seed (see seed.ts:1018) —
+    // give it a real value here so forecastDispatch is actually populated and
+    // the assertion below is meaningful, not vacuously skipped.
+    const original = await owner.job.findUniqueOrThrow({
+      where: { id: job.id },
+      select: { committedDeliveryDate: true, targetDispatchDate: true },
+    });
+    await owner.job.update({
+      where: { id: job.id },
+      data: {
+        committedDeliveryDate: new Date("2030-06-15T00:00:00.000Z"),
+        targetDispatchDate: new Date("2001-01-01T00:00:00.000Z"),
+      },
+    });
+
+    try {
+      const asClient: Actor = { ...actorBase(job.tenantId), userId: clientUser.id, clientId: clientUser.clientId, roles: [ROLES.CLIENT_VIEWER] };
+      const views = await loadClientPortalView(asClient);
+      const view = views.find((v) => v.jobNumber === job.jobNumber);
+      expect(view).toBeDefined();
+      if (view && "forecastDispatch" in view) {
+        expect(view.forecastDispatch).not.toContain("2001-01-01");
+        expect(view.forecastDispatch).toBe("2030-06-15T00:00:00.000Z");
+      }
+    } finally {
+      // Revert unconditionally (even on assertion failure) — this fixture
+      // job is shared with the other tests in this describe block.
+      await owner.job.update({
+        where: { id: job.id },
+        data: {
+          committedDeliveryDate: original.committedDeliveryDate,
+          targetDispatchDate: original.targetDispatchDate,
+        },
+      });
+    }
+  });
 });
