@@ -958,6 +958,32 @@ body {
 .theme-industrial .feed-row:last-child { border-bottom: none; }
 .theme-industrial .feed-row .when { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
 
+/* new-job wizard (/jobs/new) — step rail + family-card selection states.
+   Everything else in the wizard reuses .card/.hd/.dept-grid/.dept-card/
+   .drop/.d-row/.ws-detail/.sh-kv/.emp-grid/.emp-hint/.chip verbatim. */
+.theme-industrial .wiz-steps { display: flex; gap: 4px; margin-bottom: 16px; }
+.theme-industrial .wiz-step { flex: 1; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 11.5px; color: var(--muted); }
+.theme-industrial .wiz-step-n { width: 20px; height: 20px; min-width: 20px; border-radius: 50%; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--muted); }
+.theme-industrial .wiz-step.done { border-color: var(--s-complete); }
+.theme-industrial .wiz-step.done .wiz-step-n { background: var(--s-complete); color: #06210c; }
+.theme-industrial .wiz-step.on { border-color: var(--accent); background: rgba(255, 122, 26, .06); }
+.theme-industrial .wiz-step.on .wiz-step-n { background: var(--accent); color: #000; }
+.theme-industrial .wiz-step.on, .theme-industrial .wiz-step.done { color: var(--text); }
+.theme-industrial button.wiz-step-btn { all: unset; display: flex; align-items: center; gap: 8px; cursor: pointer; width: 100%; }
+.theme-industrial .fam-card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; transition: border-color .15s; }
+.theme-industrial .fam-card.pickable { cursor: pointer; }
+.theme-industrial .fam-card.pickable:hover { border-color: var(--hover-border); }
+.theme-industrial .fam-card.sel { border-color: var(--accent); background: rgba(255, 122, 26, .05); }
+.theme-industrial .fam-card.disabled { opacity: .6; }
+.theme-industrial .serial-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.theme-industrial .serial-row input { width: 108px; }
+
+.skel { display: inline-block; background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; border-radius: 4px; animation: skel-shimmer 1.4s ease infinite; }
+@keyframes skel-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; background: var(--surface-2); }
+}
+
 /* job detail — Gantt + BOM (§9.6), ported 1:1 from the mockup */
 .theme-industrial .gantt { padding: 10px 16px 18px; overflow-x: auto; }
 .theme-industrial .g-months { display: flex; margin-left: 190px; color: var(--muted); font-size: 10px; border-bottom: 1px solid var(--border); padding-bottom: 4px; position: relative; }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getActor } from "@/lib/authz";
+import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { loadJobs } from "@/lib/services/jobs.read";
 import { StageSpine } from "@/components/industrial/stage-spine";
 
@@ -25,16 +25,22 @@ export default async function JobsList() {
   if (actor.clientId !== null) redirect("/portal");
 
   const jobs = await loadJobs(actor);
+  const canCreate = hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return (
     <>
       <div className="page-h">
         <h1>Jobs</h1>
         <span className="sub">{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
+        {canCreate && (
+          <Link href="/jobs/new" className="btn btn-accent" style={{ marginLeft: "auto" }}>+ New job</Link>
+        )}
       </div>
 
       {jobs.length === 0 ? (
-        <p className="note">No jobs yet.</p>
+        <p className="note">
+          No jobs yet.{canCreate && <> <Link href="/jobs/new">Create the first one →</Link></>}
+        </p>
       ) : (
         <div className="card">
           <table>
