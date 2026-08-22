@@ -289,3 +289,71 @@ export const createClientSchema = z
   })
   .strict();
 export type CreateClientInput = z.infer<typeof createClientSchema>;
+
+/**
+ * Job intake (docs/superpowers/specs/2026-08-22-job-intake-design.md §4.1).
+ *
+ * `.strict()` with NO actual_* or *_at field (invariant #1). orderDate,
+ * committedDeliveryDate and targetDispatchDate are PLANNING dates a planner
+ * legitimately supplies — the same distinction schedule.service.ts already
+ * draws for its own projectStartDate/requiredDeliveryDate inputs. Every
+ * `actual_*` on this job will be written by process.service.ts from the DB
+ * clock and nowhere else.
+ */
+export const createJobSchema = z
+  .object({
+    clientId: id,
+    familyId: id,
+    templateVersionId: id,
+    calendarId: id.nullable().default(null),
+    jobNumber: z.string().trim().min(1, "A job number is required"),
+    clientOrderNo: z.string().trim().min(1).nullable().default(null),
+    projectName: z.string().trim().min(1).nullable().default(null),
+    poRef: z.string().trim().min(1).nullable().default(null),
+    designCode: z.string().trim().min(1).nullable().default(null),
+    orderDate: z.coerce.date().nullable().default(null),
+    committedDeliveryDate: z.coerce.date().nullable().default(null),
+    targetDispatchDate: z.coerce.date().nullable().default(null),
+    // Matches enum JobPriority at schema.prisma:60 — URGENT, not CRITICAL.
+    priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
+    remarks: z.string().trim().min(1).nullable().default(null),
+    /** Filtered through the family's SPEC_FIELDS in the service. */
+    specs: z.record(z.string(), z.unknown()).nullable().default(null),
+    /** TemplateProcess.code values this client skips, e.g. PWHT. */
+    excludedProcessCodes: z.array(z.string().trim().min(1)).default([]),
+    equipments: z
+      .array(
+        z
+          .object({
+            equipmentTypeId: id.nullable().default(null),
+            name: z.string().trim().min(1, "Each equipment block needs a name"),
+            blockNo: z.number().int().positive().nullable().default(null),
+            remarks: z.string().trim().min(1).nullable().default(null),
+            serials: z
+              .array(z.string().trim().min(1))
+              .min(1, "Each equipment block needs at least one serial number"),
+          })
+          .strict()
+          .refine((b) => new Set(b.serials).size === b.serials.length, {
+            message: "Serial numbers must be unique within an equipment block",
+            path: ["serials"],
+          }),
+      )
+      .min(1, "A job needs at least one equipment block"),
+    /** Clone this QCP template's items onto the new job. */
+    qcpTemplateSourceId: id.nullable().default(null),
+    /** Copy this equipment's BOM lines into the first equipment block. */
+    copyBomFromEquipmentId: id.nullable().default(null),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.targetDispatchDate == null ||
+      v.committedDeliveryDate == null ||
+      v.targetDispatchDate <= v.committedDeliveryDate,
+    {
+      message: "The target dispatch date cannot be later than the date committed to the client",
+      path: ["targetDispatchDate"],
+    },
+  );
+export type CreateJobInput = z.infer<typeof createJobSchema>;
