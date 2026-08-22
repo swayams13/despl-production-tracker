@@ -2,7 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
 import { createJob, type CreateJobResult } from "@/lib/services/job-intake.service";
-import { createClientRecord, createEquipmentType } from "@/lib/services/admin.service";
+import { createClientRecord, createEquipmentType, updateEquipmentType } from "@/lib/services/admin.service";
 import { loadTemplateProcesses } from "@/lib/services/job-intake.read";
 import { generateSchedule } from "@/lib/services/schedule.service";
 import { isAppError } from "@/lib/shared/errors";
@@ -11,6 +11,7 @@ import type {
   CreateJobInput,
   CreateClientInput,
   CreateEquipmentTypeInput,
+  UpdateEquipmentTypeInput,
 } from "@/lib/shared/schemas";
 
 export type CreateJobActionResult = ActionResult & {
@@ -92,6 +93,20 @@ export async function createEquipmentTypeAction(
 ): Promise<CreateEquipmentTypeActionResult> {
   try {
     const row = await createEquipmentType(await requireActor(), input);
+    revalidatePath("/admin/equipment-types");
+    return { ok: true, equipmentTypeId: row.id };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+export type UpdateEquipmentTypeActionResult = ActionResult & { equipmentTypeId?: number };
+
+export async function updateEquipmentTypeAction(
+  input: UpdateEquipmentTypeInput,
+): Promise<UpdateEquipmentTypeActionResult> {
+  try {
+    const row = await updateEquipmentType(await requireActor(), input);
     revalidatePath("/admin/equipment-types");
     return { ok: true, equipmentTypeId: row.id };
   } catch (e) {

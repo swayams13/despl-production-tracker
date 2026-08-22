@@ -142,6 +142,47 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
   });
 }
 
+export interface EquipmentTypeAdminRow {
+  id: number;
+  familyId: number;
+  familyName: string;
+  code: string;
+  name: string;
+  defaultDesignCode: string | null;
+  defaultSpecs: Record<string, unknown> | null;
+  active: boolean;
+}
+
+/**
+ * Every equipment type — active and inactive, with its family name — for the
+ * `/admin/equipment-types` catalog screen. Deliberately NOT
+ * `loadIntakeOptions().equipmentTypes`: that list is active-only and scoped
+ * to exactly what the wizard's dropdown needs, which is wrong here — this
+ * screen must show (and let an admin reactivate) inactive rows too.
+ */
+export async function loadEquipmentTypeAdmin(actor: Actor): Promise<EquipmentTypeAdminRow[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const rows = await tx.equipmentTypeRef.findMany({
+      where: { tenantId: actor.tenantId },
+      orderBy: [{ family: { name: "asc" } }, { name: "asc" }],
+      include: { family: { select: { name: true } } },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      familyId: r.familyId,
+      familyName: r.family.name,
+      code: r.code,
+      name: r.name,
+      defaultDesignCode: r.defaultDesignCode,
+      defaultSpecs: (r.defaultSpecs as Record<string, unknown> | null) ?? null,
+      active: r.active,
+    }));
+  });
+}
+
 /** The process list for step 2's include/exclude checkboxes. */
 export async function loadTemplateProcesses(
   actor: Actor,

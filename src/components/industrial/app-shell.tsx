@@ -208,10 +208,18 @@ export function AppShell({
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
 
-  const nav =
-    userRole === "ADMIN" || userRole === "MANAGEMENT"
-      ? [...NAV, { group: "Admin", items: [{ href: "/admin", label: "Admin", icon: icons.admin }] }]
-      : NAV;
+  // "Equipment types" listed before "/admin" so pathname.startsWith() picks
+  // the more specific match first (see `active` below) when on
+  // /admin/equipment-types — otherwise the shorter "/admin" href would win.
+  const adminGroupItems = [
+    ...(userRole === "ADMIN" || userRole === "PRODUCTION_HEAD"
+      ? [{ href: "/admin/equipment-types", label: "Equipment types", icon: icons.admin }]
+      : []),
+    ...(userRole === "ADMIN" || userRole === "MANAGEMENT"
+      ? [{ href: "/admin", label: "Admin", icon: icons.admin }]
+      : []),
+  ];
+  const nav = adminGroupItems.length > 0 ? [...NAV, { group: "Admin", items: adminGroupItems }] : NAV;
   const active = nav.flatMap((g) => g.items).find((i) => pathname.startsWith(i.href));
 
   // Job switcher badge: the job the URL is scoped to (/jobs/:id), falling
