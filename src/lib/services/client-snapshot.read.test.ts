@@ -144,40 +144,50 @@ describe.skipIf(!RUN_DB)("client-snapshot.read (DB-backed)", async () => {
 
   it("sources forecastDispatch from the committed date, never the internal target", async () => {
     const { job, clientUser } = await fixture();
-    // DESPL-320's committedDeliveryDate is null in the seed (see seed.ts:1018) —
-    // give it a real value here so forecastDispatch is actually populated and
-    // the assertion below is meaningful, not vacuously skipped.
-    const original = await owner.job.findUniqueOrThrow({
-      where: { id: job.id },
-      select: { committedDeliveryDate: true, targetDispatchDate: true },
-    });
-    await owner.job.update({
-      where: { id: job.id },
+
+    // A throwaway job, not a mutation of DESPL-320: workspace.read.test.ts
+    // (:106) hard-asserts DESPL-320's own committedDeliveryDate is null as a
+    // seed invariant, and this file's LOCK_KEY only coordinates against
+    // client-snapshot.service.test.ts — workspace.read.test.ts isn't blocked
+    // by it, and vitest runs files across parallel workers here. Mutating
+    // DESPL-320's dates in place (even with a revert) left a real, if
+    // narrow, race window against that assertion. A fresh job nothing else
+    // references can't collide with anything, so create-then-delete
+    // replaces mutate-then-revert.
+    const throwaway = await owner.job.create({
       data: {
+        tenantId: job.tenantId,
+        publicId: crypto.randomUUID(),
+        clientId: job.clientId,
+        familyId: job.familyId,
+        templateVersionId: job.templateVersionId,
+        jobNumber: `TEST-PORTAL-DATES-${Date.now()}`,
         committedDeliveryDate: new Date("2030-06-15T00:00:00.000Z"),
         targetDispatchDate: new Date("2001-01-01T00:00:00.000Z"),
       },
     });
 
     try {
+      // loadClientPortalView only puts forecastDispatch on a job once it has
+      // a VERIFIED snapshot — insert one directly rather than routing
+      // through publishSnapshot/verifySnapshot, which need real unit spines
+      // this throwaway job has no reason to have.
+      await owner.progressSnapshot.create({
+        data: { tenantId: job.tenantId, jobId: throwaway.id, asOf: new Date(), overallPct: 0, status: "VERIFIED" },
+      });
+
       const asClient: Actor = { ...actorBase(job.tenantId), userId: clientUser.id, clientId: clientUser.clientId, roles: [ROLES.CLIENT_VIEWER] };
       const views = await loadClientPortalView(asClient);
-      const view = views.find((v) => v.jobNumber === job.jobNumber);
+      const view = views.find((v) => v.jobNumber === throwaway.jobNumber);
       expect(view).toBeDefined();
       if (view && "forecastDispatch" in view) {
         expect(view.forecastDispatch).not.toContain("2001-01-01");
         expect(view.forecastDispatch).toBe("2030-06-15T00:00:00.000Z");
       }
     } finally {
-      // Revert unconditionally (even on assertion failure) — this fixture
-      // job is shared with the other tests in this describe block.
-      await owner.job.update({
-        where: { id: job.id },
-        data: {
-          committedDeliveryDate: original.committedDeliveryDate,
-          targetDispatchDate: original.targetDispatchDate,
-        },
-      });
+      // ProgressSnapshot.job is onDelete: Cascade — deleting the job takes
+      // its snapshot row with it. Zero residue either way.
+      await owner.job.delete({ where: { id: throwaway.id } });
     }
   });
 });
