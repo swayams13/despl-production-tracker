@@ -98,9 +98,33 @@ model EquipmentTypeRef {
 Modelled on the existing `*Ref` tables (`ComponentTypeRef`, `OperationRef`,
 `TestTypeRef`) — same tenant scoping, same `active` flag, same unique shape.
 
+**It carries `tenant_id`, so it is a tenant-root table and MUST get a Row
+Level Security policy in the same migration.** Every other `*Ref` table is in
+the `tenant_tables` array of `20260813052000_rls_fail_closed`. A tenant-root
+table with no policy is a silent cross-tenant read — precisely the gap the
+init migration's own comment warns about. Follow the precedent set when the
+welding module added `welders`
+(`20260815130000_welding_module/migration.sql:129`):
+
+```sql
+ALTER TABLE "equipment_type_refs" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON "equipment_type_refs"
+  USING (tenant_id = nullif(current_setting('app.tenant_id', true), '')::int)
+  WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::int);
+```
+
+Nothing currently *proves* that every `tenant_id`-bearing table has a policy —
+`db-guard.ts` checks the connected role, not policy coverage. This work adds
+that test: query `information_schema` for every table with a `tenant_id`
+column and assert each has `rowsecurity = true` and a `tenant_isolation`
+policy. It costs ~15 lines and closes this class of bug permanently rather
+than one table at a time.
+
 `Equipment` gains `equipmentTypeId Int?` — **nullable**, so the seeded DE0463
 equipment blocks (created from CSV with free-text labels and no catalog entry)
 remain valid without a backfill that would have to invent catalog rows.
+`Equipment` itself is a job-child table and correctly has no RLS of its own —
+it is reachable only through `jobs`, which does.
 
 ### 3.2 Job dates
 
@@ -131,9 +155,24 @@ update: `workspace.read.ts` (9 refs), `job-health.ts` + its test,
 commit, with the test suite green, before any wizard code.
 
 **Client visibility:** `targetDispatchDate` must not reach the portal.
-`client-snapshot.read.ts` selects fields explicitly, so the new column is
-excluded by default — the test asserting the client snapshot's field list
-must be extended to prove it stays excluded.
+
+The protection today is the **return type**, not the query.
+`client-snapshot.read.ts:103` calls `tx.job.findMany` with no `select`, so it
+loads the whole `Job` row including any column added to it; what keeps the
+portal clean is that `ClientJobView` is a closed union with an explicit field
+list, and each view object is built field by field. `targetDispatchDate`
+therefore cannot leak through the type — but nothing *asserts* that, and no
+field-list test exists to extend.
+
+Two consequences for this work:
+
+- The portal's `forecastDispatch` is currently sourced straight from
+  `job.deliveryDate` (lines 141 and 200). After the split it must read
+  `committedDeliveryDate`. Both call sites, not one.
+- A new test must **add** the assertion that a `ClientJobView` contains no
+  key outside its documented list. Written as a key-set comparison rather
+  than a spot check, so any future column added to `Job` and accidentally
+  spread into the view fails the test rather than reaching a client.
 
 ### 3.3 What is deliberately *not* added
 
