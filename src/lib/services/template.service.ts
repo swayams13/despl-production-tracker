@@ -195,6 +195,15 @@ export async function saveDraftVersion(
   }
 
   return withTenant(actor.tenantId, async (tx) => {
+    // Lock the row FOR UPDATE before the staleness read: same precedent as
+    // _shared.ts's persistScheduleRun/lockProcessPlanForUpdate. Without this,
+    // two concurrent saves starting from the same updatedAt both pass the
+    // plain-read staleness check and the second's unconditional final update
+    // silently clobbers the first author's whole pass. With the lock, a
+    // second concurrent call blocks here until the first transaction
+    // (including its final updatedAt bump) commits, so its own findFirst
+    // read below sees the new stamp and correctly throws STALE_WRITE.
+    await tx.$queryRaw`SELECT id FROM process_template_versions WHERE id = ${versionId} FOR UPDATE`;
     const version = await tx.processTemplateVersion.findFirst({
       where: { id: versionId, template: { tenantId: actor.tenantId } },
     });

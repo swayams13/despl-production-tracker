@@ -316,4 +316,41 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("template.service — saveDraftVersio
     expect(await owner.templateProcess.count({ where: { versionId: draft.id } })).toBe(countBefore);
     await owner.processTemplateVersion.delete({ where: { id: draft.id } });
   });
+
+  /**
+   * Genuine two-transaction race, not a simulated one: both calls fire via
+   * Promise.all against the same draft with the same expectedUpdatedAt. The
+   * `FOR UPDATE` lock this task added makes the second call's transaction
+   * block on Postgres until the first one commits (including its updatedAt
+   * bump), so the second's own findFirst read happens strictly after that
+   * commit and sees the new stamp — no artificial delay needed, the lock
+   * itself is what forces the interleaving. Before the fix this test would
+   * have failed: both calls would pass staleness and the loser would
+   * silently clobber the winner's processes instead of throwing.
+   */
+  it("serializes concurrent saves — the loser sees the winner's new stamp and gets STALE_WRITE", async () => {
+    const draft = await freshDraft();
+    const loaded = await owner.processTemplateVersion.findUniqueOrThrow({ where: { id: draft.id } });
+    const dept = await owner.department.findFirstOrThrow({ where: { tenantId: 1 } });
+
+    const racer = (key: string) =>
+      saveDraftVersion(actor(), {
+        versionId: draft.id,
+        expectedUpdatedAt: loaded.updatedAt,
+        processes: [proc({ key, seq: 1, code: key, name: key, defaultDepartmentId: dept.id })],
+        edges: [],
+      });
+
+    const results = await Promise.allSettled([racer("a"), racer("b")]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: ERROR_CODES.STALE_WRITE });
+    // The loser's payload never landed — exactly one process survives, from the winner only.
+    expect(await owner.templateProcess.count({ where: { versionId: draft.id } })).toBe(1);
+
+    await owner.processTemplateVersion.delete({ where: { id: draft.id } });
+  });
 });
