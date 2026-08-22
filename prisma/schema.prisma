@@ -557,6 +557,10 @@ model ProcessTemplateVersion {
   publishedAt DateTime?      @map("published_at")
   publishedBy Int?           @map("published_by")
   notes       String?
+  /// Optimistic-lock token for the draft editor. Nullable because existing
+  /// rows predate it; a null reads as "never edited since the column landed"
+  /// and the service treats a null-vs-null comparison as a match.
+  updatedAt   DateTime?      @updatedAt @map("updated_at")
 
   template  ProcessTemplate   @relation(fields: [templateId], references: [id])
   processes TemplateProcess[]
