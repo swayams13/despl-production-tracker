@@ -207,6 +207,132 @@ export const updateStandardDurationsSchema = z
   .strict();
 export type UpdateStandardDurationsInput = z.infer<typeof updateStandardDurationsSchema>;
 
+// ── Process route authoring ─────────────────────────────────────────────
+
+/** Warning codes publishVersion can return; the caller echoes them back to confirm they were shown. */
+export const TEMPLATE_WARNING_CODES = [
+  "PROVISIONAL_DURATIONS",
+  "MULTIPLE_TERMINALS",
+  "EMPTY_WORK_ORDER_STAGES",
+  "ENVELOPE_MISMATCH",
+] as const;
+export type TemplateWarningCode = (typeof TEMPLATE_WARNING_CODES)[number];
+
+/** Start a route for a family that has none. Creates an empty v1 DRAFT. */
+export const createTemplateSchema = z
+  .object({
+    familyId: id,
+    name: z.string().trim().min(1, "A name is required"),
+  })
+  .strict();
+export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
+
+/**
+ * Deep-copy a version into a new DRAFT. Omit `targetFamilyId` to revise the
+ * same template (next version); supply it to start a new family's route from
+ * an existing one, which needs a `name` for the new template.
+ */
+export const cloneVersionSchema = z
+  .object({
+    sourceVersionId: id,
+    targetFamilyId: id.optional(),
+    name: z.string().trim().min(1).optional(),
+    notes: z.string().trim().min(1, "Say why this version exists"),
+  })
+  .strict()
+  .refine((v) => v.targetFamilyId == null || v.name != null, {
+    message: "A name is required when cloning into another product family",
+    path: ["name"],
+  });
+export type CloneVersionInput = z.infer<typeof cloneVersionSchema>;
+
+/**
+ * Full replace of a DRAFT's contents. `key` is a client-side stable handle so
+ * edges can reference rows that have no database id yet.
+ *
+ * `provisional` and the durations are cross-checked: a process may not claim
+ * confirmed durations it does not have, nor hide real ones behind the flag.
+ * That pairing is invariant #10's guard rail, enforced here and again in the
+ * service.
+ */
+export const saveDraftVersionSchema = z
+  .object({
+    versionId: id,
+    /** The `updatedAt` the editor loaded. Null is legitimate for rows that predate the column. */
+    expectedUpdatedAt: z.coerce.date().nullable(),
+    processes: z
+      .array(
+        z
+          .object({
+            key: z.string().trim().min(1),
+            seq: z.number().int().positive(),
+            code: z.string().trim().min(1),
+            name: z.string().trim().min(1),
+            mainActivities: z.string().trim().nullable().default(null),
+            defaultDepartmentId: id,
+            durationMinDays: z.number().int().positive().nullable().default(null),
+            durationMaxDays: z.number().int().positive().nullable().default(null),
+            envelopeStartByMinDays: z.number().int().nullable().default(null),
+            envelopeStartByMaxDays: z.number().int().nullable().default(null),
+            envelopeFinishByMinDays: z.number().int().nullable().default(null),
+            envelopeFinishByMaxDays: z.number().int().nullable().default(null),
+            workOrderStages: z.array(z.number().int().positive()).default([]),
+            optional: z.boolean().default(false),
+            provisional: z.boolean().default(true),
+          })
+          .strict()
+          .refine(
+            (p) =>
+              p.provisional ||
+              (p.durationMinDays != null && p.durationMaxDays != null),
+            {
+              message:
+                "A confirmed process needs both a minimum and a maximum duration. Mark it provisional instead.",
+              path: ["durationMinDays"],
+            },
+          )
+          .refine(
+            (p) =>
+              p.durationMinDays == null ||
+              p.durationMaxDays == null ||
+              p.durationMinDays <= p.durationMaxDays,
+            {
+              message: "Minimum duration cannot exceed the maximum",
+              path: ["durationMaxDays"],
+            },
+          ),
+      )
+      .default([]),
+    edges: z
+      .array(
+        z
+          .object({
+            processKey: z.string().trim().min(1),
+            predecessorKey: z.string().trim().min(1),
+            type: z.enum(["FINISH_TO_START", "START_TO_START_WITH_OVERLAP"]),
+            // Negative lag is legitimate concurrent work (invariant #11), so
+            // this is a plain int with no positivity constraint.
+            lagDays: z.number().int(),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .strict();
+export type SaveDraftVersionInput = z.infer<typeof saveDraftVersionSchema>;
+
+/** Publish a DRAFT. `notes` is mandatory — it is what an auditor reads later. */
+export const publishVersionSchema = z
+  .object({
+    versionId: id,
+    notes: z.string().trim().min(1, "Say where this route's data came from"),
+    acknowledgedWarnings: z.array(z.enum(TEMPLATE_WARNING_CODES)).default([]),
+    /** Optional printed lead time in days to check the computed envelope against (invariant #10). */
+    expectedEnvelopeDays: z.number().int().positive().nullable().default(null),
+  })
+  .strict();
+export type PublishVersionInput = z.infer<typeof publishVersionSchema>;
+
 /** Claim an unassigned plan into the caller's own name (personal dashboards v1, SPEC §5.1). */
 export const claimPlanSchema = z.object({ processPlanId: id }).strict();
 export type ClaimPlanInput = z.infer<typeof claimPlanSchema>;
