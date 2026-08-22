@@ -208,12 +208,16 @@ export function AppShell({
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
 
-  // "Equipment types" listed before "/admin" so pathname.startsWith() picks
-  // the more specific match first (see `active` below) when on
-  // /admin/equipment-types — otherwise the shorter "/admin" href would win.
+  // "Equipment types" / "Process routes" listed before "/admin" so
+  // pathname.startsWith() picks the more specific match first (see `active`
+  // below) when on /admin/equipment-types or /admin/templates — otherwise
+  // the shorter "/admin" href would win.
   const adminGroupItems = [
     ...(userRole === "ADMIN" || userRole === "PRODUCTION_HEAD"
-      ? [{ href: "/admin/equipment-types", label: "Equipment types", icon: icons.admin }]
+      ? [
+          { href: "/admin/equipment-types", label: "Equipment types", icon: icons.admin },
+          { href: "/admin/templates", label: "Process routes", icon: icons.admin },
+        ]
       : []),
     ...(userRole === "ADMIN" || userRole === "MANAGEMENT"
       ? [{ href: "/admin", label: "Admin", icon: icons.admin }]
