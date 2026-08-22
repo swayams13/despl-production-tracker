@@ -67,6 +67,10 @@ export const ERROR_CODES = {
   SNAPSHOT_NOT_PUBLISHED: "SNAPSHOT_NOT_PUBLISHED",
   /** publishSnapshot: an earlier day's batch is still PUBLISHED (never verified/rejected). */
   SNAPSHOT_PRIOR_DAY_PENDING: "SNAPSHOT_PRIOR_DAY_PENDING",
+  /** A job tried to pin a process route that is still a draft. */
+  TEMPLATE_VERSION_NOT_PUBLISHED: "TEMPLATE_VERSION_NOT_PUBLISHED",
+  /** createJob: this job number is already used in this tenant. */
+  DUPLICATE_JOB_NUMBER: "DUPLICATE_JOB_NUMBER",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -110,6 +114,9 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "There is no published update waiting for review right now.",
   SNAPSHOT_PRIOR_DAY_PENDING:
     "An earlier day's update is still awaiting Management review. It must be verified or rejected before a new one can be published.",
+  TEMPLATE_VERSION_NOT_PUBLISHED:
+    "That process route is still a draft and cannot be used for a job. Publish it first.",
+  DUPLICATE_JOB_NUMBER: "A job with this number already exists.",
 };
 
 /**
