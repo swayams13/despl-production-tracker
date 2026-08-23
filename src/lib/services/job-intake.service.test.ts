@@ -263,6 +263,44 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     expect(await owner.auditLog.count({ where: { action: "job.create" } })).toBe(before + 1);
   });
 
+  it("notifies every responsible department's supervisors + other Production Heads, but not the creator", async () => {
+    const refs = await seedRefs();
+    const ph = await owner.user.findFirstOrThrow({
+      where: { tenantId: 1, active: true, roles: { some: { role: { code: "PRODUCTION_HEAD" } } } },
+    });
+
+    const r = await createJob(
+      actor({ userId: ph.id, name: ph.name, email: ph.email, roles: [ROLES.PRODUCTION_HEAD] }),
+      base({ jobNumber: "TEST-NOTIFY-1" }, refs),
+    );
+    created.push(r.jobId);
+
+    const deptIds = [
+      ...new Set(
+        (await owner.templateProcess.findMany({ where: { versionId: refs.version.id }, select: { defaultDepartmentId: true } })).map(
+          (p) => p.defaultDepartmentId,
+        ),
+      ),
+    ];
+    const supervisorIds = (
+      await owner.user.findMany({
+        where: { tenantId: 1, active: true, departments: { some: { departmentId: { in: deptIds } } } },
+        select: { id: true },
+      })
+    ).map((u) => u.id);
+    const otherPhIds = (
+      await owner.user.findMany({
+        where: { tenantId: 1, active: true, roles: { some: { role: { code: "PRODUCTION_HEAD" } } }, id: { not: ph.id } },
+        select: { id: true },
+      })
+    ).map((u) => u.id);
+    const expectedRecipients = new Set([...supervisorIds, ...otherPhIds].filter((id) => id !== ph.id));
+
+    const notifs = await owner.notification.findMany({ where: { type: "JOB_CREATED", entityType: "Job", entityId: r.jobId } });
+    expect(new Set(notifs.map((n) => n.recipientId))).toEqual(expectedRecipients);
+    expect(notifs.every((n) => n.recipientId !== ph.id)).toBe(true);
+  });
+
   it("rolls back everything when the transaction fails part-way", async () => {
     const refs = await seedRefs();
     const auditBefore = await owner.auditLog.count({ where: { action: "job.create" } });
