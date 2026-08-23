@@ -130,6 +130,16 @@ function parseStages(text: string): number[] {
     .filter((n) => Number.isInteger(n) && n > 0);
 }
 
+/**
+ * Service-layer refusals carry the specific, process-naming sentence in
+ * `detail.reason` (see template.service.ts's validateVersionForPublish
+ * docstring) — the generic per-code `message` is only a fallback for the
+ * refusals that don't set one (e.g. STALE_WRITE).
+ */
+function refusalMessage(message: string, detail: Record<string, unknown> | undefined): string {
+  return typeof detail?.reason === "string" ? detail.reason : message;
+}
+
 /** Best-effort extra context appended to a toast — not every refusal carries it. */
 function formatDetail(detail: Record<string, unknown> | undefined): string {
   if (!detail) return "";
@@ -271,8 +281,9 @@ export function VersionEditorClient({ view }: { view: VersionEditorView }) {
           toast.error(r.message);
           return;
         }
+        const msg = refusalMessage(r.message, r.detail);
         const extra = formatDetail(r.detail);
-        toast.error(extra ? `${r.message} (${extra})` : r.message);
+        toast.error(extra ? `${msg} (${extra})` : msg);
         return;
       }
       setUpdatedAtToken(r.updatedAt ?? null);
@@ -683,7 +694,7 @@ function PublishDialog({ versionId, onClose }: { versionId: number; onClose: () 
         return;
       }
       const codes = (r.detail?.processCodes as string[] | undefined) ?? [];
-      setBlocking({ message: r.message, processCodes: codes });
+      setBlocking({ message: refusalMessage(r.message, r.detail), processCodes: codes });
     });
   };
 
