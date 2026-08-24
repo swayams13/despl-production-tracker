@@ -398,6 +398,12 @@ model OperationRef {
   defaultDepartmentId Int?    @map("default_department_id")
   /// Column name in DESPL's live tracker CSVs, where one exists.
   sourceColumn        String? @map("source_column")
+  /// Which of the 36 lead-time processes (`JobProcess.code`, as a number)
+  /// this component-level operation rolls up into. Lets a BOM component's
+  /// route step resolve its gating QCP checkpoints via
+  /// `QcpItemProcess` → `JobProcess`. Null where the seed's
+  /// `canonicalOperations` entry carries no mapping.
+  leadTimeProcessSeq  Int?    @map("lead_time_process_seq")
   active              Boolean @default(true)
 
   tenant            Organization         @relation(fields: [tenantId], references: [id])
