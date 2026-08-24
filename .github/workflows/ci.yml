@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, demo]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: despl_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # DIRECT_URL: table owner, used by `prisma migrate deploy` and by
+      # provision-db-role.sql. DATABASE_URL: the despl_web login role that
+      # migration 20260813051500_rls_and_app_role's `despl_app` permission
+      # bundle gets granted to below — same two-role split described in
+      # scripts/provision-db-role.sql and .env.example, just with a
+      # throwaway CI password instead of a real one.
+      # connection_limit caps match .env.test's tuning — left uncapped,
+      # Prisma's cpus*2+1 default blows past Postgres's max_connections (100)
+      # once vitest's worker threads run DB-gated tests in parallel.
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/despl_ci?connection_limit=3
+      DATABASE_URL: postgresql://despl_web:ci_only_password@localhost:5432/despl_ci?connection_limit=10
+      AUTH_SECRET: ci_only_secret_not_used_outside_github_actions_00000000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.20.2
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+      - run: pnpm typecheck
+
+      # Applies every migration against a throwaway database as the table
+      # owner (DIRECT_URL) — the exact step that was missing from the
+      # production deploy path and caused the 2026-08-24 outage. Runs here,
+      # against every PR, before anything can reach main.
+      - run: pnpm exec prisma migrate deploy
+
+      - name: Provision despl_web role
+        run: psql "$DIRECT_URL" -v despl_web_password=ci_only_password -f scripts/provision-db-role.sql
+
+      # DB-gated tests read fixtures (e.g. DESPL-320, its ProcessPlan rows)
+      # that only exist after seeding + schedule bootstrap — same two steps
+      # local dev runs before `pnpm test:db`. Order matters: db:seed must run
+      # before any DB-gated test touches this database, since those tests
+      # create throwaway Organization rows they never clean up (by design,
+      # per .env.test) — run afterwards, `organization.findFirst()` in
+      # scripts/bootstrap-schedule.ts could resolve to one of those instead
+      # of the real seeded tenant.
+      - run: pnpm db:seed
+      - run: pnpm db:bootstrap
+
+      - run: pnpm test
+      - name: DB-gated tests
+        run: pnpm exec vitest run
+        env:
+          RUN_DB_TESTS: "1"
+
+      - run: pnpm build
