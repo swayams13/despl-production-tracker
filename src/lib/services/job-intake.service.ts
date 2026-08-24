@@ -5,6 +5,7 @@ import { ROLES, requireRole, assertNotClientUser, type Actor } from "@/lib/authz
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { createJobSchema, type CreateJobInput } from "@/lib/shared/schemas";
 import { validateSpecs } from "@/lib/shared/specs";
+import { notifyJobCreated } from "./notifications.service";
 
 /**
  * Job intake (docs/superpowers/specs/2026-08-22-job-intake-design.md).
@@ -199,6 +200,13 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           lagDays: e.lagDays,
         })),
       });
+
+      await notifyJobCreated(
+        tx,
+        actor,
+        { id: job.id, jobNumber: job.jobNumber, projectName: job.projectName },
+        version.processes.map((tp) => tp.defaultDepartmentId),
+      );
 
       let unitCount = 0;
       let firstEquipmentId: number | null = null;

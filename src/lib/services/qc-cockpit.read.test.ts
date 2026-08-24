@@ -76,4 +76,49 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadQcCockpit (DB)", async () => {
       expect(cockpit.rejectsByCheckpoint[i].count).toBeLessThanOrEqual(cockpit.rejectsByCheckpoint[i - 1].count);
     }
   });
+
+  // Isolated fixture (own throwaway ScheduleRun/ProcessPlan, cleaned up
+  // after) — regenerating a job's schedule leaves the superseded run's
+  // plans in the DB with isCurrent: false; a SUBMITTED plan on one of those
+  // must never reach the live QC queue, which is only meaningful against
+  // the job's CURRENT run.
+  it("excludes a SUBMITTED plan on a superseded (non-current) schedule run", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+    if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
+    const jobProcess = await owner.jobProcess.findFirstOrThrow({ where: { jobId: job.id } });
+    const unit = await owner.unit.findFirstOrThrow({ where: { equipment: { jobId: job.id } } });
+
+    const staleRun = await owner.scheduleRun.create({
+      data: { jobId: job.id, version: 999_001, mode: "FORWARD", projectStartDate: new Date(), isCurrent: false },
+    });
+    const stalePlan = await owner.processPlan.create({
+      data: {
+        scheduleRunId: staleRun.id,
+        jobProcessId: jobProcess.id,
+        unitId: unit.id,
+        status: "SUBMITTED",
+        ownerDepartmentId: jobProcess.departmentId,
+      },
+    });
+
+    try {
+      const actor: Actor = {
+        userId: 1,
+        tenantId: job.tenantId,
+        clientId: null,
+        name: "QC",
+        email: "qc@despl.test",
+        roles: [ROLES.QC],
+        departmentIds: [],
+        mustChangePassword: false,
+        themePreference: "SYSTEM",
+        outdoorMode: false,
+      };
+      const cockpit = await loadQcCockpit(actor);
+      expect(cockpit.queue.some((r) => r.planId === stalePlan.id)).toBe(false);
+    } finally {
+      await owner.processPlan.delete({ where: { id: stalePlan.id } });
+      await owner.scheduleRun.delete({ where: { id: staleRun.id } });
+    }
+  });
 });

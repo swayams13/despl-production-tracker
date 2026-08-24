@@ -200,14 +200,17 @@ And on `Equipment`:
 
 with `@@index([equipmentTypeId])`.
 
-- [ ] **Step 2: Generate the migration**
+- [ ] **Step 2: Generate the migration WITHOUT applying it**
 
-Run: `pnpm exec prisma migrate dev --name equipment_type_refs`
-Expected: `CREATE TABLE "equipment_type_refs"`, `ALTER TABLE "equipments" ADD COLUMN "equipment_type_id"`, plus indexes and FKs. No DROP.
+Run: `pnpm exec prisma migrate dev --name equipment_type_refs --create-only`
 
-- [ ] **Step 3: Append the RLS policy to that migration**
+**`--create-only` is mandatory here.** Plain `prisma migrate dev` both generates AND immediately applies the migration, recording its checksum. If the file is then edited (Step 3) after that, the next `prisma migrate dev` detects the checksum no longer matches what was applied and refuses to proceed — it does not silently re-apply the edited file. `--create-only` writes the SQL file without applying it, so it can still be edited freely.
 
-Prisma does not generate RLS. Open the generated `migration.sql` and append, following the precedent at `prisma/migrations/20260815130000_welding_module/migration.sql:129`:
+Expected: a new migration folder containing `CREATE TABLE "equipment_type_refs"`, `ALTER TABLE "equipments" ADD COLUMN "equipment_type_id"`, plus indexes and FKs. No DROP. Not yet applied — `pnpm exec prisma migrate status` will show it as pending.
+
+- [ ] **Step 3: Append the RLS policy to that migration file**
+
+Prisma does not generate RLS. Open the generated (still-unapplied) `migration.sql` and append, following the precedent at `prisma/migrations/20260815130000_welding_module/migration.sql:129`:
 
 ```sql
 -- Tenant RLS on the new tenant-root table. equipment_type_refs carries
@@ -222,7 +225,11 @@ CREATE POLICY tenant_isolation ON "equipment_type_refs"
   WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::int);
 ```
 
-Apply it: `pnpm exec prisma migrate reset --skip-seed --force` is **wrong** here (it destroys the demo database). Instead re-run `pnpm exec prisma migrate dev` — Prisma detects the edited, unapplied migration and applies it whole.
+- [ ] **Step 3b: Apply the finished migration**
+
+Run: `pnpm exec prisma migrate dev`
+
+With no pending edits and one unapplied migration on disk, this applies the whole file (table + columns + indexes + RLS) in one shot and records its checksum against the FINAL contents — so there is no later drift. Confirm with `pnpm exec prisma migrate status`: "Database schema is up to date!".
 
 - [ ] **Step 4: Write the policy-coverage test**
 

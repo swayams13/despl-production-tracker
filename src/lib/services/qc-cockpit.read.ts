@@ -82,8 +82,9 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
       JOIN jobs j ON j.id = jp.job_id
       JOIN units u ON u.id = pp.unit_id
       JOIN departments d ON d.id = pp.owner_department_id
+      JOIN schedule_runs sr ON sr.id = pp.schedule_run_id
       LEFT JOIN users usr ON usr.id = pp.submitted_by
-      WHERE pp.status = 'SUBMITTED'
+      WHERE pp.status = 'SUBMITTED' AND sr.is_current = true
       ORDER BY submitted_at ASC NULLS LAST
     `;
     const queue: QcQueueRow[] = queueRows.map((r) => ({

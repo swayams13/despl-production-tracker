@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { StatusChip } from "./status-chip";
 import { STAGE_STATUS } from "./stage-status";
 import { recordMtcAction } from "@/app/actions/bom";
-import type { BomTree, BomItemRow } from "@/lib/services/bom.read";
+import type { BomTree, BomItemRow, BomComponentOp } from "@/lib/services/bom.read";
+import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -177,13 +178,9 @@ function ComponentDetail({ jobId, item }: { jobId: number; item: BomItemRow }) {
         <button className="btn" style={{ marginBottom: 14 }} onClick={() => setRecording(true)}>Record MTC…</button>
       )}
 
-      <div className="sh-sec">Component process spine</div>
+      <div className="sh-sec">Component route</div>
       {comp && comp.operations.length > 0 ? (
-        <div className="sh-pos">
-          {comp.operations.map((op) => (
-            <i key={op.seq} style={{ background: STAGE_STATUS[mapOpStatus(op.status)].colorVar }} title={op.operationName} />
-          ))}
-        </div>
+        <RouteSteps operations={comp.operations} />
       ) : (
         <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
       )}
@@ -203,6 +200,58 @@ function ComponentDetail({ jobId, item }: { jobId: number; item: BomItemRow }) {
       ) : (
         <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No activity yet.</p>
       )}
+    </div>
+  );
+}
+
+function stepStatusLabel(status: string): string {
+  if (status === "COMPLETE") return "complete";
+  if (status === "SUBMITTED") return "submitted";
+  if (status === "IN_PROGRESS") return "in progress";
+  return "not started";
+}
+
+/** Full planned route (§ component route projection): a leading run of completed steps
+ * collapses into one chip so a component deep into fabrication doesn't render its whole
+ * finished history every time — the current/next steps are what matter day to day. */
+function RouteSteps({ operations }: { operations: BomComponentOp[] }) {
+  const { collapsedDoneCount, visible } = groupProjectedRoute(operations);
+  const [openSeq, setOpenSeq] = useState<number | null>(null);
+
+  return (
+    <div className="sh-route">
+      {collapsedDoneCount > 0 && (
+        <div className="chip c-complete sh-route-collapsed">
+          <i />{collapsedDoneCount} step{collapsedDoneCount > 1 ? "s" : ""} complete
+        </div>
+      )}
+      {visible.map((op) => (
+        <div key={op.seq} className="sh-route-step">
+          <button
+            type="button"
+            className="sh-route-step-hd"
+            onClick={() => setOpenSeq((s) => (s === op.seq ? null : op.seq))}
+            aria-expanded={openSeq === op.seq}
+            disabled={op.qcpCheckpoints.length === 0}
+          >
+            <i style={{ background: STAGE_STATUS[mapOpStatus(op.status)].colorVar }} />
+            <span className="sh-route-step-name">{op.operationName}</span>
+            <span className="sh-route-step-status">{stepStatusLabel(op.status)}</span>
+            {op.qcpCheckpoints.length > 0 && (
+              <span className="sh-route-step-badge">{op.qcpCheckpoints.length} QCP</span>
+            )}
+          </button>
+          {openSeq === op.seq && op.qcpCheckpoints.length > 0 && (
+            <div className="sh-route-step-checkpoints">
+              {op.qcpCheckpoints.map((cp) => (
+                <div key={cp.qcpItemId}>
+                  <span className="mono">{cp.srNo}</span> {cp.activity}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

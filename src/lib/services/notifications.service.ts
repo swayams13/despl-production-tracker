@@ -53,6 +53,48 @@ export async function userIdsWithRole(tx: Tx, tenantId: number, roleCode: string
   return users.map((u) => u.id);
 }
 
+/**
+ * Fires inside job-intake's own transaction right after the JobProcess spine
+ * is written — every department the new job's spine names (JobProcess.
+ * departmentId) already exists at that point, so this is the one mutation
+ * moment (unlike STAGE_OVERDUE/HOLD_POINT_AGED above) that doesn't need lazy
+ * reconciliation.
+ */
+export async function notifyJobCreated(
+  tx: Tx,
+  actor: Actor,
+  job: { id: number; jobNumber: string; projectName: string | null },
+  departmentIds: number[],
+): Promise<void> {
+  const deptIds = [...new Set(departmentIds)];
+  if (deptIds.length === 0) return;
+
+  const [supervisorRows, productionHeadIds] = await Promise.all([
+    tx.user.findMany({
+      where: { tenantId: actor.tenantId, active: true, departments: { some: { departmentId: { in: deptIds } } } },
+      select: { id: true },
+    }),
+    userIdsWithRole(tx, actor.tenantId, "PRODUCTION_HEAD"),
+  ]);
+
+  const recipientIds = new Set([...supervisorRows.map((u) => u.id), ...productionHeadIds]);
+  recipientIds.delete(actor.userId);
+  if (recipientIds.size === 0) return;
+
+  await notify(
+    tx,
+    actor.tenantId,
+    [...recipientIds].map((recipientId) => ({
+      recipientId,
+      type: "JOB_CREATED",
+      entityType: "Job",
+      entityId: job.id,
+      title: `New job: ${job.jobNumber}`,
+      body: job.projectName ?? undefined,
+    })),
+  );
+}
+
 export async function markNotificationRead(actor: Actor, id: number): Promise<void> {
   await withTenant(actor.tenantId, async (tx) => {
     const n = await tx.notification.findFirst({ where: { id, recipientId: actor.userId } });

@@ -2,6 +2,7 @@ import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
+import { projectComponentRoute, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
 
 /**
  * Job detail — BOM & Components tab (§4.3, §9.6).
@@ -24,12 +25,15 @@ import type { PmiResult } from "@/generated/prisma/client";
  * multiple equipments — e.g. DE0463 has 2). Per-serial component fan-out is
  * the same deferred concern already logged for schedule stagger.
  */
-export interface BomComponentOp {
-  seq: number;
-  operationName: string;
-  status: string;
-  startedAt: string | null;
-  finishedAt: string | null;
+export interface BomQcpCheckpoint {
+  qcpItemId: number;
+  srNo: string;
+  activity: string;
+}
+
+export interface BomComponentOp extends ProjectedOp {
+  /** QCP checkpoints gated to this route step (via OperationRef.leadTimeProcessSeq → JobProcess → QcpItemProcess). */
+  qcpCheckpoints: BomQcpCheckpoint[];
 }
 
 export interface BomComponentSummary {
@@ -113,14 +117,44 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
           select: {
             id: true,
             tag: true,
+            routeVersion: {
+              select: {
+                steps: {
+                  orderBy: { seq: "asc" },
+                  select: { seq: true, operation: { select: { id: true, name: true, leadTimeProcessSeq: true } } },
+                },
+              },
+            },
             operations: {
               orderBy: { seq: "asc" },
-              select: { seq: true, status: true, startedAt: true, finishedAt: true, operation: { select: { name: true } } },
+              select: {
+                status: true,
+                startedAt: true,
+                finishedAt: true,
+                operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
+              },
             },
           },
         },
       },
     });
+
+    // Checkpoints gated to each of the job's 36 lead-time processes, keyed
+    // by JobProcess.code (a stage seq number, as text) — the same identity
+    // OperationRef.leadTimeProcessSeq points at.
+    const checkpointLinks = await tx.qcpItemProcess.findMany({
+      where: { jobProcess: { jobId } },
+      select: {
+        jobProcess: { select: { code: true } },
+        qcpItem: { select: { id: true, srNo: true, activity: true } },
+      },
+    });
+    const checkpointsByProcessCode = new Map<string, BomQcpCheckpoint[]>();
+    for (const link of checkpointLinks) {
+      const list = checkpointsByProcessCode.get(link.jobProcess.code) ?? [];
+      list.push({ qcpItemId: link.qcpItem.id, srNo: link.qcpItem.srNo, activity: link.qcpItem.activity });
+      checkpointsByProcessCode.set(link.jobProcess.code, list);
+    }
 
     const byGroup = new Map<string, BomItemRow[]>();
     for (const it of items) {
@@ -134,12 +168,23 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
         qty: it.qty,
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING" })),
         components: it.components.map((c) => {
-          const ops = c.operations.map((o) => ({
-            seq: o.seq,
+          const routeSteps: RouteStepDef[] = (c.routeVersion?.steps ?? []).map((s) => ({
+            seq: s.seq,
+            operationId: s.operation.id,
+            operationName: s.operation.name,
+            leadTimeProcessSeq: s.operation.leadTimeProcessSeq,
+          }));
+          const actualOps: ActualOp[] = c.operations.map((o) => ({
+            operationId: o.operation.id,
             operationName: o.operation.name,
             status: o.status,
             startedAt: o.startedAt?.toISOString() ?? null,
             finishedAt: o.finishedAt?.toISOString() ?? null,
+            leadTimeProcessSeq: o.operation.leadTimeProcessSeq,
+          }));
+          const ops: BomComponentOp[] = projectComponentRoute(routeSteps, actualOps).map((p) => ({
+            ...p,
+            qcpCheckpoints: p.leadTimeProcessSeq != null ? (checkpointsByProcessCode.get(String(p.leadTimeProcessSeq)) ?? []) : [],
           }));
           const displayStatus: StageDisplayStatus =
             ops.length === 0

@@ -216,8 +216,14 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     const refs = await seedRefs();
     const r = await createJob(actor(), base({ jobNumber: "TEST-PUB-1" }, refs));
     created.push(r.jobId);
+    // The regex above already proves publicId is UUID-shaped, not a
+    // sequential/derivable encoding of jobId — that's what "not derivable"
+    // means here. A `not.toContain(String(r.jobId))` substring check was
+    // removed: for any single-digit id (0-9, the common case for the first
+    // few jobs in a fresh DB), a 32-hex-char UUID contains that digit with
+    // very high probability, making the assertion flaky by construction
+    // rather than a real signal.
     expect(r.publicId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(r.publicId).not.toContain(String(r.jobId));
   });
 
   it("refuses a duplicate job number", async () => {
@@ -261,6 +267,44 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     const r = await createJob(actor(), base({ jobNumber: "TEST-AUDIT-1" }, refs));
     created.push(r.jobId);
     expect(await owner.auditLog.count({ where: { action: "job.create" } })).toBe(before + 1);
+  });
+
+  it("notifies every responsible department's supervisors + other Production Heads, but not the creator", async () => {
+    const refs = await seedRefs();
+    const ph = await owner.user.findFirstOrThrow({
+      where: { tenantId: 1, active: true, roles: { some: { role: { code: "PRODUCTION_HEAD" } } } },
+    });
+
+    const r = await createJob(
+      actor({ userId: ph.id, name: ph.name, email: ph.email, roles: [ROLES.PRODUCTION_HEAD] }),
+      base({ jobNumber: "TEST-NOTIFY-1" }, refs),
+    );
+    created.push(r.jobId);
+
+    const deptIds = [
+      ...new Set(
+        (await owner.templateProcess.findMany({ where: { versionId: refs.version.id }, select: { defaultDepartmentId: true } })).map(
+          (p) => p.defaultDepartmentId,
+        ),
+      ),
+    ];
+    const supervisorIds = (
+      await owner.user.findMany({
+        where: { tenantId: 1, active: true, departments: { some: { departmentId: { in: deptIds } } } },
+        select: { id: true },
+      })
+    ).map((u) => u.id);
+    const otherPhIds = (
+      await owner.user.findMany({
+        where: { tenantId: 1, active: true, roles: { some: { role: { code: "PRODUCTION_HEAD" } } }, id: { not: ph.id } },
+        select: { id: true },
+      })
+    ).map((u) => u.id);
+    const expectedRecipients = new Set([...supervisorIds, ...otherPhIds].filter((id) => id !== ph.id));
+
+    const notifs = await owner.notification.findMany({ where: { type: "JOB_CREATED", entityType: "Job", entityId: r.jobId } });
+    expect(new Set(notifs.map((n) => n.recipientId))).toEqual(expectedRecipients);
+    expect(notifs.every((n) => n.recipientId !== ph.id)).toBe(true);
   });
 
   it("rolls back everything when the transaction fails part-way", async () => {

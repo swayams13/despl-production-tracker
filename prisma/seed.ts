@@ -492,6 +492,7 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
           name: meta.label,
           defaultDepartmentId: deptIdByCode.get(meta.dept)!,
           sourceColumn: meta.csvColumn,
+          leadTimeProcessSeq: meta.leadTimeProcess,
         })),
       });
       const operations = await tx.operationRef.findMany({ where: { tenantId } });
@@ -1281,6 +1282,18 @@ async function seedDemo(
         );
       }
       await mkUser("client@example.local", "Client Viewer", ["CLIENT_VIEWER"], [], client.id);
+      // One extra all-access login for the demo walkthrough: every role +
+      // every department, so one person can click through every module
+      // without juggling the per-role accounts above. Maker–checker (CLAUDE.md
+      // invariant #3) still applies to this account like any other — holding
+      // QC does not let it verify its own submissions, which is the point,
+      // not a gap to route around.
+      await mkUser(
+        "reviewer@despl.local",
+        "Demo Reviewer",
+        ["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVISOR", "QC"],
+        leadTime.departments.map((d) => d.code),
+      );
       stats.users = await tx.user.count({ where: { tenantId } });
 
       // ── 13. Welders (FR-W1) ─────────────────────────────────────────
