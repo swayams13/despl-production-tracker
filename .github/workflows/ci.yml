@@ -35,6 +35,9 @@ jobs:
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/despl_ci?connection_limit=3
       DATABASE_URL: postgresql://despl_web:ci_only_password@localhost:5432/despl_ci?connection_limit=10
       AUTH_SECRET: ci_only_secret_not_used_outside_github_actions_00000000
+      # psql/libpq don't understand Prisma's connection_limit query param —
+      # a plain-URL twin of DIRECT_URL for the two raw-psql steps below.
+      PSQL_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/despl_ci
     steps:
       - uses: actions/checkout@v4
 
@@ -60,7 +63,7 @@ jobs:
       # migrate deploy has finished creating despl_app (below).
       - name: Pre-create despl_web login role
         run: |
-          psql "$DIRECT_URL" -c "
+          psql "$PSQL_DIRECT_URL" -c "
             DO \$\$ BEGIN
               IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'despl_web') THEN
                 CREATE ROLE despl_web LOGIN PASSWORD 'ci_only_password';
@@ -74,7 +77,7 @@ jobs:
       - run: pnpm exec prisma migrate deploy
 
       - name: Provision despl_web role
-        run: psql "$DIRECT_URL" -v despl_web_password=ci_only_password -f scripts/provision-db-role.sql
+        run: psql "$PSQL_DIRECT_URL" -v despl_web_password=ci_only_password -f scripts/provision-db-role.sql
 
       # DB-gated tests read fixtures (e.g. DESPL-320, its ProcessPlan rows)
       # that only exist after seeding + schedule bootstrap — same two steps
