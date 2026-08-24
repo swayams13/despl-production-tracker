@@ -216,8 +216,14 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     const refs = await seedRefs();
     const r = await createJob(actor(), base({ jobNumber: "TEST-PUB-1" }, refs));
     created.push(r.jobId);
+    // The regex above already proves publicId is UUID-shaped, not a
+    // sequential/derivable encoding of jobId — that's what "not derivable"
+    // means here. A `not.toContain(String(r.jobId))` substring check was
+    // removed: for any single-digit id (0-9, the common case for the first
+    // few jobs in a fresh DB), a 32-hex-char UUID contains that digit with
+    // very high probability, making the assertion flaky by construction
+    // rather than a real signal.
     expect(r.publicId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
-    expect(r.publicId).not.toContain(String(r.jobId));
   });
 
   it("refuses a duplicate job number", async () => {
