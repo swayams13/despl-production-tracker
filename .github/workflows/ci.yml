@@ -52,6 +52,21 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
 
+      # Migration 20260815120000_v_unit_stage_status GRANTs directly to
+      # despl_web mid-sequence, so the login role must exist before any
+      # migration runs — provision-db-role.sql can't go first because it
+      # grants despl_app, which a *later*-in-that-same-migration statement
+      # creates. Bare role now; full grants + password + timezone once
+      # migrate deploy has finished creating despl_app (below).
+      - name: Pre-create despl_web login role
+        run: |
+          psql "$DIRECT_URL" -c "
+            DO \$\$ BEGIN
+              IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'despl_web') THEN
+                CREATE ROLE despl_web LOGIN PASSWORD 'ci_only_password';
+              END IF;
+            END \$\$;"
+
       # Applies every migration against a throwaway database as the table
       # owner (DIRECT_URL) — the exact step that was missing from the
       # production deploy path and caused the 2026-08-24 outage. Runs here,
