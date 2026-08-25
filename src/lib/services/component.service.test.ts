@@ -112,6 +112,11 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let opSeq1 = 0; // component A, seq 1 (RECEIPT)
   let opSeq2 = 0; // component A, seq 2 (CUTTING) — gated on opSeq1
   let componentBOpSeq1 = 0; // component B, seq 1 — independent route for cross-component isolation
+  // Component C: ComponentOperation.seq assignment order is DELIBERATELY the
+  // REVERSE of the canonical RouteStep order (regression fixture for #2 —
+  // the gate must key off canonical route position, not raw seq).
+  let componentCReceiptOp = 0; // ComponentOperation.seq = 1, canonical RouteStep.seq = 2
+  let componentCCuttingOp = 0; // ComponentOperation.seq = 2, canonical RouteStep.seq = 1
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -182,6 +187,32 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       })
     ).id;
 
+    // Canonical route: CUTTING (RouteStep.seq 1) then RECEIPT (RouteStep.seq 2)
+    // — the reverse of componentA/B's natural op order — so component C's
+    // ComponentOperation.seq assignment (RECEIPT=1, CUTTING=2, CSV-column
+    // order) diverges from canonical route order on purpose.
+    const routeTemplate = await owner.routeTemplate.create({
+      data: { tenantId, componentTypeId: componentType.id, name: "Reversed route" },
+    });
+    const routeVersion = await owner.routeTemplateVersion.create({
+      data: { routeId: routeTemplate.id, version: 1 },
+    });
+    await owner.routeStep.create({ data: { routeVersionId: routeVersion.id, seq: 1, operationId: opCutting.id } });
+    await owner.routeStep.create({ data: { routeVersionId: routeVersion.id, seq: 2, operationId: opReceipt.id } });
+    const componentC = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "N3", componentTypeId: componentType.id, routeVersionId: routeVersion.id },
+    });
+    componentCReceiptOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentC.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+    componentCCuttingOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentC.id, seq: 2, operationId: opCutting.id },
+      })
+    ).id;
+
     const userSup = await owner.user.create({
       data: { tenantId, email: "co-sup@x", username: "co-sup", name: "Sup", passwordHash: "x" },
     });
@@ -216,6 +247,23 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
 
   it("out-of-order start: seq 2 cannot start before seq 1 on the same component (#2)", async () => {
     await expectCode(startComponentOperation(supA, { componentOperationId: opSeq2 }), ERROR_CODES.GATING_BLOCKED);
+  });
+
+  it("gate uses canonical route position, not raw ComponentOperation.seq (#2 regression): the op that's canonically FIRST starts immediately even though its ComponentOperation.seq is 2", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: componentCCuttingOp });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  it("gate uses canonical route position, not raw ComponentOperation.seq (#2 regression): the op that's canonically SECOND is blocked on its canonical predecessor, even though its ComponentOperation.seq is 1 (naive seq-1 gating would wrongly allow it immediately)", async () => {
+    await expectCode(
+      startComponentOperation(supA, { componentOperationId: componentCReceiptOp }),
+      ERROR_CODES.GATING_BLOCKED,
+    );
+    // Clears once the canonical predecessor (CUTTING, seq 2 in the DB) completes.
+    await submitComponentOperation(supA, { componentOperationId: componentCCuttingOp });
+    await verifyComponentOperation(qc, { componentOperationId: componentCCuttingOp });
+    const started = await startComponentOperation(supA, { componentOperationId: componentCReceiptOp });
+    expect(started.status).toBe("IN_PROGRESS");
   });
 
   it("wrong department: a supervisor outside the operation's department cannot start it", async () => {

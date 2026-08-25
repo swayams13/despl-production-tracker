@@ -12,7 +12,7 @@ import {
   verifyComponentOperationAction,
 } from "@/app/actions/component";
 import type { ActionResult } from "@/app/actions/_action";
-import type { BomTree, BomItemRow, BomComponentOp } from "@/lib/services/bom.read";
+import type { BomTree, BomItemRow, BomComponentOp, BomComponentSummary } from "@/lib/services/bom.read";
 import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
@@ -110,6 +110,64 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
         {selected ? <ComponentDetail jobId={jobId} item={selected} /> : (
           <p className="note" style={{ margin: "16px 0" }}>Click a BOM item on the left to view its component detail.</p>
         )}
+      </div>
+
+      {bom.subAssemblyComponents.length > 0 && (
+        <SubAssemblyComponents jobId={jobId} components={bom.subAssemblyComponents} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * `Component` rows with no linked `BomItem` (no real procurement BOM export
+ * exists for this job yet — see `BomTree.subAssemblyComponents`). Rendered as
+ * its own expandable list, not folded into the BOM-item grid above and not
+ * sharing that grid's `selectedId` state — these ids are `Component.id`, a
+ * different id space than `BomItem.id`, and keeping them in a visually
+ * separate section with its own toggle state avoids any risk of collision.
+ */
+function SubAssemblyComponents({ jobId, components }: { jobId: number; components: BomComponentSummary[] }) {
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  return (
+    <div className="card" style={{ gridColumn: "1 / -1" }}>
+      <div className="hd">
+        <h3>Sub-assembly components — {components.length} tracked</h3>
+        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>No procurement BOM export yet — routed directly from the component register</span>
+      </div>
+      <div className="bom-items">
+        {components.map((comp) => (
+          <div key={comp.id}>
+            <div
+              className={`bom-item${openId === comp.id ? " selected" : ""}`}
+              onClick={() => setOpenId((s) => (s === comp.id ? null : comp.id))}
+              role="button"
+              tabIndex={0}
+            >
+              <span>
+                {comp.tag}
+                <div className="mat">{comp.componentTypeName ?? "—"}</div>
+              </span>
+              <span className="spine-mini">
+                {(comp.operations.length ? comp.operations.map((op) => op.status) : ["NOT_STARTED"]).map((status, k) => (
+                  <i key={k} style={{ background: STAGE_STATUS[mapOpStatus(status)].colorVar }} />
+                ))}
+              </span>
+              <StatusChip status={comp.displayStatus} />
+              <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); setOpenId((s) => (s === comp.id ? null : comp.id)); }}>{openId === comp.id ? "×" : "→"}</button>
+            </div>
+            {openId === comp.id && (
+              <div style={{ padding: "12px 16px" }}>
+                {comp.operations.length > 0 ? (
+                  <RouteSteps jobId={jobId} operations={comp.operations} />
+                ) : (
+                  <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );

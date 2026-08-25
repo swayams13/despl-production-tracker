@@ -13,11 +13,10 @@ import {
 import type { ComponentOperation, OperationStatus } from "@/generated/prisma/client";
 
 /**
- * DRAFT — first cut, not yet wired into a Server Action or the BomPanel UI,
- * not run against a live DB. Mirrors src/lib/services/process.service.ts's
- * state machine and invariant gates as closely as the two entities' shapes
- * allow (CLAUDE.md #1/#2/#3/#5/#8/#12) — same review pass this project runs
- * on every other service file before it ships is still owed to this one.
+ * Wired into Server Actions (`src/app/actions/component.ts`) and the
+ * BomPanel UI (`src/components/industrial/bom-panel.tsx`). Mirrors
+ * src/lib/services/process.service.ts's state machine and invariant gates as
+ * closely as the two entities' shapes allow (CLAUDE.md #1/#2/#3/#5/#8/#12).
  *
  * Grain: ComponentOperation is the per-part fabrication step (Shell rolling,
  * forming, cutting, welding, NDT, inspection, ...) — this is the
@@ -59,11 +58,55 @@ export function assertComponentOpTransition(
 }
 
 /**
+ * Finds "the immediately preceding step for this component" using the same
+ * notion of order `bom-route.ts`'s `projectComponentRoute` already uses for
+ * display: canonical route position (`RouteStep.seq` within the component's
+ * `routeVersion`), matched to actual rows by `operationId` — NOT the raw
+ * `ComponentOperation.seq` column, whose assignment order depends on seed
+ * mechanics (CSV-column order for live jobs) and isn't guaranteed to match
+ * the canonical route order. Falls back to `ComponentOperation.seq - 1` only
+ * when the component has no `routeVersionId` (no canonical order exists) or
+ * this op's operationId isn't part of the canonical route (an "extra" op,
+ * per `projectComponentRoute`'s own comment on synthesized entries) — same
+ * best-effort ordering the read path falls back to in those cases.
+ */
+async function findPreviousComponentOperation(
+  tx: Tx,
+  op: ComponentOperation & { operation: { id: number } },
+  routeVersionId: number | null,
+): Promise<{ seq: number; status: OperationStatus } | null> {
+  if (routeVersionId != null) {
+    const steps = await tx.routeStep.findMany({
+      where: { routeVersionId },
+      orderBy: { seq: "asc" },
+      select: { operationId: true },
+    });
+    const idx = steps.findIndex((s) => s.operationId === op.operation.id);
+    if (idx > 0) {
+      const prevStepOperationId = steps[idx - 1].operationId;
+      return tx.componentOperation.findFirst({
+        where: { componentId: op.componentId, operationId: prevStepOperationId },
+        select: { seq: true, status: true },
+      });
+    }
+    if (idx === 0) return null;
+    // idx === -1: op's operation isn't in the canonical route — fall through.
+  }
+
+  return op.seq > 1
+    ? tx.componentOperation.findFirst({
+        where: { componentId: op.componentId, seq: op.seq - 1 },
+        select: { seq: true, status: true },
+      })
+    : null;
+}
+
+/**
  * Locks the row FOR UPDATE (same pattern as _shared.ts's
  * lockProcessPlanForUpdate) and re-reads tenant-scoped, so nothing here ever
  * trusts a client-asserted status. Also returns the operation's
  * defaultDepartmentId (via OperationRef) for the department-scope check, and
- * the previous-seq sibling (if any) for the sequential-route gate.
+ * the canonical-order predecessor (if any) for the sequential-route gate.
  */
 async function lockComponentOperationForUpdate(
   tx: Tx,
@@ -78,19 +121,13 @@ async function lockComponentOperationForUpdate(
 
   const op = await tx.componentOperation.findFirst({
     where: { id: componentOperationId, component: { equipment: { job: { tenantId } } } },
-    include: { operation: true },
+    include: { operation: true, component: { select: { routeVersionId: true } } },
   });
   if (!op) {
     throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ComponentOperation", componentOperationId });
   }
 
-  const previousOp =
-    op.seq > 1
-      ? await tx.componentOperation.findFirst({
-          where: { componentId: op.componentId, seq: op.seq - 1 },
-          select: { seq: true, status: true },
-        })
-      : null;
+  const previousOp = await findPreviousComponentOperation(tx, op, op.component.routeVersionId);
 
   return { op, departmentId: op.operation.defaultDepartmentId, previousOp };
 }
