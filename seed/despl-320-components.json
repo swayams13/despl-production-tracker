@@ -1,0 +1,145 @@
+{
+  "$schema": "despl.despl320components.v1",
+  "job": "DESPL-320",
+  "source": "DESP 320 BOM.pdf (GA drawing BOM, 'Common for Large & Small Unit') + QCP DESPL 320SR01-09.pdf weld-joint references, cross-checked against seed/component-routes.json's 25 canonical routes and seed/qcp-templates.json's 62-item checkpoint list. Compiled 25 Aug 2026.",
+  "note": "Not yet wired into any seed script — DESPL-320 was originally seeded (scripts/seed-despl320-and-de0467.ts) from the QCP document header only (Job + 36-process spine + 9 Units + QCP template). No BomItem or Component/ComponentOperation rows exist for this job yet, unlike DE0463/DE0467 which came from a live-jobs.json CSV export. This file is that missing input, in a shape a new ingestion block can consume the same way DE0467's block reads live-jobs.json: for each unit (320SR01..320SR09), for each entry below, create one BomItem (equipmentId = the DESPL-320 Equipment row) + one Component (unitId = that unit, tag = `${entry.tag}` per unit, componentTypeId resolved via entry.componentType, routeVersionId resolved via componentTypeIdByCode -> RouteTemplateVersion) + ComponentOperation rows seeded NOT_STARTED from that route's steps, exactly like the DE0467 block already does (scripts/seed-despl320-and-de0467.ts ~line 556). CORRECTS a count error in docs/DESPL-320-DEV-READY-BOM-SCHEDULE-v1.md §4.4: that doc says '10 trackable components per unit' but then lists Shell + Top Dished End + Bottom Dished End + Skirt + 7 nozzle connections (M1, N1-N6) = 11, not 10. This file uses the correct 11, so 11 x 9 units = 99 Component rows, not 90.",
+  "weldJointNote": "weldJoints listed per component are the printed joint-map references (LS-1/CS-1/CS-2) for cross-linking after WeldJoint rows are created — WeldJoint is NOT pre-seeded anywhere in this codebase for any job; it is real shop-floor data entered live through the app as welding happens (per the app's own model), so no WeldJoint seed is included here on purpose.",
+  "componentsPerUnit": [
+    {
+      "tag": "SHELL",
+      "label": "Shell (single course)",
+      "componentType": "PLATE",
+      "qtyPerUnit": 1,
+      "material": "SA 516 Gr 485, normalized fine-grain fully killed",
+      "sizeNote": "per GA drawing PN-EM3-HIN-301-MEC-040-DG-4503 Rev A — not itemized in the BOM small-parts table; derived from design/nameplate data",
+      "weldJoints": ["LS-1"],
+      "bomStatus": "NOT_IN_SMALL_PARTS_BOM — main pressure-boundary part, verify plate size against the drawing before procurement",
+      "route": "PLATE: Receipt -> MTC Verification -> Cutting -> Edge Prep -> Rolling/Forming -> Fit-up -> Welding -> RT/UT -> Grinding -> Inspection"
+    },
+    {
+      "tag": "TOP-HEAD",
+      "label": "Top Dished End (head)",
+      "componentType": "DISHED_END",
+      "qtyPerUnit": 1,
+      "material": "SA 516 Gr 485",
+      "sizeNote": "per GA drawing — not itemized in the BOM small-parts table",
+      "weldJoints": ["CS-1"],
+      "bomStatus": "NOT_IN_SMALL_PARTS_BOM",
+      "route": "DISHED_END: Plate Cutting -> Pressing/Spinning -> Trimming -> NDT -> Inspection"
+    },
+    {
+      "tag": "BOTTOM-HEAD",
+      "label": "Bottom Dished End (head)",
+      "componentType": "DISHED_END",
+      "qtyPerUnit": 1,
+      "material": "SA 516 Gr 485",
+      "sizeNote": "per GA drawing — not itemized in the BOM small-parts table",
+      "weldJoints": ["CS-2"],
+      "bomStatus": "NOT_IN_SMALL_PARTS_BOM",
+      "route": "DISHED_END: Plate Cutting -> Pressing/Spinning -> Trimming -> NDT -> Inspection"
+    },
+    {
+      "tag": "SKIRT",
+      "label": "Skirt assembly (skirt shell + base ring + 24 gusset plates, tracked as one fabrication unit)",
+      "componentType": "SKIRT",
+      "qtyPerUnit": 1,
+      "material": "Skirt shell SA 516 Gr 485 (16T x 1062W x 7323 DEV.LG, 977 kg); base ring IS 2062 E 250 B (32T x 2187 ID x 2600 OD, 390 kg); 24x gusset plate IS 2062 E 250 B (12T x 127W x 150 LG, 43 kg total)",
+      "weldJoints": [],
+      "weldNote": "skirt-to-shell support weld tracked as a QCP checkpoint (4.13/4.14), not a numbered joint-map reference in the source QCP",
+      "bomStatus": "IN_BOM — items 4.3 table rows: Skirt Shell, Skirt Base Ring, Gusset Plate",
+      "route": "SKIRT: Plate Rolling -> Welding -> Machining -> Inspection"
+    },
+    {
+      "tag": "N1",
+      "label": "Nozzle N1 (flange, per detail)",
+      "componentType": "FLANGE",
+      "qtyPerUnit": 1,
+      "material": "SA 105",
+      "sizeNote": "per detail — size not resolved in the extracted BOM read; verify against drawing",
+      "weldJoints": [],
+      "bomStatus": "IN_BOM — item 201-243 range",
+      "route": "FLANGE: Receipt -> Machining -> Facing -> Drilling -> Inspection"
+    },
+    {
+      "tag": "N2",
+      "label": "Nozzle N2 sub-assembly (flange + 2x pipe segments + 90 deg elbow + stiffener + support pipe)",
+      "componentType": "PIPE",
+      "qtyPerUnit": 1,
+      "material": "Flange SA 105 (DN25 class); Pipe SA 333 Gr 6 (DN25 SCH.XXS, 1270 LG + 170 LG); Elbow SA 234 Gr WPB (DN25 SCH.XXS 90deg LR); Stiffener SA 516 Gr 485 (6T x 50W x 250 LG); Support Pipe SA 106 Gr B (DN200 SCH80 x 115 LG)",
+      "weldJoints": [],
+      "bomStatus": "IN_BOM — items 201-243 range, 5 BOM rows feeding one Component",
+      "route": "PIPE: Receipt -> Cutting -> Beveling -> Fit-up -> Welding -> RT/PT -> Inspection"
+    },
+    {
+      "tag": "N3",
+      "label": "Nozzle N3 (SRN forging + flange + 3x stiffener)",
+      "componentType": "FORGING",
+      "qtyPerUnit": 1,
+      "material": "SRN SA 266 Gr 2; Flange SA 105 (DN125 SCH.XXS CL.600 WNRF); Stiffener SA 516 Gr 485 (6T x 82W x 80 LG) x3",
+      "weldJoints": [],
+      "bomStatus": "IN_BOM — items 201-243 range",
+      "route": "FORGING: Receipt -> Machining -> NDT -> Inspection"
+    },
+    {
+      "tag": "N4",
+      "label": "Nozzle N4 (coupling)",
+      "componentType": "COUPLING",
+      "qtyPerUnit": 1,
+      "material": "SA 105, DN15 SCH.XXS x 6000# BSP",
+      "weldJoints": [],
+      "bomStatus": "IN_BOM — shared BOM line (qty 3) covering N4/N5/N6, split 1-per-tag here since each is a separate weld point on the vessel",
+      "route": "COUPLING: Receipt -> Thread Inspection -> Dimension Check"
+    },
+    {
+      "tag": "N5",
+      "label": "Nozzle N5 (coupling)",
+      "componentType": "COUPLING",
+      "qtyPerUnit": 1,
+      "material": "SA 105, DN15 SCH.XXS x 6000# BSP",
+      "weldJoints": [],
+      "bomStatus": "IN_BOM — see N4 note (shared BOM line, split by tag)",
+      "route": "COUPLING: Receipt -> Thread Inspection -> Dimension Check"
+    },
+    {
+      "tag": "N6",
+      "label": "Nozzle N6 (coupling)",
+      "componentType": "COUPLING",
+      "qtyPerUnit": 1,
+      "material": "SA 105, DN15 SCH.XXS x 6000# BSP",
+      "weldJoints": [],
+      "bomStatus": "IN_BOM — see N4 note (shared BOM line, split by tag)",
+      "route": "COUPLING: Receipt -> Thread Inspection -> Dimension Check"
+    },
+    {
+      "tag": "M1",
+      "label": "Manway M1 (SRN forging; blind flange, gasket, bolting set and davit/hinge tracked as BOM hardware only, not a separate fabrication route)",
+      "componentType": "FORGING",
+      "qtyPerUnit": 1,
+      "material": "SRN SA 266 Gr 2 (DN450x22THK ASME 600CL WNRF)",
+      "weldJoints": [],
+      "hardwareBomOnly": [
+        "Blind Flange (cover), SA 105, DN450 ASME 600CL BL RF — 535 kg, heaviest loose item",
+        "Gasket, Grafoil-filled spiral-wound SS316L / 3.2T CS outer ring, DN450 ASME 600CL B16.20",
+        "Stud w/ 2 Hvy. Hex. Nut x20, SA193 Gr B7 / SA194 Gr 2H, 1-5/8in UNC x 280L full thread",
+        "Davit/hinge assembly (1 set) — sq. bar hook, eye bolt, washer, hex nut, hex lock nut, support pipe, davit pipe, end plates x2, rivet, rib plate, davit boss, handle x3, jack screw x4"
+      ],
+      "bomStatus": "IN_BOM — item 201-243 range (SRN) + hardware rows above, received/issued at BOM layer, no fabrication route of their own",
+      "route": "FORGING: Receipt -> Machining -> NDT -> Inspection"
+    }
+  ],
+  "deferredToProcess23": {
+    "note": "Per docs/DESPL-320-DEV-READY-BOM-SCHEDULE-v1.md §4.4's own judgment call, kept as-is: small enough to fold into process #23 'Internal & External Attachments' as a single tracked step per unit rather than getting individual Component rows.",
+    "items": [
+      "SV1-SV4 nozzle pipes, DN100 SCH80 (4 access-opening-related small nozzles)",
+      "Lifting Lug x2, SA 516 Gr 485, 36T x 230W x 697 LG, 91 kg",
+      "Tailing Lug x1, SA 516 Gr 485, 36T x 250W x 250 LG, 17.8 kg",
+      "Name Plate Bracket x1, SA 516 Gr 485",
+      "Earthing Plate x2, Access Opening x2, Pad Plate x2, Support Plate x1, Name Plate x4, Rivet x4 — small hardware, BOM/procurement layer only"
+    ]
+  },
+  "perUnitTotals": {
+    "trackableComponentsPerUnit": 11,
+    "totalComponentRowsFor9Units": 99,
+    "correctionNote": "docs/DESPL-320-DEV-READY-BOM-SCHEDULE-v1.md §4.4 says '10 trackable components' but its own list (Shell, Top Head, Bottom Head, Skirt + M1/N1/N2/N3/N4/N5/N6) sums to 11. Use 11 x 9 = 99, not 90."
+  }
+}
