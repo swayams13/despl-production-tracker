@@ -3,8 +3,8 @@ import { assertClientScope, type Actor } from "@/lib/authz";
 import { getCurrentScheduleRun } from "./_shared";
 import type { GanttBar, GanttUnit, JobGanttData } from "./gantt-layout";
 
-export type { GanttBar, GanttEdge, GanttUnit, JobGanttData, GanttDomain } from "./gantt-layout";
-export { planFillStatus, computeGanttDomain, ganttPct } from "./gantt-layout";
+export type { GanttBar, GanttEdge, GanttUnit, JobGanttData, GanttDomain, DepartmentDeadline } from "./gantt-layout";
+export { planFillStatus, computeGanttDomain, computeDepartmentDeadlines, ganttPct } from "./gantt-layout";
 
 /**
  * Job detail — Timeline (Gantt) tab (§4.3, §9.6). One row per JobProcess
