@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
-import { createJob, type CreateJobResult } from "@/lib/services/job-intake.service";
+import { createJob, updateJobDates, type CreateJobResult } from "@/lib/services/job-intake.service";
 import { createClientRecord, createEquipmentType, updateEquipmentType } from "@/lib/services/admin.service";
 import { loadTemplateProcesses } from "@/lib/services/job-intake.read";
 import { generateSchedule } from "@/lib/services/schedule.service";
@@ -9,6 +9,7 @@ import { isAppError } from "@/lib/shared/errors";
 import { toActionError, type ActionResult } from "./_action";
 import type {
   CreateJobInput,
+  UpdateJobDatesInput,
   CreateClientInput,
   CreateEquipmentTypeInput,
   UpdateEquipmentTypeInput,
@@ -72,6 +73,37 @@ export async function scheduleNewJobAction(
       return { kind: "FAILED", message: e.message };
     }
     throw e;
+  }
+}
+
+export type UpdateJobDatesActionResult = ActionResult & {
+  schedule?: ScheduleVerdict;
+  detail?: Record<string, unknown>;
+};
+
+/**
+ * Set/change an existing job's dates (typically the dispatch/delivery date
+ * that scheduleNewJobAction never got at creation time), then immediately
+ * re-run the scheduler on it — same BACKWARD-from-delivery pattern the "New
+ * job" wizard uses right after createJobAction, just re-triggerable later
+ * instead of only once at intake.
+ */
+export async function updateJobDatesAction(input: UpdateJobDatesInput): Promise<UpdateJobDatesActionResult> {
+  try {
+    const actor = await requireActor();
+    const job = await updateJobDates(actor, input);
+    revalidatePath(`/jobs/${input.jobId}`);
+    revalidatePath("/jobs");
+
+    const schedule = job.committedDeliveryDate
+      ? await scheduleNewJobAction(input.jobId, job.committedDeliveryDate)
+      : undefined;
+
+    return { ok: true, schedule };
+  } catch (e) {
+    const result = toActionError(e);
+    if (!result.ok && isAppError(e)) return { ...result, detail: e.detail };
+    return result;
   }
 }
 

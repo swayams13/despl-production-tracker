@@ -3,7 +3,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import { audited } from "@/lib/audit";
 import { ROLES, requireRole, assertNotClientUser, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { createJobSchema, type CreateJobInput } from "@/lib/shared/schemas";
+import { createJobSchema, updateJobDatesSchema, type CreateJobInput, type UpdateJobDatesInput } from "@/lib/shared/schemas";
 import { validateSpecs } from "@/lib/shared/specs";
 import { notifyJobCreated } from "./notifications.service";
 
@@ -267,6 +267,61 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           },
           eventType: "JobCreated",
           eventPayload: { jobId: job.id, jobNumber: job.jobNumber, familyId: job.familyId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Set/change an existing job's planning dates (order/committed/target
+ * dispatch) after creation. A freshly created job commonly has none of these
+ * set — createJob() deliberately doesn't require them (see the note on
+ * scheduleNewJobAction) — so this is the only way to give the scheduler
+ * something to anchor on afterwards. Same role gate as createJob: a client
+ * user never edits these, and the app enforces it here, not just in the UI.
+ */
+export async function updateJobDates(actor: Actor, input: UpdateJobDatesInput) {
+  const parsed = updateJobDatesSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const before = await tx.job.findFirst({
+      where: { id: parsed.jobId, tenantId: actor.tenantId },
+      select: { orderDate: true, committedDeliveryDate: true, targetDispatchDate: true },
+    });
+    if (!before) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId: parsed.jobId });
+
+    return audited(tx, actor, async () => {
+      const job = await tx.job.update({
+        where: { id: parsed.jobId },
+        data: {
+          orderDate: parsed.orderDate,
+          committedDeliveryDate: parsed.committedDeliveryDate,
+          targetDispatchDate: parsed.targetDispatchDate,
+        },
+      });
+
+      return {
+        result: {
+          jobId: job.id,
+          orderDate: job.orderDate,
+          committedDeliveryDate: job.committedDeliveryDate,
+          targetDispatchDate: job.targetDispatchDate,
+        },
+        audit: {
+          action: "job.update_dates",
+          entityType: "Job",
+          entityId: job.id,
+          before,
+          after: {
+            orderDate: job.orderDate,
+            committedDeliveryDate: job.committedDeliveryDate,
+            targetDispatchDate: job.targetDispatchDate,
+          },
+          eventType: "JobDatesUpdated",
+          eventPayload: { jobId: job.id },
         },
       };
     });
