@@ -6,7 +6,13 @@ import { toast } from "sonner";
 import { StatusChip } from "./status-chip";
 import { STAGE_STATUS } from "./stage-status";
 import { recordMtcAction } from "@/app/actions/bom";
-import type { BomTree, BomItemRow, BomComponentOp } from "@/lib/services/bom.read";
+import {
+  startComponentOperationAction,
+  submitComponentOperationAction,
+  verifyComponentOperationAction,
+} from "@/app/actions/component";
+import type { ActionResult } from "@/app/actions/_action";
+import type { BomTree, BomItemRow, BomComponentOp, BomComponentSummary } from "@/lib/services/bom.read";
 import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
@@ -105,6 +111,64 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
           <p className="note" style={{ margin: "16px 0" }}>Click a BOM item on the left to view its component detail.</p>
         )}
       </div>
+
+      {bom.subAssemblyComponents.length > 0 && (
+        <SubAssemblyComponents jobId={jobId} components={bom.subAssemblyComponents} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * `Component` rows with no linked `BomItem` (no real procurement BOM export
+ * exists for this job yet — see `BomTree.subAssemblyComponents`). Rendered as
+ * its own expandable list, not folded into the BOM-item grid above and not
+ * sharing that grid's `selectedId` state — these ids are `Component.id`, a
+ * different id space than `BomItem.id`, and keeping them in a visually
+ * separate section with its own toggle state avoids any risk of collision.
+ */
+function SubAssemblyComponents({ jobId, components }: { jobId: number; components: BomComponentSummary[] }) {
+  const [openId, setOpenId] = useState<number | null>(null);
+
+  return (
+    <div className="card" style={{ gridColumn: "1 / -1" }}>
+      <div className="hd">
+        <h3>Sub-assembly components — {components.length} tracked</h3>
+        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>No procurement BOM export yet — routed directly from the component register</span>
+      </div>
+      <div>
+        {components.map((comp) => (
+          <div key={comp.id}>
+            <div
+              className={`bom-item${openId === comp.id ? " selected" : ""}`}
+              onClick={() => setOpenId((s) => (s === comp.id ? null : comp.id))}
+              role="button"
+              tabIndex={0}
+            >
+              <span>
+                {comp.tag}
+                <div className="mat">{comp.componentTypeName ?? "—"}</div>
+              </span>
+              <span className="spine-mini">
+                {(comp.operations.length ? comp.operations.map((op) => op.status) : ["NOT_STARTED"]).map((status, k) => (
+                  <i key={k} style={{ background: STAGE_STATUS[mapOpStatus(status)].colorVar }} />
+                ))}
+              </span>
+              <StatusChip status={comp.displayStatus} />
+              <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); setOpenId((s) => (s === comp.id ? null : comp.id)); }}>{openId === comp.id ? "×" : "→"}</button>
+            </div>
+            {openId === comp.id && (
+              <div style={{ padding: "12px 16px" }}>
+                {comp.operations.length > 0 ? (
+                  <RouteSteps jobId={jobId} operations={comp.operations} />
+                ) : (
+                  <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -180,7 +244,7 @@ function ComponentDetail({ jobId, item }: { jobId: number; item: BomItemRow }) {
 
       <div className="sh-sec">Component route</div>
       {comp && comp.operations.length > 0 ? (
-        <RouteSteps operations={comp.operations} />
+        <RouteSteps jobId={jobId} operations={comp.operations} />
       ) : (
         <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
       )}
@@ -214,9 +278,21 @@ function stepStatusLabel(status: string): string {
 /** Full planned route (§ component route projection): a leading run of completed steps
  * collapses into one chip so a component deep into fabrication doesn't render its whole
  * finished history every time — the current/next steps are what matter day to day. */
-function RouteSteps({ operations }: { operations: BomComponentOp[] }) {
+function RouteSteps({ jobId, operations }: { jobId: number; operations: BomComponentOp[] }) {
   const { collapsedDoneCount, visible } = groupProjectedRoute(operations);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
+  const router = useRouter();
+  const [pending, start] = useTransition();
+
+  const run = (fn: () => Promise<ActionResult>, ok: string) =>
+    start(async () => {
+      const r = await fn();
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success(ok);
+        router.refresh();
+      }
+    });
 
   return (
     <div className="sh-route">
@@ -227,20 +303,23 @@ function RouteSteps({ operations }: { operations: BomComponentOp[] }) {
       )}
       {visible.map((op) => (
         <div key={op.seq} className="sh-route-step">
-          <button
-            type="button"
-            className="sh-route-step-hd"
-            onClick={() => setOpenSeq((s) => (s === op.seq ? null : op.seq))}
-            aria-expanded={openSeq === op.seq}
-            disabled={op.qcpCheckpoints.length === 0}
-          >
-            <i style={{ background: STAGE_STATUS[mapOpStatus(op.status)].colorVar }} />
-            <span className="sh-route-step-name">{op.operationName}</span>
-            <span className="sh-route-step-status">{stepStatusLabel(op.status)}</span>
-            {op.qcpCheckpoints.length > 0 && (
-              <span className="sh-route-step-badge">{op.qcpCheckpoints.length} QCP</span>
-            )}
-          </button>
+          <div className="sh-route-step-hd">
+            <button
+              type="button"
+              className="sh-route-step-toggle"
+              onClick={() => setOpenSeq((s) => (s === op.seq ? null : op.seq))}
+              aria-expanded={openSeq === op.seq}
+              disabled={op.qcpCheckpoints.length === 0}
+            >
+              <i style={{ background: STAGE_STATUS[mapOpStatus(op.status)].colorVar }} />
+              <span className="sh-route-step-name">{op.operationName}</span>
+              <span className="sh-route-step-status">{stepStatusLabel(op.status)}</span>
+              {op.qcpCheckpoints.length > 0 && (
+                <span className="sh-route-step-badge">{op.qcpCheckpoints.length} QCP</span>
+              )}
+            </button>
+            <RouteStepAction jobId={jobId} op={op} pending={pending} run={run} />
+          </div>
           {openSeq === op.seq && op.qcpCheckpoints.length > 0 && (
             <div className="sh-route-step-checkpoints">
               {op.qcpCheckpoints.map((cp) => (
@@ -254,4 +333,63 @@ function RouteSteps({ operations }: { operations: BomComponentOp[] }) {
       ))}
     </div>
   );
+}
+
+/**
+ * Start / Submit / Verify for one component-route step. Mirrors the
+ * always-show-the-button-and-let-the-server-refuse idiom already used by
+ * <StageSheetFooter>/my-day's row actions — role/maker-checker enforcement
+ * lives server-side (component.service.ts); this is UX, not the gate.
+ * A route step merged in from the canonical route with no matching
+ * ComponentOperation row yet (`op.id === null`) has nothing to act on.
+ */
+function RouteStepAction({
+  jobId,
+  op,
+  pending,
+  run,
+}: {
+  jobId: number;
+  op: BomComponentOp;
+  pending: boolean;
+  run: (fn: () => Promise<ActionResult>, ok: string) => void;
+}) {
+  if (op.id == null) return null;
+  const id = op.id;
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+
+  if (op.status === "NOT_STARTED")
+    return (
+      <button
+        type="button"
+        className="btn btn-accent sh-route-step-action"
+        disabled={pending}
+        onClick={(e) => { stop(e); run(() => startComponentOperationAction(jobId, id), "Started."); }}
+      >
+        Start
+      </button>
+    );
+  if (op.status === "IN_PROGRESS")
+    return (
+      <button
+        type="button"
+        className="btn btn-accent sh-route-step-action"
+        disabled={pending}
+        onClick={(e) => { stop(e); run(() => submitComponentOperationAction(jobId, id), "Submitted for QC."); }}
+      >
+        Submit
+      </button>
+    );
+  if (op.status === "SUBMITTED")
+    return (
+      <button
+        type="button"
+        className="btn btn-accent sh-route-step-action"
+        disabled={pending}
+        onClick={(e) => { stop(e); run(() => verifyComponentOperationAction(jobId, id), "Verified."); }}
+      >
+        Verify
+      </button>
+    );
+  return null;
 }

@@ -39,6 +39,8 @@ export interface BomComponentOp extends ProjectedOp {
 export interface BomComponentSummary {
   id: number;
   tag: string;
+  /** Only populated for `BomTree.subAssemblyComponents` — real `ComponentTypeRef.name`, not a fabricated BOM category. */
+  componentTypeName?: string;
   displayStatus: StageDisplayStatus;
   operations: BomComponentOp[];
 }
@@ -76,6 +78,15 @@ export interface BomTree {
   equipmentName: string;
   equipments: EquipmentOption[];
   groups: BomGroup[];
+  /**
+   * `Component` rows for this equipment with no `BomItem` (bomItemId: null)
+   * — e.g. DESPL-320's seeded sub-assembly register, which has no real
+   * procurement BOM export to link to yet (see
+   * `scripts/seed-despl320-components.ts`). Fabricating a fake `BomItem` to
+   * hang these off would violate the "real data only" rule, so they get their
+   * own section instead of being folded into `groups`.
+   */
+  subAssemblyComponents: BomComponentSummary[];
 }
 
 function opDisplayStatus(status: string): StageDisplayStatus {
@@ -83,6 +94,57 @@ function opDisplayStatus(status: string): StageDisplayStatus {
   if (status === "SUBMITTED") return "submitted";
   if (status === "IN_PROGRESS") return "progress";
   return "idle";
+}
+
+interface RawComponentForSummary {
+  id: number;
+  tag: string;
+  componentType?: { name: string } | null;
+  routeVersion: {
+    steps: { seq: number; operation: { id: number; name: string; leadTimeProcessSeq: number | null } }[];
+  } | null;
+  operations: {
+    id: number;
+    status: string;
+    startedAt: Date | null;
+    finishedAt: Date | null;
+    operation: { id: number; name: string; leadTimeProcessSeq: number | null };
+  }[];
+}
+
+/** Shared projection from a raw `Component` row (however it was reached — via
+ * `BomItem.components` or directly by equipment) into the route-aware summary
+ * shape both the BOM-item-linked path and the bomless sub-assembly path render. */
+function buildComponentSummary(
+  c: RawComponentForSummary,
+  checkpointsByProcessCode: Map<string, BomQcpCheckpoint[]>,
+): BomComponentSummary {
+  const routeSteps: RouteStepDef[] = (c.routeVersion?.steps ?? []).map((s) => ({
+    seq: s.seq,
+    operationId: s.operation.id,
+    operationName: s.operation.name,
+    leadTimeProcessSeq: s.operation.leadTimeProcessSeq,
+  }));
+  const actualOps: ActualOp[] = c.operations.map((o) => ({
+    id: o.id,
+    operationId: o.operation.id,
+    operationName: o.operation.name,
+    status: o.status,
+    startedAt: o.startedAt?.toISOString() ?? null,
+    finishedAt: o.finishedAt?.toISOString() ?? null,
+    leadTimeProcessSeq: o.operation.leadTimeProcessSeq,
+  }));
+  const ops: BomComponentOp[] = projectComponentRoute(routeSteps, actualOps).map((p) => ({
+    ...p,
+    qcpCheckpoints: p.leadTimeProcessSeq != null ? (checkpointsByProcessCode.get(String(p.leadTimeProcessSeq)) ?? []) : [],
+  }));
+  const displayStatus: StageDisplayStatus =
+    ops.length === 0
+      ? "idle"
+      : ops.every((o) => o.status === "COMPLETE")
+        ? "complete"
+        : opDisplayStatus(ops.find((o) => o.status !== "COMPLETE" && o.status !== "NOT_STARTED")?.status ?? ops[0].status);
+  return { id: c.id, tag: c.tag, componentTypeName: c.componentType?.name, displayStatus, operations: ops };
 }
 
 export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: number): Promise<BomTree | null> {
@@ -96,7 +158,7 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
       select: { id: true, name: true },
       orderBy: { id: "asc" },
     });
-    if (equipments.length === 0) return { equipmentId: 0, equipmentName: "", equipments: [], groups: [] };
+    if (equipments.length === 0) return { equipmentId: 0, equipmentName: "", equipments: [], groups: [], subAssemblyComponents: [] };
 
     const targetId = equipmentId != null && equipments.some((e) => e.id === equipmentId) ? equipmentId : equipments[0].id;
     const equipment = equipments.find((e) => e.id === targetId)!;
@@ -117,6 +179,7 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
           select: {
             id: true,
             tag: true,
+            componentType: { select: { name: true } },
             routeVersion: {
               select: {
                 steps: {
@@ -128,12 +191,44 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
             operations: {
               orderBy: { seq: "asc" },
               select: {
+                id: true,
                 status: true,
                 startedAt: true,
                 finishedAt: true,
                 operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
               },
             },
+          },
+        },
+      },
+    });
+
+    // Component rows for this equipment with no BomItem (bomItemId: null) —
+    // e.g. DESPL-320's seeded sub-assembly register, unreachable via
+    // `items[].components` above since that path only walks BomItem.components.
+    const bomlessComponents = await tx.component.findMany({
+      where: { equipmentId: targetId, bomItemId: null },
+      orderBy: { tag: "asc" },
+      select: {
+        id: true,
+        tag: true,
+        componentType: { select: { name: true } },
+        routeVersion: {
+          select: {
+            steps: {
+              orderBy: { seq: "asc" },
+              select: { seq: true, operation: { select: { id: true, name: true, leadTimeProcessSeq: true } } },
+            },
+          },
+        },
+        operations: {
+          orderBy: { seq: "asc" },
+          select: {
+            id: true,
+            status: true,
+            startedAt: true,
+            finishedAt: true,
+            operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
           },
         },
       },
@@ -156,6 +251,8 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
       checkpointsByProcessCode.set(link.jobProcess.code, list);
     }
 
+    const subAssemblyComponents = bomlessComponents.map((c) => buildComponentSummary(c, checkpointsByProcessCode));
+
     const byGroup = new Map<string, BomItemRow[]>();
     for (const it of items) {
       const groupName = it.componentType?.name ?? "Uncategorized";
@@ -167,33 +264,7 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
         material: it.material,
         qty: it.qty,
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING" })),
-        components: it.components.map((c) => {
-          const routeSteps: RouteStepDef[] = (c.routeVersion?.steps ?? []).map((s) => ({
-            seq: s.seq,
-            operationId: s.operation.id,
-            operationName: s.operation.name,
-            leadTimeProcessSeq: s.operation.leadTimeProcessSeq,
-          }));
-          const actualOps: ActualOp[] = c.operations.map((o) => ({
-            operationId: o.operation.id,
-            operationName: o.operation.name,
-            status: o.status,
-            startedAt: o.startedAt?.toISOString() ?? null,
-            finishedAt: o.finishedAt?.toISOString() ?? null,
-            leadTimeProcessSeq: o.operation.leadTimeProcessSeq,
-          }));
-          const ops: BomComponentOp[] = projectComponentRoute(routeSteps, actualOps).map((p) => ({
-            ...p,
-            qcpCheckpoints: p.leadTimeProcessSeq != null ? (checkpointsByProcessCode.get(String(p.leadTimeProcessSeq)) ?? []) : [],
-          }));
-          const displayStatus: StageDisplayStatus =
-            ops.length === 0
-              ? "idle"
-              : ops.every((o) => o.status === "COMPLETE")
-                ? "complete"
-                : opDisplayStatus(ops.find((o) => o.status !== "COMPLETE" && o.status !== "NOT_STARTED")?.status ?? ops[0].status);
-          return { id: c.id, tag: c.tag, displayStatus, operations: ops };
-        }),
+        components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),
       };
       const list = byGroup.get(groupName) ?? [];
       list.push(row);
@@ -204,6 +275,6 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, groupItems]) => ({ name, items: groupItems }));
 
-    return { equipmentId: targetId, equipmentName: equipment.name, equipments, groups };
+    return { equipmentId: targetId, equipmentName: equipment.name, equipments, groups, subAssemblyComponents };
   });
 }

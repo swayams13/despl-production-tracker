@@ -6,8 +6,8 @@ function step(seq: number, operationId: number, operationName: string, leadTimeP
   return { seq, operationId, operationName, leadTimeProcessSeq };
 }
 
-function op(operationId: number, operationName: string, status: string, leadTimeProcessSeq: number | null = null): ActualOp {
-  return { operationId, operationName, status, startedAt: null, finishedAt: null, leadTimeProcessSeq };
+function op(operationId: number, operationName: string, status: string, leadTimeProcessSeq: number | null = null, id: number = operationId): ActualOp {
+  return { id, operationId, operationName, status, startedAt: null, finishedAt: null, leadTimeProcessSeq };
 }
 
 test("no route, no actual ops -> empty", () => {
@@ -42,6 +42,17 @@ test("actual op with no matching route step (e.g. synthesized MTC verification) 
   const actual = [op(1, "Cutting", "COMPLETE"), op(99, "MTC Verification", "NOT_STARTED")];
   const result = projectComponentRoute(route, actual);
   expect(result.map((r) => r.operationName)).toEqual(["Cutting", "MTC Verification"]);
+});
+
+test("id is null for a route step with no matching ComponentOperation row, and carries the real id (not operationId) when matched", () => {
+  // Distinct id/operationId (id = 701, operationId = 1) proves the assertion
+  // reads ProjectedOp.id specifically — with id === operationId in the
+  // fixture, a code path that accidentally returned operationId instead of
+  // id would still pass this test.
+  const route = [step(1, 1, "Cutting"), step(2, 2, "Forming")];
+  const actual = [op(1, "Cutting", "COMPLETE", null, 701)];
+  const result = projectComponentRoute(route, actual);
+  expect(result.map((r) => r.id)).toEqual([701, null]);
 });
 
 test("carries leadTimeProcessSeq through for checkpoint lookup", () => {

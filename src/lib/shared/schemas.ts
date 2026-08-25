@@ -66,6 +66,18 @@ export type SubmitProcessInput = z.infer<typeof submitProcessSchema>;
 export const verifyProcessSchema = z.object({ processPlanId: id }).strict();
 export type VerifyProcessInput = z.infer<typeof verifyProcessSchema>;
 
+/** Start a component operation (sub-assembly fabrication step). */
+export const startComponentOperationSchema = z.object({ componentOperationId: id }).strict();
+export type StartComponentOperationInput = z.infer<typeof startComponentOperationSchema>;
+
+/** Submit a component operation for QC verification (maker step). */
+export const submitComponentOperationSchema = z.object({ componentOperationId: id }).strict();
+export type SubmitComponentOperationInput = z.infer<typeof submitComponentOperationSchema>;
+
+/** Verify a submitted component operation (checker step, maker-checker enforced in the service). */
+export const verifyComponentOperationSchema = z.object({ componentOperationId: id }).strict();
+export type VerifyComponentOperationInput = z.infer<typeof verifyComponentOperationSchema>;
+
 /** Put a process plan ON_HOLD with a recorded reason. */
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
 export type HoldProcessInput = z.infer<typeof holdProcessSchema>;
