@@ -12,6 +12,8 @@ export interface RouteStepDef {
 }
 
 export interface ActualOp {
+  /** ComponentOperation.id — the row a Start/Submit/Verify action must reference. */
+  id: number;
   operationId: number;
   operationName: string;
   status: string;
@@ -27,6 +29,8 @@ export interface ProjectedOp {
   startedAt: string | null;
   finishedAt: string | null;
   leadTimeProcessSeq: number | null;
+  /** Null for a canonical route step with no matching ComponentOperation row yet — no action is possible on it. */
+  id: number | null;
 }
 
 /**
@@ -55,6 +59,7 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
         startedAt: actual?.startedAt ?? null,
         finishedAt: actual?.finishedAt ?? null,
         leadTimeProcessSeq: s.leadTimeProcessSeq,
+        id: actual?.id ?? null,
       };
     });
 
@@ -67,6 +72,7 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
       startedAt: o.startedAt,
       finishedAt: o.finishedAt,
       leadTimeProcessSeq: o.leadTimeProcessSeq,
+      id: o.id,
     }));
 
   return [...projected, ...extras];

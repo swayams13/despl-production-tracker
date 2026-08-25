@@ -7,7 +7,7 @@ function step(seq: number, operationId: number, operationName: string, leadTimeP
 }
 
 function op(operationId: number, operationName: string, status: string, leadTimeProcessSeq: number | null = null): ActualOp {
-  return { operationId, operationName, status, startedAt: null, finishedAt: null, leadTimeProcessSeq };
+  return { id: operationId, operationId, operationName, status, startedAt: null, finishedAt: null, leadTimeProcessSeq };
 }
 
 test("no route, no actual ops -> empty", () => {
@@ -42,6 +42,13 @@ test("actual op with no matching route step (e.g. synthesized MTC verification) 
   const actual = [op(1, "Cutting", "COMPLETE"), op(99, "MTC Verification", "NOT_STARTED")];
   const result = projectComponentRoute(route, actual);
   expect(result.map((r) => r.operationName)).toEqual(["Cutting", "MTC Verification"]);
+});
+
+test("id is null for a route step with no matching ComponentOperation row, and carries the real id when matched", () => {
+  const route = [step(1, 1, "Cutting"), step(2, 2, "Forming")];
+  const actual = [op(1, "Cutting", "COMPLETE")];
+  const result = projectComponentRoute(route, actual);
+  expect(result.map((r) => r.id)).toEqual([1, null]);
 });
 
 test("carries leadTimeProcessSeq through for checkpoint lookup", () => {

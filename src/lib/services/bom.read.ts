@@ -128,6 +128,7 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
             operations: {
               orderBy: { seq: "asc" },
               select: {
+                id: true,
                 status: true,
                 startedAt: true,
                 finishedAt: true,
@@ -175,6 +176,7 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
             leadTimeProcessSeq: s.operation.leadTimeProcessSeq,
           }));
           const actualOps: ActualOp[] = c.operations.map((o) => ({
+            id: o.id,
             operationId: o.operation.id,
             operationName: o.operation.name,
             status: o.status,
