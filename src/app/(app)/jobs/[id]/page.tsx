@@ -34,6 +34,7 @@ export default async function JobDetail({
   if (actor.clientId !== null) redirect("/portal");
 
   const canReviewClientUpdates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
+  const canEditJobDates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   const { id } = await params;
   const jobId = Number(id);
@@ -73,6 +74,7 @@ export default async function JobDetail({
       qcp={qcp}
       clientPreview={clientPreview}
       canReviewClientUpdates={canReviewClientUpdates}
+      canEditJobDates={canEditJobDates}
       tab={tab}
       openUnit={openUnit}
       openStage={openStage}

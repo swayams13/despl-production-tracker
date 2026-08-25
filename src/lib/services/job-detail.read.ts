@@ -18,7 +18,9 @@ export interface JobHeader {
   designCode: string | null;
   equipmentName: string | null;
   unitCount: number;
+  orderDate: string | null;
   committedDeliveryDate: string | null;
+  targetDispatchDate: string | null;
   forecastDispatch: string | null;
   forecastVarianceDays: number | null;
   totalPlans: number;
@@ -38,7 +40,9 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
         jobNumber: true,
         projectName: true,
         designCode: true,
+        orderDate: true,
         committedDeliveryDate: true,
+        targetDispatchDate: true,
         family: { select: { name: true } },
         equipments: { select: { name: true, _count: { select: { units: true } } }, orderBy: { id: "asc" } },
       },
@@ -80,7 +84,9 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
       designCode: job.designCode,
       equipmentName: job.equipments[0]?.name ?? null,
       unitCount: job.equipments.reduce((n, e) => n + e._count.units, 0),
+      orderDate: job.orderDate ? job.orderDate.toISOString() : null,
       committedDeliveryDate: job.committedDeliveryDate ? job.committedDeliveryDate.toISOString() : null,
+      targetDispatchDate: job.targetDispatchDate ? job.targetDispatchDate.toISOString() : null,
       forecastDispatch: forecastDispatch ? forecastDispatch.toISOString() : null,
       forecastVarianceDays,
       totalPlans,

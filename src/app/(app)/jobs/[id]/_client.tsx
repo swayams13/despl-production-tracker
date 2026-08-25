@@ -11,6 +11,7 @@ import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { ClientPortalView } from "@/components/industrial/client-portal-view";
 import { ClientReviewBanner } from "@/components/industrial/client-review-banner";
+import { JobDateEditor } from "@/components/industrial/job-date-editor";
 import type { JobHeader } from "@/lib/services/job-detail.read";
 import type { UnitSpine } from "@/lib/services/spine.read";
 import type { ActivityEvent } from "@/lib/services/events.read";
@@ -43,6 +44,7 @@ export function JobDetailClient({
   qcp,
   clientPreview,
   canReviewClientUpdates,
+  canEditJobDates,
   tab,
   openUnit,
   openStage: openStageParam,
@@ -57,6 +59,7 @@ export function JobDetailClient({
   qcp: QcpGridData | null;
   clientPreview: ClientPreview | null;
   canReviewClientUpdates: boolean;
+  canEditJobDates: boolean;
   tab: "overview" | "gantt" | "bom" | "qcp" | "activity" | "client";
   /** Deep-link from a notification (`?openUnit=&openStage=`) — auto-opens the StageSheet once on mount. */
   openUnit?: number;
@@ -101,6 +104,14 @@ export function JobDetailClient({
             </>
           ) : (
             "No contractual date set yet"
+          )}
+          {canEditJobDates && (
+            <JobDateEditor
+              jobId={jobId}
+              orderDate={header.orderDate}
+              committedDeliveryDate={header.committedDeliveryDate}
+              targetDispatchDate={header.targetDispatchDate}
+            />
           )}
         </span>
       </div>

@@ -489,3 +489,27 @@ export const createJobSchema = z
     },
   );
 export type CreateJobInput = z.infer<typeof createJobSchema>;
+
+/**
+ * Set/change a job's planning dates after creation. Same PLANNING-date
+ * distinction as createJobSchema — no actual_* field, invariant #1.
+ */
+export const updateJobDatesSchema = z
+  .object({
+    jobId: id,
+    orderDate: z.coerce.date().nullable().default(null),
+    committedDeliveryDate: z.coerce.date().nullable().default(null),
+    targetDispatchDate: z.coerce.date().nullable().default(null),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.targetDispatchDate == null ||
+      v.committedDeliveryDate == null ||
+      v.targetDispatchDate <= v.committedDeliveryDate,
+    {
+      message: "The target dispatch date cannot be later than the date committed to the client",
+      path: ["targetDispatchDate"],
+    },
+  );
+export type UpdateJobDatesInput = z.infer<typeof updateJobDatesSchema>;
