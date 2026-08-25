@@ -136,7 +136,7 @@ function SubAssemblyComponents({ jobId, components }: { jobId: number; component
         <h3>Sub-assembly components — {components.length} tracked</h3>
         <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>No procurement BOM export yet — routed directly from the component register</span>
       </div>
-      <div className="bom-items">
+      <div>
         {components.map((comp) => (
           <div key={comp.id}>
             <div
