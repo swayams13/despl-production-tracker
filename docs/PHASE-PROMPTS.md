@@ -70,6 +70,48 @@ codebase and they are load-bearing for everything downstream:
 Two need surgical fixes, not replacement: `persistScheduleRun` and `override.service.ts`.
 Both are named in Phase 0.
 
+### Generality: DESPL-320 is the calibration job, not the product
+
+The application tracks **many projects across many product families** — pressure vessels, heat
+exchangers, pipe spools, piping systems — for many departments. DESPL-320 is the pilot being used
+to finalise the workflow. It is **not** the thing being built.
+
+The schema already supports this and it must stay that way:
+
+- `ProductFamily` — four families seeded: `PRESSURE_VESSEL`, `HEAT_EXCHANGER`, `PIPE_SPOOL`, `PIPING_SYSTEM`
+- `ProcessTemplate` → `ProcessTemplateVersion` → `TemplateProcess`, **per family, versioned**; a job
+  pins a version at intake and materialises editable `JobProcess` rows
+- `RouteTemplate` is `@@unique([tenantId, componentTypeId, familyId])` with `familyId` nullable —
+  a route either belongs to a family or applies to all of them
+- `QcpTemplate` supports **library rows with `jobId: null`**; `createJob` takes
+  `qcpTemplateSourceId` and `cloneQcpTemplate` clones by process **code**, not id, so it survives
+  renumbering across template versions
+- `EquipmentTypeRef` carries `familyId` and `defaultSpecs`, copied into `Job.specs` at intake
+- `TemplateProcess.provisional` lets a family have a real, sourced route with unconfirmed durations
+  — `lib/schedule/` refuses to compute rather than inventing dates. `PIPE_SPOOL` already works this way.
+
+**The rule for every phase:**
+
+1. **No literal in `src/`.** No job number, serial, component tag, operation name, group code or
+   family code appears in application code. `workspace/page.tsx:8-13` was the one violation and
+   Phase 0 removed it. Do not add another.
+2. **Anything that varies by product family goes in a versioned template**, pinned by the job,
+   materialised per unit — the same three-layer pattern `ProcessTemplate → JobProcess → ProcessPlan`
+   and `RouteTemplate → RouteStep → ComponentOperation` already use. Never a per-job hand-seed with
+   no template behind it.
+3. **Job-specific data lives in `seed/*.json` and `scripts/`**, never in `src/`.
+4. **New vocabulary is shared vocabulary.** An operation DESPL-320 needs is a new `OperationRef` in
+   the tenant vocabulary and a `RouteStep` on the relevant family route — never a special case.
+5. **The acceptance test for every phase:** *"If we won an identical heat exchanger tomorrow, what
+   code changes?"* The correct answer is **none** — a template, a route set and a QCP get authored
+   as data by an engineer, and the job runs. If a phase's work makes that answer anything other
+   than "none", the design is wrong. Say so before implementing it.
+
+Family readiness today, for context: `PRESSURE_VESSEL` has the full 36-process template and the
+25-route library. `PIPE_SPOOL` has a provisional template sourced from two piping QAPs — real
+sequence, no durations. `PIPING_SYSTEM` and `HEAT_EXCHANGER` have no template yet. That is a data
+gap, not an engineering one, and it is the correct state.
+
 ### Repository conventions to follow
 - All business rules live in `lib/services/`. Server Actions and Route Handlers stay thin.
   Pages must not reach past the service layer to `@/lib/db` — three currently do; do not add a fourth.
@@ -192,7 +234,8 @@ them are audited. No operation is a checkbox and none is skipped because it seem
 | F5 | **`rejectComponentOperation`.** Currently omitted on purpose because "a rejection reason has nowhere durable to live yet." Add `ComponentOperationRejection` (op id, reason, `DelayCategoryRef` id, rejectedBy, at) and a `REJECTED` transition returning the op to IN_PROGRESS with the rejection retained. Maker–checker applies: the submitter cannot reject their own work. Settle F-e on where work restarts. | `component.service.ts:27-29,43-58` |
 | F6 | **Reconcile all 25 seeded routes against the spec's 54 operations**, so every step the floor actually performs exists as a `RouteStep` and nothing is silently folded into a neighbour. Known discrepancies to settle with the floor: Rolling vs Forming on `PLATE` (spec tracks two timed steps, route has one combined), and the three operations flagged `"GAP": "No dedicated column in the live CSV"` — `EDGE_PREP`, `GRINDING`, `INSPECTION`. Treat these as examples, not the list: diff the whole spec against the whole route library and confirm every difference. Each fix is one `OperationRef` and/or `RouteStep` change. **Do not guess — an invented operation is worse than a missing one.** | `seed/component-routes.json` · spec §1 |
 | F8 | **Generalise the transition helper.** `process.service.ts` and `component.service.ts` carry structurally identical state machines. One `assertTransition<S>(matrix, action, from, entityName)` serves both — and Phase 2 needs a third. Do this here, not later. | `process.service.ts:67-88` · `component.service.ts:34-58` |
-| F9 | **UI:** operation rows in `<BomPanel />` gain Started/Ended/Operator/Remarks/quantity and a Reject action alongside Start/Submit/Verify. Match the spec's column contract. Keyboard-operable. | `bom-panel.tsx:321` |
+| F9 | **UI:** operation rows in `<BomPanel />` gain Started/Ended/Operator/Remarks/quantity and a Reject action alongside Start/Submit/Verify. Match the spec's column contract. Keyboard-operable. **Render from the component's route, whatever that route is** — no hardcoded operation names, no assumption of 11 components or 54 operations. A pipe spool with a 4-step route must render correctly in the same component. | `bom-panel.tsx:321` |
+| F10 | **Generality check before closing the phase.** New operations go into `OperationRef` and family-scoped `RouteTemplate`s, never a DESPL-320 branch. Confirm: nothing added this phase would need changing to run a heat exchanger, and no job number, serial or component tag has entered `src/`. See §0. | — |
 
 ### Acceptance criteria
 - A supervisor opens unit 320SR03, sees its 11 components and each component's ordered route.
@@ -242,12 +285,13 @@ that governs them.
 
 | # | Item | Notes |
 |---|---|---|
-| A1 | **`AssemblyStep`** — `unitId · seq · groupCode · groupName · activity · kind (WORK\|INSPECTION) · weldJointId? · qcpItemId? · status · startedAt · finishedAt · performedBy · submittedBy · verifiedBy · remarks`, `@@unique([unitId, seq])`. Reuse `OperationStatus` and F8's generic transition helper. The design is a direct transcription of the spec — no invention, no new input needed from DESPL. |
-| A2 | **Seed the 54-step sequence per unit** from `docs/DESPL-320-fabrication-assembly-spec.md` §2. The `kind` column there is an annotation, not a workbook field — have the floor confirm the WORK/INSPECTION split before seeding. |
+| A1 | **`AssemblyTemplate` → `AssemblyTemplateVersion` → `AssemblyTemplateStep`, then `AssemblyStep` per unit.** *Read §0's generality rule before designing this — it is the phase most at risk of hardcoding DESPL-320.* Template is `(tenantId, familyId, name)`; version carries `version` + `TemplateStatus`; step carries `seq · groupCode · groupName · activity · kind (WORK\|INSPECTION) · qcpItemRef? · weldJointRef?`. A job pins `assemblyTemplateVersionId` exactly as it pins `templateVersionId`, and intake materialises `AssemblyStep` rows per unit — `unitId · assemblyTemplateStepId · seq · status · startedAt · finishedAt · performedBy · submittedBy · verifiedBy · weldJointId? · qcpItemId? · remarks`, `@@unique([unitId, seq])`. Reuse `OperationStatus` and F8's generic transition helper. **A heat exchanger's assembly sequence must then be a new template version authored as data, not a code change.** |
+| A2 | **Author the A–Q sequence as `PRESSURE_VESSEL` assembly template v1** from `docs/DESPL-320-fabrication-assembly-spec.md` §2, then materialise it for DESPL-320's 9 units through the normal intake path — not a bespoke per-unit seed. The `kind` column in the spec is this document's annotation, not a workbook field; have the floor confirm the WORK/INSPECTION split before authoring. |
 | A3 | **Link `WeldJoint`.** Add `componentId` to `WeldJoint` and reference it from the weld steps. This is what makes per-welder repair rate real, lets an NDT `REJECT` re-open the offending step, and makes heat-to-weld traceability reachable later. |
 | A4 | **Link `QcpItem`.** Inspection steps point at the checkpoint that governs them, so `assertNoOpenHoldPoint` needs no change and the QC cockpit and assembly view stop being two truths. |
 | A5 | **Welder registry CRUD.** There is currently **no write path at all** — `Welder` can only be seeded. Blocks A3 and blocks the whole welding module. Needs open question F-f answered (welder list + employee codes, outstanding since before the pilot). |
 | A6 | **Assembly UI** — the A–Q sequence per unit, with the same action set as fabrication, weld joints inline on the weld steps, and NDT results attached. |
+| A8 | **QCP template authoring** *(may slip to Phase 4)* — `QcpTemplate` already supports library rows (`jobId: null`) and `createJob` already accepts `qcpTemplateSourceId`, so the mechanism exists. What is missing is a UI (PRD FR-M3). Until it exists, a new family's QCP must be hand-seeded as JSON, which is the main thing standing between "we won a heat exchanger" and "the job runs". Flag it in the plan if it fits; do not skip it silently. |
 | A7 | **`ComponentConsumption`** *(defer, but leave room)* — `(assemblyStepId, componentId)`. Gives the as-built record and the gate "CS-2 set-up cannot start until BOTTOM-HEAD is COMPLETE." Not required to ship this phase; required before claiming traceability. Do not paint over it. |
 
 ### Acceptance criteria

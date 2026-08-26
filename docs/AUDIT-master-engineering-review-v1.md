@@ -9,6 +9,26 @@
 
 ---
 
+## ⚠ Status — read before using §9
+
+This audit's **findings and evidence stand**. Two things about it have been superseded:
+
+| Superseded | By | Why |
+|---|---|---|
+| **§9's phase order** (Phase 1 = BOM foundation) | `docs/AUDIT-addendum-fabrication-and-assembly.md` §4 | The first deliverable is fabrication and assembly production tracking, which needs the *component register*, not the BOM tree. BOM and materials moved to Phase 4. |
+| **This document's DESPL-320 framing** | `docs/PHASE-PROMPTS.md` §0 *Generality* and the addendum §0b | The audit examines the pilot job because that is what the repository contains. **The product is a multi-project, multi-family platform** — pressure vessels, heat exchangers, pipe spools, piping systems. Nothing in this audit should be read as scoping the application to DESPL-320 or to pressure vessels. |
+
+Working documents, in reading order:
+
+1. `docs/AUDIT-addendum-fabrication-and-assembly.md` — the first deliverable and the revised phase order
+2. `docs/DESPL-320-fabrication-assembly-spec.md` — the functional requirement
+3. `docs/PHASE-PROMPTS.md` — §0 standing rules (including the generality constraint) and per-phase briefs
+
+The audit's §18 gap analysis, §19 keep/refactor/redesign decisions and §21 immediate actions remain
+current. Only the sequencing in §9 and §20 changed.
+
+---
+
 ## 1. Executive verdict
 
 **The integrity core is genuinely senior-level and must not be rewritten.** Transactional gating

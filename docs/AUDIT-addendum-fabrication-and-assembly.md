@@ -32,6 +32,35 @@ That is the deliverable. Build exactly that.
 
 ---
 
+## 0b. DESPL-320 is the calibration job, not the product
+
+Everything below is expressed against DESPL-320 because it is the pilot being used to finalise the
+workflow. **The application tracks many projects across many families** — pressure vessels, heat
+exchangers, pipe spools, piping systems — across all departments.
+
+The schema already supports that, and the existing patterns are the ones to follow:
+
+| Mechanism | Status |
+|---|---|
+| `ProductFamily` — 4 families seeded | ✅ exists |
+| `ProcessTemplate` → `Version` → `TemplateProcess`, per family, job pins a version | ✅ exists, `PRESSURE_VESSEL` v1 = the 36 processes |
+| `RouteTemplate` `@@unique([tenantId, componentTypeId, familyId])`, `familyId` nullable | ✅ exists, 25 routes seeded |
+| `QcpTemplate` library rows (`jobId: null`) + `createJob(qcpTemplateSourceId)` + clone-by-code | ✅ mechanism exists, **no authoring UI** (FR-M3) |
+| `EquipmentTypeRef` with `familyId` + `defaultSpecs` → `Job.specs` | ✅ exists |
+| `TemplateProcess.provisional` — real route, unconfirmed durations, scheduler refuses rather than guessing | ✅ exists; `PIPE_SPOOL` already uses it |
+| **Assembly sequence template** | ❌ **does not exist — Phase 2 must create it** |
+
+Family readiness today: `PRESSURE_VESSEL` complete; `PIPE_SPOOL` provisional (real sequence from two
+piping QAPs, no durations); `PIPING_SYSTEM` and `HEAT_EXCHANGER` have no template. That is a data
+gap, not an engineering one, and it is the correct state.
+
+**The standing test for every phase:** *if we won an identical heat exchanger tomorrow, what code
+changes?* The answer must be **none** — an engineer authors a process template, a route set and a
+QCP as data, and the job runs. §2's assembly design is written to preserve that; a per-unit
+hand-seed with no template behind it would break it.
+
+---
+
 ## 1. Fabrication — what exists
 
 `Component` → `ComponentOperation`, driven by `RouteTemplate` → `RouteTemplateVersion` →
@@ -160,34 +189,72 @@ So today, assembly is representable only as:
   *"Weld Long Seam Of Shell"* (work) and *"Weld Visual Of LS-1"* (inspection). The system needs
   both, distinguished.
 
-### Recommended model — one new table
+### Recommended model — template, version, instance
+
+**Not one table — the same three layers everything else in this schema uses.** A per-unit
+hand-seed would make the A–Q sequence a DESPL-320 special case and force a code change for the
+first heat exchanger. See §0b.
 
 ```prisma
-model AssemblyStep {
+model AssemblyTemplate {          // per product family, like ProcessTemplate
+  id       Int    @id @default(autoincrement())
+  tenantId Int
+  familyId Int
+  name     String
+  versions AssemblyTemplateVersion[]
+}
+
+model AssemblyTemplateVersion {   // versioned, publishable, pinned by a job
+  id         Int            @id @default(autoincrement())
+  templateId Int
+  version    Int
+  status     TemplateStatus
+  steps      AssemblyTemplateStep[]
+  @@unique([templateId, version])
+}
+
+model AssemblyTemplateStep {      // the A–Q sequence, authored once per family
+  id         Int    @id @default(autoincrement())
+  versionId  Int
+  seq        Int                  // 1..54 for PRESSURE_VESSEL v1
+  groupCode  String               // "E", "G", "H", "J", "K", "L", "M", "N", "O", "P", "Q"
+  groupName  String               // "Shell Sub-Assembly (LS-1)"
+  srNo       String               // "4.5" — the printed QAP reference
+  activity   String               // "Weld Long Seam Of Shell (LS-1)"
+  kind       AssemblyStepKind     // WORK | INSPECTION
+  qcpSrNo    String?              // resolves to QcpItem by sr/sequence at materialisation
+  jointRef   String?              // "LS-1" — resolves to a WeldJoint as one is logged
+  @@unique([versionId, seq])
+}
+
+model AssemblyStep {              // materialised per unit at intake, like ProcessPlan
   id          Int      @id @default(autoincrement())
   unitId      Int
-  seq         Int                    // 1..N, the A–Q sequence
-  groupCode   String                 // "E", "G", "H", "J", "K", "L"
-  groupName   String                 // "Shell Sub-Assembly (LS-1)"
-  activity    String                 // "Weld Long Seam Of Shell (LS-1)"
-  kind        AssemblyStepKind       // WORK | INSPECTION
-  weldJointId Int?                   // links the weld steps to the joint + its welders + NDT
-  qcpItemId   Int?                   // links the inspection steps to the checkpoint that governs
-  status      OperationStatus        // reuse the ComponentOperation state machine
-  startedAt   DateTime?              // SERVER CLOCK ONLY
-  finishedAt  DateTime?              // SERVER CLOCK ONLY
+  templateStepId Int
+  seq         Int
+  status      OperationStatus     // reuse the ComponentOperation state machine
+  startedAt   DateTime?           // SERVER CLOCK ONLY
+  finishedAt  DateTime?           // SERVER CLOCK ONLY
   performedBy Int?
   submittedBy Int?
   verifiedBy  Int?
+  weldJointId Int?                // bound as the joint is logged
+  qcpItemId   Int?                // bound at materialisation
   remarks     String?
-
   @@unique([unitId, seq])
 }
 ```
 
+`Job` gains `assemblyTemplateVersionId`, pinned at intake exactly as `templateVersionId` is.
+Resolve `qcpSrNo` → `QcpItem` by sr/sequence at materialisation, the same **match-by-code, never
+by id** discipline `cloneQcpTemplate` already uses — it is what makes a template survive
+renumbering.
+
 Why this shape:
-- It is a **direct transcription of your own checklist**, so it needs no invention and no
-  confirmation from DESPL.
+- The step content is a **direct transcription of your own checklist**, so it needs no invention
+  and no confirmation from DESPL — only the WORK/INSPECTION split does.
+- A heat exchanger's assembly sequence becomes `AssemblyTemplate(HEAT_EXCHANGER)` v1, authored as
+  data. **No code changes.**
 - It reuses `ComponentOperation`'s state machine, gating pattern and maker–checker verbatim —
   one generic `assertTransition<S>()` serves both.
 - `weldJointId` makes the existing welding module load-bearing instead of an empty side page:
