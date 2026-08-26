@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES } from "@/lib/shared/errors";
-import { createJob } from "./job-intake.service";
+import { createJob, updateJobDetails } from "./job-intake.service";
 import type { CreateJobInput } from "@/lib/shared/schemas";
 
 function actor(over: Partial<Actor> = {}): Actor {
@@ -95,6 +95,48 @@ describe("job-intake.service — pure refusals", () => {
     await expect(
       // @ts-expect-error — .strict() schema; no actual_* field exists on this input
       createJob(actor(), { ...input(), actualStart: new Date() }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("job-intake.service — updateJobDetails pure refusals", () => {
+  it.each([
+    ["SUPERVISOR", ROLES.SUPERVISOR],
+    ["QC", ROLES.QC],
+    ["MANAGEMENT", ROLES.MANAGEMENT],
+  ])("refuses a %s caller (RBAC deny-by-default)", async (_label, role) => {
+    await expect(
+      updateJobDetails(actor({ roles: [role] }), { jobId: 1, clientOrderNo: null, projectName: null, poRef: null, designCode: null, priority: "NORMAL", remarks: null }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("refuses a client user before touching the DB", async () => {
+    await expect(
+      updateJobDetails(actor({ clientId: 5, roles: [ROLES.CLIENT_VIEWER] }), {
+        jobId: 1,
+        clientOrderNo: null,
+        projectName: null,
+        poRef: null,
+        designCode: null,
+        priority: "NORMAL",
+        remarks: null,
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("rejects a smuggled actual_* field via the strict schema (invariant #1)", async () => {
+    await expect(
+      updateJobDetails(actor(), {
+        jobId: 1,
+        clientOrderNo: null,
+        projectName: null,
+        poRef: null,
+        designCode: null,
+        priority: "NORMAL",
+        remarks: null,
+        // @ts-expect-error — .strict() schema; no actual_* field exists on this input
+        actualStart: new Date(),
+      }),
     ).rejects.toThrow();
   });
 });

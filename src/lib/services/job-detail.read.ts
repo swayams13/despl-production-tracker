@@ -2,6 +2,7 @@ import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { getCurrentScheduleRun } from "./_shared";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
+import { isOverdue } from "@/lib/shared/business-day";
 
 /**
  * Job detail header (§4.3): code, description, status chip, due + forecast
@@ -14,6 +15,10 @@ export interface JobHeader {
   jobId: number;
   jobNumber: string;
   projectName: string | null;
+  clientOrderNo: string | null;
+  poRef: string | null;
+  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  remarks: string | null;
   familyName: string;
   designCode: string | null;
   equipmentName: string | null;
@@ -39,6 +44,10 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
         clientId: true,
         jobNumber: true,
         projectName: true,
+        clientOrderNo: true,
+        poRef: true,
+        priority: true,
+        remarks: true,
         designCode: true,
         orderDate: true,
         committedDeliveryDate: true,
@@ -54,8 +63,7 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
     const plans = run?.processPlans ?? [];
     const totalPlans = plans.length;
     const completePlans = plans.filter((p) => p.status === "COMPLETE").length;
-    const now = new Date();
-    const overduePlans = plans.filter((p) => p.status !== "COMPLETE" && p.plannedFinish != null && p.plannedFinish < now).length;
+    const overduePlans = plans.filter((p) => p.status !== "COMPLETE" && isOverdue(p.plannedFinish)).length;
     const percentComplete = totalPlans > 0 ? Math.round((completePlans / totalPlans) * 100) : 0;
 
     const onHold = plans.some((p) => p.status === "ON_HOLD");
@@ -80,6 +88,10 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
       jobId,
       jobNumber: job.jobNumber,
       projectName: job.projectName,
+      clientOrderNo: job.clientOrderNo,
+      poRef: job.poRef,
+      priority: job.priority,
+      remarks: job.remarks,
       familyName: job.family.name,
       designCode: job.designCode,
       equipmentName: job.equipments[0]?.name ?? null,

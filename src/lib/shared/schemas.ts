@@ -525,3 +525,24 @@ export const updateJobDatesSchema = z
     },
   );
 export type UpdateJobDatesInput = z.infer<typeof updateJobDatesSchema>;
+
+/**
+ * Revise a job's own descriptive/reference fields after creation (client PO
+ * changed, project renamed, priority bumped, …). Deliberately excludes
+ * clientId/familyId/templateVersionId/equipments — those are structural and
+ * ripple through the route, BOM and unit graph createJob() builds; changing
+ * them isn't a "revision," it's a different job. Same `.strict()` +
+ * no-actual_* rule as every other request schema here.
+ */
+export const updateJobDetailsSchema = z
+  .object({
+    jobId: id,
+    clientOrderNo: z.string().trim().min(1).nullable().default(null),
+    projectName: z.string().trim().min(1).nullable().default(null),
+    poRef: z.string().trim().min(1).nullable().default(null),
+    designCode: z.string().trim().min(1).nullable().default(null),
+    priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]),
+    remarks: z.string().trim().min(1).nullable().default(null),
+  })
+  .strict();
+export type UpdateJobDetailsInput = z.infer<typeof updateJobDetailsSchema>;

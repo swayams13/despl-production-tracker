@@ -21,8 +21,13 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
   requireRole(actor, ROLES.QC);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const bomItem = await tx.bomItem.findUnique({
-      where: { id: bomItemId },
+    // `bom_items` carries no tenant_id (audit C3): `assertClientScope` below
+    // is a CLIENT boundary (no-ops for internal actors, authz/index.ts:124-128)
+    // and was doing all the work here, which is none for the common internal
+    // case. Anchor the id lookup itself through `equipment.job`, which IS
+    // tenant-scoped — same pattern as `lockProcessPlanForUpdate` (_shared.ts).
+    const bomItem = await tx.bomItem.findFirst({
+      where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
       select: { equipment: { select: { job: { select: { clientId: true } } } } },
     });
     if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });

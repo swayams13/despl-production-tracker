@@ -2,6 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { workingDaysBetween, DEFAULT_CALENDAR } from "@/lib/schedule";
 import type { WorkCalendarInput } from "@/lib/schedule";
+import { isOverdue, isOnTime } from "@/lib/shared/business-day";
 
 /**
  * `/departments` + `/departments/[id]` (§4.6) — cross-job, like `/qc`.
@@ -45,16 +46,15 @@ export async function loadDepartmentCards(actor: Actor): Promise<DeptCard[]> {
       select: { ownerDepartmentId: true, status: true, plannedFinish: true, actualFinish: true },
     });
 
-    const now = new Date();
     const byDept = new Map<number, { open: number; overdue: number; onTime: number; onTimeTotal: number }>();
     for (const p of plans) {
       const b = byDept.get(p.ownerDepartmentId) ?? { open: 0, overdue: 0, onTime: 0, onTimeTotal: 0 };
       if (p.status !== "COMPLETE") {
         b.open++;
-        if (p.plannedFinish != null && p.plannedFinish < now) b.overdue++;
+        if (isOverdue(p.plannedFinish)) b.overdue++;
       } else if (p.actualFinish && p.plannedFinish) {
         b.onTimeTotal++;
-        if (p.actualFinish <= p.plannedFinish) b.onTime++;
+        if (isOnTime(p.actualFinish, p.plannedFinish)) b.onTime++;
       }
       byDept.set(p.ownerDepartmentId, b);
     }
@@ -132,7 +132,6 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
       },
     });
 
-    const now = new Date();
     const openItems: DeptOpenItem[] = plans
       .filter((p) => p.status !== "COMPLETE" && p.unit != null)
       .map((p) => ({
@@ -145,7 +144,7 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
         processName: p.jobProcess.name,
         status: p.status,
         plannedFinish: p.plannedFinish ? p.plannedFinish.toISOString() : null,
-        overdue: p.plannedFinish != null && p.plannedFinish < now,
+        overdue: isOverdue(p.plannedFinish),
       }))
       .sort((a, b) => (a.plannedFinish ?? "").localeCompare(b.plannedFinish ?? ""));
 

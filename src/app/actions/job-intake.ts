@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
-import { createJob, updateJobDates, type CreateJobResult } from "@/lib/services/job-intake.service";
+import { createJob, updateJobDates, updateJobDetails, type CreateJobResult } from "@/lib/services/job-intake.service";
 import { createClientRecord, createEquipmentType, updateEquipmentType } from "@/lib/services/admin.service";
 import { loadTemplateProcesses } from "@/lib/services/job-intake.read";
 import { generateSchedule } from "@/lib/services/schedule.service";
@@ -10,6 +10,7 @@ import { toActionError, type ActionResult } from "./_action";
 import type {
   CreateJobInput,
   UpdateJobDatesInput,
+  UpdateJobDetailsInput,
   CreateClientInput,
   CreateEquipmentTypeInput,
   UpdateEquipmentTypeInput,
@@ -100,6 +101,21 @@ export async function updateJobDatesAction(input: UpdateJobDatesInput): Promise<
       : undefined;
 
     return { ok: true, schedule };
+  } catch (e) {
+    const result = toActionError(e);
+    if (!result.ok && isAppError(e)) return { ...result, detail: e.detail };
+    return result;
+  }
+}
+
+export type UpdateJobDetailsActionResult = ActionResult & { detail?: Record<string, unknown> };
+
+export async function updateJobDetailsAction(input: UpdateJobDetailsInput): Promise<UpdateJobDetailsActionResult> {
+  try {
+    await updateJobDetails(await requireActor(), input);
+    revalidatePath(`/jobs/${input.jobId}`);
+    revalidatePath("/jobs");
+    return { ok: true };
   } catch (e) {
     const result = toActionError(e);
     if (!result.ok && isAppError(e)) return { ...result, detail: e.detail };

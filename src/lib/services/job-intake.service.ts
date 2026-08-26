@@ -3,7 +3,14 @@ import { withTenant, type Tx } from "@/lib/db";
 import { audited } from "@/lib/audit";
 import { ROLES, requireRole, assertNotClientUser, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { createJobSchema, updateJobDatesSchema, type CreateJobInput, type UpdateJobDatesInput } from "@/lib/shared/schemas";
+import {
+  createJobSchema,
+  updateJobDatesSchema,
+  updateJobDetailsSchema,
+  type CreateJobInput,
+  type UpdateJobDatesInput,
+  type UpdateJobDetailsInput,
+} from "@/lib/shared/schemas";
 import { validateSpecs } from "@/lib/shared/specs";
 import { notifyJobCreated } from "./notifications.service";
 
@@ -321,6 +328,70 @@ export async function updateJobDates(actor: Actor, input: UpdateJobDatesInput) {
             targetDispatchDate: job.targetDispatchDate,
           },
           eventType: "JobDatesUpdated",
+          eventPayload: { jobId: job.id },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Revise a job's own descriptive/reference fields (client PO, project name,
+ * design code, priority, remarks) after creation. Same role gate and direct-
+ * update-plus-audit-log pattern as updateJobDates — a plain correction, not a
+ * versioned one (invariant #6's "new version with a reason" is for records
+ * with real-world consequences already logged elsewhere, e.g. a submitted MTC;
+ * these fields carry none of that).
+ */
+export async function updateJobDetails(actor: Actor, input: UpdateJobDetailsInput) {
+  const parsed = updateJobDetailsSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const before = await tx.job.findFirst({
+      where: { id: parsed.jobId, tenantId: actor.tenantId },
+      select: { clientOrderNo: true, projectName: true, poRef: true, designCode: true, priority: true, remarks: true },
+    });
+    if (!before) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId: parsed.jobId });
+
+    return audited(tx, actor, async () => {
+      const job = await tx.job.update({
+        where: { id: parsed.jobId },
+        data: {
+          clientOrderNo: parsed.clientOrderNo,
+          projectName: parsed.projectName,
+          poRef: parsed.poRef,
+          designCode: parsed.designCode,
+          priority: parsed.priority,
+          remarks: parsed.remarks,
+        },
+      });
+
+      return {
+        result: {
+          jobId: job.id,
+          clientOrderNo: job.clientOrderNo,
+          projectName: job.projectName,
+          poRef: job.poRef,
+          designCode: job.designCode,
+          priority: job.priority,
+          remarks: job.remarks,
+        },
+        audit: {
+          action: "job.update_details",
+          entityType: "Job",
+          entityId: job.id,
+          before,
+          after: {
+            clientOrderNo: job.clientOrderNo,
+            projectName: job.projectName,
+            poRef: job.poRef,
+            designCode: job.designCode,
+            priority: job.priority,
+            remarks: job.remarks,
+          },
+          eventType: "JobDetailsUpdated",
           eventPayload: { jobId: job.id },
         },
       };

@@ -102,6 +102,15 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
     // it resets its own precondition at the start to stay rerun-safe.
     await owner.qcpExecution.deleteMany({ where: { unitId: unit.id, qcpItemId: { in: blocking } } });
 
+    // Same reasoning for the ProcessPlan itself: persistScheduleRun now
+    // carries real work forward across a reschedule (audit C1 fix) instead of
+    // resetting it, so a rerun against this no-cleanup seed DB would otherwise
+    // find seq1/unit[2] already SUBMITTED or COMPLETE from the run before.
+    await owner.processPlan.updateMany({
+      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: seq1Id, unitId: unit.id },
+      data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
+    });
+
     const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
     const planId = run.processPlans.find((p) => p.jobProcessId === seq1Id && p.unitId === unit.id)!.id;
 

@@ -236,6 +236,42 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
     await expect(rejectSnapshot(md(job.tenantId), { jobId: job.id, reason: "" })).rejects.toThrow();
   });
 
+  /**
+   * Genuine two-transaction race, not a simulated one (audit 0.11): two
+   * different Management actors both call verifySnapshot on the same batch.
+   * Unlike template.service.ts's save path, there is no `FOR UPDATE` lock
+   * forcing the loser's initial read to happen strictly after the winner's
+   * commit — so the loser can land on either of two honest refusals
+   * depending on exact timing: SNAPSHOT_NOT_PUBLISHED (its own `pending` read
+   * ran after the winner's commit and saw nothing left) or STALE_WRITE (its
+   * read saw the row as PUBLISHED, but the winner committed before its own
+   * `updateMany` ran, so the count check here is what catches it). Both are
+   * fine; what must never happen is the loser silently "succeeding" — the
+   * count check is what closes that gap.
+   */
+  it("serializes concurrent verifies — the loser gets an honest refusal, not a false success", async () => {
+    const { job } = await fixture();
+    await cleanup(job.id);
+    await publishSnapshot(ph(job.tenantId), { jobId: job.id });
+
+    const mdA: Actor = { ...md(job.tenantId), userId: 2 };
+    const mdB: Actor = { ...md(job.tenantId), userId: 3 };
+    const results = await Promise.allSettled([
+      verifySnapshot(mdA, { jobId: job.id }),
+      verifySnapshot(mdB, { jobId: job.id }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const loserCode = (rejected[0] as PromiseRejectedResult & { reason: { code: string } }).reason.code;
+    expect([ERROR_CODES.STALE_WRITE, ERROR_CODES.SNAPSHOT_NOT_PUBLISHED]).toContain(loserCode);
+
+    const rows = await owner.progressSnapshot.findMany({ where: { jobId: job.id, status: "PUBLISHED" } });
+    expect(rows).toHaveLength(0); // no row left half-verified or re-readable as still-pending
+  });
+
   it("rejectSnapshot moves every row to REJECTED, and a fresh publish flips it back to PUBLISHED", async () => {
     const { job, unitCount } = await fixture();
     await cleanup(job.id);

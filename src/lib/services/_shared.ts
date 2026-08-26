@@ -1,13 +1,15 @@
 import type { Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { DEFAULT_CALENDAR } from "@/lib/schedule";
+import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
+import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
+import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import type {
   ScheduleProcess,
   ScheduleEdge,
   WorkCalendarInput,
   PredecessorState,
+  CpmNode,
 } from "@/lib/schedule";
 import type {
   Job,
@@ -30,6 +32,42 @@ import type {
  * Everything here runs inside a `withTenant` transaction the caller already
  * opened — these take the `tx`, never the bare client (db.ts).
  */
+
+// ── CPM guards (audit 0.10) ─────────────────────────────────────────────
+
+/**
+ * Bare Errors from the CPM (cycle, dangling edge, an excluded node with no
+ * duration for bypassExcluded to compose through) become an explainable
+ * refusal (invariant #12); AppErrors (e.g. SCHEDULE_DATA_MISSING) pass
+ * through unchanged. Use for a single-job read/write path, where the caller
+ * already has a jobId to report the failure against — override.service.ts's
+ * original helper, promoted here so every CPM call site shares it.
+ */
+export function computeOrRefuse<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (isAppError(e)) throw e;
+    throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+      cause: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/**
+ * computeCpm, but for a loop over EVERY job in the tenant (My Day, Command
+ * Center): one job with a malformed spine — a cycle, a dangling edge, an
+ * excluded provisional process with no confirmed duration — must not 500 the
+ * whole page for every other job. Returns null on any failure so the caller
+ * can skip just that job's contribution and keep going (audit H2/0.10).
+ */
+export function computeCpmSafe(processes: ScheduleProcess[], edges: ScheduleEdge[]): CpmNode[] | null {
+  try {
+    return computeCpm(processes, edges);
+  } catch {
+    return null;
+  }
+}
 
 // ── Row → engine mappers ────────────────────────────────────────────────
 
@@ -100,7 +138,13 @@ export async function loadJobSpine(tx: Tx, jobId: number): Promise<JobSpine> {
   const job = await tx.job.findUnique({ where: { id: jobId } });
   if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
 
-  const rawProcesses = await tx.jobProcess.findMany({ where: { jobId } });
+  // orderBy is load-bearing, not cosmetic: schedule.service.ts's terminal-node
+  // selection ties on envelopeFinishByMaxDays for parallel branches and
+  // tie-breaks on array order — an unordered findMany lets Postgres return rows
+  // in any order, so which tied process "wins" (and therefore which
+  // envelopeFinishByMinDays feeds checkFeasibility) becomes nondeterministic
+  // (audit 0.9).
+  const rawProcesses = await tx.jobProcess.findMany({ where: { jobId }, orderBy: { seq: "asc" } });
   const rawEdges = await tx.jobProcessEdge.findMany({ where: { process: { jobId } } });
 
   let cal =
@@ -164,6 +208,11 @@ export type ScheduleRunWithPlans = ScheduleRun & { processPlans: ProcessPlan[] }
  * and audit it — all in the caller's transaction. Never mutates a prior run's
  * rows (invariant #6): an override is a NEW version, the old baseline stays intact.
  */
+/** (jobProcessId, unitId) → the prior run's actuals for that cell, carried forward on reschedule. */
+function priorActualsKey(jobProcessId: number, unitId: number | null): string {
+  return `${jobProcessId}:${unitId ?? "null"}`;
+}
+
 export async function persistScheduleRun(
   tx: Tx,
   actor: Actor,
@@ -179,6 +228,21 @@ export async function persistScheduleRun(
   // ponytail: per-job row lock; a partial unique index on (job_id) WHERE
   // is_current is the DB-native alternative if this lock ever contends.
   await tx.$queryRaw`SELECT id FROM jobs WHERE id = ${jobId} FOR UPDATE`;
+
+  // Reschedule must not orphan in-flight actuals (audit C1): the prior current
+  // run's plans carry real floor work — actualStart/actualFinish/submittedBy/
+  // verifiedBy/status — and every read filters isCurrent, so demoting the run
+  // without carrying them forward makes that work invisible everywhere. Read
+  // the prior current run's plans BEFORE demoting it (still readable either way
+  // since demote only flips isCurrent, not the rows) and key them by the same
+  // (jobProcessId, unitId) grain the new plans are built on.
+  const priorRun = await tx.scheduleRun.findFirst({
+    where: { jobId, equipmentId, isCurrent: true },
+    include: { processPlans: true },
+  });
+  const priorByKey = new Map(
+    (priorRun?.processPlans ?? []).map((p) => [priorActualsKey(p.jobProcessId, p.unitId), p]),
+  );
 
   const prev = await tx.scheduleRun.aggregate({
     _max: { version: true },
@@ -205,16 +269,23 @@ export async function persistScheduleRun(
       overrideReason: input.overrideReason,
       createdBy: actor.userId,
       processPlans: {
-        create: input.plans.map((p) => ({
-          jobProcessId: p.jobProcessId,
-          unitId: p.unitId,
-          baselineStart: p.baselineStart,
-          baselineFinish: p.baselineFinish,
-          plannedStart: p.plannedStart,
-          plannedFinish: p.plannedFinish,
-          ownerDepartmentId: p.ownerDepartmentId,
-          status: "NOT_STARTED",
-        })),
+        create: input.plans.map((p) => {
+          const prior = priorByKey.get(priorActualsKey(p.jobProcessId, p.unitId));
+          return {
+            jobProcessId: p.jobProcessId,
+            unitId: p.unitId,
+            baselineStart: p.baselineStart,
+            baselineFinish: p.baselineFinish,
+            plannedStart: p.plannedStart,
+            plannedFinish: p.plannedFinish,
+            ownerDepartmentId: p.ownerDepartmentId,
+            status: prior?.status ?? "NOT_STARTED",
+            actualStart: prior?.actualStart ?? null,
+            actualFinish: prior?.actualFinish ?? null,
+            submittedBy: prior?.submittedBy ?? null,
+            verifiedBy: prior?.verifiedBy ?? null,
+          };
+        }),
       },
     },
     include: { processPlans: true },
@@ -271,6 +342,12 @@ export async function getCurrentScheduleRun(
  * // that turns out to belong to another tenant is wasted work inside a
  * // doomed transaction, not a data leak; the scoped read right after it is
  * // what decides whether anything is returned.
+ *
+ * Also refuses a write against a plan whose ScheduleRun has been superseded
+ * (audit C1's aggravator): a reschedule flips the prior run's isCurrent to
+ * false but never mutates its ProcessPlan rows, so a stale client tab open on
+ * an old plan id could otherwise still Start/Submit/Verify against a run
+ * nothing reads from anymore — passing gating while being invisible everywhere.
  */
 export async function lockProcessPlanForUpdate(
   tx: Tx,
@@ -282,6 +359,8 @@ export async function lockProcessPlanForUpdate(
     where: { id: processPlanId, ownerDepartment: { tenantId } },
   });
   if (!row) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessPlan", processPlanId });
+  const run = await tx.scheduleRun.findUnique({ where: { id: row.scheduleRunId }, select: { isCurrent: true } });
+  if (!run?.isCurrent) throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProcessPlan", processPlanId });
   return row;
 }
 
@@ -302,7 +381,7 @@ export async function assertNoUnfiledDelayBlock(
       ownerDepartmentId: args.ownerDepartmentId,
       unitId: args.unitId ?? null,
       status: { not: "COMPLETE" },
-      plannedFinish: { lt: new Date() },
+      plannedFinish: { lt: istCalendarDayMarker() },
       delayReasons: { none: {} },
     },
     select: { id: true, jobProcessId: true, plannedFinish: true },

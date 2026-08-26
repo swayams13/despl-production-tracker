@@ -164,10 +164,20 @@ export async function verifySnapshot(actor: Actor, input: VerifySnapshotInput): 
     const asOf = pending[0].asOf;
 
     return audited(tx, actor, async () => {
-      await tx.progressSnapshot.updateMany({
+      // Count check (audit 0.11): the batch was PUBLISHED as of the earlier
+      // `pending` read, but nothing holds a lock between that read and this
+      // write — a concurrent verify/reject on the same batch could already
+      // have flipped these rows' status. An unchecked updateMany would then
+      // silently affect 0 rows while this call still reports success with
+      // pending.length, double-verifying (or verifying-after-reject) without
+      // either caller ever seeing a conflict.
+      const { count } = await tx.progressSnapshot.updateMany({
         where: { jobId, asOf, status: "PUBLISHED" },
         data: { status: "VERIFIED", verifiedBy: actor.userId, verifiedAt: new Date() },
       });
+      if (count !== pending.length) {
+        throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProgressSnapshot", jobId, asOf });
+      }
 
       return {
         result: { jobId, asOf, unitCount: pending.length },
@@ -202,10 +212,14 @@ export async function rejectSnapshot(actor: Actor, input: RejectSnapshotInput): 
     const asOf = pending[0].asOf;
 
     const result = await audited(tx, actor, async () => {
-      await tx.progressSnapshot.updateMany({
+      // Count check (audit 0.11) — see verifySnapshot's identical comment.
+      const { count } = await tx.progressSnapshot.updateMany({
         where: { jobId, asOf, status: "PUBLISHED" },
         data: { status: "REJECTED", rejectionReason: reason },
       });
+      if (count !== pending.length) {
+        throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProgressSnapshot", jobId, asOf });
+      }
 
       return {
         result: { jobId, asOf, unitCount: pending.length },

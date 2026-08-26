@@ -1,14 +1,16 @@
 import * as XLSX from "xlsx";
 import { NextResponse } from "next/server";
-import { requireActor } from "@/lib/authz";
+import { requireActor, assertNotClientUser } from "@/lib/authz";
 import { AppError, ERROR_CODES, isAppError, ERROR_MESSAGES } from "@/lib/shared/errors";
 import { loadQcpGrid } from "@/lib/services/qcp-grid.read";
 import { intParam, type RouteCtx } from "../../../../_lib";
 
 // GET /api/jobs/:id/qcp/export?unit=:unitId — QCP checklist for one unit as .xlsx.
 export async function GET(req: Request, ctx: RouteCtx) {
+  const requestId = req.headers.get("x-request-id") ?? crypto.randomUUID();
   try {
     const actor = await requireActor();
+    assertNotClientUser(actor); // audit H3 — this route bypasses api/_lib.ts's route() wrapper
     const params = await ctx.params;
     const jobId = intParam(params.id);
     const unitParam = new URL(req.url).searchParams.get("unit");
@@ -47,7 +49,10 @@ export async function GET(req: Request, ctx: RouteCtx) {
     if (isAppError(e)) {
       return NextResponse.json({ error: { code: e.code, message: ERROR_MESSAGES[e.code] ?? "Request failed." } }, { status: e.code === "NOT_FOUND" ? 404 : 403 });
     }
-    console.error("[api] qcp export failed", e);
-    return NextResponse.json({ error: { code: "INTERNAL", message: "Something went wrong." } }, { status: 500 });
+    console.error("[api] qcp export failed", { requestId, error: e });
+    return NextResponse.json(
+      { error: { code: "INTERNAL", message: "Something went wrong." } },
+      { status: 500, headers: { "x-request-id": requestId } },
+    );
   }
 }

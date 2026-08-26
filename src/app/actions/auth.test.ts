@@ -110,4 +110,50 @@ describe.skipIf(!RUN_DB)("login() — identity resolution (DB)", async () => {
     expect(state?.error).toBe("Incorrect username, email, or password");
     expect(cookieValue).toBeUndefined(); // no session was created
   });
+
+  // Audit C4: brute force was unthrottled and left no trace at all.
+  it("a failed login leaves a trace — writes an audit_log row", async () => {
+    const { login } = await import("./auth");
+    cookieValue = undefined;
+    const identifier = `nobody-audit-${Date.now()}`;
+
+    const form = new FormData();
+    form.set("identifier", identifier);
+    form.set("password", "whatever-not-real-1");
+    await login({}, form);
+
+    const rows = await owner.auditLog.findMany({
+      where: { tenantId, action: "auth.loginFailed", entityId: identifier.toLowerCase() },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].actorId).toBeNull(); // no account matched this identifier
+  });
+
+  it("throttles repeated bad attempts against the same identifier", async () => {
+    const { login } = await import("./auth");
+    const identifier = `nobody-throttle-${Date.now()}`;
+
+    async function attempt(password: string) {
+      cookieValue = undefined;
+      const form = new FormData();
+      form.set("identifier", identifier);
+      form.set("password", password);
+      return login({}, form);
+    }
+
+    for (let i = 0; i < 5; i++) {
+      const state = await attempt("whatever-not-real-1");
+      expect(state?.error).toBe("Incorrect username, email, or password");
+    }
+
+    // 6th attempt within the window is throttled, even with a correct-shaped
+    // password — proves the block fires on attempt count, not password checks.
+    const throttled = await attempt("whatever-not-real-1");
+    expect(throttled?.error).toBe("Too many attempts. Try again in a few minutes.");
+
+    const rows = await owner.auditLog.count({
+      where: { tenantId, action: "auth.loginFailed", entityId: identifier.toLowerCase() },
+    });
+    expect(rows).toBe(5); // the throttled 6th attempt never re-checked the password, so no 6th row
+  });
 });

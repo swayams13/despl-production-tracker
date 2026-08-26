@@ -12,6 +12,7 @@ import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industri
 import { ClientPortalView } from "@/components/industrial/client-portal-view";
 import { ClientReviewBanner } from "@/components/industrial/client-review-banner";
 import { JobDateEditor } from "@/components/industrial/job-date-editor";
+import { JobDetailsEditor } from "@/components/industrial/job-details-editor";
 import type { JobHeader } from "@/lib/services/job-detail.read";
 import type { UnitSpine } from "@/lib/services/spine.read";
 import type { ActivityEvent } from "@/lib/services/events.read";
@@ -87,7 +88,24 @@ export function JobDetailClient({
           {header.equipmentName ?? "—"} · {header.familyName} · {header.unitCount} units
         </span>
         <StatusChip status={header.displayStatus} />
+        {canEditJobDates && (
+          <JobDetailsEditor
+            jobId={jobId}
+            clientOrderNo={header.clientOrderNo}
+            projectName={header.projectName}
+            poRef={header.poRef}
+            designCode={header.designCode}
+            priority={header.priority}
+            remarks={header.remarks}
+          />
+        )}
         <span className="sub" style={{ marginLeft: "auto" }}>
+          {header.orderDate && (
+            <>
+              Start <b className="mono" style={{ color: "var(--text)" }}>{fmtDate(header.orderDate)}</b>
+              {" · "}
+            </>
+          )}
           {header.committedDeliveryDate ? (
             <>
               Due <b className="mono" style={{ color: "var(--text)" }}>{fmtDate(header.committedDeliveryDate)}</b>

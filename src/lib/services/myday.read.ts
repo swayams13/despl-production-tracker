@@ -1,10 +1,11 @@
 import { withTenant } from "@/lib/db";
 import { hasRole, ROLES, type Actor } from "@/lib/authz";
-import { computeCpm, workingDaysBetween } from "@/lib/schedule";
-import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
+import { workingDaysBetween } from "@/lib/schedule";
+import { loadJobSpine, getCurrentScheduleRun, computeCpmSafe } from "./_shared";
 import { prioritize, compareRankedPlans, type RankedPlan } from "./prioritizer";
 import { loadJobs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
+import { isOnTime } from "@/lib/shared/business-day";
 
 /**
  * `/my-day` (personal dashboards v1, SPEC §6.1) — the personalized read every
@@ -173,10 +174,14 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
     for (const job of jobs) {
       const run = await getCurrentScheduleRun(tx, job.id, null);
       if (!run) continue;
-      activeRunIds.push(run.id);
 
       const spine = await loadJobSpine(tx, job.id);
-      const cpm = computeCpm(spine.processes, spine.edges);
+      // A malformed spine (cycle, dangling edge, excluded provisional process
+      // with no confirmed duration) on ANY one job must not 500 My Day for the
+      // whole tenant — skip just this job's contribution (audit H2/0.10).
+      const cpm = computeCpmSafe(spine.processes, spine.edges);
+      if (!cpm) continue;
+      activeRunIds.push(run.id);
       const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
       const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
       const durationMaxById = new Map(spine.rawProcesses.map((p) => [p.id, p.durationMaxDays]));
@@ -255,7 +260,7 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
         if (p.status !== "COMPLETE") continue;
         if (p.actualFinish && p.plannedFinish && p.actualFinish >= thirtyDaysAgo) {
           onTimeTotal++;
-          if (p.actualFinish <= p.plannedFinish) onTimeCount++;
+          if (isOnTime(p.actualFinish, p.plannedFinish)) onTimeCount++;
         }
         if (p.actualFinish && p.actualFinish >= sevenDaysAgo) doneThisWeek++;
         if (p.actualStart && p.actualFinish) {

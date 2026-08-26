@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireActor, type Actor } from "@/lib/authz";
+import { requireActor, assertNotClientUser, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES, isAppError, ERROR_MESSAGES, type ErrorCode } from "@/lib/shared/errors";
 
 /** Error code → HTTP status. Refusals stay explainable (CLAUDE.md invariant #12). */
@@ -39,6 +39,7 @@ const STATUS: Record<ErrorCode, number> = {
   TEMPLATE_VERSION_LOCKED: 409,
   TEMPLATE_INCOMPLETE: 409,
   STALE_WRITE: 409,
+  OVERRIDE_NOT_SUPPORTED_WITH_UNITS: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */
@@ -49,25 +50,50 @@ export type RouteCtx = { params: Promise<Record<string, string>> };
  * refusals become their mapped status + a UI-safe message + stable code;
  * anything unexpected is a 500 with no internals leaked. The handler receives
  * the actor, the request, and the resolved route params.
+ *
+ * Client users are blocked here by DEFAULT (audit H3): the schema's own
+ * comment says a `User` with a non-null `clientId` may only ever see
+ * ProgressSnapshot data, never live tables — but every `/api` route was a
+ * bare `route(handler)` with no such check, so a client user could `curl`
+ * internal delay-reason history, submitter identities and the raw
+ * domain-event stream directly. No route under `src/app/api/` is currently
+ * client-facing (the portal reads via server components, not this surface),
+ * so there is no opt-in list yet — pass `{ allowClient: true }` the day one
+ * is added, rather than defaulting new routes open again.
  */
 export function route<T>(
   fn: (actor: Actor, req: Request, params: Record<string, string>) => Promise<T>,
+  opts: { allowClient?: boolean } = {},
 ) {
   return async (req: Request, ctx: RouteCtx): Promise<NextResponse> => {
+    // Stamped by middleware.ts on every request; a request that somehow
+    // bypasses it (a direct route-handler unit test) still gets an id here
+    // rather than logging as untraceable.
+    const requestId = req.headers.get("x-request-id") ?? crypto.randomUUID();
     try {
       const actor = await requireActor();
+      if (!opts.allowClient) assertNotClientUser(actor);
       const params = await ctx.params;
-      return NextResponse.json(await fn(actor, req, params));
+      const res = NextResponse.json(await fn(actor, req, params));
+      res.headers.set("x-request-id", requestId);
+      return res;
     } catch (e) {
       if (isAppError(e)) {
         const status = STATUS[e.code] ?? 500;
+        // Refusals are expected product behavior (CLAUDE.md invariant #12) —
+        // info, not error — but still worth a request-id-correlated line so a
+        // support conversation ("it refused me") is greppable.
+        console.info("[api] refused", { requestId, code: e.code, status });
         return NextResponse.json(
           { error: { code: e.code, message: ERROR_MESSAGES[e.code] ?? "Request failed." } },
-          { status },
+          { status, headers: { "x-request-id": requestId } },
         );
       }
-      console.error("[api] unhandled", e);
-      return NextResponse.json({ error: { code: "INTERNAL", message: "Something went wrong." } }, { status: 500 });
+      console.error("[api] unhandled", { requestId, error: e });
+      return NextResponse.json(
+        { error: { code: "INTERNAL", message: "Something went wrong." } },
+        { status: 500, headers: { "x-request-id": requestId } },
+      );
     }
   };
 }

@@ -77,6 +77,8 @@ export const ERROR_CODES = {
   TEMPLATE_INCOMPLETE: "TEMPLATE_INCOMPLETE",
   /** The row changed under the caller since it was loaded; the write was refused. */
   STALE_WRITE: "STALE_WRITE",
+  /** applyDurationOverride: job/equipment-grain override refused because the job already has units — it would write unitId:null plans that supersede the per-unit run and brick gating (audit H7). */
+  OVERRIDE_NOT_SUPPORTED_WITH_UNITS: "OVERRIDE_NOT_SUPPORTED_WITH_UNITS",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -129,6 +131,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This process route is missing information it needs before it can be published.",
   STALE_WRITE:
     "Someone else changed this while you were editing. Reload the page and reapply your changes.",
+  OVERRIDE_NOT_SUPPORTED_WITH_UNITS:
+    "This job already has per-unit schedules. A duration override at job level would replace them and cannot be applied here.",
 };
 
 /**

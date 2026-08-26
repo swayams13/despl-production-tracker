@@ -1,9 +1,10 @@
 import { withTenant } from "@/lib/db";
 import { assertClientScope, hasRole, ROLES, type Actor } from "@/lib/authz";
 import { computeCpm, workingDaysBetween } from "@/lib/schedule";
-import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
+import { loadJobSpine, getCurrentScheduleRun, computeOrRefuse } from "./_shared";
 import { prioritize, type PlanState, type RankedPlan } from "./prioritizer";
 import type { Department, DelayCategoryRef, ProcessPlan } from "@/generated/prisma/client";
+import { isOnTime } from "@/lib/shared/business-day";
 
 /**
  * The current run's per-department prioritized view — the shared read behind
@@ -30,7 +31,9 @@ export async function loadPrioritizedJob(actor: Actor, jobId: number): Promise<P
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
-    const cpm = computeCpm(spine.processes, spine.edges);
+    // Single-job read: a malformed spine surfaces as an explainable refusal
+    // rather than a bare-Error 500 (audit 0.10).
+    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
     const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
 
@@ -265,7 +268,9 @@ export async function loadWorkspaceView(
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
-    const cpm = computeCpm(spine.processes, spine.edges);
+    // Single-job read: a malformed spine surfaces as an explainable refusal
+    // rather than a bare-Error 500 (audit 0.10).
+    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
     const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
     const procMeta = new Map(
@@ -558,7 +563,9 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
-    const cpm = computeCpm(spine.processes, spine.edges);
+    // Single-job read: a malformed spine surfaces as an explainable refusal
+    // rather than a bare-Error 500 (audit 0.10).
+    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
     const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
     const durationMaxById = new Map(spine.rawProcesses.map((p) => [p.id, p.durationMaxDays]));
@@ -595,7 +602,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
       if (p.status === "COMPLETE" && p.actualFinish && p.plannedFinish) {
         const bucket = onTimeByDept.get(p.ownerDepartmentId) ?? { onTime: 0, total: 0 };
         bucket.total++;
-        if (p.actualFinish <= p.plannedFinish) bucket.onTime++;
+        if (isOnTime(p.actualFinish, p.plannedFinish)) bucket.onTime++;
         onTimeByDept.set(p.ownerDepartmentId, bucket);
       }
     }

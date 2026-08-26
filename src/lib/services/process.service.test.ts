@@ -440,23 +440,40 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
     }
   }
 
+  // Reschedule now carries real work forward instead of resetting it (audit
+  // C1 fix) — this file's own DB-gated tests, and siblings sharing this
+  // no-cleanup seed DB (qcp.service.test.ts), advance real ProcessPlan rows
+  // via startProcess/submitProcess/verifyProcess. A test that assumes a
+  // NOT_STARTED baseline for the exact (jobProcess, unit) pairs it drives must
+  // reset those specific rows itself first, same spirit as clearHold above
+  // resetting its own precondition — reset on the CURRENT run so the carried-
+  // forward state generateSchedule reads is clean.
+  async function resetPlans(jobId: number, jobProcessIds: number[], unitIds: number[]): Promise<void> {
+    await owner.processPlan.updateMany({
+      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: { in: jobProcessIds }, unitId: { in: unitIds } },
+      data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
+    });
+  }
+
   const future = new Date(Date.now() + 30 * 864e5);
 
   it("per-unit gating isolation: unit A's completion never gates unit B open", async () => {
     const { jobId, tenantId } = await despl320();
     const a = planner(tenantId);
-    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
 
     const units = await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } });
     const [unitA, unitB] = units;
-    const planId = (jobProcessId: number, unitId: number) =>
-      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unitId)!.id;
 
     // P = seq 1 (PO Receipt & Order Review, root — no predecessors of its
     // own), S = seq 2 (Kick-Off / Pre-Inspection Meeting): a real
     // FINISH_TO_START edge in the seeded spine.
     const pId = await procId(jobId, 1);
     const sId = await procId(jobId, 2);
+    await resetPlans(jobId, [pId, sId], [unitA.id, unitB.id]);
+
+    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
+    const planId = (jobProcessId: number, unitId: number) =>
+      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unitId)!.id;
 
     // P carries a real blocking checkpoint (seeded QcpItem 4); clear it for
     // unit A only so P can legitimately reach COMPLETE there.
@@ -485,11 +502,30 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
   it("verify refuses at a genuinely uncleared hold point", async () => {
     const { jobId, tenantId } = await despl320();
     const a = planner(tenantId);
-    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
 
+    // skip: 3 — the prior test in this file completes/starts real work on
+    // units[0]/units[1] (unitA/unitB), and qcp.service.test.ts's DB block
+    // reserves units[2] for the same reason (see its own comment) — this same
+    // shared DESPL-320 job, and persistScheduleRun now correctly carries real
+    // work forward across a reschedule (audit C1 fix) instead of silently
+    // resetting it. Pick a unit no known sibling file touches rather than
+    // relying on a fresh-slate reset that would itself be the bug being fixed.
+    // ponytail: unit-index reservation by convention/comment, not enforced —
+    // fine for the ~3 files that currently touch DESPL-320 unit-scoped state;
+    // a shared per-file-unit allocator (or per-test job/equipment fixtures)
+    // is the upgrade path if this keeps growing.
     const unit = (
-      await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" }, take: 1 })
+      await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" }, skip: 3, take: 1 })
     )[0];
+
+    // Reset every plan this test's own dependency chain drives, so a rerun
+    // against the same no-cleanup seed DB starts from NOT_STARTED again (same
+    // reasoning as resetPlans above the first test).
+    const chainSeqs = [1, 2, 3, 4, 7, 8, 9, 10];
+    const chainIds = await Promise.all(chainSeqs.map((seq) => procId(jobId, seq)));
+    await resetPlans(jobId, chainIds, [unit.id]);
+
+    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
     const planId = (jobProcessId: number) =>
       run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unit.id)!.id;
 

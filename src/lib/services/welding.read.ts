@@ -215,8 +215,12 @@ export interface WeldJointOption {
 /** Feeds the "record result" picker — joints logged for a job (any unit). */
 export async function loadWeldJointOptions(actor: Actor, jobId: number): Promise<WeldJointOption[]> {
   return withTenant(actor.tenantId, async (tx) => {
+    // `weld_joints` carries no tenant_id (audit H4): a bare `jobId` filter let
+    // any authenticated user enumerate every weld joint, WPS ref and unit
+    // serial in the DB by guessing/incrementing job ids. Anchor through `job`,
+    // which IS tenant-scoped.
     const joints = await tx.weldJoint.findMany({
-      where: { jobId },
+      where: { jobId, job: { tenantId: actor.tenantId } },
       orderBy: { createdAt: "desc" },
       include: { job: { select: { jobNumber: true } }, unit: { select: { serialNo: true } } },
     });

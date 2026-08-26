@@ -26,7 +26,8 @@ export default async function Workspace({
   if (actor.clientId !== null) redirect("/portal");
 
   const sp = await searchParams;
-  const jobId = await pilotJobId(actor.tenantId);
+  const jobParam = Number(first(sp.job));
+  const jobId = Number.isInteger(jobParam) && jobParam > 0 ? jobParam : await pilotJobId(actor.tenantId);
   const view = jobId
     ? await loadWorkspaceView(actor, jobId, {
         dept: first(sp.dept),

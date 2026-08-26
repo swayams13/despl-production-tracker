@@ -45,6 +45,16 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
 
     const seq1Id = await procId(jobId, 1);
     const unit = (await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } }))[4];
+
+    // Reset this test's own target plan on whatever run is currently current,
+    // so a rerun against this no-cleanup seed DB starts from NOT_STARTED again
+    // — persistScheduleRun now carries real work forward across a reschedule
+    // (audit C1 fix) instead of resetting it.
+    await owner.processPlan.updateMany({
+      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: seq1Id, unitId: unit.id },
+      data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
+    });
+
     const run = await generateSchedule(planner, { jobId, mode: "FORWARD", projectStartDate: future });
     const planId = run.processPlans.find((p) => p.jobProcessId === seq1Id && p.unitId === unit.id)!.id;
 

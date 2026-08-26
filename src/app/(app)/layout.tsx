@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import { AppShell } from "@/components/industrial/app-shell";
 import { ThemeRoot } from "@/components/industrial/theme-root";
@@ -38,7 +39,10 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };
   let jobs: Awaited<ReturnType<typeof loadJobs>> = [];
   if (actor) {
-    await syncNotifications(actor).catch((e) => console.error("[notifications] sync failed", e));
+    await syncNotifications(actor).catch(async (e) => {
+      const requestId = (await headers()).get("x-request-id") ?? "unknown";
+      console.error("[notifications] sync failed", { requestId, error: e });
+    });
     [overdueCount, notifications, jobs] = await Promise.all([
       loadMyOverdueCount(actor),
       loadNotifications(actor),

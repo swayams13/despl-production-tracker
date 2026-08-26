@@ -2,14 +2,15 @@ import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { requireRole, assertNotClientUser, ROLES } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
-import { applyOverride, computeCpm, addWorkingDays } from "@/lib/schedule";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { applyOverride, addWorkingDays } from "@/lib/schedule";
 import { applyDurationOverrideSchema } from "@/lib/shared/schemas";
 import type { ApplyDurationOverrideInput } from "@/lib/shared/schemas";
 import {
   loadJobSpine,
   getCurrentScheduleRun,
   persistScheduleRun,
+  computeOrRefuse,
   type PlanInput,
   type ScheduleRunWithPlans,
 } from "./_shared";
@@ -21,29 +22,17 @@ import {
  * mandatory reason. This:
  *   1. recomputes the CPM plan (Layer 2) from the override — reason enforced by
  *      the pure engine (applyOverride);
- *   2. FIXES the Layer-1↔Layer-2 desync: restamps this job's envelope offsets
- *      (Layer 1) from the recomputed CPM so the authoritative window and the
- *      plan agree, instead of leaving the printed offsets stale (the flagged
- *      medium bug — see the restamp block);
+ *   2. FIXES the Layer-1↔Layer-2 desync: restamps this job's MAX envelope
+ *      offsets (Layer 1) from the recomputed CPM so the authoritative window and
+ *      the plan agree, instead of leaving the printed offsets stale (the flagged
+ *      medium bug — see the restamp block). MIN offsets are deliberately left
+ *      untouched (audit C2 — see the restamp block for why);
  *   3. persists a NEW ScheduleRun version (mode OVERRIDE) whose planned dates
  *      are the recomputed plan and whose baseline carries the prior run's
  *      baseline forward — the old baseline is never mutated (invariant #6);
  *   4. audits the JobProcess change; persistScheduleRun audits the new run.
  * All in one transaction.
  */
-
-/** Bare Errors from the CPM (cycle, dangling edge) become an explainable
- *  refusal (invariant #12); AppErrors (e.g. SCHEDULE_DATA_MISSING) pass through. */
-function computeOrRefuse<T>(fn: () => T): T {
-  try {
-    return fn();
-  } catch (e) {
-    if (isAppError(e)) throw e;
-    throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
-      cause: e instanceof Error ? e.message : String(e),
-    });
-  }
-}
 
 export async function applyDurationOverride(
   actor: Actor,
@@ -70,6 +59,18 @@ export async function applyDurationOverride(
     applyDurationOverrideSchema.parse(input);
 
   return withTenant(actor.tenantId, async (tx) => {
+    // Refuse on jobs with units (audit H7): this override writes unitId:null
+    // plans, which would become isCurrent and supersede the per-unit run —
+    // every per-unit plan then has a stale scheduleRunId, predecessor lookup
+    // finds nothing, and gating fails closed everywhere, silently, for the
+    // whole job. Override has no per-unit UI caller in this prototype; block
+    // rather than risk a job-level write against a job schedule the unit runs
+    // no longer read.
+    const unitCount = await tx.unit.count({ where: { equipment: { jobId } } });
+    if (unitCount > 0) {
+      throw new AppError(ERROR_CODES.OVERRIDE_NOT_SUPPORTED_WITH_UNITS, { jobId, unitCount });
+    }
+
     const spine = await loadJobSpine(tx, jobId); // throws NOT_FOUND
     const target = spine.rawProcesses.find((p) => p.id === jobProcessId);
     if (!target) {
@@ -87,31 +88,23 @@ export async function applyDurationOverride(
       }),
     );
     const maxNodes = overridePlan.current;
-
-    // MIN-space pass: each process's min duration, with the new override
-    // collapsing the overridden process (min == max == override).
-    const minMap = new Map<number, number>();
-    for (const p of spine.processes) if (p.durationMinDays != null) minMap.set(p.id, p.durationMinDays);
-    minMap.set(jobProcessId, durationOverrideDays);
-    const minNodes = computeOrRefuse(() =>
-      computeCpm(spine.processes, spine.edges, { durationDaysByProcessId: minMap }),
-    );
-
     const maxByPid = new Map(maxNodes.map((n) => [n.processId, n]));
-    const minByPid = new Map(minNodes.map((n) => [n.processId, n]));
 
     // ── Fix the Layer-1↔Layer-2 desync (flagged medium bug) ────────────────
-    // Once a duration override exists the printed envelope offsets are stale;
-    // restamp them from the recomputed CPM so computeEnvelope (Layer 1) and the
-    // CPM plan (Layer 2) produce the same dates. Unchanged processes get
+    // Once a duration override exists the printed MAX envelope offsets are
+    // stale; restamp them from the recomputed CPM so computeEnvelope (Layer 1)
+    // and the CPM plan (Layer 2) agree on MAX. Unchanged processes get
     // identical MAX offsets (CPM-max reproduces the printed finishByMax exactly
-    // — cpm.ts), the overridden process and everything downstream shift. MIN
-    // offsets are recomputed too, so the window stays coherent (min ≤ max) even
-    // when the override SHORTENS a duration — leaving the printed min untouched
-    // could make finishByMin > finishByMax. This makes CPM the source of truth
-    // for this job's envelope past the first override: the intended two-layer
-    // replanning semantics (BUILD-SPEC-v2 §1), a strictly smaller change than
-    // nulling the offsets (which would make Layer 1 refuse, not agree).
+    // — cpm.ts); the overridden process and everything downstream shift.
+    //
+    // MIN offsets are intentionally left untouched (audit C2). A min-space CPM
+    // pass here would use the SAME lags the schedule was fitted against for
+    // MAX durations only — in min space those lags corrupt the terminal node
+    // (P36 collapses to ~36 days instead of the real ~119), so every job with
+    // one override reads requiredMinDays ≈ 36 forever after and checkFeasibility
+    // can never again return INFEASIBLE. The printed min envelope from job
+    // intake is the authoritative Layer-1 figure (BUILD-SPEC-v2 §1's two-layer
+    // model); recomputing it from CPM is not more correct, just differently wrong.
     // Every restamped row overwrites authoritative Layer-1 offsets in place, so
     // capture its before/after for the audit payload (invariant #5/#6) — not just
     // the target's. One audit row (below) carries the whole {processId,before,after}
@@ -123,19 +116,14 @@ export async function applyDurationOverride(
     }> = [];
     for (const p of spine.rawProcesses) {
       const mx = maxByPid.get(p.id);
-      const mn = minByPid.get(p.id);
-      if (!mx || !mn) continue; // excluded — spliced out of the CPM, offsets unused
+      if (!mx) continue; // excluded — spliced out of the CPM, offsets unused
       const after = {
-        envelopeStartByMinDays: mn.earlyStart,
-        envelopeFinishByMinDays: mn.earlyFinish,
         envelopeStartByMaxDays: mx.earlyStart,
         envelopeFinishByMaxDays: mx.earlyFinish,
       };
       restamped.push({
         processId: p.id,
         before: {
-          envelopeStartByMinDays: p.envelopeStartByMinDays,
-          envelopeFinishByMinDays: p.envelopeFinishByMinDays,
           envelopeStartByMaxDays: p.envelopeStartByMaxDays,
           envelopeFinishByMaxDays: p.envelopeFinishByMaxDays,
         },

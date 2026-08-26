@@ -1,7 +1,9 @@
 import { withTenant, type Tx } from "@/lib/db";
-import type { Actor } from "@/lib/authz";
+import { assertNotClientUser, type Actor } from "@/lib/authz";
+import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { HOLD_POINT_AGE_ALERT_DAYS, NUDGE_COOLDOWN_MINUTES } from "@/lib/shared/constants";
+import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import { loadPlanNotifyContext } from "./_shared";
 import { loadQcCockpit } from "./qc-cockpit.read";
 import type { ProcessPlan } from "@/generated/prisma/client";
@@ -138,7 +140,7 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
     const overduePlans = await tx.processPlan.findMany({
       where: {
         status: { not: "COMPLETE" },
-        plannedFinish: { lt: new Date() },
+        plannedFinish: { lt: istCalendarDayMarker() },
         scheduleRun: { isCurrent: true },
         jobProcess: { job: { tenantId: actor.tenantId } },
       },
@@ -232,8 +234,14 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
  * moment earlier via stage-detail.read.ts) — not an authoritative
  * `actual_*`/`*_at` field, so invariant #1 doesn't apply; it only shapes the
  * notification's title text.
+ *
+ * `assertNotClientUser` + `recordAudit` (audit C3): a client-scoped actor
+ * could otherwise create notifications untraceably — this action was the one
+ * exception to every other write in this file going through no authz check
+ * at all AND leaving no audit_log row.
  */
 export async function nudgeQc(actor: Actor, planId: number, ageDays: number): Promise<void> {
+  assertNotClientUser(actor);
   await withTenant(actor.tenantId, async (tx) => {
     const plan = await tx.processPlan.findFirst({
       where: { id: planId, jobProcess: { job: { tenantId: actor.tenantId } } },
@@ -268,6 +276,13 @@ export async function nudgeQc(actor: Actor, planId: number, ageDays: number): Pr
         payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo, actorId: actor.userId },
       })),
     );
+
+    await recordAudit(tx, actor, {
+      action: "notification.nudgeQc",
+      entityType: "ProcessPlan",
+      entityId: planId,
+      after: { recipients, ageDays },
+    });
   });
 }
 

@@ -7,7 +7,7 @@ import {
   ROLES,
 } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { computeEnvelope, checkFeasibility, subtractWorkingDays } from "@/lib/schedule";
+import { computeEnvelope, checkFeasibility, subtractWorkingDays, selectTerminal } from "@/lib/schedule";
 import {
   generateScheduleSchema,
   type GenerateScheduleInput,
@@ -60,13 +60,12 @@ export async function generateSchedule(
       });
     }
 
-    // Terminal = latest process by standard (max) envelope finish-by. Its
-    // envelope offsets anchor BACKWARD scheduling and feed feasibility. A null
-    // here means the terminal is provisional → unschedulable (computeEnvelope
+    // Terminal = the DAG's sink (audit 0.9 — see selectTerminal's own comment
+    // for why "latest by max envelope" alone is not enough, and not
+    // deterministic without loadJobSpine's seq orderBy). A null envelope here
+    // means the terminal is provisional → unschedulable (computeEnvelope
     // would refuse anyway; we refuse with the same code up front).
-    const terminal = included.reduce((a, b) =>
-      (b.envelopeFinishByMaxDays ?? -Infinity) > (a.envelopeFinishByMaxDays ?? -Infinity) ? b : a,
-    );
+    const terminal = selectTerminal(spine.processes, spine.edges);
     if (terminal.envelopeFinishByMaxDays == null || terminal.envelopeFinishByMinDays == null) {
       throw new AppError(ERROR_CODES.SCHEDULE_DATA_MISSING, {
         processId: terminal.id,

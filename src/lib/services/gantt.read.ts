@@ -2,6 +2,7 @@ import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { getCurrentScheduleRun } from "./_shared";
 import type { GanttBar, GanttUnit, JobGanttData } from "./gantt-layout";
+import { isOverdue } from "@/lib/shared/business-day";
 
 export type { GanttBar, GanttEdge, GanttUnit, JobGanttData, GanttDomain, DepartmentDeadline } from "./gantt-layout";
 export { planFillStatus, computeGanttDomain, computeDepartmentDeadlines, ganttPct } from "./gantt-layout";
@@ -71,7 +72,7 @@ export async function loadJobGantt(actor: Actor, jobId: number): Promise<JobGant
         .map((p) => {
           const proc = processById.get(p.jobProcessId);
           if (!proc) return null;
-          const overdue = p.status !== "COMPLETE" && p.plannedFinish != null && p.plannedFinish < now;
+          const overdue = p.status !== "COMPLETE" && isOverdue(p.plannedFinish, now);
           const bar: GanttBar = {
             jobProcessId: proc.id,
             code: proc.code,
