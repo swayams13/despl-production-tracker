@@ -1,6 +1,6 @@
 # CLAUDE.md — DESPL Production Tracker
 
-Project guide for Claude Code / AI-assisted build sessions. **Read `docs/BUILD-SPEC-v2.md` first** — it supersedes the scheduling, granularity and stack sections of `docs/PRD.md` and `docs/TRD.md`. Update `progress.md` at the end of every working session.
+Project guide for Claude Code / AI-assisted build sessions. **Read `docs/BUILD-SPEC-v2.md` first** — it supersedes the scheduling, granularity and stack sections of `docs/PRD.md` and `docs/TRD.md`. Also read `docs/ADR-product-family-agnostic-platform-v1.md` — the app is a multi-project, multi-product-family platform (Pressure Vessel, Heat Exchanger, Pipe Spool, Piping System); DESPL-320 is the calibration pilot, not the product (see also `docs/PHASE-PROMPTS.md` §0). Update `progress.md` at the end of every working session.
 
 > Full cross-project context pack (status, roadmap, decisions, deployment, known issues) lives in the Obsidian vault: `/Users/sonusingh/SWAYAM OS/4_Projects/Client Work/DESPL/DESPL TRACKER/`. The repo's `progress.md` is canonical; the vault mirrors it — update `progress.md`, then sync the vault (`CURRENT_STATUS.md`, `TASKS.md`, `CHANGELOG.md`) and run `link_vault.py` if doc files were added or renamed.
 

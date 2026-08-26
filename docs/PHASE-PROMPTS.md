@@ -228,6 +228,7 @@ them are audited. No operation is a checkbox and none is skipped because it seem
 |---|---|---|
 | F2 | **Add the `unitId` filter and a unit selector to the BOM panel.** The bomless-component query filters by `equipmentId` only. The seed writes real `unitId`s, so without this all 99 parts of all 9 serials render as one list. The read model's header comment claiming `unitId` is always null is stale — fix it too. | `bom.read.ts:209` and its header |
 | F7 | **`Component` uniqueness → `@@unique([unitId, tag])`** for serialised components. Today's `[equipmentId, tag]` forces `SHELL-320SR01`; the spec uses `SHELL-01`. Do this while there are zero rows. | `schema.prisma:1013` |
+| F7b | **Add `Component.parentComponentId`** — nullable, self-referencing FK. Migration only: no explosion, no authoring UI, no material logic. Pulled forward from Phase 4 (`docs/ADR-product-family-agnostic-platform-v1.md`'s Phase 1 schema-shape review, approved 26 Aug 2026) because `Component` has zero rows until F1 seeds it — adding this after seeding would mean a real backfill migration instead of a schema-only one. Lets F1's seed express the SKIRT's shell + base ring + 24 gusset plates as real parent/child rows instead of collapsing them into one fabrication unit (the gap F4 names). Do this before F1. | `schema.prisma:997-1027` |
 | F1 | **Seed the 99 components.** Run `scripts/seed-despl320-components.ts` against `seed/despl-320-components.json` — 11 components × 9 units, with `ComponentOperation` rows from each route. Idempotent and additive. Nothing about this phase is demonstrable until it lands. | `scripts/seed-despl320-components.ts` |
 | F3 | **Operator and remarks on `ComponentOperation`.** The spec's columns are *Operator / Welder* and *Remarks*. `submittedBy` is who clicked, not who welded — on the floor these are routinely different people, which is why `Welder` exists as a registry of people who do not log in. Add `performedByWelderId` / `performedByUserId` and `remarks`. Settle open question F-d first. | `schema.prisma:1023` |
 | F4 | **Quantities on `ComponentOperation`** — `qtyPlanned` / `qtyGood` / `qtyRejected`. The skirt is *"skirt shell + base ring + 24 gusset plates, tracked as one fabrication unit"* — a collapse forced by the model. Without a count, "18 of 24 gussets welded" is unrepresentable and the operation sits IN_PROGRESS for days showing nothing. Settle F-c first; if the floor says done/not-done is enough for v1, migrate the columns anyway and leave the UI out. | — |
@@ -247,6 +248,13 @@ them are audited. No operation is a checkbox and none is skipped because it seem
 - The BOM tab shows one serial at a time.
 - Violation-case tests exist for: out-of-sequence start, wrong department, maker–checker on verify
   and on reject, reject without a reason, and cross-tenant access.
+- **Generality (see `docs/ADR-product-family-agnostic-platform-v1.md`):**
+  - DESPL-320 is represented as one `Job` of family `PRESSURE_VESSEL`, with nothing about it special-cased.
+  - Components and operations render from whatever route a component has — a 4-step pipe spool route
+    works in the same UI as an 11-step plate route.
+  - Quantities carry a unit of measure.
+  - Nothing added this phase would need changing to run a heat exchanger.
+  - Two projects of different families can coexist with no shared mutable state beyond the tenant.
 
 ---
 

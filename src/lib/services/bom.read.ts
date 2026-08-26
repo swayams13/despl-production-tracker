@@ -78,6 +78,16 @@ export interface UnitOption {
   serialNo: string;
 }
 
+export interface WelderOption {
+  id: number;
+  name: string;
+}
+
+export interface DelayCategoryOption {
+  id: number;
+  name: string;
+}
+
 export interface BomTree {
   equipmentId: number;
   equipmentName: string;
@@ -100,6 +110,10 @@ export interface BomTree {
   units: UnitOption[];
   /** The unit `subAssemblyComponents` is filtered to; null when there's nothing to filter by. */
   unitId: number | null;
+  /** F3's Operator/Welder picker — active welders, tenant-wide (no per-operation department filter; keeps the picker simple). */
+  welders: WelderOption[];
+  /** F5's reject reason picker — same taxonomy `fileDelayReasonSchema` uses at process grain. */
+  delayCategories: DelayCategoryOption[];
 }
 
 function opDisplayStatus(status: string): StageDisplayStatus {
@@ -121,6 +135,13 @@ interface RawComponentForSummary {
     status: string;
     startedAt: Date | null;
     finishedAt: Date | null;
+    remarks: string | null;
+    qtyPlanned: number | null;
+    qtyGood: number | null;
+    qtyRejected: number | null;
+    performedByWelder: { name: string } | null;
+    performedByUser: { name: string } | null;
+    rejections: { detail: string | null; category: { name: string } }[];
     operation: { id: number; name: string; leadTimeProcessSeq: number | null };
   }[];
 }
@@ -146,6 +167,13 @@ function buildComponentSummary(
     startedAt: o.startedAt?.toISOString() ?? null,
     finishedAt: o.finishedAt?.toISOString() ?? null,
     leadTimeProcessSeq: o.operation.leadTimeProcessSeq,
+    performedByWelderName: o.performedByWelder?.name ?? null,
+    performedByUserName: o.performedByUser?.name ?? null,
+    remarks: o.remarks,
+    qtyPlanned: o.qtyPlanned,
+    qtyGood: o.qtyGood,
+    qtyRejected: o.qtyRejected,
+    rejection: o.rejections[0] ? { categoryName: o.rejections[0].category.name, detail: o.rejections[0].detail } : null,
   }));
   const ops: BomComponentOp[] = projectComponentRoute(routeSteps, actualOps).map((p) => ({
     ...p,
@@ -177,7 +205,17 @@ export async function loadBomTree(
       orderBy: { id: "asc" },
     });
     if (equipments.length === 0) {
-      return { equipmentId: 0, equipmentName: "", equipments: [], groups: [], subAssemblyComponents: [], units: [], unitId: null };
+      return {
+        equipmentId: 0,
+        equipmentName: "",
+        equipments: [],
+        groups: [],
+        subAssemblyComponents: [],
+        units: [],
+        unitId: null,
+        welders: [],
+        delayCategories: [],
+      };
     }
 
     const targetId = equipmentId != null && equipments.some((e) => e.id === equipmentId) ? equipmentId : equipments[0].id;
@@ -223,6 +261,17 @@ export async function loadBomTree(
                 status: true,
                 startedAt: true,
                 finishedAt: true,
+                remarks: true,
+                qtyPlanned: true,
+                qtyGood: true,
+                qtyRejected: true,
+                performedByWelder: { select: { name: true } },
+                performedByUser: { select: { name: true } },
+                rejections: {
+                  orderBy: { rejectedAt: "desc" },
+                  take: 1,
+                  select: { detail: true, category: { select: { name: true } } },
+                },
                 operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
               },
             },
@@ -258,6 +307,17 @@ export async function loadBomTree(
             status: true,
             startedAt: true,
             finishedAt: true,
+            remarks: true,
+            qtyPlanned: true,
+            qtyGood: true,
+            qtyRejected: true,
+            performedByWelder: { select: { name: true } },
+            performedByUser: { select: { name: true } },
+            rejections: {
+              orderBy: { rejectedAt: "desc" },
+              take: 1,
+              select: { detail: true, category: { select: { name: true } } },
+            },
             operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
           },
         },
@@ -305,6 +365,11 @@ export async function loadBomTree(
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, groupItems]) => ({ name, items: groupItems }));
 
+    const [welders, delayCategories] = await Promise.all([
+      tx.welder.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      tx.delayCategoryRef.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    ]);
+
     return {
       equipmentId: targetId,
       equipmentName: equipment.name,
@@ -313,6 +378,8 @@ export async function loadBomTree(
       subAssemblyComponents,
       units,
       unitId: targetUnitId,
+      welders,
+      delayCategories,
     };
   });
 }

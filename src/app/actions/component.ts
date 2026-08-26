@@ -23,12 +23,32 @@ export async function startComponentOperationAction(
 export async function submitComponentOperationAction(
   jobId: number,
   componentOperationId: number,
+  detail?: {
+    performedByWelderId?: number | null;
+    performedByUserId?: number | null;
+    remarks?: string;
+    qtyPlanned?: number | null;
+    qtyGood?: number | null;
+    qtyRejected?: number | null;
+  },
 ): Promise<ActionResult> {
-  return run(jobId, async () => svc.submitComponentOperation(await requireActor(), { componentOperationId }));
+  return run(jobId, async () =>
+    svc.submitComponentOperation(await requireActor(), { componentOperationId, ...detail }),
+  );
 }
 export async function verifyComponentOperationAction(
   jobId: number,
   componentOperationId: number,
 ): Promise<ActionResult> {
   return run(jobId, async () => svc.verifyComponentOperation(await requireActor(), { componentOperationId }));
+}
+export async function rejectComponentOperationAction(
+  jobId: number,
+  componentOperationId: number,
+  categoryId: number,
+  detail?: string,
+): Promise<ActionResult> {
+  return run(jobId, async () =>
+    svc.rejectComponentOperation(await requireActor(), { componentOperationId, categoryId, detail }),
+  );
 }

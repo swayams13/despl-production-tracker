@@ -34,15 +34,16 @@ describe("assertComponentOpTransition", () => {
     ["start", "NOT_STARTED", "IN_PROGRESS"],
     ["submit", "IN_PROGRESS", "SUBMITTED"],
     ["verify", "SUBMITTED", "COMPLETE"],
+    ["reject", "SUBMITTED", "IN_PROGRESS"],
   ];
 
   it.each(legal)("%s from %s → %s", (action, from, to) => {
     expect(assertComponentOpTransition(action, from)).toBe(to);
   });
 
-  // Every (action, from) pair NOT in the legal table must be rejected —
-  // notably no reject/hold path exists at all for ComponentOperation (#2
-  // scaled down: flat sequence, no HOLD state, reject deferred to Task 4).
+  // Every (action, from) pair NOT in the legal table must be rejected — e.g.
+  // no HOLD state exists for ComponentOperation (#2 scaled down: flat
+  // sequence, no HOLD/resume). F5 adds reject: SUBMITTED → IN_PROGRESS only.
   const legalSet = new Set(legal.map(([a, f]) => `${a}:${f}`));
   const actions = Object.keys(COMPONENT_OP_TRANSITIONS) as ComponentOperationAction[];
   const illegal: Array<[ComponentOperationAction, OperationStatus]> = [];
@@ -99,9 +100,8 @@ const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
 describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  const { startComponentOperation, submitComponentOperation, verifyComponentOperation } = await import(
-    "./component.service"
-  );
+  const { startComponentOperation, submitComponentOperation, verifyComponentOperation, rejectComponentOperation } =
+    await import("./component.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
@@ -117,6 +117,9 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   // the gate must key off canonical route position, not raw seq).
   let componentCReceiptOp = 0; // ComponentOperation.seq = 1, canonical RouteStep.seq = 2
   let componentCCuttingOp = 0; // ComponentOperation.seq = 2, canonical RouteStep.seq = 1
+  let opDetailTest = 0; // component D, seq 1 — F3/F4 field-persistence test, untouched by anything else
+  let rejectCategoryId = 0;
+  let welderId = 0;
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -211,6 +214,21 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       await owner.componentOperation.create({
         data: { componentId: componentC.id, seq: 2, operationId: opCutting.id },
       })
+    ).id;
+
+    const componentD = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "N4", componentTypeId: componentType.id },
+    });
+    opDetailTest = (
+      await owner.componentOperation.create({
+        data: { componentId: componentD.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+    rejectCategoryId = (
+      await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })
+    ).id;
+    welderId = (
+      await owner.welder.create({ data: { tenantId, name: "Welder One", employeeCode: `W-${Date.now()}` } })
     ).id;
 
     const userSup = await owner.user.create({
@@ -355,5 +373,64 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
 
     const after = await owner.componentOperation.findUniqueOrThrow({ where: { id: opSeq2 } });
     expect(after.status).toBe(statusBefore);
+  });
+
+  it("submit persists F3/F4 detail fields (operator, remarks, quantities)", async () => {
+    await startComponentOperation(supA, { componentOperationId: opDetailTest });
+    const submitted = await submitComponentOperation(supA, {
+      componentOperationId: opDetailTest,
+      performedByWelderId: welderId,
+      performedByUserId: qc.userId,
+      remarks: "18 of 24 gussets welded",
+      qtyPlanned: 24,
+      qtyGood: 18,
+      qtyRejected: 0,
+    });
+    expect(submitted.performedByWelderId).toBe(welderId);
+    expect(submitted.performedByUserId).toBe(qc.userId);
+    expect(submitted.remarks).toBe("18 of 24 gussets welded");
+    expect(submitted.qtyPlanned).toBe(24);
+    expect(submitted.qtyGood).toBe(18);
+    expect(submitted.qtyRejected).toBe(0);
+  });
+
+  // F5 — reuses componentBOpSeq1, which the "client user cannot verify"
+  // test above left SUBMITTED with submittedBy = supA.userId.
+  it("F5 maker–checker: the submitter cannot reject their own submission", async () => {
+    await expectCode(
+      rejectComponentOperation(supA, { componentOperationId: componentBOpSeq1, categoryId: rejectCategoryId }),
+      ERROR_CODES.MAKER_CHECKER_VIOLATION,
+    );
+  });
+
+  it("F5: QC reject returns a SUBMITTED op to IN_PROGRESS, clears submittedBy, and retains the rejection", async () => {
+    const rejected = await rejectComponentOperation(qc, {
+      componentOperationId: componentBOpSeq1,
+      categoryId: rejectCategoryId,
+      detail: "PAUT indication",
+    });
+    expect(rejected.status).toBe("IN_PROGRESS");
+    expect(rejected.submittedBy).toBeNull();
+
+    const rejections = await owner.componentOperationRejection.findMany({
+      where: { componentOperationId: componentBOpSeq1 },
+    });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]).toMatchObject({ categoryId: rejectCategoryId, detail: "PAUT indication", rejectedBy: qc.userId });
+
+    // Rejected work restarts from the SAME step (F-e default, spec §4) — it
+    // must be resubmittable, not stuck.
+    const resubmitted = await submitComponentOperation(supA, { componentOperationId: componentBOpSeq1 });
+    expect(resubmitted.status).toBe("SUBMITTED");
+  });
+
+  it("F5: rejecting a non-SUBMITTED op is refused (illegal transition)", async () => {
+    // opSeq1 is COMPLETE by this point (the "happy path" test above); actor
+    // is a different QC user so this exercises the transition guard, not
+    // maker–checker.
+    await expectCode(
+      rejectComponentOperation(qc, { componentOperationId: opSeq1, categoryId: rejectCategoryId }),
+      ERROR_CODES.INVALID_STATE_TRANSITION,
+    );
   });
 });

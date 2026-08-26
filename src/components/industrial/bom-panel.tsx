@@ -10,9 +10,10 @@ import {
   startComponentOperationAction,
   submitComponentOperationAction,
   verifyComponentOperationAction,
+  rejectComponentOperationAction,
 } from "@/app/actions/component";
 import type { ActionResult } from "@/app/actions/_action";
-import type { BomTree, BomItemRow, BomComponentOp } from "@/lib/services/bom.read";
+import type { BomTree, BomItemRow, BomComponentOp, WelderOption, DelayCategoryOption } from "@/lib/services/bom.read";
 import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
@@ -107,7 +108,7 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
           <h3>{selected ? `Component — ${selected.partName}` : "Select an item"}</h3>
           {selected?.components[0] && <StatusChip status={selected.components[0].displayStatus} />}
         </div>
-        {selected ? <ComponentDetail jobId={jobId} item={selected} /> : (
+        {selected ? <ComponentDetail jobId={jobId} item={selected} welders={bom.welders} delayCategories={bom.delayCategories} /> : (
           <p className="note" style={{ margin: "16px 0" }}>Click a BOM item on the left to view its component detail.</p>
         )}
       </div>
@@ -173,7 +174,7 @@ function SubAssemblyComponents({ jobId, bom }: { jobId: number; bom: BomTree }) 
             {openId === comp.id && (
               <div style={{ padding: "12px 16px" }}>
                 {comp.operations.length > 0 ? (
-                  <RouteSteps jobId={jobId} operations={comp.operations} />
+                  <RouteSteps jobId={jobId} operations={comp.operations} welders={bom.welders} delayCategories={bom.delayCategories} />
                 ) : (
                   <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
                 )}
@@ -193,7 +194,17 @@ function mapOpStatus(status: string): "idle" | "progress" | "submitted" | "compl
   return "idle";
 }
 
-function ComponentDetail({ jobId, item }: { jobId: number; item: BomItemRow }) {
+function ComponentDetail({
+  jobId,
+  item,
+  welders,
+  delayCategories,
+}: {
+  jobId: number;
+  item: BomItemRow;
+  welders: WelderOption[];
+  delayCategories: DelayCategoryOption[];
+}) {
   const comp = item.components[0];
   const [recording, setRecording] = useState(false);
   const [heatNumber, setHeatNumber] = useState("");
@@ -257,7 +268,7 @@ function ComponentDetail({ jobId, item }: { jobId: number; item: BomItemRow }) {
 
       <div className="sh-sec">Component route</div>
       {comp && comp.operations.length > 0 ? (
-        <RouteSteps jobId={jobId} operations={comp.operations} />
+        <RouteSteps jobId={jobId} operations={comp.operations} welders={welders} delayCategories={delayCategories} />
       ) : (
         <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
       )}
@@ -291,7 +302,17 @@ function stepStatusLabel(status: string): string {
 /** Full planned route (§ component route projection): a leading run of completed steps
  * collapses into one chip so a component deep into fabrication doesn't render its whole
  * finished history every time — the current/next steps are what matter day to day. */
-function RouteSteps({ jobId, operations }: { jobId: number; operations: BomComponentOp[] }) {
+function RouteSteps({
+  jobId,
+  operations,
+  welders,
+  delayCategories,
+}: {
+  jobId: number;
+  operations: BomComponentOp[];
+  welders: WelderOption[];
+  delayCategories: DelayCategoryOption[];
+}) {
   const { collapsedDoneCount, visible } = groupProjectedRoute(operations);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const router = useRouter();
@@ -331,8 +352,9 @@ function RouteSteps({ jobId, operations }: { jobId: number; operations: BomCompo
                 <span className="sh-route-step-badge">{op.qcpCheckpoints.length} QCP</span>
               )}
             </button>
-            <RouteStepAction jobId={jobId} op={op} pending={pending} run={run} />
+            <RouteStepAction jobId={jobId} op={op} pending={pending} run={run} welders={welders} delayCategories={delayCategories} />
           </div>
+          <StepMeta op={op} />
           {openSeq === op.seq && op.qcpCheckpoints.length > 0 && (
             <div className="sh-route-step-checkpoints">
               {op.qcpCheckpoints.map((cp) => (
@@ -348,25 +370,64 @@ function RouteSteps({ jobId, operations }: { jobId: number; operations: BomCompo
   );
 }
 
+/** F3/F4/F5 — operator, remarks, quantities and the latest rejection, shown
+ * under the step name once recorded. Nothing renders when none are set. */
+function StepMeta({ op }: { op: BomComponentOp }) {
+  const operator = op.performedByWelderName ?? op.performedByUserName;
+  const qty =
+    op.qtyPlanned != null || op.qtyGood != null || op.qtyRejected != null
+      ? `${op.qtyGood ?? 0}${op.qtyPlanned != null ? `/${op.qtyPlanned}` : ""} good${op.qtyRejected ? ` · ${op.qtyRejected} rejected` : ""}`
+      : null;
+  const hasMeta = operator || op.remarks || qty || op.rejection;
+  if (!hasMeta) return null;
+  return (
+    <div className="sh-route-step-meta" style={{ padding: "0 0 6px 22px", fontSize: 11, color: "var(--muted)" }}>
+      {operator && <span>{operator}</span>}
+      {qty && <span>{operator ? " · " : ""}{qty}</span>}
+      {op.remarks && <div>{op.remarks}</div>}
+      {op.rejection && (
+        <div style={{ color: "var(--s-overdue)" }}>
+          Rejected — {op.rejection.categoryName}
+          {op.rejection.detail ? `: ${op.rejection.detail}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
- * Start / Submit / Verify for one component-route step. Mirrors the
+ * Start / Submit / Verify / Reject for one component-route step. Mirrors the
  * always-show-the-button-and-let-the-server-refuse idiom already used by
  * <StageSheetFooter>/my-day's row actions — role/maker-checker enforcement
  * lives server-side (component.service.ts); this is UX, not the gate.
  * A route step merged in from the canonical route with no matching
  * ComponentOperation row yet (`op.id === null`) has nothing to act on.
+ * Submit/Reject open a small inline form (F3/F4/F5) instead of firing
+ * immediately, since both can carry optional detail.
  */
 function RouteStepAction({
   jobId,
   op,
   pending,
   run,
+  welders,
+  delayCategories,
 }: {
   jobId: number;
   op: BomComponentOp;
   pending: boolean;
   run: (fn: () => Promise<ActionResult>, ok: string) => void;
+  welders: WelderOption[];
+  delayCategories: DelayCategoryOption[];
 }) {
+  const [mode, setMode] = useState<"idle" | "submit" | "reject">("idle");
+  const [welderId, setWelderId] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [qtyGood, setQtyGood] = useState("");
+  const [qtyRejected, setQtyRejected] = useState("");
+  const [categoryId, setCategoryId] = useState("");
+  const [detail, setDetail] = useState("");
+
   if (op.id == null) return null;
   const id = op.id;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
@@ -382,27 +443,97 @@ function RouteStepAction({
         Start
       </button>
     );
-  if (op.status === "IN_PROGRESS")
+
+  if (op.status === "IN_PROGRESS") {
+    if (mode !== "submit")
+      return (
+        <button
+          type="button"
+          className="btn btn-accent sh-route-step-action"
+          disabled={pending}
+          onClick={(e) => { stop(e); setMode("submit"); }}
+        >
+          Submit
+        </button>
+      );
     return (
-      <button
-        type="button"
-        className="btn btn-accent sh-route-step-action"
-        disabled={pending}
-        onClick={(e) => { stop(e); run(() => submitComponentOperationAction(jobId, id), "Submitted for QC."); }}
-      >
-        Submit
-      </button>
+      <div className="sh-route-step-form" onClick={stop} style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 0" }}>
+        <select className="btn" value={welderId} onChange={(e) => setWelderId(e.target.value)} aria-label="Operator / welder">
+          <option value="">Operator/welder — none</option>
+          {welders.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+        </select>
+        <input className="ws-detail" placeholder="Remarks (optional)" value={remarks} onChange={(e) => setRemarks(e.target.value)} style={{ minWidth: 140 }} />
+        <input className="ws-detail" type="number" min={0} placeholder="Qty good" value={qtyGood} onChange={(e) => setQtyGood(e.target.value)} style={{ width: 80 }} />
+        <input className="ws-detail" type="number" min={0} placeholder="Qty rejected" value={qtyRejected} onChange={(e) => setQtyRejected(e.target.value)} style={{ width: 90 }} />
+        <button
+          type="button"
+          className="btn btn-accent"
+          disabled={pending}
+          onClick={() => {
+            setMode("idle");
+            run(
+              () =>
+                submitComponentOperationAction(jobId, id, {
+                  performedByWelderId: welderId ? Number(welderId) : undefined,
+                  remarks: remarks.trim() || undefined,
+                  qtyGood: qtyGood !== "" ? Number(qtyGood) : undefined,
+                  qtyRejected: qtyRejected !== "" ? Number(qtyRejected) : undefined,
+                }),
+              "Submitted for QC.",
+            );
+          }}
+        >
+          Save
+        </button>
+        <button type="button" className="btn" disabled={pending} onClick={() => setMode("idle")}>Cancel</button>
+      </div>
     );
-  if (op.status === "SUBMITTED")
+  }
+
+  if (op.status === "SUBMITTED") {
+    if (mode === "reject")
+      return (
+        <div className="sh-route-step-form" onClick={stop} style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 0" }}>
+          <select className="btn" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} aria-label="Rejection reason">
+            <option value="">Reason…</option>
+            {delayCategories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <input className="ws-detail" placeholder="Detail (optional)" value={detail} onChange={(e) => setDetail(e.target.value)} style={{ minWidth: 140 }} />
+          <button
+            type="button"
+            className="btn btn-accent"
+            disabled={pending || !categoryId}
+            onClick={() => {
+              setMode("idle");
+              run(() => rejectComponentOperationAction(jobId, id, Number(categoryId), detail.trim() || undefined), "Rejected.");
+            }}
+          >
+            Reject
+          </button>
+          <button type="button" className="btn" disabled={pending} onClick={() => setMode("idle")}>Cancel</button>
+        </div>
+      );
     return (
-      <button
-        type="button"
-        className="btn btn-accent sh-route-step-action"
-        disabled={pending}
-        onClick={(e) => { stop(e); run(() => verifyComponentOperationAction(jobId, id), "Verified."); }}
-      >
-        Verify
-      </button>
+      <>
+        <button
+          type="button"
+          className="btn btn-accent sh-route-step-action"
+          disabled={pending}
+          onClick={(e) => { stop(e); run(() => verifyComponentOperationAction(jobId, id), "Verified."); }}
+        >
+          Verify
+        </button>
+        <button
+          type="button"
+          className="btn sh-route-step-action"
+          disabled={pending}
+          onClick={(e) => { stop(e); setMode("reject"); }}
+        >
+          Reject
+        </button>
+      </>
     );
+  }
+
   return null;
 }

@@ -11,6 +11,12 @@ export interface RouteStepDef {
   leadTimeProcessSeq: number | null;
 }
 
+/** F5's latest rejection, for display alongside a step returned to IN_PROGRESS. */
+export interface RejectionSummary {
+  categoryName: string;
+  detail: string | null;
+}
+
 export interface ActualOp {
   /** ComponentOperation.id — the row a Start/Submit/Verify action must reference. */
   id: number;
@@ -20,6 +26,16 @@ export interface ActualOp {
   startedAt: string | null;
   finishedAt: string | null;
   leadTimeProcessSeq: number | null;
+  /** F3 — who performed the work, not who clicked Submit. */
+  performedByWelderName: string | null;
+  performedByUserName: string | null;
+  remarks: string | null;
+  /** F4 — all nullable; "done/not done" alone remains valid for v1 (F-c open). */
+  qtyPlanned: number | null;
+  qtyGood: number | null;
+  qtyRejected: number | null;
+  /** F5 — the most recent rejection, if any. */
+  rejection: RejectionSummary | null;
 }
 
 export interface ProjectedOp {
@@ -31,6 +47,13 @@ export interface ProjectedOp {
   leadTimeProcessSeq: number | null;
   /** Null for a canonical route step with no matching ComponentOperation row yet — no action is possible on it. */
   id: number | null;
+  performedByWelderName: string | null;
+  performedByUserName: string | null;
+  remarks: string | null;
+  qtyPlanned: number | null;
+  qtyGood: number | null;
+  qtyRejected: number | null;
+  rejection: RejectionSummary | null;
 }
 
 /**
@@ -60,6 +83,13 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
         finishedAt: actual?.finishedAt ?? null,
         leadTimeProcessSeq: s.leadTimeProcessSeq,
         id: actual?.id ?? null,
+        performedByWelderName: actual?.performedByWelderName ?? null,
+        performedByUserName: actual?.performedByUserName ?? null,
+        remarks: actual?.remarks ?? null,
+        qtyPlanned: actual?.qtyPlanned ?? null,
+        qtyGood: actual?.qtyGood ?? null,
+        qtyRejected: actual?.qtyRejected ?? null,
+        rejection: actual?.rejection ?? null,
       };
     });
 
@@ -73,6 +103,13 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
       finishedAt: o.finishedAt,
       leadTimeProcessSeq: o.leadTimeProcessSeq,
       id: o.id,
+      performedByWelderName: o.performedByWelderName,
+      performedByUserName: o.performedByUserName,
+      remarks: o.remarks,
+      qtyPlanned: o.qtyPlanned,
+      qtyGood: o.qtyGood,
+      qtyRejected: o.qtyRejected,
+      rejection: o.rejection,
     }));
 
   return [...projected, ...extras];

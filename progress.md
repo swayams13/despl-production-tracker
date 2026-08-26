@@ -2,6 +2,93 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Phase 1 resumed and closed out: F7b, F3/F4/F5 wired, F9 UI, F6 diagnosed, 26 Aug 2026
+
+**Status: Phase 1 items F1–F5, F7, F7b, F8, F9 done, tested (pure + DB-gated + live browser click-through),
+typechecked, linted. F6 is diagnosed but its fix is correctly withheld — it needs floor confirmation,
+not more engineering (see below). F10's generality check passes for every line this session touched.**
+
+Preceded by the ADR session that produced `docs/ADR-product-family-agnostic-platform-v1.md` and pulled
+`Component.parentComponentId` (F7b) forward into Phase 1 — approved, then this session implemented it.
+
+### F7b — `Component.parentComponentId`
+Nullable self-referencing FK, added while `Component` still had zero real rows (migrations
+`20260826084752_component_parent_id` + a follow-up `20260826085244_component_op_performed_by_user_fk`
+for the `ComponentOperation.performedByUser` relation F3 needed). Migration only — no explosion logic,
+no authoring UI, matching the approved scope.
+
+### Dev-DB cleanup found and fixed
+The local `despl` DB had **198 Component rows for DESPL-320**, not 99: an earlier pre-F7 seed run
+(mangled tags, `SHELL-320SR01`) was never cleaned up after F7's tag-scheme migration landed, so old-
+and new-scheme rows coexisted (Postgres's `@@unique([unitId, tag])` didn't catch it — different tag
+strings). Deleted the 99 stale pre-F7 rows (and their 477 `ComponentOperation` children) after
+confirming they were local test artifacts, not real data (one had a stray `COMPLETE` op from earlier
+manual testing). Re-ran `pnpm db:seed:despl320-components` — idempotent, 0 created / 99 skipped.
+Final state: 99 components, 477 operations, matches summing the route-library step counts for the 11
+component types DESPL-320 uses (53/unit × 9 — see F6 below for why that's 53, not the spec's 54).
+
+### F3 (operator + remarks) / F4 (quantities) / F5 (reject) — wired end to end
+- Schema: `ComponentOperation.performedByWelderId/performedByUserId/remarks/qtyPlanned/qtyGood/
+  qtyRejected` and `ComponentOperationRejection` already existed in `schema.prisma` (drafted, unapplied,
+  from the prior session) — applied via `prisma migrate dev` to `despl` and `prisma migrate deploy` to
+  `despl_test`. Added the missing `ComponentOperation.performedByUser → User` relation (F3 needed it;
+  only `performedByWelder` had one).
+- `submitComponentOperationSchema` gained optional `performedByWelderId/performedByUserId/remarks/
+  qtyPlanned/qtyGood/qtyRejected` — every field optional, per F-c/F-d being still open with the floor.
+- `component.service.ts`: `submitComponentOperation` persists the new fields (undefined ≠ null — a
+  resubmit that omits a field doesn't erase a previously recorded one). New `rejectComponentOperation`:
+  `SUBMITTED → IN_PROGRESS`, maker–checker enforced (QC role AND actor ≠ submittedBy, no admin
+  exception — verified live: an ADMIN-role reject attempt was correctly refused, `FORBIDDEN`, because
+  admin holds no QC role), writes `ComponentOperationRejection`, clears `submittedBy` so the maker must
+  resubmit. F-e (where work restarts) resolved per the addendum's own stated default: same step,
+  not an earlier one.
+- `bom-route.ts`/`bom.read.ts`: `ActualOp`/`ProjectedOp` carry the new fields plus the latest rejection
+  through to the UI; `BomTree` gained `welders`/`delayCategories` lists for the pickers.
+- Tests: `component.service.test.ts` pure transition-matrix test updated (`reject` is now legal from
+  `SUBMITTED`); 5 new DB-gated cases added (submit persists detail fields; submitter cannot reject own
+  work; QC reject returns to `IN_PROGRESS` and clears `submittedBy`; the rejection row is retained;
+  rejecting a non-`SUBMITTED` op is refused). All 724 DB-gated + 508 pure tests pass.
+
+### F9 — BomPanel UI
+Submit now opens a small inline form (Operator/welder select, Remarks, Qty good/rejected) instead of
+firing immediately; a recorded operator/remarks/rejection renders as a muted meta line under the step
+name. SUBMITTED steps show Verify **and** Reject (reject opens its own inline reason-category + detail
+form, reusing `DelayCategoryRef` the same way `fileDelayReasonSchema` does at process grain). No new
+dependency, no redesign beyond the columns F3/F4/F5 required.
+
+**Verified live**, not just by test: logged in via the real `/login` form (never forged a session,
+per `CLAUDE.md`'s Agent-conduct rule) as `sup.fabrication`, then `admin`, then `qc`, drove
+DESPL-320 → BOM & Components → SHELL's Receipt step through Start → Submit (with operator + remarks)
+→ Reject (as QC, with reason + detail) → confirmed the step returned to "in progress" with the
+rejection shown in red and the prior remarks preserved, ready to resubmit. Also incidentally confirmed
+department-scope gating still works for real (a `sup.fabrication` actor was correctly refused
+`FORBIDDEN` starting `Receipt`/`Cutting`/`Welding` on this DE0463... — actually DESPL-320's — Shell,
+which turned out to be because the seeded `RECEIPT`/`CUTTING` ops sit in `STORES`/`FABRICATION_PREP`,
+not `FABRICATION`; not a bug, just not the department this session picked for the click-through).
+
+### F6 — route reconciliation: diagnosed, not fixed (correctly)
+Per `docs/AUDIT-addendum-fabrication-and-assembly.md`'s own instruction ("do not guess — an invented
+operation is worse than a missing one") and open questions F-a/F-b, this needs the floor, not more
+code. What the diagnosis found: `seed/component-routes.json`'s `PLATE` route (SHELL/the type DESPL-320's
+Shell uses) **already lists `EDGE_PREP`, `GRINDING` and `INSPECTION` as separate `RouteStep`s** —
+10 steps, all three GAP-flagged operations included — so that specific discrepancy the addendum names
+as an example is *not* actually missing from the live route. The real, precise gap: summing the route
+library's step counts for DESPL-320's 11 component types (`PLATE`×1, `DISHED_END`×2, `SKIRT`×1,
+`FLANGE`×1, `PIPE`×1, `FORGING`×2, `COUPLING`×3) gives **53 operations/unit**, not the spec's stated
+**54**. `seed/component-routes.json`'s own `TODO_FOR_DESPL` array already flags this class of gap.
+Left as an open item — do not close it by guessing which operation is missing.
+
+### Not touched this session (still sitting uncommitted from before, per the prior session's note)
+`docs/SCOPE-CLARIFICATION-PROMPT.md`, and the department-account-creation work (`scripts/
+bootstrap-admin.ts`, `scripts/create-department-accounts.ts`, `admin.service.ts`/`.test.ts`,
+`schemas.ts`'s `mustChangePassword` field, `package.json`). Next session should ask what these are.
+
+### Next
+1. F6's actual fix, once the floor confirms the 53-vs-54 discrepancy and F-a/F-b.
+2. Phase 1's remaining generality acceptance criteria (§2, added this ADR session) — re-check once F6
+   lands, since it changes operation counts per unit.
+3. Then Phase 2 (assembly tracking) — not started, not scoped into this session.
+
 ## Session — Phase 1 (Fabrication tracking) paused mid-flight for a scope clarification, 26 Aug 2026
 
 **Status: PAUSED, not stalled.** Stopped on explicit instruction — a scope clarification affecting

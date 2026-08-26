@@ -70,13 +70,38 @@ export type VerifyProcessInput = z.infer<typeof verifyProcessSchema>;
 export const startComponentOperationSchema = z.object({ componentOperationId: id }).strict();
 export type StartComponentOperationInput = z.infer<typeof startComponentOperationSchema>;
 
-/** Submit a component operation for QC verification (maker step). */
-export const submitComponentOperationSchema = z.object({ componentOperationId: id }).strict();
+/**
+ * Submit a component operation for QC verification (maker step). Optionally
+ * records who performed the work (F3) and quantities (F4) — both are open
+ * questions with the floor (F-d/F-c, spec §4), so every field here stays
+ * optional; submit still succeeds with none of them set.
+ */
+export const submitComponentOperationSchema = z
+  .object({
+    componentOperationId: id,
+    performedByWelderId: id.nullish(),
+    performedByUserId: id.nullish(),
+    remarks: z.string().trim().max(2000).optional(),
+    qtyPlanned: z.number().int().nonnegative().nullish(),
+    qtyGood: z.number().int().nonnegative().nullish(),
+    qtyRejected: z.number().int().nonnegative().nullish(),
+  })
+  .strict();
 export type SubmitComponentOperationInput = z.infer<typeof submitComponentOperationSchema>;
 
 /** Verify a submitted component operation (checker step, maker-checker enforced in the service). */
 export const verifyComponentOperationSchema = z.object({ componentOperationId: id }).strict();
 export type VerifyComponentOperationInput = z.infer<typeof verifyComponentOperationSchema>;
+
+/**
+ * F5 — QC rejects a submitted component operation back to the maker. Same
+ * shape as `fileDelayReasonSchema`'s categorised reason: `ComponentOperationRejection`
+ * reuses `DelayCategoryRef` rather than a parallel taxonomy.
+ */
+export const rejectComponentOperationSchema = z
+  .object({ componentOperationId: id, categoryId: id, detail: z.string().trim().optional() })
+  .strict();
+export type RejectComponentOperationInput = z.infer<typeof rejectComponentOperationSchema>;
 
 /** Put a process plan ON_HOLD with a recorded reason. */
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
@@ -148,6 +173,9 @@ export const createUserSchema = z
       .min(1, "At least one role is required"),
     departmentIds: z.array(id).default([]),
     password: z.string().min(8, "Password must be at least 8 characters"),
+    // Defaults true (force a change on first login). Only an admin creating
+    // a deliberately shared/interim credential should ever pass false.
+    mustChangePassword: z.boolean().default(true),
   })
   .strict();
 export type CreateUserInput = z.infer<typeof createUserSchema>;

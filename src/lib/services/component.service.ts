@@ -7,9 +7,11 @@ import {
   startComponentOperationSchema,
   submitComponentOperationSchema,
   verifyComponentOperationSchema,
+  rejectComponentOperationSchema,
   type StartComponentOperationInput,
   type SubmitComponentOperationInput,
   type VerifyComponentOperationInput,
+  type RejectComponentOperationInput,
 } from "@/lib/shared/schemas";
 import type { ComponentOperation, OperationStatus } from "@/generated/prisma/client";
 
@@ -25,12 +27,14 @@ import type { ComponentOperation, OperationStatus } from "@/generated/prisma/cli
  * machine: no HOLD/resume, and no cross-component DAG — a component's own
  * route is a flat ordered sequence (RouteStep.seq), so the only ordering
  * gate is "the previous seq on THIS component must be COMPLETE", not a full
- * predecessor graph. reject() is left out of this draft on purpose: a
- * rejection reason has nowhere durable to live yet (DelayReason is keyed to
- * processPlanId only) — see the plan doc for the two ways to close that gap.
+ * predecessor graph. F5 (Phase 1): reject() returns a SUBMITTED op to
+ * IN_PROGRESS with the rejection retained in `ComponentOperationRejection`
+ * (reuses `DelayCategoryRef`, the same taxonomy `DelayReason` uses at process
+ * grain) — the durable home the earlier draft of this file said didn't exist
+ * yet.
  */
 
-export type ComponentOperationAction = "start" | "submit" | "verify";
+export type ComponentOperationAction = "start" | "submit" | "verify" | "reject";
 
 export const COMPONENT_OP_TRANSITIONS: Record<
   ComponentOperationAction,
@@ -39,6 +43,11 @@ export const COMPONENT_OP_TRANSITIONS: Record<
   start: { from: ["NOT_STARTED"], to: "IN_PROGRESS" },
   submit: { from: ["IN_PROGRESS"], to: "SUBMITTED" },
   verify: { from: ["SUBMITTED"], to: "COMPLETE" },
+  // F5 / F-e (spec §4): rejected work restarts from the SAME step, not an
+  // earlier one — the floor has not been asked to confirm otherwise, and
+  // this is the addendum's own stated default ("returning the op to
+  // IN_PROGRESS with the rejection retained").
+  reject: { from: ["SUBMITTED"], to: "IN_PROGRESS" },
 };
 
 export function assertComponentOpTransition(
@@ -201,7 +210,8 @@ export async function submitComponentOperation(
   actor: Actor,
   input: SubmitComponentOperationInput,
 ): Promise<ComponentOperation> {
-  const { componentOperationId } = submitComponentOperationSchema.parse(input);
+  const { componentOperationId, performedByWelderId, performedByUserId, remarks, qtyPlanned, qtyGood, qtyRejected } =
+    submitComponentOperationSchema.parse(input);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
@@ -209,10 +219,22 @@ export async function submitComponentOperation(
     requireOperationDepartment(actor, departmentId);
     const to = assertComponentOpTransition("submit", op.status);
 
+    // F3/F4 fields are all optional (schema) — `undefined` here (rather than
+    // `null`) leaves an already-recorded value untouched instead of wiping it
+    // on a resubmit that doesn't repeat it.
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
-        data: { status: to, submittedBy: actor.userId },
+        data: {
+          status: to,
+          submittedBy: actor.userId,
+          performedByWelderId: performedByWelderId ?? undefined,
+          performedByUserId: performedByUserId ?? undefined,
+          remarks: remarks ?? undefined,
+          qtyPlanned: qtyPlanned ?? undefined,
+          qtyGood: qtyGood ?? undefined,
+          qtyRejected: qtyRejected ?? undefined,
+        },
       });
       return {
         result: updated,
@@ -221,7 +243,16 @@ export async function submitComponentOperation(
           entityType: "ComponentOperation",
           entityId: op.id,
           before: { status: op.status, submittedBy: op.submittedBy },
-          after: { status: updated.status, submittedBy: updated.submittedBy },
+          after: {
+            status: updated.status,
+            submittedBy: updated.submittedBy,
+            performedByWelderId: updated.performedByWelderId,
+            performedByUserId: updated.performedByUserId,
+            remarks: updated.remarks,
+            qtyPlanned: updated.qtyPlanned,
+            qtyGood: updated.qtyGood,
+            qtyRejected: updated.qtyRejected,
+          },
           eventType: "ComponentOperationSubmitted",
           eventPayload: { componentOperationId: op.id, submittedBy: actor.userId },
         },
@@ -267,6 +298,56 @@ export async function verifyComponentOperation(
           after: { status: updated.status, verifiedBy: updated.verifiedBy, finishedAt: updated.finishedAt },
           eventType: "ComponentOperationVerified",
           eventPayload: { componentOperationId: op.id, submittedBy: op.submittedBy, verifiedBy: actor.userId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * F5 — SUBMITTED -> IN_PROGRESS (checker rejects the maker's submission).
+ * Same maker-checker gate as verify (#3): QC role AND actor != submittedBy —
+ * the submitter cannot reject their own work. A category is mandatory
+ * (schema); the rejection is recorded in `ComponentOperationRejection`
+ * (durable, unlike the earlier draft's "nowhere to live yet") and
+ * `submittedBy` is cleared so the maker must re-submit after rework.
+ */
+export async function rejectComponentOperation(
+  actor: Actor,
+  input: RejectComponentOperationInput,
+): Promise<ComponentOperation> {
+  const { componentOperationId, categoryId, detail } = rejectComponentOperationSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const { op } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    assertMakerChecker(actor, op.submittedBy);
+    const to = assertComponentOpTransition("reject", op.status);
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.componentOperation.update({
+        where: { id: op.id },
+        data: { status: to, submittedBy: null },
+      });
+      await tx.componentOperationRejection.create({
+        data: { componentOperationId: op.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "componentOperation.reject",
+          entityType: "ComponentOperation",
+          entityId: op.id,
+          before: { status: op.status, submittedBy: op.submittedBy },
+          after: { status: updated.status, submittedBy: updated.submittedBy, categoryId, detail },
+          eventType: "ComponentOperationRejected",
+          eventPayload: {
+            componentOperationId: op.id,
+            submittedBy: op.submittedBy,
+            rejectedBy: actor.userId,
+            categoryId,
+            detail,
+          },
         },
       };
     });
