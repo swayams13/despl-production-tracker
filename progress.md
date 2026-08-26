@@ -2,9 +2,91 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟢 **Phase 0 (0a+0b) DONE and pushed to `origin/demo` (commit `b48234f`), 26 Aug 2026.** All of 0.1–0.15 that a coding session can do is complete — see the two "Session — Phase 0a/0b" entries below for the full account. `pnpm typecheck` / `pnpm lint` / `pnpm test` all green; `pnpm test:db` green (711/711 fresh + rerun, twice). Not merged to `main` (this project's standing rule — needs explicit human approval). Still open, needs a human with Railway dashboard access, not a coding session: drop `DIRECT_URL` from the runtime environment, turn on PITR + run one restore drill, rotate the Postgres password flagged 22 Aug.
+## Session — Phase 1 (Fabrication tracking) paused mid-flight for a scope clarification, 26 Aug 2026
 
-**Next session starts at Phase 1 (Fabrication tracking)** — `docs/PHASE-PROMPTS.md` §2 (F1–F9). Read `docs/AUDIT-addendum-fabrication-and-assembly.md` §1, `docs/DESPL-320-fabrication-assembly-spec.md` §1, and `docs/superpowers/plans/2026-08-25-component-operation-tracking.md` first. **F2 must land before F1** (the doc's own ordering note — the BOM panel's unit filter, or the first screen after seeding is unusable). Items F4/F5/F6 have open questions the doc explicitly says must be settled with the floor, not guessed — brainstorm/plan Phase 1 properly before writing code, this is a real feature build, not a fix.
+**Status: PAUSED, not stalled.** Stopped on explicit instruction — a scope clarification affecting
+Phase 1's acceptance criteria was incoming (a new "Generality" rule + item F10 landed in
+`docs/PHASE-PROMPTS.md` §0/§2 mid-session; `docs/SCOPE-CLARIFICATION-PROMPT.md` appeared on disk,
+untracked, presumably the next input — **not read or acted on this session**, left exactly as found).
+Work committed to `demo` at `2cb49be`. Tree is clean of everything this session touched; a handful of
+**unrelated** modified/untracked files from other work (department-account creation — `package.json`,
+`scripts/bootstrap-admin.ts`, `scripts/create-department-accounts.ts`, `admin.service.ts`/`.test.ts`,
+`schemas.ts`'s `mustChangePassword` field) and doc edits (`AUDIT-addendum-fabrication-and-assembly.md`,
+`AUDIT-master-engineering-review-v1.md`, `PHASE-PROMPTS.md`) were **not touched, not committed, not
+stashed** — they weren't authored this session and weren't safe to sweep into a commit without
+understanding them. They're still sitting uncommitted in the working tree; next session should ask
+what they are before doing anything with them.
+
+### Sequencing used: F7 → F1 → F2 → F8 → F3+F4 → F5 → F9 (per the approved plan, not the brief's table order)
+
+**Done, tested, verified, committed:**
+- **F7** — `Component.@@unique` moved from `[equipmentId, tag]` to `[unitId, tag]`, so serialised
+  components get a plain tag (`SHELL`) instead of a mangled one (`SHELL-320SR01`). Migration
+  `20260826140000_component_unit_tag_unique` hand-written (non-interactive shell, `prisma migrate dev`
+  refused) and applied via `prisma migrate deploy` to **both** `despl_test` and the local demo DB
+  (`despl`). `scripts/seed-despl320-components.ts`'s tag-building fixed to match.
+- **F1** — ran `pnpm db:seed:despl320-components` (alias already existed in `package.json` from a
+  prior session). 99 `Component` rows landed in `despl_test` (idempotency reconfirmed: 99 created →
+  99 skipped/0 created on rerun) and in the local demo DB. Verified in Postgres directly: 9 distinct
+  plain tags × 9 units = 99 rows, no `-320SR0N` suffix.
+- **F2** — `loadBomTree` (`bom.read.ts`) gains a `unitId` param; `BomTree` carries `units`/`unitId`;
+  `subAssemblyComponents` scopes to one unit once the equipment has any (defaults to the first by
+  `serialNo`). `page.tsx` threads the existing `unit` searchParam through. `bom-panel.tsx` gets a unit
+  `<select>` in the sub-assembly card, same pattern as the existing equipment selector. 5/5 tests
+  passing in `bom.read.test.ts` (2 new, DB-gated).
+- **F8** — new `src/lib/services/state-machine.ts` (`assertStateTransition<Status, Action>`);
+  `process.service.ts`'s `assertTransition` and `component.service.ts`'s `assertComponentOpTransition`
+  both now thin wrappers over it. Both existing signatures unchanged, no caller elsewhere needed to
+  change. 56/56 existing tests still pass unmodified + 3 new direct tests on the shared helper.
+- **Generality check (§0/F10), run mid-session on the user's request:** everything above passed — no
+  job number/serial/component tag/family code in any `src/` logic; job-specific data stayed in
+  `scripts/`. One non-functional finding fixed: `bom.read.test.ts`'s new fixture used
+  `"320SR01"`/`"SHELL"` as arbitrary test values, genericized to `"UNIT-1"`/`"PART-A"` to stop it
+  reading as DESPL-320-coupling. Full account of what was checked is in this session's transcript;
+  worth re-running once F3/F4/F5/F9 land.
+
+**Half-done — schema drafted, nothing else built, migration NOT applied anywhere:**
+- **F3 (operator/remarks) + F4 (quantities)** — `ComponentOperation` gained
+  `performedByWelderId`/`performedByUserId`/`remarks`/`qtyPlanned`/`qtyGood`/`qtyRejected` in
+  `schema.prisma`, plus the `Welder`/`DelayCategoryRef` back-relations needed for it and F5 to
+  validate. Migration `20260826082150_component_op_operator_qty_rejection` exists on disk
+  (`prisma migrate dev --create-only`) but **has not been run against despl_test or the demo DB** —
+  no `prisma migrate deploy`, no `prisma generate` since these fields were added. **Nothing consumes
+  these fields yet**: no `schemas.ts` zod fields, no `component.service.ts` write path, no
+  `bom-route.ts`/`bom.read.ts` projection, no UI. F-c (is a quantity count required for v1, or is
+  done/not-done enough?) was still unresolved with the floor when work stopped — the plan's fallback
+  was "migrate the columns regardless, decide the UI later," which is exactly the state this is in.
+- **F5 (`rejectComponentOperation`)** — same migration above also created `ComponentOperationRejection`
+  (op id, category id via the existing `DelayCategoryRef` taxonomy, detail, rejectedBy, rejectedAt).
+  **Not started:** the `reject` transition entry in `COMPONENT_OP_TRANSITIONS`, the service function
+  itself, the zod schema, the Server Action, and the table-driven violation tests (wrong role,
+  same-actor maker-checker, wrong source state, cross-tenant).
+
+**Not started at all:**
+- **F9** — no UI wiring for operator/remarks/qty/reject on `bom-panel.tsx`'s route-step rows.
+- **Phase-end verification pass** — `pnpm lint` and `pnpm test:db` (full suite) were not run this
+  session; only the specific touched test files were run directly, plus `tsc --noEmit` (clean) after
+  each group. No live-browser check was done (the "click the affected workflow in the running app"
+  step in §0's Verification section is still outstanding).
+- The phase-end report structure required by §0 (what/why/files/schema/API/frontend/tests
+  added-and-executed/limitations/risks/acceptance-criteria status/next phase) — not written; this
+  paused-session entry stands in for it for now.
+
+### Immediate next steps, once the scope clarification lands
+1. Read `docs/SCOPE-CLARIFICATION-PROMPT.md` and the now-current `docs/PHASE-PROMPTS.md` §0/§2 in
+   full — both changed mid-session (new "Generality" rule, new F10) and may have changed further
+   since. Re-check whether F3/F4/F5's already-drafted schema still matches whatever the clarification
+   settles, before writing any service/UI code against it.
+2. If the schema still holds: apply `20260826082150_component_op_operator_qty_rejection` to
+   `despl_test`, re-run `prisma generate`, then resume F3/F4 (schemas.ts + service + read-model
+   plumbing) → F5 (reject transition + service + tests) → F9 (UI) → full verification pass →
+   phase-end progress.md report, per the approved plan's sequencing.
+3. Ask about the unrelated uncommitted files (department-account creation work, the three doc edits)
+   before touching them — they were left alone deliberately, not because they're understood to be safe.
+
+---
+
+**Status:** 🟢 **Phase 0 (0a+0b) DONE and pushed to `origin/demo` (commit `b48234f`), 26 Aug 2026.** All of 0.1–0.15 that a coding session can do is complete — see the two "Session — Phase 0a/0b" entries below for the full account. `pnpm typecheck` / `pnpm lint` / `pnpm test` all green; `pnpm test:db` green (711/711 fresh + rerun, twice). Not merged to `main` (this project's standing rule — needs explicit human approval). Still open, needs a human with Railway dashboard access, not a coding session: drop `DIRECT_URL` from the runtime environment, turn on PITR + run one restore drill, rotate the Postgres password flagged 22 Aug.
 
 ## Session — Phase 0b (safety/security subset), 26 Aug 2026, resumed same day after an unplanned restart
 
