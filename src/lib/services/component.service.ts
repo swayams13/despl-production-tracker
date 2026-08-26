@@ -2,6 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { assertStateTransition } from "./state-machine";
 import {
   startComponentOperationSchema,
   submitComponentOperationSchema,
@@ -44,17 +45,7 @@ export function assertComponentOpTransition(
   action: ComponentOperationAction,
   from: OperationStatus,
 ): OperationStatus {
-  const t = COMPONENT_OP_TRANSITIONS[action];
-  if (!t.from.includes(from)) {
-    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      entity: "ComponentOperation",
-      action,
-      from,
-      allowedFrom: t.from,
-      to: t.to,
-    });
-  }
-  return t.to;
+  return assertStateTransition(COMPONENT_OP_TRANSITIONS, action, from, "ComponentOperation");
 }
 
 /**

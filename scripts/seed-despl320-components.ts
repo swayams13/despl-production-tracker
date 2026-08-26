@@ -17,7 +17,7 @@
 // transaction over Railway's public Postgres proxy can get its connection
 // dropped mid-transaction on a slow round trip). 99 rows is enough that a
 // single all-or-nothing transaction is asking for the same problem for no
-// real benefit — instead this loop is idempotent per (equipmentId, tag)
+// real benefit — instead this loop is idempotent per (unitId, tag)
 // (Component's own @@unique constraint), so re-running after a partial
 // failure just resumes from wherever it stopped.
 //
@@ -79,10 +79,13 @@ async function main() {
 
   for (const unit of units) {
     for (const comp of file.componentsPerUnit) {
-      const tag = `${comp.tag}-${unit.serialNo}`;
+      // Plain tag ("SHELL", not "SHELL-320SR01") — uniqueness is now scoped
+      // to (unitId, tag), not (equipmentId, tag), so no per-unit suffix is
+      // needed (see schema.prisma's Component.@@unique comment).
+      const tag = comp.tag;
 
       const existing = await prisma.component.findFirst({
-        where: { equipmentId: equipment.id, tag },
+        where: { unitId: unit.id, tag },
       });
       if (existing) {
         skipped++;

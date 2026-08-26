@@ -17,13 +17,13 @@ import { projectComponentRoute, type ActualOp, type ProjectedOp, type RouteStepD
  * is honest to what's actually in the DB rather than inventing a bucket map
  * the data doesn't support (functional rule #2: real data only).
  *
- * **Equipment-, not unit-, scoped (also a real-data finding):** `Component`
- * rows in the current seed all have `unitId = null` — BOM/component data
- * exists at the equipment grain only, components are not yet fanned out per
- * serial. The mockup's "Unit 1" selector would show identical data for every
- * unit, so this tab uses an equipment selector instead (a job can have
- * multiple equipments — e.g. DE0463 has 2). Per-serial component fan-out is
- * the same deferred concern already logged for schedule stagger.
+ * **Equipment selector, plus a unit selector where components are fanned out
+ * per serial:** `Component.unitId` is null for DE0463/DE0467 (BOM-item-linked
+ * data still lives at equipment grain only there) but real for DESPL-320's
+ * seeded sub-assembly register (`scripts/seed-despl320-components.ts`) — 11
+ * rows per unit, 99 across the job. `subAssemblyComponents` is filtered to
+ * one unit at a time once an equipment has any; `groups` (the BomItem-linked
+ * path) stays equipment-scoped, unchanged.
  */
 export interface BomQcpCheckpoint {
   qcpItemId: number;
@@ -73,6 +73,11 @@ export interface EquipmentOption {
   name: string;
 }
 
+export interface UnitOption {
+  id: number;
+  serialNo: string;
+}
+
 export interface BomTree {
   equipmentId: number;
   equipmentName: string;
@@ -85,8 +90,16 @@ export interface BomTree {
    * `scripts/seed-despl320-components.ts`). Fabricating a fake `BomItem` to
    * hang these off would violate the "real data only" rule, so they get their
    * own section instead of being folded into `groups`.
+   *
+   * Filtered to one unit (`unitId`) when the equipment has any units with
+   * their own bomless components — otherwise (DE0463/DE0467 today) this is
+   * equipment-scoped, same as before per-serial fan-out existed.
    */
   subAssemblyComponents: BomComponentSummary[];
+  /** Units for the current equipment — non-empty only when `subAssemblyComponents` is unit-fanned. */
+  units: UnitOption[];
+  /** The unit `subAssemblyComponents` is filtered to; null when there's nothing to filter by. */
+  unitId: number | null;
 }
 
 function opDisplayStatus(status: string): StageDisplayStatus {
@@ -147,7 +160,12 @@ function buildComponentSummary(
   return { id: c.id, tag: c.tag, componentTypeName: c.componentType?.name, displayStatus, operations: ops };
 }
 
-export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: number): Promise<BomTree | null> {
+export async function loadBomTree(
+  actor: Actor,
+  jobId: number,
+  equipmentId?: number,
+  unitId?: number,
+): Promise<BomTree | null> {
   return withTenant(actor.tenantId, async (tx) => {
     const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
     if (!job) return null;
@@ -158,10 +176,20 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
       select: { id: true, name: true },
       orderBy: { id: "asc" },
     });
-    if (equipments.length === 0) return { equipmentId: 0, equipmentName: "", equipments: [], groups: [], subAssemblyComponents: [] };
+    if (equipments.length === 0) {
+      return { equipmentId: 0, equipmentName: "", equipments: [], groups: [], subAssemblyComponents: [], units: [], unitId: null };
+    }
 
     const targetId = equipmentId != null && equipments.some((e) => e.id === equipmentId) ? equipmentId : equipments[0].id;
     const equipment = equipments.find((e) => e.id === targetId)!;
+
+    const units = await tx.unit.findMany({
+      where: { equipmentId: targetId },
+      select: { id: true, serialNo: true },
+      orderBy: { serialNo: "asc" },
+    });
+    const targetUnitId =
+      units.length === 0 ? null : unitId != null && units.some((u) => u.id === unitId) ? unitId : units[0].id;
 
     const items = await tx.bomItem.findMany({
       where: { equipmentId: targetId },
@@ -206,8 +234,10 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
     // Component rows for this equipment with no BomItem (bomItemId: null) —
     // e.g. DESPL-320's seeded sub-assembly register, unreachable via
     // `items[].components` above since that path only walks BomItem.components.
+    // Scoped to one unit once the equipment has any (targetUnitId) — without
+    // this, DESPL-320's 99 rows across 9 units would render as one flat list.
     const bomlessComponents = await tx.component.findMany({
-      where: { equipmentId: targetId, bomItemId: null },
+      where: { equipmentId: targetId, bomItemId: null, ...(targetUnitId != null ? { unitId: targetUnitId } : {}) },
       orderBy: { tag: "asc" },
       select: {
         id: true,
@@ -275,6 +305,14 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, groupItems]) => ({ name, items: groupItems }));
 
-    return { equipmentId: targetId, equipmentName: equipment.name, equipments, groups, subAssemblyComponents };
+    return {
+      equipmentId: targetId,
+      equipmentName: equipment.name,
+      equipments,
+      groups,
+      subAssemblyComponents,
+      units,
+      unitId: targetUnitId,
+    };
   });
 }

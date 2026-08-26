@@ -223,10 +223,10 @@ model Client {
 }
 
 model User {
-  id                 Int      @id @default(autoincrement())
-  tenantId           Int      @map("tenant_id")
+  id                 Int             @id @default(autoincrement())
+  tenantId           Int             @map("tenant_id")
   /// Non-null => external client user. Scoped to this client, snapshots only.
-  clientId           Int?     @map("client_id")
+  clientId           Int?            @map("client_id")
   email              String
   /// Login handle distinct from email (personal dashboards v1). Backfilled
   /// from the email local-part for existing rows. Tenant-scoped, not
@@ -234,30 +234,30 @@ model User {
   /// is architected multi-tenant even though only one org exists today; see
   /// resolveTenantForLogin). A plain global @unique would be the one field
   /// on this model that can collide across tenants.
-  username           String   @map("username")
-  passwordHash       String   @map("password_hash")
+  username           String          @map("username")
+  passwordHash       String          @map("password_hash")
   name               String
   /// Tenant-scoped unique, matching Welder.employeeCode's own scoping.
   /// Nullable: Postgres allows multiple NULLs under a unique constraint, so
   /// existing rows with no employee code need no backfill.
-  employeeCode       String?  @map("employee_code")
-  active             Boolean  @default(true)
+  employeeCode       String?         @map("employee_code")
+  active             Boolean         @default(true)
   /// New accounts must change their password on first login. Existing rows
   /// are backfilled to false in the migration (they already have working
   /// passwords) — only the Prisma default is true, for rows created after.
-  mustChangePassword Boolean  @default(true) @map("must_change_password")
+  mustChangePassword Boolean         @default(true) @map("must_change_password")
   /// Bumped on every `changeOwnPassword` call. `SessionPayload.sessionVersion`
   /// is stamped into the JWT at issuance; `getActor()` compares the two on
   /// every request and treats a mismatch as "not signed in" — this is how a
   /// password change invalidates every OTHER previously-issued token without
   /// a session table (personal dashboards v1, Task 1.3).
-  sessionVersion     Int      @default(0) @map("session_version")
-  createdAt          DateTime @default(now()) @map("created_at")
+  sessionVersion     Int             @default(0) @map("session_version")
+  createdAt          DateTime        @default(now()) @map("created_at")
   /// Stamped by `login()` on every successful sign-in (server clock only,
   /// invariant #1). Null = never logged in (seeded/imported, not yet used
   /// their credentials) — the /admin Employees table (SPEC §7.3) renders
   /// that as "Never", not a fabricated date.
-  lastLoginAt        DateTime? @map("last_login_at")
+  lastLoginAt        DateTime?       @map("last_login_at")
   /// UI appearance preference (D27, session R1 task 6). Per USER, not per
   /// browser — CLAUDE.md hard-bans localStorage for app state. SYSTEM defers
   /// to the OS's prefers-color-scheme; server-side rendering resolves it to
@@ -267,7 +267,7 @@ model User {
   /// SEPARATE column from themePreference even though today's single control
   /// presents them as one four-step cycle — the data model then survives a
   /// later UI that splits them back into two controls (D25).
-  outdoorMode        Boolean  @default(false) @map("outdoor_mode")
+  outdoorMode        Boolean         @default(false) @map("outdoor_mode")
 
   tenant        Organization     @relation(fields: [tenantId], references: [id])
   client        Client?          @relation(fields: [clientId], references: [id])
@@ -367,16 +367,16 @@ model ComponentTypeRef {
 /// from Equipment (one job's actual block). Carries tenant_id, so it is a
 /// tenant-root table and has its own RLS policy — see the migration.
 model EquipmentTypeRef {
-  id                Int      @id @default(autoincrement())
-  tenantId          Int      @map("tenant_id")
-  familyId          Int      @map("family_id")
+  id                Int     @id @default(autoincrement())
+  tenantId          Int     @map("tenant_id")
+  familyId          Int     @map("family_id")
   /// Stable short code, e.g. HP-AIR-RCVR-2000
   code              String
   name              String
-  defaultDesignCode String?  @map("default_design_code")
+  defaultDesignCode String? @map("default_design_code")
   /// Family-shaped design defaults, copied into Job.specs at intake.
-  defaultSpecs      Json?    @map("default_specs")
-  active            Boolean  @default(true)
+  defaultSpecs      Json?   @map("default_specs")
+  active            Boolean @default(true)
 
   tenant     Organization  @relation(fields: [tenantId], references: [id])
   family     ProductFamily @relation(fields: [familyId], references: [id])
@@ -457,8 +457,9 @@ model DelayCategoryRef {
   name     String
   active   Boolean @default(true)
 
-  tenant       Organization  @relation(fields: [tenantId], references: [id])
-  delayReasons DelayReason[]
+  tenant                       Organization                  @relation(fields: [tenantId], references: [id])
+  delayReasons                 DelayReason[]
+  componentOperationRejections ComponentOperationRejection[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -648,38 +649,38 @@ model TemplateEdge {
 /// and every existing doc. `clientOrderNo` vs `jobNumber` resolves C5: both
 /// live CSVs carry Work Order DE0455-01 while the jobs are DE0463/DE0467.
 model Job {
-  id                Int         @id @default(autoincrement())
-  tenantId          Int         @map("tenant_id")
+  id                    Int         @id @default(autoincrement())
+  tenantId              Int         @map("tenant_id")
   /// Opaque id for client-facing URLs — sequential ids leak order volume.
-  publicId          String      @unique @map("public_id")
-  clientId          Int         @map("client_id")
-  familyId          Int         @map("family_id")
-  templateVersionId Int         @map("template_version_id")
-  calendarId        Int?        @map("calendar_id")
-  jobNumber         String      @map("job_number")
+  publicId              String      @unique @map("public_id")
+  clientId              Int         @map("client_id")
+  familyId              Int         @map("family_id")
+  templateVersionId     Int         @map("template_version_id")
+  calendarId            Int?        @map("calendar_id")
+  jobNumber             String      @map("job_number")
   /// The client's own order number, when it differs from ours (C5).
-  clientOrderNo     String?     @map("client_order_no")
-  projectName       String?     @map("project_name")
-  poRef             String?     @map("po_ref")
-  designCode        String?     @map("design_code")
-  orderDate         DateTime?   @map("order_date")
+  clientOrderNo         String?     @map("client_order_no")
+  projectName           String?     @map("project_name")
+  poRef                 String?     @map("po_ref")
+  designCode            String?     @map("design_code")
+  orderDate             DateTime?   @map("order_date")
   /// The contractual date given to the client. BACKWARD scheduling anchors on
   /// this by default, and every overdue / KPI / forecast-vs-due calculation
   /// measures against it. Renamed from `deliveryDate` (22 Aug 2026): the CSV
   /// import was writing a *dispatch* date into a field the scheduler read as a
   /// *required delivery* date, conflating two different commitments.
-  committedDeliveryDate DateTime? @map("committed_delivery_date")
+  committedDeliveryDate DateTime?   @map("committed_delivery_date")
   /// DESPL's own internal target, normally earlier than the committed date and
   /// carrying their buffer. Never shown to a client user.
-  targetDispatchDate    DateTime? @map("target_dispatch_date")
+  targetDispatchDate    DateTime?   @map("target_dispatch_date")
   /// Family-shaped design configuration (design pressure, MDMT, MOC, …).
   /// Display and reference data ONLY. Nothing in lib/schedule/ or the gating
   /// path may read it — the moment a schedule depends on a free-shaped blob,
   /// refusals stop being explainable (invariant #12).
   specs                 Json?
-  priority          JobPriority @default(NORMAL)
-  status            JobStatus   @default(ACTIVE)
-  remarks           String?
+  priority              JobPriority @default(NORMAL)
+  status                JobStatus   @default(ACTIVE)
+  remarks               String?
 
   tenant          Organization           @relation(fields: [tenantId], references: [id])
   client          Client                 @relation(fields: [clientId], references: [id])
@@ -706,15 +707,15 @@ model Job {
 }
 
 model Equipment {
-  id      Int     @id @default(autoincrement())
-  jobId   Int     @map("job_id")
-  name    String
-  blockNo Int?    @map("block_no")
-  remarks String?
+  id              Int     @id @default(autoincrement())
+  jobId           Int     @map("job_id")
+  name            String
+  blockNo         Int?    @map("block_no")
+  remarks         String?
   /// Nullable: the seeded DE0463/DE0467 blocks came from CSV with free-text
   /// labels and no catalog entry. Backfilling them would mean inventing
   /// catalog rows, so they stay unlinked.
-  equipmentTypeId Int? @map("equipment_type_id")
+  equipmentTypeId Int?    @map("equipment_type_id")
 
   job           Job                @relation(fields: [jobId], references: [id])
   equipmentType EquipmentTypeRef?  @relation(fields: [equipmentTypeId], references: [id])
@@ -1010,7 +1011,14 @@ model Component {
   routeVersion  RouteTemplateVersion? @relation(fields: [routeVersionId], references: [id])
   operations    ComponentOperation[]
 
-  @@unique([equipmentId, tag])
+  /// Component grain follows the serial (unitId), not the equipment — a
+  /// serialised job's components carry a plain tag ("SHELL", not
+  /// "SHELL-320SR01"). Equipment-grain components (unitId null, e.g.
+  /// DE0463/DE0467's BOM-item-derived rows) are not uniqueness-checked by
+  /// this index (Postgres treats NULL as distinct per row); their tags are
+  /// already collision-free by construction (`B${blockNo}-I${itemNo}`,
+  /// itemNo unique per equipment) — see scripts/seed-despl320-and-de0467.ts.
+  @@unique([unitId, tag])
   @@index([equipmentId])
   @@index([unitId])
   @@index([bomItemId])
@@ -1021,27 +1029,67 @@ model Component {
 /// Replaces the old ItemOperation, which had no sequence column and so could
 /// not represent route order at all.
 model ComponentOperation {
-  id          Int             @id @default(autoincrement())
-  componentId Int             @map("component_id")
-  seq         Int
-  operationId Int             @map("operation_id")
-  sourcing    Sourcing?
-  status      OperationStatus @default(NOT_STARTED)
+  id                  Int             @id @default(autoincrement())
+  componentId         Int             @map("component_id")
+  seq                 Int
+  operationId         Int             @map("operation_id")
+  sourcing            Sourcing?
+  status              OperationStatus @default(NOT_STARTED)
   /// SERVER CLOCK ONLY (invariant #1)
-  startedAt   DateTime?       @map("started_at")
+  startedAt           DateTime?       @map("started_at")
   /// SERVER CLOCK ONLY (invariant #1)
-  finishedAt  DateTime?       @map("finished_at")
-  submittedBy Int?            @map("submitted_by")
-  verifiedBy  Int?            @map("verified_by")
+  finishedAt          DateTime?       @map("finished_at")
+  submittedBy         Int?            @map("submitted_by")
+  verifiedBy          Int?            @map("verified_by")
+  /// Who actually did the work (F3) — distinct from submittedBy (who
+  /// clicked). Welders don't log in (see Welder's own doc comment); a
+  /// non-welding operation (cutting, grinding, machining...) instead names
+  /// performedByUserId. Not DB-enforced as mutually exclusive — Welder has
+  /// no write path yet (F-f, blocks Phase 2's A5), so nothing can mandate
+  /// either field being set in practice today.
+  performedByWelderId Int?            @map("performed_by_welder_id")
+  performedByUserId   Int?            @map("performed_by_user_id")
+  remarks             String?
+  /// F4 — multi-piece components (e.g. SKIRT's 24 gusset plates) need a
+  /// count; done/not-done alone can't show "18 of 24 welded". Nullable,
+  /// unconstrained: F-c (is a count required for v1?) is still open with the
+  /// floor — see docs/DESPL-320-fabrication-assembly-spec.md §4.
+  qtyPlanned          Int?
+  qtyGood             Int?
+  qtyRejected         Int?
 
-  component Component    @relation(fields: [componentId], references: [id], onDelete: Cascade)
-  operation OperationRef @relation(fields: [operationId], references: [id])
+  component         Component                     @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  operation         OperationRef                  @relation(fields: [operationId], references: [id])
+  performedByWelder Welder?                       @relation(fields: [performedByWelderId], references: [id])
+  rejections        ComponentOperationRejection[]
 
   @@unique([componentId, seq])
   @@index([componentId])
   @@index([operationId])
   @@index([status])
+  @@index([performedByWelderId])
   @@map("component_operations")
+}
+
+/// F5 — a fabrication rejection reason has a durable home (previously "has
+/// nowhere durable to live yet" per component.service.ts's own comment on
+/// reject() being omitted). Reuses DelayCategoryRef, the same taxonomy
+/// DelayReason already uses for process-level delays, rather than inventing
+/// a parallel one.
+model ComponentOperationRejection {
+  id                   Int      @id @default(autoincrement())
+  componentOperationId Int      @map("component_operation_id")
+  categoryId           Int      @map("category_id")
+  detail               String?
+  rejectedBy           Int      @map("rejected_by")
+  rejectedAt           DateTime @default(now()) @map("rejected_at")
+
+  componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
+  category           DelayCategoryRef   @relation(fields: [categoryId], references: [id])
+
+  @@index([componentOperationId])
+  @@index([categoryId])
+  @@map("component_operation_rejections")
 }
 
 model ItemTest {
@@ -1084,10 +1132,11 @@ model Welder {
   departmentId Int?     @map("department_id")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  tenant     Organization      @relation(fields: [tenantId], references: [id])
-  department Department?       @relation(fields: [departmentId], references: [id])
-  joints     WeldJointWelder[]
-  logs       WeldLog[]
+  tenant              Organization         @relation(fields: [tenantId], references: [id])
+  department          Department?          @relation(fields: [departmentId], references: [id])
+  joints              WeldJointWelder[]
+  logs                WeldLog[]
+  componentOperations ComponentOperation[]
 
   @@unique([tenantId, employeeCode])
   @@index([tenantId])

@@ -20,6 +20,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
   let tenantId = 0;
   let actor: Actor;
   let jobId = 0;
+  let unit1Id = 0;
+  let unit2Id = 0;
 
   afterAll(async () => {
     await owner.$disconnect();
@@ -83,6 +85,20 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     });
     await owner.qcpItemProcess.create({ data: { qcpItemId: qcpItem.id, jobProcessId: jobProcess.id } });
 
+    // Two units with their own bomless (bomItemId: null) components — the
+    // fanned-out-per-serial shape any job's sub-assembly register can take
+    // once it has no BOM export yet (F2); generic fixture, not DESPL-320-specific.
+    const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "UNIT-1" } });
+    const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "UNIT-2" } });
+    unit1Id = unit1.id;
+    unit2Id = unit2.id;
+    await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit1.id, tag: "PART-A", componentTypeId: componentType.id },
+    });
+    await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit2.id, tag: "PART-A", componentTypeId: componentType.id },
+    });
+
     actor = {
       userId: 1,
       tenantId,
@@ -116,5 +132,23 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     const ops = tree!.groups[0].items[0].components[0].operations;
     const cutting = ops.find((o) => o.operationName === "Cutting")!;
     expect(cutting.qcpCheckpoints).toEqual([]);
+  });
+
+  it("scopes bomless sub-assembly components to one unit, not all units flattened (F2)", async () => {
+    const tree1 = await loadBomTree(actor, jobId, undefined, unit1Id);
+    expect(tree1!.subAssemblyComponents).toHaveLength(1);
+    expect(tree1!.unitId).toBe(unit1Id);
+
+    const tree2 = await loadBomTree(actor, jobId, undefined, unit2Id);
+    expect(tree2!.subAssemblyComponents).toHaveLength(1);
+    expect(tree2!.unitId).toBe(unit2Id);
+
+    expect(tree1!.units.map((u) => u.serialNo)).toEqual(["UNIT-1", "UNIT-2"]);
+  });
+
+  it("defaults to the first unit (by serialNo) when no unitId is given", async () => {
+    const tree = await loadBomTree(actor, jobId);
+    expect(tree!.unitId).toBe(unit1Id);
+    expect(tree!.subAssemblyComponents).toHaveLength(1);
   });
 });

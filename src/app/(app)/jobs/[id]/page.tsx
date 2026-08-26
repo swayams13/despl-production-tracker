@@ -53,7 +53,7 @@ export default async function JobDetail({
     loadJobSpines(actor, jobId),
     loadEvents(actor, { jobId, limit: tab === "activity" ? 100 : 5 }),
     tab === "gantt" ? loadJobGantt(actor, jobId) : Promise.resolve(null),
-    tab === "bom" ? loadBomTree(actor, jobId, equipmentParam) : Promise.resolve(null),
+    tab === "bom" ? loadBomTree(actor, jobId, equipmentParam, unitParam) : Promise.resolve(null),
     tab === "qcp" ? loadQcpGrid(actor, jobId, unitParam) : Promise.resolve(null),
     tab === "client" && canReviewClientUpdates ? loadClientPreview(actor, jobId) : Promise.resolve(null),
   ]);

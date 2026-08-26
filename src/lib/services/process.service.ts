@@ -7,6 +7,7 @@ import {
 } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { assertStateTransition } from "./state-machine";
 import {
   assertCanComplete,
   assertCanStart,
@@ -75,16 +76,7 @@ export const TRANSITIONS: Record<ProcessAction, { from: ProcessPlanStatus[]; to:
 
 /** Reject an illegal source state (invariant: the state machine, not the UI). */
 export function assertTransition(action: ProcessAction, from: ProcessPlanStatus): ProcessPlanStatus {
-  const t = TRANSITIONS[action];
-  if (!t.from.includes(from)) {
-    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      action,
-      from,
-      allowedFrom: t.from,
-      to: t.to,
-    });
-  }
-  return t.to;
+  return assertStateTransition(TRANSITIONS, action, from, "ProcessPlan");
 }
 
 // ── Gating inputs ────────────────────────────────────────────────────────

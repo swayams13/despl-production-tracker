@@ -12,7 +12,7 @@ import {
   verifyComponentOperationAction,
 } from "@/app/actions/component";
 import type { ActionResult } from "@/app/actions/_action";
-import type { BomTree, BomItemRow, BomComponentOp, BomComponentSummary } from "@/lib/services/bom.read";
+import type { BomTree, BomItemRow, BomComponentOp } from "@/lib/services/bom.read";
 import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
@@ -113,7 +113,7 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
       </div>
 
       {bom.subAssemblyComponents.length > 0 && (
-        <SubAssemblyComponents jobId={jobId} components={bom.subAssemblyComponents} />
+        <SubAssemblyComponents jobId={jobId} bom={bom} />
       )}
     </div>
   );
@@ -127,14 +127,27 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
  * different id space than `BomItem.id`, and keeping them in a visually
  * separate section with its own toggle state avoids any risk of collision.
  */
-function SubAssemblyComponents({ jobId, components }: { jobId: number; components: BomComponentSummary[] }) {
+function SubAssemblyComponents({ jobId, bom }: { jobId: number; bom: BomTree }) {
   const [openId, setOpenId] = useState<number | null>(null);
+  const router = useRouter();
+  const components = bom.subAssemblyComponents;
 
   return (
     <div className="card" style={{ gridColumn: "1 / -1" }}>
       <div className="hd">
         <h3>Sub-assembly components — {components.length} tracked</h3>
         <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>No procurement BOM export yet — routed directly from the component register</span>
+        {bom.units.length > 1 && (
+          <select
+            className="btn"
+            style={{ marginLeft: 8 }}
+            value={bom.unitId ?? ""}
+            onChange={(e) => router.push(`/jobs/${jobId}?tab=bom&equipment=${bom.equipmentId}&unit=${e.target.value}`)}
+            aria-label="Unit"
+          >
+            {bom.units.map((u) => <option key={u.id} value={u.id}>{u.serialNo}</option>)}
+          </select>
+        )}
       </div>
       <div>
         {components.map((comp) => (
