@@ -307,8 +307,8 @@ Carried from the workbook's Dev Notes and `seed/component-routes.json`; see the 
 
 | # | Question | Affects |
 |---|---|---|
-| F-a | Rolling and Forming — two separately timed steps, or one? The workbook tracks two; the `PLATE` route has one combined `FORMING`. | `PLATE` route, op count |
-| F-b | Are Edge Prep, Grinding and generic Inspection real timed steps? All three are flagged `GAP` in `component-routes.json` — no column in the live CSV. | Route definitions, op count |
+| F-a | ~~Rolling and Forming — two separately timed steps, or one?~~ **Resolved 26 Aug 2026**: two — per this document's own SHELL-01 note ("Team asked to track Rolling and Forming as two separate timed steps"). `PLATE` route now has both (`ROLLING` then `FORMING`), via a new `RouteTemplateVersion` — see `docs/PHASE-PROMPTS.md` §2 F6. | `PLATE` route, op count |
+| F-b | ~~Are Edge Prep, Grinding and generic Inspection real timed steps?~~ **Resolved for `PLATE` 26 Aug 2026**: yes — they were already separate `RouteStep`s despite the stale `GAP` annotation in `component-routes.json`; the annotation has been left as historical context, not a live gap. Whether every *future* component type needs them as their own steps is still open (`TODO_FOR_DESPL`). | Route definitions, op count |
 | F-c | Multi-piece components (24 gussets, 6 nozzles) — count required, or is done/not-done enough for v1? | Whether quantity columns are P0 |
 | F-d | Is "Operator / Welder" the person who did the work or who reported it? | Field shape, maker-checker boundary |
 | F-e | On a fabrication rejection, does work restart at that step or an earlier one? | Reject state machine |

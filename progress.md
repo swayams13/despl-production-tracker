@@ -2,6 +2,46 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — F6 closed for DESPL-320, on explicit instruction to continue past the diagnosis, 26 Aug 2026
+
+Prior session left F6 diagnosed but deliberately unfixed (see block below), pending floor input. User
+explicitly asked to finish it. Re-examined the evidence before touching anything: diffed
+`docs/DESPL-320-fabrication-assembly-spec.md` §1 line-by-line (not just summed counts) against
+`seed/component-routes.json`, confirming the *entire* 53-vs-54 gap is one thing — `PLATE`'s missing
+`ROLLING` step — and that the spec document itself (generated from the workbook, which is the stated
+source of truth) already contains the floor's answer: *"Team asked to track Rolling and Forming as two
+separate timed steps."* That's a citation, not a guess, so it was applied. Everything else stayed
+untouched — `EDGE_PREP`/`GRINDING`/`INSPECTION` turned out to already be separate `RouteStep`s on
+`PLATE` (their `GAP` flags were stale), and no other component type's route was touched.
+
+**What changed:**
+- `seed/component-routes.json` — new `ROLLING` canonical operation; `PLATE`'s route gains it as seq 5
+  (before `FORMING`, now seq 6), 10 → 11 steps, with a `_note` citing the exact source.
+- `scripts/split-plate-rolling-forming.ts` (new) — applies this as a **new `RouteTemplateVersion`**
+  (v2), not an in-place edit (invariant #9: templates are versioned). Generic: operates on the `PLATE`
+  `RouteTemplate` tenant-wide (`familyId` is null on it — every family that uses `PLATE` gets this),
+  not a DESPL-320 special case. Idempotent — re-points every `PLATE` `Component` still on v1 to v2 and
+  adds the missing `ROLLING` `ComponentOperation` row, skipping anything already migrated. Run against
+  `despl` (dev): repointed 19 `PLATE` components (9 DESPL-320 `SHELL`s + 10 from DE0463/DE0467),
+  added 19 `ROLLING` rows. Existing operation state (including the `SHELL`/Receipt row this session's
+  earlier live click-through had pushed through submit → reject → back to `IN_PROGRESS`) was preserved
+  untouched — only `Component.routeVersionId` and one new row were touched.
+- `docs/PHASE-PROMPTS.md` §2 F6, `docs/DESPL-320-fabrication-assembly-spec.md` §4 (F-a/F-b),
+  `docs/AUDIT-addendum-fabrication-and-assembly.md` §5 (F-a) — updated in place to record the
+  resolution and its citation, not just marked done.
+
+**Verified:** DESPL-320 now totals exactly 486 `ComponentOperation` rows (54 × 9 units), matching the
+spec precisely. `pnpm typecheck`/`lint`/`test`/`test:db` all clean (724 + 508 tests). Confirmed live in
+the browser (admin login): SHELL's route now renders "Rolling" as its own step immediately before
+"Rolling / Forming / Pressing / Dishing", in the correct canonical order.
+
+**Explicitly still open, not touched:** the other 24 seeded routes (DE0463/DE0467's component types)
+were not re-diffed against any spec — DESPL-320's spec document only covers its own 11 components, so
+there's nothing to diff those against yet. F-c (quantity requirement), F-d (who "Operator/Welder"
+means), F-e (reject restart point — already defaulted in F5), F-f (welder registry) remain open,
+untouched, per the standing "do not guess" rule — none of these had a citable answer sitting in a
+source document the way F-a did.
+
 ## Session — Phase 1 resumed and closed out: F7b, F3/F4/F5 wired, F9 UI, F6 diagnosed, 26 Aug 2026
 
 **Status: Phase 1 items F1–F5, F7, F7b, F8, F9 done, tested (pure + DB-gated + live browser click-through),

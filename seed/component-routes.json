@@ -28,6 +28,13 @@
       "leadTimeProcess": 12,
       "GAP": "No dedicated column in the live CSV - currently folded into Cutting or Set-up. Confirm with production."
     },
+    "ROLLING": {
+      "label": "Rolling",
+      "dept": "FABRICATION_PREP",
+      "csvColumn": "Rolling",
+      "leadTimeProcess": 13,
+      "_note": "F6 (26 Aug 2026): split from FORMING for the PLATE route only - see PLATE's route entry. Same lead-time process as FORMING (13); both are the same physical stage of the 36-process spine, now floor-tracked as two timed steps."
+    },
     "FORMING": {
       "label": "Rolling / Forming / Pressing / Dishing",
       "dept": "FABRICATION_PREP",
@@ -106,7 +113,8 @@
   "routes": [
     {
       "componentType": "PLATE",
-      "printedRoute": "Receipt -> MTC Verification -> Cutting -> Edge Preparation -> Rolling/Forming -> Fit-up -> Welding -> RT/UT -> Grinding -> Inspection",
+      "printedRoute": "Receipt -> MTC Verification -> Cutting -> Edge Preparation -> Rolling -> Forming -> Fit-up -> Welding -> RT/UT -> Grinding -> Inspection",
+      "_note": "F6 (26 Aug 2026): Rolling split out from the combined FORMING step, per docs/DESPL-320-fabrication-assembly-spec.md#1 SHELL-01 seq 5-6 - 'Team asked to track Rolling and Forming as two separate timed steps' (sourced from the workbook itself, not invented). Resolves F-a. Applied via a new RouteTemplateVersion, not an in-place edit (CLAUDE.md invariant #9) - see scripts/split-plate-rolling-forming.ts.",
       "operations": [
         {
           "seq": 1,
@@ -130,31 +138,36 @@
         },
         {
           "seq": 5,
-          "printed": "Rolling/Forming",
-          "operation": "FORMING"
+          "printed": "Rolling",
+          "operation": "ROLLING"
         },
         {
           "seq": 6,
+          "printed": "Forming (Sizing / Calibration)",
+          "operation": "FORMING"
+        },
+        {
+          "seq": 7,
           "printed": "Fit-up",
           "operation": "FIT_UP"
         },
         {
-          "seq": 7,
+          "seq": 8,
           "printed": "Welding",
           "operation": "WELDING"
         },
         {
-          "seq": 8,
+          "seq": 9,
           "printed": "RT/UT",
           "operation": "NDT"
         },
         {
-          "seq": 9,
+          "seq": 10,
           "printed": "Grinding",
           "operation": "GRINDING"
         },
         {
-          "seq": 10,
+          "seq": 11,
           "printed": "Inspection",
           "operation": "INSPECTION"
         }
