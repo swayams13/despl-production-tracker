@@ -2,7 +2,9 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-**Status:** 🟢 **Phase 0b (safety/security subset) DONE — 0.2–0.5, 0.7–0.11, 0.14 (code portion), 0.15, 26 Aug 2026.** Completes the same session's Phase 0a (below). Not yet committed — this whole Phase 0a+0b body of work is awaiting the user's review before a commit. `pnpm typecheck` / `pnpm lint` / `pnpm test` all green; `pnpm test:db` green (711/711 fresh + rerun, twice) as of finishing 0.11. Remaining Railway-dashboard/infra items (drop `DIRECT_URL` from runtime, PITR + restore drill, password rotation) are flagged, not attempted — outside a coding session's reach.
+**Status:** 🟢 **Phase 0 (0a+0b) DONE and pushed to `origin/demo` (commit `b48234f`), 26 Aug 2026.** All of 0.1–0.15 that a coding session can do is complete — see the two "Session — Phase 0a/0b" entries below for the full account. `pnpm typecheck` / `pnpm lint` / `pnpm test` all green; `pnpm test:db` green (711/711 fresh + rerun, twice). Not merged to `main` (this project's standing rule — needs explicit human approval). Still open, needs a human with Railway dashboard access, not a coding session: drop `DIRECT_URL` from the runtime environment, turn on PITR + run one restore drill, rotate the Postgres password flagged 22 Aug.
+
+**Next session starts at Phase 1 (Fabrication tracking)** — `docs/PHASE-PROMPTS.md` §2 (F1–F9). Read `docs/AUDIT-addendum-fabrication-and-assembly.md` §1, `docs/DESPL-320-fabrication-assembly-spec.md` §1, and `docs/superpowers/plans/2026-08-25-component-operation-tracking.md` first. **F2 must land before F1** (the doc's own ordering note — the BOM panel's unit filter, or the first screen after seeding is unusable). Items F4/F5/F6 have open questions the doc explicitly says must be settled with the floor, not guessed — brainstorm/plan Phase 1 properly before writing code, this is a real feature build, not a fix.
 
 ## Session — Phase 0b (safety/security subset), 26 Aug 2026, resumed same day after an unplanned restart
 
