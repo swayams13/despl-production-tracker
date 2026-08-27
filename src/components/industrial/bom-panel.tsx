@@ -21,6 +21,22 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
+/** Humanized procurement status label — B5, Phase 4 (matches CLAUDE.md's "humanize enums" copy rule). */
+function procurementStatusLabel(status: BomItemRow["procurement"]["status"]): string {
+  switch (status) {
+    case "NOT_STARTED": return "Not started";
+    case "INDENT_RAISED": return "Indent raised";
+    case "INDENT_APPROVED": return "Indent approved";
+    case "PO_PLACED": return "PO placed";
+    case "RECEIPT": return "Received";
+  }
+}
+function procurementChipClass(status: BomItemRow["procurement"]["status"]): string {
+  if (status === "RECEIPT") return "c-complete";
+  if (status === "NOT_STARTED") return "c-idle";
+  return "c-progress";
+}
+
 export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
   const router = useRouter();
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(bom.groups[0] ? [bom.groups[0].name] : []));
@@ -235,6 +251,18 @@ function ComponentDetail({
       <div className="sh-kv">
         <dt>Material</dt><dd>{item.material ?? "—"}</dd>
         <dt>Qty</dt><dd>{formatBomQty(item)}</dd>
+        <dt>Procurement</dt>
+        <dd>
+          <span className={`chip ${procurementChipClass(item.procurement.status)}`}>
+            <i />{procurementStatusLabel(item.procurement.status)}
+          </span>
+          {/* receivedQty is `null` (unknown quantity) vs `0`/a number — never collapse the two (B5 acceptance). */}
+          {item.procurement.status === "RECEIPT" && (
+            <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 11 }}>
+              {item.procurement.receivedQty != null ? `${item.procurement.receivedQty} received` : "quantity not recorded"}
+            </span>
+          )}
+        </dd>
         <dt>Heat no.</dt><dd className="mono">{mtc?.heatNumber ?? "—"}</dd>
         <dt>MTC</dt>
         <dd>

@@ -421,7 +421,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
       sourceEquipment._count.bomItems,
     );
     expect(
-      await owner.procurement.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),
+      await owner.procurementEvent.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),
     ).toBe(0);
     expect(
       await owner.materialIdentification.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),

@@ -28,8 +28,6 @@ import { hash } from "@node-rs/argon2";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import {
   ProcessEdgeType,
-  ProcurementStatus,
-  MaterialReceivedStatus,
   Sourcing,
   OperationStatus,
   QcpItemKind,
@@ -291,28 +289,64 @@ function buildJobRemarks(
   return lines.join("\n");
 }
 
-const PROCUREMENT_STATUS_MAP: Record<string, ProcurementStatus> = {
-  "Indent Approved": ProcurementStatus.INDENT_APPROVED,
-  "PO Placed": ProcurementStatus.PO_PLACED,
-  "In Stock": ProcurementStatus.IN_STOCK,
+// ponytail: duplicated from scripts/backfill-bom-item-qty-per.ts's
+// `parseSourceQty` (same regex) rather than imported — that file's `main()`
+// runs unconditionally at module scope (no `require.main` guard), so
+// importing it here would fire a second, unwanted DB pass as a side effect
+// of loading this file. Promote to a shared lib module if a third caller
+// ever needs it.
+const QTY_RE = /^(\d+(?:\.\d+)?)\s*(.*)$/;
+function parseSourceQty(sourceQty: string): { qtyPer: number; uom: string | null } | null {
+  const m = QTY_RE.exec(sourceQty.trim());
+  if (!m) return null;
+  return { qtyPer: Number(m[1]), uom: m[2].trim() || null };
+}
+
+type ReceivedStatus = "NOT_RECEIVED" | "PARTIALLY_RECEIVED" | "RECEIVED";
+const RECEIVED_STATUS_MAP: Record<string, ReceivedStatus> = {
+  Received: "RECEIVED",
+  "Not Received": "NOT_RECEIVED",
+  "Partially Received": "PARTIALLY_RECEIVED",
 };
-function mapProcurementStatus(raw: string | null): ProcurementStatus {
-  if (!raw) return ProcurementStatus.NOT_STARTED;
-  const m = PROCUREMENT_STATUS_MAP[raw];
-  if (!m) throw new Error(`unknown Procurement.status "${raw}"`);
+function mapReceivedStatus(raw: string | null): ReceivedStatus | null {
+  if (!raw) return null;
+  const m = RECEIVED_STATUS_MAP[raw];
+  if (!m) throw new Error(`unknown procurement.materialReceivedStatus "${raw}"`);
   return m;
 }
 
-const RECEIVED_STATUS_MAP: Record<string, MaterialReceivedStatus> = {
-  Received: MaterialReceivedStatus.RECEIVED,
-  "Not Received": MaterialReceivedStatus.NOT_RECEIVED,
-  "Partially Received": MaterialReceivedStatus.PARTIALLY_RECEIVED,
-};
-function mapReceivedStatus(raw: string | null): MaterialReceivedStatus | null {
-  if (!raw) return null;
-  const m = RECEIVED_STATUS_MAP[raw];
-  if (!m) throw new Error(`unknown Procurement.receivedStatus "${raw}"`);
-  return m;
+/**
+ * B5, Phase 4: one `ProcurementEvent` row per non-null date field on the
+ * source CSV's procurement block — same shape
+ * `scripts/backfill-procurement-events.ts` synthesizes for pre-existing
+ * `procurements` rows, applied here at first-import time instead of as a
+ * later backfill. RECEIPT's `qty` uses `parseSourceQty` (B1's parser,
+ * reused rather than re-implemented) on the BOM line's own raw qty string —
+ * `BomItem.qtyPer` isn't populated yet at this point in the seed run (that's
+ * `scripts/backfill-bom-item-qty-per.ts`, a separate manual step), and only
+ * when `receivedStatus === "RECEIVED"`; a PARTIALLY_RECEIVED row still gets
+ * a RECEIPT event, with `qty` left null — the source data never recorded a
+ * partial-receipt number, and inventing one would be a guess (CLAUDE.md:
+ * flag, don't fabricate).
+ */
+function buildProcurementEventRows(
+  p: LiveBomItem["procurement"],
+  sourceQty: string,
+): { type: "INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT"; qty: number | null; refNo: string | null; at: Date }[] {
+  const rows: ReturnType<typeof buildProcurementEventRows> = [];
+  const indentDate = isoDate(p.indentGenerateDate);
+  if (indentDate) rows.push({ type: "INDENT_RAISED", qty: null, refNo: p.indentNo || null, at: indentDate });
+  const approvedDate = isoDate(p.indentApprovedDate);
+  if (approvedDate) rows.push({ type: "INDENT_APPROVED", qty: null, refNo: null, at: approvedDate });
+  const poDate = isoDate(p.poDate);
+  if (poDate) rows.push({ type: "PO_PLACED", qty: null, refNo: p.poNo || null, at: poDate });
+  const receivedDate = isoDate(p.materialReceivedDate);
+  if (receivedDate) {
+    const receivedStatus = mapReceivedStatus(p.materialReceivedStatus);
+    const qty = receivedStatus === "RECEIVED" ? (parseSourceQty(sourceQty)?.qtyPer ?? null) : null;
+    rows.push({ type: "RECEIPT", qty, refNo: null, at: receivedDate });
+  }
+  return rows;
 }
 
 const SOURCING_MAP: Record<string, Sourcing> = {
@@ -863,6 +897,43 @@ async function seedDemo(
         data: { clientId: client.id, cadence: SnapshotCadence.DAILY, requiresApproval: true },
       });
 
+      // Hoisted ahead of §10/§11 (was §12 "Users", below): ProcurementEvent.by
+      // (B5, Phase 4) is a required actor FK, and the BOM/procurement import
+      // loop that needs it runs before the rest of the demo users would
+      // otherwise be created. mkUser is reused unchanged at §12 for the rest
+      // of the roster; this is the one call moved up, not duplicated —
+      // adminUser is passed down to buildProcurementEventRows below.
+      const mkUser = async (
+        email: string,
+        name: string,
+        roleCodes: string[],
+        deptCodes: string[] = [],
+        clientIdForUser: number | null = null,
+      ) => {
+        const user = await tx.user.create({
+          data: {
+            tenantId,
+            clientId: clientIdForUser,
+            email,
+            username: email.split("@")[0],
+            name,
+            passwordHash,
+            mustChangePassword: false,
+            themePreference: "DARK",
+          },
+        });
+        await tx.userRole.createMany({
+          data: roleCodes.map((c) => ({ userId: user.id, roleId: roleIdByCode.get(c)! })),
+        });
+        if (deptCodes.length) {
+          await tx.userDepartment.createMany({
+            data: deptCodes.map((c) => ({ userId: user.id, departmentId: deptIdByCode.get(c)! })),
+          });
+        }
+        return user;
+      };
+      const adminUser = await mkUser("admin@despl.local", "Administrator", ["ADMIN"]);
+
       const csvColumnToOperation = new Map<string, string>();
       for (const [opCode, meta] of Object.entries(routesFile.canonicalOperations)) {
         if (meta.csvColumn && !meta.csvColumn.includes("|")) {
@@ -1003,19 +1074,12 @@ async function seedDemo(
             });
             bomCount++;
 
-            await tx.procurement.create({
-              data: {
-                bomItemId: bomItem.id,
-                indentNo: item.procurement.indentNo,
-                indentDate: isoDate(item.procurement.indentGenerateDate),
-                approvedDate: isoDate(item.procurement.indentApprovedDate),
-                status: mapProcurementStatus(item.procurement.status),
-                poNo: item.procurement.poNo,
-                poDate: isoDate(item.procurement.poDate),
-                receivedStatus: mapReceivedStatus(item.procurement.materialReceivedStatus),
-                receivedDate: isoDate(item.procurement.materialReceivedDate),
-              },
-            });
+            const procurementEventRows = buildProcurementEventRows(item.procurement, item.qty);
+            if (procurementEventRows.length) {
+              await tx.procurementEvent.createMany({
+                data: procurementEventRows.map((r) => ({ ...r, bomItemId: bomItem.id, by: adminUser.id })),
+              });
+            }
 
             // One component instance per BOM line for the live data. Where a
             // client orders N of something (5 vs 8 nozzles), the UI creates N
@@ -1290,47 +1354,9 @@ async function seedDemo(
 
       // ── 12. Users ────────────────────────────────────────────────────
       // One per role, plus a supervisor per department, plus one client user.
-      const mkUser = async (
-        email: string,
-        name: string,
-        roleCodes: string[],
-        deptCodes: string[] = [],
-        clientId: number | null = null,
-      ) => {
-        const user = await tx.user.create({
-          // Demo/dev seed accounts ship with a known, documented password
-          // (see the SEED_PASSWORD warning above) — same reasoning as Task
-          // 1.1's migration backfill for pre-existing rows: they already have
-          // a working password and must not be locked out behind the
-          // first-login interstitial.
-          data: {
-            tenantId,
-            clientId,
-            email,
-            username: email.split("@")[0],
-            name,
-            passwordHash,
-            mustChangePassword: false,
-            // Same reasoning as the theme_preference_dark_backfill migration:
-            // seeded accounts existed before the theme feature and must not
-            // silently land on SYSTEM (which resolves to the untested light
-            // palette on any factory-default OS) — a re-seed before a demo
-            // must not reintroduce that bug for these accounts.
-            themePreference: "DARK",
-          },
-        });
-        await tx.userRole.createMany({
-          data: roleCodes.map((c) => ({ userId: user.id, roleId: roleIdByCode.get(c)! })),
-        });
-        if (deptCodes.length) {
-          await tx.userDepartment.createMany({
-            data: deptCodes.map((c) => ({ userId: user.id, departmentId: deptIdByCode.get(c)! })),
-          });
-        }
-        return user;
-      };
-
-      await mkUser("admin@despl.local", "Administrator", ["ADMIN"]);
+      // `mkUser` itself and the admin account were hoisted above §10 (see the
+      // comment there) — B5's ProcurementEvent.by needed an actor to exist
+      // before the BOM/procurement import loop runs.
       await mkUser("md@despl.local", "MD", ["MANAGEMENT"]);
       await mkUser("ceo@despl.local", "CEO", ["MANAGEMENT"]);
       await mkUser("sj@despl.local", "SJ — Production Head", ["PRODUCTION_HEAD"]);

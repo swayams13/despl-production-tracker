@@ -111,18 +111,14 @@ enum BomRevisionStatus {
   RELEASED
 }
 
-enum ProcurementStatus {
-  NOT_STARTED
+/// B5, Phase 4: replaces ProcurementStatus/MaterialReceivedStatus — a
+/// ProcurementEvent's `type` IS the status; there is no separate status enum
+/// to keep in sync with the event log.
+enum ProcurementEventType {
   INDENT_RAISED
   INDENT_APPROVED
   PO_PLACED
-  IN_STOCK
-}
-
-enum MaterialReceivedStatus {
-  NOT_RECEIVED
-  PARTIALLY_RECEIVED
-  RECEIVED
+  RECEIPT
 }
 
 enum PmiResult {
@@ -286,6 +282,7 @@ model User {
   assignedPlans                ProcessPlan[]
   performedComponentOperations ComponentOperation[]
   performedAssemblySteps       AssemblyStep[]
+  procurementEvents            ProcurementEvent[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -959,7 +956,7 @@ model BomItem {
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   componentType           ComponentTypeRef?        @relation(fields: [componentTypeId], references: [id])
   bomRevision             BomRevision?             @relation(fields: [bomRevisionId], references: [id])
-  procurement             Procurement?
+  procurementEvents       ProcurementEvent[]
   materialIdentifications MaterialIdentification[]
   components              Component[]
   tests                   ItemTest[]
@@ -973,22 +970,38 @@ model BomItem {
   @@map("bom_items")
 }
 
-model Procurement {
-  id             Int                     @id @default(autoincrement())
-  bomItemId      Int                     @unique @map("bom_item_id")
-  indentNo       String?                 @map("indent_no")
-  indentDate     DateTime?               @map("indent_date")
-  approvedDate   DateTime?               @map("approved_date")
-  status         ProcurementStatus       @default(NOT_STARTED)
-  poNo           String?                 @map("po_no")
-  poDate         DateTime?               @map("po_date")
-  receivedStatus MaterialReceivedStatus? @map("received_status")
-  receivedDate   DateTime?               @map("received_date")
+/// Append-only procurement ledger (B5, Phase 4) — replaces the mutable
+/// `Procurement` row-per-BomItem. "Received so far" is a sum over `RECEIPT`
+/// events, never an asserted enum. `qty` is only meaningful on `RECEIPT`
+/// (null for the other three types) and is itself nullable there: old
+/// `PARTIALLY_RECEIVED` data never recorded a number, and backfilling one
+/// would be a guess this codebase forbids — see
+/// `scripts/backfill-procurement-events.ts`.
+///
+/// No update/delete path exists anywhere in `src/` for this model by
+/// construction (service layer only ever calls `.create`) — append-only is
+/// enforced at the application layer, same spirit as `AuditLog`/
+/// `DomainEvent` (which are enforced at the DB grant layer instead, since
+/// those two are infrastructure tables the app itself never rewrites).
+model ProcurementEvent {
+  id        Int                  @id @default(autoincrement())
+  bomItemId Int                  @map("bom_item_id")
+  type      ProcurementEventType
+  qty       Decimal?             @db.Decimal(12, 3)
+  /// Indent/PO number — reuses the slot `Procurement.indentNo`/`poNo` held.
+  refNo     String?              @map("ref_no")
+  at        DateTime             @default(now())
+  /// Actor who logged this event. Not one of B10's FK-less "actor" columns —
+  /// this field is created fresh in this dispatch, so it gets the `@relation`
+  /// immediately instead of deferring it.
+  by        Int
 
   bomItem BomItem @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  actor   User    @relation(fields: [by], references: [id])
 
-  @@index([status])
-  @@map("procurements")
+  @@index([bomItemId])
+  @@index([bomItemId, at])
+  @@map("procurement_events")
 }
 
 /// Real traceability: heat number + MTC. Replaces the misused

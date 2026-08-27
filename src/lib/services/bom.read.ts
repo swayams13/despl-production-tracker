@@ -55,6 +55,22 @@ export interface BomMtc {
   pmiResult: PmiResult;
 }
 
+/**
+ * Derived from `ProcurementEvent` rows (B5, Phase 4) — replaces the old
+ * mutable `Procurement` row. `status` is the type of the most recent event
+ * (by `at`, ties broken by `id` descending); `receivedQty` is the sum of
+ * `qty` across all RECEIPT events, `null` when there have been no RECEIPT
+ * events with a known quantity yet (kept distinct from `0` — a partial
+ * receipt with unrecorded qty must not silently render as "0 received").
+ */
+export type ProcurementDisplayStatus = "NOT_STARTED" | "INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT";
+
+export interface BomProcurementSummary {
+  status: ProcurementDisplayStatus;
+  receivedQty: number | null;
+  events: { id: number; type: Exclude<ProcurementDisplayStatus, "NOT_STARTED">; qty: number | null; refNo: string | null; at: string }[];
+}
+
 export interface BomItemRow {
   id: number;
   itemNo: number;
@@ -67,7 +83,33 @@ export interface BomItemRow {
   qtyPer: number | null;
   uom: string | null;
   mtc: BomMtc[];
+  procurement: BomProcurementSummary;
   components: BomComponentSummary[];
+}
+
+/** No events yet → "NOT_STARTED", a status no `ProcurementEvent.type` value
+ * carries — nothing has been logged for this item at all. Otherwise the
+ * most recent event's type IS the status; there's no separate status field
+ * to derive from a heuristic. */
+function summarizeProcurement(
+  events: { id: number; type: Exclude<ProcurementDisplayStatus, "NOT_STARTED">; qty: Decimal | null; refNo: string | null; at: Date }[],
+): BomProcurementSummary {
+  const sorted = [...events].sort((a, b) => b.at.getTime() - a.at.getTime() || b.id - a.id);
+  const receipts = events.filter((e) => e.type === "RECEIPT" && e.qty != null);
+  const receivedQty = receipts.length
+    ? receipts.reduce((sum, e) => sum + e.qty!.toNumber(), 0)
+    : null;
+  return {
+    status: sorted[0]?.type ?? "NOT_STARTED",
+    receivedQty,
+    events: sorted.map((e) => ({
+      id: e.id,
+      type: e.type,
+      qty: e.qty != null ? e.qty.toNumber() : null,
+      refNo: e.refNo,
+      at: e.at.toISOString(),
+    })),
+  };
 }
 
 /** Quantity cell for the BOM tab: `qtyPer uom` when parsed, else the raw `sourceQty` — never `null`. */
@@ -256,6 +298,9 @@ export async function loadBomTree(
         uom: true,
         componentType: { select: { name: true } },
         materialIdentifications: { select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true } },
+        procurementEvents: {
+          select: { id: true, type: true, qty: true, refNo: true, at: true },
+        },
         components: {
           select: {
             id: true,
@@ -371,6 +416,7 @@ export async function loadBomTree(
         qtyPer: it.qtyPer?.toNumber() ?? null,
         uom: it.uom,
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING" })),
+        procurement: summarizeProcurement(it.procurementEvents),
         components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),
       };
       const list = byGroup.get(groupName) ?? [];

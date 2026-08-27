@@ -193,6 +193,26 @@ export const recordMtcSchema = z
   .strict();
 export type RecordMtcInput = z.infer<typeof recordMtcSchema>;
 
+/**
+ * Log a procurement event (indent/PO/receipt) against a BOM item (B5, Phase
+ * 4). `qty` is required on RECEIPT (how much arrived) and forbidden on the
+ * other three types (they don't carry a quantity) — `.refine()` for the
+ * cross-field rule, same style as `submitAssemblyStepSchema`'s
+ * weldJointId/newJoint mutual-exclusion check above.
+ */
+export const recordProcurementEventSchema = z
+  .object({
+    bomItemId: id,
+    type: z.enum(["INDENT_RAISED", "INDENT_APPROVED", "PO_PLACED", "RECEIPT"]),
+    qty: z.number().positive().optional(),
+    refNo: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .refine((v) => (v.type === "RECEIPT" ? v.qty != null : v.qty == null), {
+    message: "qty is required on a RECEIPT event, and not allowed on any other event type.",
+  });
+export type RecordProcurementEventInput = z.infer<typeof recordProcurementEventSchema>;
+
 /** File the categorised delay reason invariant #7 requires to unblock a dept. */
 export const fileDelayReasonSchema = z
   .object({ processPlanId: id, categoryId: id, detail: z.string().trim().optional() })
