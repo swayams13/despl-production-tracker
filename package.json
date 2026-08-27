@@ -24,7 +24,8 @@
     "db:bootstrap-admin": "tsx scripts/bootstrap-admin.ts",
     "db:seed:despl320-components": "tsx scripts/seed-despl320-components.ts",
     "db:seed:despl320-bom": "tsx scripts/seed-despl320-bom.ts",
-    "db:seed:despl320-assembly-steps": "tsx scripts/seed-despl320-assembly-steps.ts"
+    "db:seed:despl320-assembly-steps": "tsx scripts/seed-despl320-assembly-steps.ts",
+    "db:create-dept-accounts": "tsx scripts/create-department-accounts.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

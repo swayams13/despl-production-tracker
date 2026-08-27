@@ -61,7 +61,7 @@ function generateTempPassword(): string {
 }
 
 export async function createUser(actor: Actor, input: CreateUserInput): Promise<User> {
-  const { name, email, roleCodes, departmentIds, password } = createUserSchema.parse(input);
+  const { name, email, roleCodes, departmentIds, password, mustChangePassword } = createUserSchema.parse(input);
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN);
 
@@ -124,6 +124,7 @@ export async function createUser(actor: Actor, input: CreateUserInput): Promise<
           // needs a real username-entry UX; this just keeps rows valid.
           username,
           passwordHash,
+          mustChangePassword,
           roles: { create: roles.map((r) => ({ roleId: r.id })) },
           departments: { create: departmentIds.map((departmentId) => ({ departmentId })) },
         },
