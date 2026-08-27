@@ -2,6 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { assertKitReady } from "./_shared";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
 import {
@@ -176,6 +177,11 @@ export async function startComponentOperation(
         blockedByStatus: previousOp.status,
       });
     }
+
+    // B7, Phase 4 (CLAUDE.md #2's fourth gate): the component's linked
+    // BomItem must not be recorded short. SEAM no-op for untracked/never-
+    // stocked parts — see _shared.ts's assertKitReady.
+    await assertKitReady(tx, op.componentId, actor.tenantId);
 
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({

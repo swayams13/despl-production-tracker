@@ -120,6 +120,12 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let opDetailTest = 0; // component D, seq 1 — F3/F4 field-persistence test, untouched by anything else
   let rejectCategoryId = 0;
   let welderId = 0;
+  // B7 — assertKitReady fixtures (all seq 1, so only the kit-readiness gate is under test).
+  let kitShortOp = 0; // bomItem required 10, available 3 → refused
+  let kitStockedOp = 0; // bomItem required 2, available 5 → allowed
+  let kitUntrackedOp = 0; // Component.bomItemId null (SEAM) → allowed
+  let kitNoActivityOp = 0; // bomItem set, zero StockLot rows at all (SEAM) → allowed
+  let kitCrossTenantOp = 0; // Component.bomItemId points at another tenant's BomItem → NOT_FOUND
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -229,6 +235,101 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     ).id;
     welderId = (
       await owner.welder.create({ data: { tenantId, name: "Welder One", employeeCode: `W-${Date.now()}` } })
+    ).id;
+
+    // B7 — assertKitReady fixtures. explodeBomItem's `required` is
+    // qtyPer * unitCount, so this equipment needs exactly one Unit row (no
+    // other test above depends on unitCount, so adding it here is safe).
+    await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "KIT-1" } });
+
+    const bomItemShort = await owner.bomItem.create({
+      data: { equipmentId: equipment.id, itemNo: 1, partName: "Gasket, Short", sourceQty: "10 NOS.", qtyPer: 10, uom: "NOS." },
+    });
+    await owner.stockLot.create({ data: { bomItemId: bomItemShort.id, location: "Yard A", qty: 3 } });
+
+    const bomItemStocked = await owner.bomItem.create({
+      data: { equipmentId: equipment.id, itemNo: 2, partName: "Gasket, Stocked", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+    });
+    await owner.stockLot.create({ data: { bomItemId: bomItemStocked.id, location: "Yard A", qty: 5 } });
+
+    // Zero StockLot rows for this item at all — the SEAM case ("never
+    // tracked" vs "tracked but 0 available"), distinct from bomItemShort.
+    const bomItemNoActivity = await owner.bomItem.create({
+      data: { equipmentId: equipment.id, itemNo: 3, partName: "Gasket, Untracked", sourceQty: "5 NOS.", qtyPer: 5, uom: "NOS." },
+    });
+
+    const componentKitShort = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "KIT-SHORT", componentTypeId: componentType.id, bomItemId: bomItemShort.id },
+    });
+    kitShortOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentKitShort.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    const componentKitStocked = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "KIT-STOCKED", componentTypeId: componentType.id, bomItemId: bomItemStocked.id },
+    });
+    kitStockedOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentKitStocked.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    const componentKitUntracked = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "KIT-UNTRACKED", componentTypeId: componentType.id },
+    });
+    kitUntrackedOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentKitUntracked.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    const componentKitNoActivity = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "KIT-NOACT", componentTypeId: componentType.id, bomItemId: bomItemNoActivity.id },
+    });
+    kitNoActivityOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentKitNoActivity.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    // Cross-tenant BomItem: a Component in THIS tenant with bomItemId pointing
+    // at a BomItem that belongs to a different tenant's equipment/job — not
+    // reachable through the app's own writes, but assertKitReady's own
+    // tenant-scoped lookup must still refuse it (same discipline as Dispatch
+    // 4's requiredQty/availableQty/shortage fix).
+    const otherOrg = await owner.organization.create({
+      data: { code: `TEST-CO-KITXT-${Date.now()}`, name: "Other tenant (kit)" },
+    });
+    const otherClient = await owner.client.create({ data: { tenantId: otherOrg.id, name: "Other Client" } });
+    const otherTemplate = await owner.processTemplate.create({
+      data: { tenantId: otherOrg.id, familyId: family.id, name: "Other PV template" },
+    });
+    const otherVersion = await owner.processTemplateVersion.create({
+      data: { templateId: otherTemplate.id, version: 1 },
+    });
+    const otherJob = await owner.job.create({
+      data: {
+        tenantId: otherOrg.id,
+        publicId: `pub-co-kitxt-${Date.now()}`,
+        clientId: otherClient.id,
+        familyId: family.id,
+        templateVersionId: otherVersion.id,
+        jobNumber: `JOB-CO-KITXT-${Date.now()}`,
+      },
+    });
+    const otherEquipment = await owner.equipment.create({ data: { jobId: otherJob.id, name: "Other Vessel" } });
+    const otherBomItem = await owner.bomItem.create({
+      data: { equipmentId: otherEquipment.id, itemNo: 1, partName: "Other tenant's part", sourceQty: "1 NOS.", qtyPer: 1, uom: "NOS." },
+    });
+    const componentKitCrossTenant = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "KIT-XT", componentTypeId: componentType.id, bomItemId: otherBomItem.id },
+    });
+    kitCrossTenantOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentKitCrossTenant.id, seq: 1, operationId: opReceipt.id },
+      })
     ).id;
 
     const userSup = await owner.user.create({
@@ -432,5 +533,33 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       rejectComponentOperation(qc, { componentOperationId: opSeq1, categoryId: rejectCategoryId }),
       ERROR_CODES.INVALID_STATE_TRANSITION,
     );
+  });
+
+  // ── B7: assertKitReady, wired into startComponentOperation's 4th gate ────
+
+  it("kit gate: a component whose BomItem is recorded short is refused, naming the part (violation case 1)", async () => {
+    await expectCode(
+      startComponentOperation(supA, { componentOperationId: kitShortOp }),
+      ERROR_CODES.MATERIAL_NOT_AVAILABLE,
+    );
+  });
+
+  it("kit gate: a component whose BomItem has adequate stock (available >= required) starts normally (violation case 2)", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: kitStockedOp });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  it("kit gate SEAM: Component.bomItemId null starts unaffected — no BOM link, nothing to check (violation case 3)", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: kitUntrackedOp });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  it("kit gate SEAM: BomItem set but zero StockLot/StockTxn rows recorded at all starts unaffected — 'never tracked' is not 'zero available' (violation case 4, the highest-risk regression)", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: kitNoActivityOp });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  it("kit gate cross-tenant: a Component.bomItemId pointing at another tenant's BomItem is refused as NOT_FOUND, not read across (violation case 5)", async () => {
+    await expectCode(startComponentOperation(supA, { componentOperationId: kitCrossTenantOp }), ERROR_CODES.NOT_FOUND);
   });
 });

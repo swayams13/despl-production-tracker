@@ -1,9 +1,11 @@
+import { Decimal } from "@prisma/client/runtime/library";
 import type { Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
 import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
+import { explodeBomItem, type ExplodableBomItem } from "./bom-explosion";
 import type {
   ScheduleProcess,
   ScheduleEdge,
@@ -510,6 +512,79 @@ export async function assertComponentOpsComplete(
       jobProcessId: args.jobProcessId,
       unitId: args.unitId,
       incompleteOperations: incomplete.map((o) => o.label),
+    });
+  }
+}
+
+/**
+ * B7, Phase 4 (CLAUDE.md #2's fourth gate): a component's linked `BomItem`
+ * must not be recorded short before its next operation starts. SEAM, same
+ * convention as `assertComponentOpsComplete`/`assertNoOpenHoldPoint`: no-op
+ * (nothing to check) when `Component.bomItemId` is null (untracked part), or
+ * when the `BomItem` has zero `StockLot` rows at all (never tracked, distinct
+ * from "zero available" — B6's `availableQty`/`shortage` SEAM convention).
+ *
+ * `bom.read.ts`'s exported `requiredQty`/`availableQty`/`shortage` each open
+ * their own `withTenant` transaction — calling them here would nest a
+ * transaction inside the caller's already-open one, which Prisma's
+ * interactive-transaction client doesn't support. So the required/available
+ * arithmetic is re-implemented inline against `tx`, the same way
+ * `bom.read.ts`'s `loadBomTree` already does it for the same reason (see its
+ * comment above `itemsById`) — not a divergent copy, the established pattern
+ * for "needs the same numbers but from inside a transaction."
+ */
+export async function assertKitReady(tx: Tx, componentId: number, tenantId: number): Promise<void> {
+  const component = await tx.component.findFirst({
+    where: { id: componentId, equipment: { job: { tenantId } } },
+    select: { bomItemId: true },
+  });
+  if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+  if (component.bomItemId == null) return; // SEAM: no BOM link, nothing to check
+
+  const bomItem = await tx.bomItem.findFirst({
+    where: { id: component.bomItemId, equipment: { job: { tenantId } } },
+    select: {
+      id: true,
+      partName: true,
+      equipmentId: true,
+      qtyPer: true,
+      parentBomItemId: true,
+      stockLots: { select: { qty: true, txns: { select: { type: true, qty: true } } } },
+    },
+  });
+  if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId: component.bomItemId });
+  if (bomItem.stockLots.length === 0) return; // SEAM: zero stock activity recorded at all — never tracked stays silent
+
+  const [unitCount, siblingItems] = await Promise.all([
+    tx.unit.count({ where: { equipmentId: bomItem.equipmentId } }),
+    tx.bomItem.findMany({
+      where: { equipmentId: bomItem.equipmentId },
+      select: { id: true, qtyPer: true, parentBomItemId: true },
+    }),
+  ]);
+  const itemsById = new Map<number, ExplodableBomItem>(siblingItems.map((it) => [it.id, it]));
+
+  let required: Decimal;
+  try {
+    required = explodeBomItem(itemsById.get(bomItem.id)!, unitCount, itemsById);
+  } catch {
+    return; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to check (same fallback as loadBomTree)
+  }
+
+  let available = bomItem.stockLots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
+  for (const lot of bomItem.stockLots) {
+    for (const t of lot.txns) {
+      available = t.type === "RETURN" ? available.plus(t.qty) : available.minus(t.qty);
+    }
+  }
+
+  const shortfall = required.minus(available);
+  if (shortfall.gt(0)) {
+    throw new AppError(ERROR_CODES.MATERIAL_NOT_AVAILABLE, {
+      componentId,
+      bomItemId: bomItem.id,
+      partName: bomItem.partName,
+      shortage: shortfall.toNumber(),
     });
   }
 }

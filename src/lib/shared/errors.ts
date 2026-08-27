@@ -85,6 +85,8 @@ export const ERROR_CODES = {
   BOM_CYCLE_DETECTED: "BOM_CYCLE_DETECTED",
   /** issueStock/scrapStock: this would drive the lot's available quantity below zero. */
   INSUFFICIENT_STOCK: "INSUFFICIENT_STOCK",
+  /** startComponentOperation: the component's linked BomItem is recorded short (B7, Phase 4). */
+  MATERIAL_NOT_AVAILABLE: "MATERIAL_NOT_AVAILABLE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -143,6 +145,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "One or more fabrication or assembly operations backing this process are not yet complete on this unit.",
   BOM_CYCLE_DETECTED: "This BOM item's parent chain is malformed (a cycle). Contact an administrator.",
   INSUFFICIENT_STOCK: "This would take the lot's available quantity below zero.",
+  MATERIAL_NOT_AVAILABLE: "This part is recorded short. Resolve the shortage before starting this operation.",
 };
 
 /**

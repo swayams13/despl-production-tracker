@@ -44,6 +44,7 @@ const STATUS: Record<ErrorCode, number> = {
   // Malformed DB data (bad direct write), not a normal client refusal.
   BOM_CYCLE_DETECTED: 500,
   INSUFFICIENT_STOCK: 409,
+  MATERIAL_NOT_AVAILABLE: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */
