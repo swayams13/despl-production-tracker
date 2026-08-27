@@ -122,31 +122,54 @@ async function main() {
     return;
   }
 
+  // Resolve every actor BEFORE any write (task review C2): a run that fails
+  // partway through used to leave whichever bomItem it stopped on with only
+  // SOME of its events written, and the idempotency guard above then treats
+  // that bomItem as "already backfilled" forever — silently losing the rest.
+  // Failing here, before touching the DB, is what actually makes "no partial
+  // writes intended" true.
   const admins = await prisma.user.findMany({
     where: { email: "admin@despl.local" },
     select: { id: true, tenantId: true },
   });
   const adminIdByTenant = new Map(admins.map((a) => [a.tenantId, a.id]));
 
-  // Re-fetch tenant per bom_item_id (cheap, N is small — 54 rows in the only
-  // environment this has run against so far) rather than threading tenant_id
-  // through PlannedEvent, keeping the insert step decoupled from the raw
-  // query's column shape.
   const bomItems = await prisma.bomItem.findMany({
     where: { id: { in: [...new Set(events.map((e) => e.bomItemId))] } },
     select: { id: true, equipment: { select: { job: { select: { tenantId: true } } } } },
   });
   const tenantByBomItem = new Map(bomItems.map((b) => [b.id, b.equipment.job.tenantId]));
 
-  let inserted = 0;
+  const eventsByBomItem = new Map<number, PlannedEvent[]>();
   for (const e of events) {
-    const tenantId = tenantByBomItem.get(e.bomItemId);
+    const list = eventsByBomItem.get(e.bomItemId) ?? [];
+    list.push(e);
+    eventsByBomItem.set(e.bomItemId, list);
+  }
+
+  const byForBomItem = new Map<number, number>();
+  for (const bomItemId of eventsByBomItem.keys()) {
+    const tenantId = tenantByBomItem.get(bomItemId);
     const by = tenantId != null ? adminIdByTenant.get(tenantId) : undefined;
-    if (by == null) throw new Error(`No admin@despl.local user found for tenant of bomItemId=${e.bomItemId} — aborting, no partial writes intended.`);
-    await prisma.procurementEvent.create({
-      data: { bomItemId: e.bomItemId, type: e.type, qty: e.qty, refNo: e.refNo, at: e.at, by },
-    });
-    inserted++;
+    if (by == null) throw new Error(`No admin@despl.local user found for tenant of bomItemId=${bomItemId} — aborting before any writes.`);
+    byForBomItem.set(bomItemId, by);
+  }
+
+  // One `$transaction` per bomItem (task review C2): its handful of events
+  // (indent/approval/PO/receipt, at most 4) commit together or not at all —
+  // a dropped connection mid-run (documented as observed, over this same DB
+  // proxy, in scripts/seed-despl320-and-de0467.ts's header) leaves the
+  // NEXT bomItem's events unwritten, not a partially-written one the resume
+  // guard would then skip forever.
+  let inserted = 0;
+  for (const [bomItemId, bomItemEvents] of eventsByBomItem) {
+    const by = byForBomItem.get(bomItemId)!;
+    await prisma.$transaction(
+      bomItemEvents.map((e) =>
+        prisma.procurementEvent.create({ data: { bomItemId: e.bomItemId, type: e.type, qty: e.qty, refNo: e.refNo, at: e.at, by } }),
+      ),
+    );
+    inserted += bomItemEvents.length;
   }
   console.log(`\nInserted ${inserted} ProcurementEvent row(s).`);
 }

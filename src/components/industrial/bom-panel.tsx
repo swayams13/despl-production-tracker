@@ -256,10 +256,14 @@ function ComponentDetail({
           <span className={`chip ${procurementChipClass(item.procurement.status)}`}>
             <i />{procurementStatusLabel(item.procurement.status)}
           </span>
-          {/* receivedQty is `null` (unknown quantity) vs `0`/a number — never collapse the two (B5 acceptance). */}
+          {/* receivedQty is `null` (unknown quantity) vs `0`/a number — never collapse the two (B5 acceptance).
+              A mixed known+unknown case (hasUnknownReceipt with a non-null receivedQty) must not read as a
+              confident total either — task review I1. */}
           {item.procurement.status === "RECEIPT" && (
             <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 11 }}>
-              {item.procurement.receivedQty != null ? `${item.procurement.receivedQty} received` : "quantity not recorded"}
+              {item.procurement.receivedQty != null
+                ? `${item.procurement.receivedQty} received${item.procurement.hasUnknownReceipt ? ", plus an unrecorded quantity" : ""}`
+                : "quantity not recorded"}
             </span>
           )}
         </dd>

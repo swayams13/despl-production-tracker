@@ -59,15 +59,21 @@ export interface BomMtc {
  * Derived from `ProcurementEvent` rows (B5, Phase 4) — replaces the old
  * mutable `Procurement` row. `status` is the type of the most recent event
  * (by `at`, ties broken by `id` descending); `receivedQty` is the sum of
- * `qty` across all RECEIPT events, `null` when there have been no RECEIPT
- * events with a known quantity yet (kept distinct from `0` — a partial
- * receipt with unrecorded qty must not silently render as "0 received").
+ * `qty` across RECEIPT events that HAVE a known quantity — `null` when there
+ * have been no RECEIPT events at all, or every RECEIPT so far has an unknown
+ * quantity (kept distinct from `0`). `hasUnknownReceipt` is true whenever AT
+ * LEAST ONE RECEIPT event has `qty: null`, even if others don't — task
+ * review I1: a mixed known+unknown case (e.g. a backfilled
+ * PARTIALLY_RECEIVED plus a later real receipt of 8) must not render as a
+ * confident "8 received" with the unknown portion silently dropped from the
+ * sum.
  */
 export type ProcurementDisplayStatus = "NOT_STARTED" | "INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT";
 
 export interface BomProcurementSummary {
   status: ProcurementDisplayStatus;
   receivedQty: number | null;
+  hasUnknownReceipt: boolean;
   events: { id: number; type: Exclude<ProcurementDisplayStatus, "NOT_STARTED">; qty: number | null; refNo: string | null; at: string }[];
 }
 
@@ -95,13 +101,16 @@ function summarizeProcurement(
   events: { id: number; type: Exclude<ProcurementDisplayStatus, "NOT_STARTED">; qty: Decimal | null; refNo: string | null; at: Date }[],
 ): BomProcurementSummary {
   const sorted = [...events].sort((a, b) => b.at.getTime() - a.at.getTime() || b.id - a.id);
-  const receipts = events.filter((e) => e.type === "RECEIPT" && e.qty != null);
-  const receivedQty = receipts.length
-    ? receipts.reduce((sum, e) => sum + e.qty!.toNumber(), 0)
+  const allReceipts = events.filter((e) => e.type === "RECEIPT");
+  const knownReceipts = allReceipts.filter((e) => e.qty != null);
+  const receivedQty = knownReceipts.length
+    ? knownReceipts.reduce((sum, e) => sum + e.qty!.toNumber(), 0)
     : null;
+  const hasUnknownReceipt = allReceipts.some((e) => e.qty == null);
   return {
     status: sorted[0]?.type ?? "NOT_STARTED",
     receivedQty,
+    hasUnknownReceipt,
     events: sorted.map((e) => ({
       id: e.id,
       type: e.type,

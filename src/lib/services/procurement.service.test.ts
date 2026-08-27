@@ -19,7 +19,29 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
   const { loadBomTree } = await import("./bom.read");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
+  // Task review I3: each fixture()/cross-tenant call creates a whole
+  // disposable Organization, and nothing deleted it — matches
+  // job-intake.service.test.ts's "track ids, delete bottom-up in afterAll"
+  // pattern rather than leaving every run's fixtures in despl_test forever.
+  const createdOrgIds: number[] = [];
+
+  async function deleteOrgAndChildren(tenantId: number) {
+    await owner.procurementEvent.deleteMany({ where: { bomItem: { equipment: { job: { tenantId } } } } });
+    await owner.bomItem.deleteMany({ where: { equipment: { job: { tenantId } } } });
+    await owner.equipment.deleteMany({ where: { job: { tenantId } } });
+    await owner.job.deleteMany({ where: { tenantId } });
+    await owner.processTemplateVersion.deleteMany({ where: { template: { tenantId } } });
+    await owner.processTemplate.deleteMany({ where: { tenantId } });
+    await owner.productFamily.deleteMany({ where: { tenantId } });
+    await owner.client.deleteMany({ where: { tenantId } });
+    await owner.user.deleteMany({ where: { tenantId } });
+    await owner.organization.delete({ where: { id: tenantId } });
+  }
+
   afterAll(async () => {
+    for (const id of createdOrgIds) {
+      await deleteOrgAndChildren(id).catch(() => {});
+    }
     await owner.$disconnect();
   });
 
@@ -35,6 +57,7 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
 
   async function fixture() {
     const org = await owner.organization.create({ data: { code: `TEST-PROC-${Date.now()}`, name: "procurement test" } });
+    createdOrgIds.push(org.id);
     const tenantId = org.id;
     const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-${Date.now()}` } });
     const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
@@ -100,11 +123,18 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
   it("qty is required on RECEIPT and forbidden on the other three types", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
+    // Pinned to the schema's own .refine() message (task review I2) — a bare
+    // .rejects.toBeTruthy() would also pass for an unrelated FORBIDDEN,
+    // NOT_FOUND, or a TypeError, so it can't tell "the refine fired" from
+    // "something else went wrong". zod's own .strict()/.refine() failures
+    // are raw ZodErrors here, not AppErrors — same documented convention as
+    // client-snapshot.service.test.ts's "rejectSnapshot requires a reason".
+    const REFINE_MESSAGE = /qty is required on a RECEIPT event, and not allowed on any other event type/;
     // RECEIPT with no qty — refused.
-    await expect(recordProcurementEvent(ph, { bomItemId: bomItem.id, type: "RECEIPT" })).rejects.toBeTruthy();
+    await expect(recordProcurementEvent(ph, { bomItemId: bomItem.id, type: "RECEIPT" })).rejects.toThrow(REFINE_MESSAGE);
     // INDENT_RAISED / INDENT_APPROVED / PO_PLACED with a qty — refused.
     for (const type of ["INDENT_RAISED", "INDENT_APPROVED", "PO_PLACED"] as const) {
-      await expect(recordProcurementEvent(ph, { bomItemId: bomItem.id, type, qty: 5 })).rejects.toBeTruthy();
+      await expect(recordProcurementEvent(ph, { bomItemId: bomItem.id, type, qty: 5 })).rejects.toThrow(REFINE_MESSAGE);
     }
     // RECEIPT with a qty — accepted.
     const event = await recordProcurementEvent(ph, { bomItemId: bomItem.id, type: "RECEIPT", qty: 5 });
@@ -120,6 +150,7 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
     const tree = await loadBomTree(ph, job.id, equipment.id);
     const row = tree!.groups.flatMap((g) => g.items).find((i) => i.id === bomItem.id)!;
     expect(row.procurement.receivedQty).toBe(20);
+    expect(row.procurement.hasUnknownReceipt).toBe(false);
     expect(row.procurement.status).toBe("RECEIPT");
   });
 
@@ -154,12 +185,31 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
     const tree = await loadBomTree(ph, job.id, equipment.id);
     const row = tree!.groups.flatMap((g) => g.items).find((i) => i.id === bomItem.id)!;
     expect(row.procurement.receivedQty).toBeNull(); // not 0
+    expect(row.procurement.hasUnknownReceipt).toBe(true);
     expect(row.procurement.events[0]).toMatchObject({ type: "RECEIPT", qty: null });
+  });
+
+  it("a mixed known+unknown RECEIPT never renders a confident total (task review I1)", async () => {
+    const { tenantId, job, equipment, bomItem, user } = await fixture();
+    const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
+    // One backfilled-shaped unknown receipt (raw insert, mirrors
+    // PARTIALLY_RECEIVED-with-no-recorded-qty data) plus one real, known
+    // receipt of 8 logged through the actual writer.
+    await owner.procurementEvent.create({ data: { bomItemId: bomItem.id, type: "RECEIPT", qty: null, by: user.id } });
+    await recordProcurementEvent(ph, { bomItemId: bomItem.id, type: "RECEIPT", qty: 8 });
+
+    const tree = await loadBomTree(ph, job.id, equipment.id);
+    const row = tree!.groups.flatMap((g) => g.items).find((i) => i.id === bomItem.id)!;
+    // The known portion (8) must still surface — but so must the fact that
+    // it's incomplete, not a confident total.
+    expect(row.procurement.receivedQty).toBe(8);
+    expect(row.procurement.hasUnknownReceipt).toBe(true);
   });
 
   it("cross-tenant: another tenant's actor cannot reach this bom item by id (NOT_FOUND)", async () => {
     const { bomItem } = await fixture();
     const otherOrg = await owner.organization.create({ data: { code: `TEST-PROC-XT-${Date.now()}`, name: "Other tenant" } });
+    createdOrgIds.push(otherOrg.id);
     const otherUser = await owner.user.create({
       data: {
         tenantId: otherOrg.id,
