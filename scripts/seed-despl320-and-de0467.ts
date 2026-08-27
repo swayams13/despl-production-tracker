@@ -531,7 +531,7 @@ async function main() {
                 partName: item.partName,
                 description: item.description || null,
                 material: item.material || null,
-                qty: item.qty,
+                sourceQty: item.qty,
                 unit: item.unit,
                 componentTypeId: suggestedType
                   ? refs.componentTypeIdByCode.get(suggestedType)!

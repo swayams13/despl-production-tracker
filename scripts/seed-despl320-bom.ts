@@ -71,7 +71,7 @@ async function main() {
         partName: item.partName,
         description: item.description,
         material: item.material,
-        qty: item.qty,
+        sourceQty: item.qty,
         unit: item.unit,
         remarks: item.remarks,
       },

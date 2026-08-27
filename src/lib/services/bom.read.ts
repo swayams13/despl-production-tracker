@@ -58,9 +58,19 @@ export interface BomItemRow {
   partName: string;
   description: string | null;
   material: string | null;
-  qty: string;
+  /** Raw source value (e.g. "40 NOS.") — kept for import fidelity and as the fallback display when `qtyPer` couldn't be parsed. */
+  sourceQty: string;
+  /** Parsed numeric quantity (B1); null when `sourceQty` didn't match the "N UOM" shape. */
+  qtyPer: number | null;
+  uom: string | null;
   mtc: BomMtc[];
   components: BomComponentSummary[];
+}
+
+/** Quantity cell for the BOM tab: `qtyPer uom` when parsed, else the raw `sourceQty` — never `null`. */
+export function formatBomQty(row: Pick<BomItemRow, "qtyPer" | "uom" | "sourceQty">): string {
+  if (row.qtyPer == null) return row.sourceQty;
+  return row.uom ? `${row.qtyPer} ${row.uom}` : String(row.qtyPer);
 }
 
 export interface BomGroup {
@@ -238,7 +248,9 @@ export async function loadBomTree(
         partName: true,
         description: true,
         material: true,
-        qty: true,
+        sourceQty: true,
+        qtyPer: true,
+        uom: true,
         componentType: { select: { name: true } },
         materialIdentifications: { select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true } },
         components: {
@@ -352,7 +364,9 @@ export async function loadBomTree(
         partName: it.partName,
         description: it.description,
         material: it.material,
-        qty: it.qty,
+        sourceQty: it.sourceQty,
+        qtyPer: it.qtyPer?.toNumber() ?? null,
+        uom: it.uom,
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING" })),
         components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),
       };

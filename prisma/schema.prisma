@@ -890,18 +890,31 @@ model ProcessPlan {
 // ── BOM, components and traceability ────────────────────────────────────
 
 model BomItem {
-  id              Int     @id @default(autoincrement())
-  equipmentId     Int     @map("equipment_id")
-  itemNo          Int     @map("item_no")
-  blockNo         Int?    @map("block_no")
-  partName        String  @map("part_name")
+  id              Int      @id @default(autoincrement())
+  equipmentId     Int      @map("equipment_id")
+  itemNo          Int      @map("item_no")
+  blockNo         Int?     @map("block_no")
+  partName        String   @map("part_name")
   description     String?
   material        String?
-  /// Raw source value — the live CSVs carry things like "40 NOS."
-  qty             String
+  /// Raw source value — the live CSVs carry things like "40 NOS." Column
+  /// stays "qty" (`@map`) — this is a Prisma-model-only rename, no data
+  /// movement. Kept verbatim for import fidelity alongside the parsed
+  /// `qtyPer`/`uom` below.
+  sourceQty       String   @map("qty")
+  /// Parsed out of `sourceQty` by `scripts/backfill-bom-item-qty-per.ts`
+  /// (regex `/^(\d+(?:\.\d+)?)\s*(.*)$/`). Nullable — free-text source
+  /// values (e.g. "As required") are left null, never guessed.
+  qtyPer          Decimal? @db.Decimal(12, 3) @map("qty_per")
+  uom             String?  @map("uom")
   unit            String?
-  componentTypeId Int?    @map("component_type_id")
+  componentTypeId Int?     @map("component_type_id")
   remarks         String?
+  /// Multi-level BOM tree (B2, Phase 4). Nullable/additive — every existing
+  /// row's parent stays null; no hierarchy inferred from the flat CSV
+  /// import, which carries no parent signal. First writer is the (later,
+  /// separately-dispatched) BOM authoring UI.
+  parentBomItemId Int?     @map("parent_bom_item_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   componentType           ComponentTypeRef?        @relation(fields: [componentTypeId], references: [id])
@@ -909,9 +922,12 @@ model BomItem {
   materialIdentifications MaterialIdentification[]
   components              Component[]
   tests                   ItemTest[]
+  parent                  BomItem?                 @relation("BomItemHierarchy", fields: [parentBomItemId], references: [id])
+  children                BomItem[]                @relation("BomItemHierarchy")
 
   @@index([equipmentId])
   @@index([componentTypeId])
+  @@index([parentBomItemId])
   @@map("bom_items")
 }
 

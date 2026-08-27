@@ -1,5 +1,22 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
+import { formatBomQty } from "./bom.read";
+
+/** Pure — no DB. B1's quantity cell: parsed `qtyPer`/`uom` renders numeric, an
+ * unparsed row falls back to the raw `sourceQty` string and never throws. */
+describe("formatBomQty", () => {
+  it("renders qtyPer + uom when parsed", () => {
+    expect(formatBomQty({ qtyPer: 40, uom: "NOS.", sourceQty: "40 NOS." })).toBe("40 NOS.");
+  });
+
+  it("renders a bare qtyPer when there's no uom", () => {
+    expect(formatBomQty({ qtyPer: 24, uom: null, sourceQty: "24" })).toBe("24");
+  });
+
+  it("falls back to the raw sourceQty when unparsed, without throwing", () => {
+    expect(formatBomQty({ qtyPer: null, uom: null, sourceQty: "As required" })).toBe("As required");
+  });
+});
 
 /**
  * DB-backed coverage for `loadBomTree`'s component-route projection: a
@@ -64,7 +81,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
 
     const equipment = await owner.equipment.create({ data: { jobId, name: "Air Receiver", blockNo: 1 } });
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", qty: "1", componentTypeId: componentType.id },
+      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "1", componentTypeId: componentType.id },
     });
     const component = await owner.component.create({
       data: { equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SHELL-1", componentTypeId: componentType.id, routeVersionId: routeVersion.id },
@@ -150,5 +167,51 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     const tree = await loadBomTree(actor, jobId);
     expect(tree!.unitId).toBe(unit1Id);
     expect(tree!.subAssemblyComponents).toHaveLength(1);
+  });
+});
+
+/**
+ * Schema-level coverage for B2's `BomItem.parentBomItemId` self-relation —
+ * no service reads/writes it yet (first writer is the later, separately
+ * dispatched BOM authoring UI). Just proves the FK and both relation
+ * directions ("BomItemHierarchy") resolve via a direct Prisma call.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("BomItem.parentBomItemId (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("resolves parent -> children and child -> parent", async () => {
+    const org = await owner.organization.create({ data: { code: `TEST-BOMPARENT-${Date.now()}`, name: "bom parent test" } });
+    const client = await owner.client.create({ data: { tenantId: org.id, name: "ACME", code: `ACME-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId: org.id, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId: org.id, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId: org.id,
+        publicId: `pub-bomparent-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DE-BOMPARENT-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
+    const parent = await owner.bomItem.create({
+      data: { equipmentId: equipment.id, itemNo: 1, partName: "Skirt Assembly", sourceQty: "1" },
+    });
+    const child = await owner.bomItem.create({
+      data: { equipmentId: equipment.id, itemNo: 2, partName: "Gusset Plate", sourceQty: "24", parentBomItemId: parent.id },
+    });
+
+    const childWithParent = await owner.bomItem.findUniqueOrThrow({ where: { id: child.id }, include: { parent: true } });
+    expect(childWithParent.parent?.id).toBe(parent.id);
+
+    const parentWithChildren = await owner.bomItem.findUniqueOrThrow({ where: { id: parent.id }, include: { children: true } });
+    expect(parentWithChildren.children.map((c) => c.id)).toEqual([child.id]);
   });
 });

@@ -993,7 +993,7 @@ async function seedDemo(
                 partName: item.partName,
                 description: item.description || null,
                 material: item.material || null,
-                qty: item.qty,
+                sourceQty: item.qty,
                 unit: item.unit,
                 componentTypeId: suggestedType
                   ? componentTypeIdByCode.get(suggestedType)!

@@ -13,7 +13,7 @@ import {
   rejectComponentOperationAction,
 } from "@/app/actions/component";
 import type { ActionResult } from "@/app/actions/_action";
-import type { BomTree, BomItemRow, BomComponentOp, WelderOption, DelayCategoryOption } from "@/lib/services/bom.read";
+import { formatBomQty, type BomTree, type BomItemRow, type BomComponentOp, type WelderOption, type DelayCategoryOption } from "@/lib/services/bom.read";
 import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
@@ -234,7 +234,7 @@ function ComponentDetail({
     <div style={{ padding: "14px 16px" }}>
       <div className="sh-kv">
         <dt>Material</dt><dd>{item.material ?? "—"}</dd>
-        <dt>Qty</dt><dd>{item.qty}</dd>
+        <dt>Qty</dt><dd>{formatBomQty(item)}</dd>
         <dt>Heat no.</dt><dd className="mono">{mtc?.heatNumber ?? "—"}</dd>
         <dt>MTC</dt>
         <dd>
