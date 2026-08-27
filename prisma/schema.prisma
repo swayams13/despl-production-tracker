@@ -296,6 +296,26 @@ model User {
   performedAssemblySteps       AssemblyStep[]
   procurementEvents            ProcurementEvent[]
   stockTxns                    StockTxn[]
+  createdScheduleRuns          ScheduleRun[]
+  submittedProcessPlans        ProcessPlan[]        @relation("ProcessPlanSubmittedBy")
+  verifiedProcessPlans         ProcessPlan[]        @relation("ProcessPlanVerifiedBy")
+  submittedComponentOps        ComponentOperation[] @relation("ComponentOperationSubmittedBy")
+  verifiedComponentOps         ComponentOperation[] @relation("ComponentOperationVerifiedBy")
+  rejectedComponentOps         ComponentOperationRejection[]
+  loggedWeldJoints             WeldJoint[]
+  loggedWeldLogs               WeldLog[]
+  submittedAssemblySteps       AssemblyStep[]       @relation("AssemblyStepSubmittedBy")
+  verifiedAssemblySteps        AssemblyStep[]       @relation("AssemblyStepVerifiedBy")
+  rejectedAssemblySteps        AssemblyStepRejection[]
+  clearedQcpExecutions         QcpExecution[]       @relation("QcpExecutionClearedBy")
+  waiverApprovedQcpExecutions  QcpExecution[]       @relation("QcpExecutionWaiverApprovedBy")
+  filedDelayReasons            DelayReason[]        @relation("DelayReasonFiledBy")
+  reviewedDelayReasons         DelayReason[]        @relation("DelayReasonReviewedBy")
+  publishedSnapshots           ProgressSnapshot[]   @relation("ProgressSnapshotPublishedBy")
+  verifiedSnapshots            ProgressSnapshot[]   @relation("ProgressSnapshotVerifiedBy")
+  createdBomRevisions          BomRevision[]
+  recordedNdtResults           NdtResult[]
+  publishedTemplateVersions    ProcessTemplateVersion[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -598,6 +618,7 @@ model ProcessTemplateVersion {
   processes TemplateProcess[]
   edges     TemplateEdge[]
   jobs      Job[]
+  publisher User?            @relation(fields: [publishedBy], references: [id])
 
   @@unique([templateId, version])
   @@index([templateId])
@@ -860,6 +881,7 @@ model ScheduleRun {
   job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   equipment    Equipment?    @relation(fields: [equipmentId], references: [id])
   processPlans ProcessPlan[]
+  creator      User?         @relation(fields: [createdBy], references: [id])
 
   @@unique([jobId, equipmentId, version])
   @@index([jobId])
@@ -894,8 +916,14 @@ model ProcessPlan {
   unit            Unit?         @relation(fields: [unitId], references: [id])
   ownerDepartment Department    @relation(fields: [ownerDepartmentId], references: [id])
   assignee        User?         @relation(fields: [assigneeUserId], references: [id])
+  submitter       User?         @relation("ProcessPlanSubmittedBy", fields: [submittedBy], references: [id])
+  verifier        User?         @relation("ProcessPlanVerifiedBy", fields: [verifiedBy], references: [id])
   delayReasons    DelayReason[]
 
+  /// Unique constraint on non-null unitId; null unitId case is handled by
+  /// a partial unique index in the migration (PostgreSQL treats NULL as
+  /// distinct in a regular unique constraint, so this DDL-only index enforces
+  /// single-row uniqueness per (scheduleRunId, jobProcessId) when unitId IS NULL).
   @@unique([scheduleRunId, jobProcessId, unitId])
   @@index([scheduleRunId])
   @@index([jobProcessId])
@@ -925,6 +953,7 @@ model BomRevision {
   createdAt   DateTime          @default(now()) @map("created_at")
 
   equipment Equipment @relation(fields: [equipmentId], references: [id])
+  creator   User?    @relation(fields: [createdBy], references: [id])
   bomItems  BomItem[]
 
   @@unique([equipmentId, revisionNo])
@@ -1262,6 +1291,8 @@ model ComponentOperation {
   operation         OperationRef                  @relation(fields: [operationId], references: [id])
   performedByWelder Welder?                       @relation(fields: [performedByWelderId], references: [id])
   performedByUser   User?                         @relation(fields: [performedByUserId], references: [id])
+  submitter         User?                         @relation("ComponentOperationSubmittedBy", fields: [submittedBy], references: [id])
+  verifier          User?                         @relation("ComponentOperationVerifiedBy", fields: [verifiedBy], references: [id])
   rejections        ComponentOperationRejection[]
 
   @@unique([componentId, seq])
@@ -1288,6 +1319,7 @@ model ComponentOperationRejection {
 
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
   category           DelayCategoryRef   @relation(fields: [categoryId], references: [id])
+  rejector           User               @relation(fields: [rejectedBy], references: [id])
 
   @@index([componentOperationId])
   @@index([categoryId])
@@ -1368,6 +1400,7 @@ model WeldJoint {
   job           Job               @relation(fields: [jobId], references: [id])
   unit          Unit?             @relation(fields: [unitId], references: [id])
   component     Component?        @relation(fields: [componentId], references: [id])
+  logger        User              @relation(fields: [loggedBy], references: [id])
   welders       WeldJointWelder[]
   ndtResults    NdtResult[]
   assemblySteps AssemblyStep[]
@@ -1406,6 +1439,7 @@ model WeldLog {
 
   welder Welder @relation(fields: [welderId], references: [id])
   job    Job    @relation(fields: [jobId], references: [id])
+  logger User   @relation(fields: [loggedBy], references: [id])
 
   @@index([welderId])
   @@index([jobId])
@@ -1430,6 +1464,7 @@ model NdtResult {
 
   weldJoint WeldJoint   @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
   testType  TestTypeRef @relation(fields: [testTypeId], references: [id])
+  recorder  User?       @relation(fields: [recordedBy], references: [id])
 
   @@index([weldJointId])
   @@index([testTypeId])
@@ -1555,6 +1590,8 @@ model AssemblyStep {
   qcpItem           QcpItem?                @relation(fields: [qcpItemId], references: [id])
   performedByWelder Welder?                 @relation(fields: [performedByWelderId], references: [id])
   performedByUser   User?                   @relation(fields: [performedByUserId], references: [id])
+  submitter         User?                   @relation("AssemblyStepSubmittedBy", fields: [submittedBy], references: [id])
+  verifier          User?                   @relation("AssemblyStepVerifiedBy", fields: [verifiedBy], references: [id])
   rejections        AssemblyStepRejection[]
 
   @@unique([unitId, seq])
@@ -1580,6 +1617,7 @@ model AssemblyStepRejection {
 
   assemblyStep AssemblyStep     @relation(fields: [assemblyStepId], references: [id], onDelete: Cascade)
   category     DelayCategoryRef @relation(fields: [categoryId], references: [id])
+  rejector     User             @relation(fields: [rejectedBy], references: [id])
 
   @@index([assemblyStepId])
   @@index([categoryId])
@@ -1700,6 +1738,8 @@ model QcpExecution {
 
   qcpItem QcpItem @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   unit    Unit    @relation(fields: [unitId], references: [id])
+  clearer User?   @relation("QcpExecutionClearedBy", fields: [clearedBy], references: [id])
+  waiver  User?   @relation("QcpExecutionWaiverApprovedBy", fields: [waiverApprovedBy], references: [id])
 
   @@unique([qcpItemId, unitId, attemptNo])
   @@index([qcpItemId])
@@ -1792,6 +1832,8 @@ model DelayReason {
 
   processPlan ProcessPlan      @relation(fields: [processPlanId], references: [id], onDelete: Cascade)
   category    DelayCategoryRef @relation(fields: [categoryId], references: [id])
+  filer       User             @relation("DelayReasonFiledBy", fields: [filedBy], references: [id])
+  reviewer    User?            @relation("DelayReasonReviewedBy", fields: [reviewedBy], references: [id])
 
   @@index([processPlanId])
   @@index([categoryId])
@@ -1873,6 +1915,8 @@ model ProgressSnapshot {
   job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
   equipment Equipment?   @relation(fields: [equipmentId], references: [id])
   unit      Unit?        @relation(fields: [unitId], references: [id])
+  publisher User?        @relation("ProgressSnapshotPublishedBy", fields: [publishedBy], references: [id])
+  verifier  User?        @relation("ProgressSnapshotVerifiedBy", fields: [verifiedBy], references: [id])
 
   // Postgres treats NULL as distinct in a unique index, so this constraint gives no
   // duplicate protection when unitId is null (equipment/job-grain rollups) — not
