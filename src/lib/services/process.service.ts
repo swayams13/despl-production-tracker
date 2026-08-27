@@ -27,6 +27,7 @@ import {
   type VerifyProcessInput,
 } from "@/lib/shared/schemas";
 import {
+  assertComponentOpsComplete,
   assertNoOpenHoldPoint,
   assertNoUnfiledDelayBlock,
   jobEdgeToScheduleEdge,
@@ -155,6 +156,8 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
       scheduleRunId: plan.scheduleRunId,
       unitId: plan.unitId,
     });
+
+    await assertComponentOpsComplete(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
 
     const updated = await audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({

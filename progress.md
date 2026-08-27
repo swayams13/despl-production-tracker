@@ -2,6 +2,87 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Phase 3 (The rollup) implemented per the approved plan, 27 Aug 2026
+
+**Status: R0 (schema link), R1/R3 (weighted percent-complete, one definition), R2 (submitProcess
+gate), R4 (StageSheet contributing operations) all implemented, tested (pure + DB-gated + live
+browser click-through as Production Head), typechecked, linted. Plan followed §0's standing
+process — read the brief, inspected the code, produced a plan, stopped for approval before writing
+code.**
+
+### What changed
+
+**R0 (flagged in the plan, not silently added) — `AssemblyTemplateStep.leadTimeProcessSeq`.** The
+brief's R1/R2/R4 assumed both fabrication (`ComponentOperation`) and assembly (`AssemblyStep`) were
+already joinable to the 36-process spine; only the fabrication side was (`OperationRef.leadTimeProcessSeq`).
+Added the same nullable `Int` column to `AssemblyTemplateStep`, migration `20260827034257`, and
+authored the 54-step PRESSURE_VESSEL template's mapping in `seed/assembly-template-pressure-vessel-v1.json`
+by analogy to `seed/lead-time-model.json`'s 36-process names (e.g. LS-1/CS-2/CS-1 weld rows → #16
+"Shell Welding", post-weld NDT rows → #22 "NDE After Welding/PWHT", hydro rows → #27 "Hydrostatic /
+Pressure Test") — same judgment-call discipline as A2's `defaultDepartment`, not floor-confirmed,
+flagged in the JSON's own notes. Backfilled the already-seeded local `despl` DB via a new one-off
+script (`scripts/backfill-assembly-step-lead-time-process-seq.ts`), same shape as A2's own backfill.
+
+**R1/R3 — `v_process_plan_percent`, the one percent-complete definition.** Found 5 independent,
+disagreeing implementations (job header, jobs list, dashboard KPIs, client-portal per-unit, client
+portal job rollup) — two different grains (36-process-plan count vs. 25-stage-segment average), the
+concrete cause of "the client portal always sees the lower number." Added a SQL view,
+`v_process_plan_percent` (migration `20260827040000`, `security_invoker = true` matching
+`v_unit_stage_status`'s own precedent) — one row per current-run `ProcessPlan`, `percent` = mapped
+fabrication/assembly-ops completion fraction when any exist, else the old binary plan-status (0/100)
+SEAM fallback, `weight` = `JobProcess.durationMaxDays` (audit's unweighted-count finding fixed).
+Every consumer (`jobs.read.ts`, `job-detail.read.ts`, `workspace.read.ts`'s `loadJobKpis`,
+`client-snapshot.service.ts`'s per-unit publish) now computes its aggregate from this view instead of
+re-deriving its own ratio — same rows each site already selected, only the math changed, so blast
+radius stayed small. `client-snapshot.read.ts`'s job-level rollup (average of stored per-unit
+`overallPct`) was left as-is deliberately — it reads frozen, VERIFIED-day snapshots, not live data,
+and each unit's stored number is now correct at the source.
+
+**R2 — `submitProcess` gains `COMPONENT_OPS_INCOMPLETE`.** New `assertComponentOpsComplete` +
+`loadMappedOps` in `_shared.ts` (same shape as `assertNoOpenHoldPoint`: SEAM no-op when `unitId` is
+null or nothing is mapped), wired into `submitProcess` right after the existing delay-block gate.
+New error code + message in `errors.ts`, new HTTP-status mapping in `api/_lib.ts`. **Caught a real
+interaction with Phase 1's own DESPL-320 seed data while fixing the existing DB-gated hold-point
+test**: seq 10 (Material Receipt & Incoming Inspection, RECEIPT → leadTimeProcessSeq 10) has real,
+still-`NOT_STARTED` `ComponentOperation` rows for every seeded unit — the pre-Phase-3 test assumed
+`submitProcess` on that process would always succeed en route to testing `verifyProcess`'s hold
+point; it's now correctly refused first. Fixed the test to complete those component ops before
+proceeding (not a workaround — this is the exact cross-cutting behavior the phase was built to add).
+
+**R4 — StageSheet shows contributing operations.** `StageDetail`'s `StageBackingPlan` gained
+`contributingOps: MappedOp[]` (same `loadMappedOps` helper, reused rather than duplicated).
+`StageSheetLauncher`: multi-process stages show a per-process op-completion line under
+`BackingPlanRow` ("N/M … complete — waiting on X, Y"); single-process stages (the common case) get
+their own "Contributing operations" section listing each op with source/label/status.
+
+### Tests / verification
+
+New DB-gated tests: `assertComponentOpsComplete`/`submitProcess` violation case (own minimal fixture
+— start succeeds with no predecessors, submit refused naming the incomplete op, submit succeeds once
+it's marked COMPLETE) in `process.service.test.ts`; the existing DESPL-320 hold-point test updated per
+the R2 interaction above. `pnpm typecheck`/`pnpm lint` clean (2 pre-existing unused-import warnings
+in `process.service.ts`, unrelated to this change). `pnpm test` 532/532 pure. `pnpm test:db` 768/768
+against `despl_test` (migrations applied there first via `prisma migrate deploy`).
+
+**Live-verified through the real `/login` form** as `sj@despl.local` (Production Head, no forged
+session): dashboard's DESPL-320 percent-complete (1%) matches the view's own SQL cross-check
+(`select job_id, sum(percent*weight)/sum(weight) ...` from `v_process_plan_percent`, unit 1 at
+14.7%, units 2–9 at 0%). Opened the real StageSheet for Stage 8 "Forming" on unit 320SR01 — the new
+"Contributing operations (1)" section renders live, "FABRICATION — Rolling — NOT STARTED", matching
+a direct `fetch('/api/jobs/3/stage?unit=1&stage=8')` call against the running dev server. Confirmed
+via the same live fetch sweep that both fabrication- and assembly-sourced ops surface correctly
+across multiple stages (stage 3 "Detail Engineering" → 4 assembly ops from the document-gate group,
+stage 8 → 1 fabrication op). Attempted to start an unrelated not-yet-gated stage and confirmed the
+existing `GATING_BLOCKED` refusal still renders cleanly as a toast (no regression from this session's
+changes) — did not additionally hunt down a live click-path that hits `COMPONENT_OPS_INCOMPLETE`
+specifically, since the DB-gated automated test already exercises that exact code path (same
+`submitProcess`, same Prisma `tx`) end to end.
+
+### Deferred / not in this phase
+
+Nothing from R1–R4 was deferred. R0 (the schema gap) was folded in rather than deferred, per §0's
+"say so before implementing" rule for anything that turns out materially different from the brief.
+
 ## Session — Phase 2 (Assembly tracking) implemented per the approved plan, 26–27 Aug 2026
 
 **Status: A1/A3 (schema), A2 (template authored + materialised for DESPL-320), A5 (welder CRUD),

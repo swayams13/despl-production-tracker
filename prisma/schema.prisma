@@ -1335,6 +1335,11 @@ model AssemblyTemplateStep {
   /// weld groups (E/G/H/J/K/L per spec §3). Not a WeldJoint FK — the actual
   /// joint doesn't exist until the floor logs it against this step.
   jointRef            String?          @map("joint_ref")
+  /// Which of the 36 lead-time processes (`JobProcess.code`, as a number)
+  /// this assembly step rolls up into — same mapping OperationRef carries
+  /// for fabrication (Phase 3, addendum §3). Null where the step has no
+  /// 1:1 spine process (author it on the template, never in code).
+  leadTimeProcessSeq  Int?             @map("lead_time_process_seq")
 
   version           AssemblyTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment Department              @relation(fields: [defaultDepartmentId], references: [id])

@@ -19,6 +19,7 @@ import type {
   ScheduleRun,
   ScheduleMode,
   ScheduleFeasibility,
+  OperationStatus,
 } from "@/generated/prisma/client";
 
 /**
@@ -442,6 +443,73 @@ export async function assertNoOpenHoldPoint(
       jobProcessId: args.jobProcessId,
       unitId: args.unitId,
       openQcpItemIds: open,
+    });
+  }
+}
+
+// ── Component/assembly rollup (Phase 3, addendum §3) ────────────────────
+
+export interface MappedOp {
+  source: "fabrication" | "assembly";
+  label: string;
+  status: OperationStatus;
+}
+
+/**
+ * Every `ComponentOperation`/`AssemblyStep` on `unitId` that rolls up into
+ * `jobProcessId`, joined by value (`OperationRef.leadTimeProcessSeq` /
+ * `AssemblyTemplateStep.leadTimeProcessSeq` == `JobProcess.code` as a
+ * number) — the same discipline `bom.read.ts`'s QCP-checkpoint lookup
+ * already uses for the fabrication half. Empty when `unitId` is null
+ * (job/equipment grain, no serial to roll up yet) or when this process has
+ * no mapped operations at all — both are SEAM cases, not errors.
+ */
+export async function loadMappedOps(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<MappedOp[]> {
+  if (args.unitId == null) return [];
+
+  const jobProcess = await tx.jobProcess.findUnique({
+    where: { id: args.jobProcessId },
+    select: { code: true },
+  });
+  if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return [];
+  const seq = Number(jobProcess.code);
+
+  const [componentOps, assemblySteps] = await Promise.all([
+    tx.componentOperation.findMany({
+      where: { component: { unitId: args.unitId }, operation: { leadTimeProcessSeq: seq } },
+      select: { status: true, operation: { select: { name: true } } },
+    }),
+    tx.assemblyStep.findMany({
+      where: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
+      select: { status: true, templateStep: { select: { activity: true } } },
+    }),
+  ]);
+
+  return [
+    ...componentOps.map((o) => ({ source: "fabrication" as const, label: o.operation.name, status: o.status })),
+    ...assemblySteps.map((s) => ({ source: "assembly" as const, label: s.templateStep.activity, status: s.status })),
+  ];
+}
+
+/**
+ * `submitProcess` gate (Phase 3, R2 / PRD FR-C2): refuses when a mapped
+ * fabrication or assembly operation on this (process, unit) is not yet
+ * COMPLETE. No-op when nothing is mapped — see `loadMappedOps`.
+ */
+export async function assertComponentOpsComplete(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<void> {
+  const ops = await loadMappedOps(tx, args);
+  const incomplete = ops.filter((o) => o.status !== "COMPLETE");
+  if (incomplete.length > 0) {
+    throw new AppError(ERROR_CODES.COMPONENT_OPS_INCOMPLETE, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      incompleteOperations: incomplete.map((o) => o.label),
     });
   }
 }

@@ -562,11 +562,105 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
     expect(blocking.length).toBeGreaterThan(0); // sanity: a real blocking checkpoint IS linked here
 
     await startProcess(maker, { processPlanId: planId(seq10Id) });
+
+    // Phase 3, R2: seq 10 (RECEIPT, leadTimeProcessSeq 10) has real seeded
+    // ComponentOperations for this unit, still NOT_STARTED — submit is
+    // refused until they're complete, same discipline as this test already
+    // uses to clear a QCP hold point before proceeding.
+    const blockedSubmit = await submitProcess(maker, { processPlanId: planId(seq10Id) }).catch((e) => e);
+    expect(isAppError(blockedSubmit) && blockedSubmit.code).toBe(ERROR_CODES.COMPONENT_OPS_INCOMPLETE);
+    await owner.componentOperation.updateMany({
+      where: { component: { unitId: unit.id }, operation: { leadTimeProcessSeq: 10 } },
+      data: { status: "COMPLETE" },
+    });
+
     await submitProcess(maker, { processPlanId: planId(seq10Id) });
 
     // ...but its OWN checkpoint (a different QcpItem than seq 1's) has no
     // QcpExecution recorded for this unit — verify must refuse.
     const err = await verifyProcess(checker, { processPlanId: planId(seq10Id) }).catch((e) => e);
     expect(isAppError(err) && err.code).toBe(ERROR_CODES.HOLD_POINT_OPEN);
+  });
+});
+
+/**
+ * Phase 3, R2: `submitProcess` refuses when a mapped `ComponentOperation` on
+ * this (process, unit) is not COMPLETE. Own minimal fixture (mirrors the
+ * first describe block above) — a single JobProcess with no predecessors, so
+ * `startProcess`/gating never enter the picture and the test isolates the
+ * new gate only.
+ */
+describe.skipIf(!RUN_DB)("submitProcess component-ops gate (Phase 3, R2, DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startProcess, submitProcess } = await import("./process.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("refuses submit while a mapped ComponentOperation is incomplete, naming it, then allows it once complete", async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-COMPOPS-${Date.now()}`, name: "Component-ops gate test" },
+    });
+    const tenantId = org.id;
+
+    const dept = await owner.department.create({ data: { tenantId, code: "F", name: "Fabrication" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-compops-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-COMPOPS-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+
+    // seq 12 mirrors the real spine's CUTTING slot — arbitrary here, just a
+    // code the mapped OperationRef can point at.
+    const jobProcess = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 12, code: "12", name: "Cutting", departmentId: dept.id },
+    });
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+    const operation = await owner.operationRef.create({
+      data: { tenantId, code: "CUTTING", name: "Cutting / Blanking", leadTimeProcessSeq: 12 },
+    });
+    const component = await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    const componentOp = await owner.componentOperation.create({
+      data: { componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
+    });
+
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const plan = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    const user = await owner.user.create({
+      data: { tenantId, email: "fab@x", username: "fab", name: "Fab", passwordHash: "x" },
+    });
+    const base = { tenantId, clientId: null, mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
+    const actor: Actor = { ...base, userId: user.id, name: "Fab", email: "fab@x", roles: [ROLES.SUPERVISOR], departmentIds: [dept.id] };
+
+    await startProcess(actor, { processPlanId: plan.id });
+
+    const err = await submitProcess(actor, { processPlanId: plan.id }).catch((e) => e);
+    expect(isAppError(err) && err.code).toBe(ERROR_CODES.COMPONENT_OPS_INCOMPLETE);
+    expect(isAppError(err) && (err.detail?.incompleteOperations as string[])).toContain("Cutting / Blanking");
+
+    await owner.componentOperation.update({ where: { id: componentOp.id }, data: { status: "COMPLETE" } });
+
+    const submitted = await submitProcess(actor, { processPlanId: plan.id });
+    expect(submitted.status).toBe("SUBMITTED");
   });
 });

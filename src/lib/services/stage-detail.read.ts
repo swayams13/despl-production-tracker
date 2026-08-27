@@ -2,7 +2,7 @@ import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
 import { stageName } from "@/lib/shared/stage-names";
-import { loadJobSpine } from "./_shared";
+import { loadJobSpine, loadMappedOps, type MappedOp } from "./_shared";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ProcessPlanStatus } from "@/generated/prisma/client";
 
@@ -28,6 +28,8 @@ export interface StageBackingPlan {
   standardDays: number | null;
   submittedByName: string | null;
   isGoverning: boolean;
+  /** Fabrication/assembly operations rolling up into this process on this unit (Phase 3, R4). Empty when nothing is mapped. */
+  contributingOps: MappedOp[];
 }
 
 export interface StageHoldPoint {
@@ -149,24 +151,27 @@ export async function loadStageDetail(
     const nameBySubmitter = new Map(submitters.map((u) => [u.id, u.name]));
 
     const planByProcess = new Map(plans.map((p) => [p.jobProcessId, p]));
-    const backingPlans: StageBackingPlan[] = backingProcesses
-      .filter((p) => planByProcess.has(p.id))
-      .map((p) => {
-        const plan = planByProcess.get(p.id)!;
-        return {
-          planId: plan.id,
-          jobProcessId: p.id,
-          processName: p.name,
-          status: plan.status,
-          plannedStart: plan.plannedStart?.toISOString() ?? null,
-          plannedFinish: plan.plannedFinish?.toISOString() ?? null,
-          actualStart: plan.actualStart?.toISOString() ?? null,
-          actualFinish: plan.actualFinish?.toISOString() ?? null,
-          standardDays: p.durationMaxDays,
-          submittedByName: plan.submittedBy != null ? (nameBySubmitter.get(plan.submittedBy) ?? null) : null,
-          isGoverning: plan.id === view.governing_plan_id,
-        };
-      });
+    const backingPlans: StageBackingPlan[] = await Promise.all(
+      backingProcesses
+        .filter((p) => planByProcess.has(p.id))
+        .map(async (p) => {
+          const plan = planByProcess.get(p.id)!;
+          return {
+            planId: plan.id,
+            jobProcessId: p.id,
+            processName: p.name,
+            status: plan.status,
+            plannedStart: plan.plannedStart?.toISOString() ?? null,
+            plannedFinish: plan.plannedFinish?.toISOString() ?? null,
+            actualStart: plan.actualStart?.toISOString() ?? null,
+            actualFinish: plan.actualFinish?.toISOString() ?? null,
+            standardDays: p.durationMaxDays,
+            submittedByName: plan.submittedBy != null ? (nameBySubmitter.get(plan.submittedBy) ?? null) : null,
+            isGoverning: plan.id === view.governing_plan_id,
+            contributingOps: await loadMappedOps(tx, { jobProcessId: p.id, unitId }),
+          };
+        }),
+    );
 
     // §11.4 stage-level dates, rolled up from the backing plans.
     const toDate = (s: string | null) => (s ? new Date(s) : null);

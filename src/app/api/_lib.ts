@@ -40,6 +40,7 @@ const STATUS: Record<ErrorCode, number> = {
   TEMPLATE_INCOMPLETE: 409,
   STALE_WRITE: 409,
   OVERRIDE_NOT_SUPPORTED_WITH_UNITS: 409,
+  COMPONENT_OPS_INCOMPLETE: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

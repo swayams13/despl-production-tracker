@@ -589,7 +589,17 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
 
     const totalPlans = run.processPlans.length;
     const completeCount = run.processPlans.filter((p) => p.status === "COMPLETE").length;
-    const percentComplete = totalPlans > 0 ? Math.round((completeCount / totalPlans) * 100) : 0;
+    // Phase 3, R1/R3: same duration-weighted, mapped-ops-aware view every
+    // percent-complete surface reads — never re-derived from completeCount.
+    const percentPlanIds = run.processPlans.map((p) => p.id);
+    const percentRows = percentPlanIds.length
+      ? await tx.$queryRaw<{ percent: string | number }[]>`
+          SELECT sum(percent * weight) / sum(weight) AS percent
+          FROM v_process_plan_percent
+          WHERE process_plan_id = ANY(${percentPlanIds}::int[])
+        `
+      : [];
+    const percentComplete = Math.round(Number(percentRows[0]?.percent ?? 0));
 
     const departments = await tx.department.findMany();
     const deptNameById = new Map(departments.map((d) => [d.id, d.name]));

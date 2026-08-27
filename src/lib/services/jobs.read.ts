@@ -7,10 +7,12 @@ import type { StageSegment } from "@/components/industrial/stage-status";
 /**
  * Job list with header stats — backs `GET /api/jobs` and `/jobs` (§4.3). Plan
  * tallies + forecast + last-activity come from each job's current schedule
- * run / event stream in grouped aggregates (no N+1); %complete and overdue
- * are computed at the 36-process plan grain per DESIGN_SPEC §11.4 (never by
- * averaging the 25-stage rollup). Client scope is enforced by tenant RLS plus
- * the actor's own client filter for portal/viewer users.
+ * run / event stream in grouped aggregates (no N+1); %complete is the
+ * duration-weighted, mapped-ops-aware figure from `v_process_plan_percent`
+ * (Phase 3, R1/R3) — every percent-complete surface reads that same view, so
+ * they can no longer disagree (never re-derive from `totalPlans`/
+ * `completePlans`, which stay as raw counts only). Client scope is enforced
+ * by tenant RLS plus the actor's own client filter for portal/viewer users.
  */
 export interface JobListItem {
   id: number;
@@ -44,6 +46,12 @@ interface TallyRow {
 interface ActivityRow {
   job_id: number;
   last_at: Date;
+}
+
+interface PercentRow {
+  job_id: number;
+  /** numeric from Postgres SUM()/division comes back as a string via pg's driver. */
+  percent: string | number;
 }
 
 export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
@@ -81,6 +89,17 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
       GROUP BY sr.job_id
     `;
     const tallyByJob = new Map(tallies.map((t) => [t.job_id, t]));
+
+    // Phase 3, R1/R3: percentComplete is duration-weighted, mapped-ops-aware
+    // completion from the single view every percent-complete surface reads —
+    // never the plain complete/total ratio above (kept only for the raw counts).
+    const percents = await tx.$queryRaw<PercentRow[]>`
+      SELECT job_id, sum(percent * weight) / sum(weight) AS percent
+      FROM v_process_plan_percent
+      WHERE job_id = ANY(${jobIds}::int[])
+      GROUP BY job_id
+    `;
+    const percentByJob = new Map(percents.map((p) => [p.job_id, p.percent]));
 
     const activity = await tx.$queryRaw<ActivityRow[]>`
       SELECT jp.job_id, max(de.at) AS last_at
@@ -127,7 +146,7 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
         totalPlans: total,
         completePlans: complete,
         overduePlans: t?.overdue ?? 0,
-        percentComplete: total > 0 ? Math.round((complete / total) * 100) : 0,
+        percentComplete: Math.round(Number(percentByJob.get(j.id) ?? 0)),
         lastActivityAt: activityByJob.get(j.id) ?? null,
       };
     });

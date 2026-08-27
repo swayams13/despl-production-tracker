@@ -170,13 +170,26 @@ export function StageSheetLauncher({
             />
           </div>
           <div className="sh-body-desktop">
-          {d.backingPlans.length > 1 && (
+          {d.backingPlans.length > 1 ? (
             <>
               <div className="sh-sec">Backing processes ({d.backingPlans.length})</div>
               {d.backingPlans.map((p) => (
                 <BackingPlanRow key={p.planId} plan={p} pending={pending} run={run} onChanged={onChanged} />
               ))}
             </>
+          ) : (
+            d.backingPlans[0]?.contributingOps.length ? (
+              <>
+                <div className="sh-sec">Contributing operations ({d.backingPlans[0].contributingOps.length})</div>
+                {d.backingPlans[0].contributingOps.map((o, i) => (
+                  <div key={i} className="hp-row" style={{ gridTemplateColumns: "auto 1fr auto", padding: "6px 0" }}>
+                    <span className="mono" style={{ color: "var(--muted)", fontSize: 10.5, textTransform: "uppercase" }}>{o.source}</span>
+                    <span>{o.label}</span>
+                    <StatusChip status={o.status === "COMPLETE" ? "complete" : o.status === "SUBMITTED" ? "submitted" : o.status === "IN_PROGRESS" ? "progress" : "idle"} />
+                  </div>
+                ))}
+              </>
+            ) : null
           )}
 
           <div className="sh-sec">Why on hold</div>
@@ -486,15 +499,29 @@ function BackingPlanRow({
     COMPLETE: "complete",
     ON_HOLD: "hold",
   };
+  const opsComplete = plan.contributingOps.filter((o) => o.status === "COMPLETE").length;
+  const opsTotal = plan.contributingOps.length;
   return (
-    <div className="hp-row" style={{ gridTemplateColumns: "1fr auto auto", padding: "8px 0" }}>
-      <span>{plan.processName}{plan.isGoverning && <span style={{ color: "var(--muted)" }}> (governing)</span>}</span>
-      <StatusChip status={statusMap[plan.status] ?? "idle"} />
-      {plan.status === "NOT_STARTED" && (
-        <button className="btn" disabled={pending} onClick={() => run(() => startAction(plan.planId), "Started.", onChanged)}>Start</button>
-      )}
-      {plan.status === "IN_PROGRESS" && (
-        <button className="btn" disabled={pending} onClick={() => run(() => submitAction(plan.planId), "Submitted for QC.", onChanged)}>Submit</button>
+    <div style={{ padding: "8px 0" }}>
+      <div className="hp-row" style={{ gridTemplateColumns: "1fr auto auto" }}>
+        <span>{plan.processName}{plan.isGoverning && <span style={{ color: "var(--muted)" }}> (governing)</span>}</span>
+        <StatusChip status={statusMap[plan.status] ?? "idle"} />
+        {plan.status === "NOT_STARTED" && (
+          <button className="btn" disabled={pending} onClick={() => run(() => startAction(plan.planId), "Started.", onChanged)}>Start</button>
+        )}
+        {plan.status === "IN_PROGRESS" && (
+          <button className="btn" disabled={pending} onClick={() => run(() => submitAction(plan.planId), "Submitted for QC.", onChanged)}>Submit</button>
+        )}
+      </div>
+      {opsTotal > 0 && (
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+          {opsComplete}/{opsTotal} fabrication/assembly operations complete
+          {opsComplete < opsTotal &&
+            ` — waiting on ${plan.contributingOps
+              .filter((o) => o.status !== "COMPLETE")
+              .map((o) => o.label)
+              .join(", ")}`}
+        </div>
       )}
     </div>
   );

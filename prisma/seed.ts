@@ -218,6 +218,7 @@ interface AssemblyTemplateFile {
     kind: "WORK" | "INSPECTION";
     defaultDepartment: string;
     jointRef?: string;
+    leadTimeProcessSeq?: number;
   }[];
 }
 
@@ -767,6 +768,7 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
           defaultDepartmentId: deptIdByCode.get(s.defaultDepartment)!,
           qcpSrNo: s.srNo,
           jointRef: s.jointRef ?? null,
+          leadTimeProcessSeq: s.leadTimeProcessSeq ?? null,
         })),
       });
       stats.assemblyTemplateSteps = await tx.assemblyTemplateStep.count({ where: { versionId: asmV1.id } });

@@ -35,6 +35,7 @@ interface AssemblyTemplateFile {
     kind: "WORK" | "INSPECTION";
     defaultDepartment: string;
     jointRef?: string;
+    leadTimeProcessSeq?: number;
   }[];
 }
 
@@ -83,6 +84,7 @@ async function main() {
       defaultDepartmentId: deptIdByCode.get(s.defaultDepartment)!,
       qcpSrNo: s.srNo,
       jointRef: s.jointRef ?? null,
+      leadTimeProcessSeq: s.leadTimeProcessSeq ?? null,
     })),
   });
 

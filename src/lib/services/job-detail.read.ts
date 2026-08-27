@@ -64,7 +64,17 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
     const totalPlans = plans.length;
     const completePlans = plans.filter((p) => p.status === "COMPLETE").length;
     const overduePlans = plans.filter((p) => p.status !== "COMPLETE" && isOverdue(p.plannedFinish)).length;
-    const percentComplete = totalPlans > 0 ? Math.round((completePlans / totalPlans) * 100) : 0;
+    // Phase 3, R1/R3: same duration-weighted, mapped-ops-aware view every
+    // percent-complete surface reads — never re-derived from completePlans.
+    const planIds = plans.map((p) => p.id);
+    const percentRows = planIds.length
+      ? await tx.$queryRaw<{ percent: string | number }[]>`
+          SELECT sum(percent * weight) / sum(weight) AS percent
+          FROM v_process_plan_percent
+          WHERE process_plan_id = ANY(${planIds}::int[])
+        `
+      : [];
+    const percentComplete = Math.round(Number(percentRows[0]?.percent ?? 0));
 
     const onHold = plans.some((p) => p.status === "ON_HOLD");
     const submitted = plans.some((p) => p.status === "SUBMITTED");

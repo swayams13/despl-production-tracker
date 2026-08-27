@@ -36,10 +36,20 @@ function currentStage(spine: UnitSpine): { stageNo: number; stageName: string; s
   return { stageNo: segment.stageNo, stageName: segment.stageName, status: segment.status };
 }
 
-/** A unit's % complete: completed segments over the full 25-stage spine. */
-function unitPercentComplete(spine: UnitSpine): number {
-  const done = spine.segments.filter((s) => s.status === "complete").length;
-  return Math.round((done / spine.segments.length) * 100);
+/**
+ * A unit's % complete — the same duration-weighted, mapped-ops-aware figure
+ * `v_process_plan_percent` gives every other percent-complete surface
+ * (Phase 3, R1/R3). Previously averaged the 25-stage segment rollup, which
+ * is what made the client portal systematically disagree with — always
+ * lower than — the internal dashboard's 36-process-plan number.
+ */
+async function unitPercentComplete(tx: Tx, unitId: number): Promise<number> {
+  const rows = await tx.$queryRaw<{ percent: string | number }[]>`
+    SELECT sum(percent * weight) / sum(weight) AS percent
+    FROM v_process_plan_percent
+    WHERE unit_id = ${unitId}
+  `;
+  return Math.round(Number(rows[0]?.percent ?? 0));
 }
 
 async function loadTodayBatch(tx: Tx, jobId: number, asOf: Date): Promise<ProgressSnapshot[]> {
@@ -88,7 +98,7 @@ export async function publishSnapshot(actor: Actor, input: PublishSnapshotInput)
       }));
       for (const spine of spines) {
         const stage = currentStage(spine);
-        const percentComplete = unitPercentComplete(spine);
+        const percentComplete = await unitPercentComplete(tx, spine.unitId);
         await tx.progressSnapshot.upsert({
           where: { jobId_unitId_asOf: { jobId, unitId: spine.unitId, asOf } },
           create: {
