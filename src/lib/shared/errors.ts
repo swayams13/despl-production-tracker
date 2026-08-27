@@ -87,6 +87,8 @@ export const ERROR_CODES = {
   INSUFFICIENT_STOCK: "INSUFFICIENT_STOCK",
   /** startComponentOperation: the component's linked BomItem is recorded short (B7, Phase 4). */
   MATERIAL_NOT_AVAILABLE: "MATERIAL_NOT_AVAILABLE",
+  /** startComponentOperation: a CUTTING op's governing drawing's current revision isn't RELEASED (B9, Phase 4). */
+  DRAWING_NOT_RELEASED: "DRAWING_NOT_RELEASED",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -146,6 +148,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   BOM_CYCLE_DETECTED: "This BOM item's parent chain is malformed (a cycle). Contact an administrator.",
   INSUFFICIENT_STOCK: "This would take the lot's available quantity below zero.",
   MATERIAL_NOT_AVAILABLE: "This part is recorded short. Resolve the shortage before starting this operation.",
+  DRAWING_NOT_RELEASED: "This component's governing drawing is not released yet. Cutting cannot start until it is.",
 };
 
 /**

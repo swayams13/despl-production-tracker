@@ -218,6 +218,25 @@ export const recordProcurementEventSchema = z
   });
 export type RecordProcurementEventInput = z.infer<typeof recordProcurementEventSchema>;
 
+/**
+ * Issue a new `DrawingRevision` for an `AssemblyDrawing` (B9, Phase 4).
+ * `revisionNo` is a plain increasing integer (Rev 1, Rev 2, ...), same shape
+ * as `BomRevision.revisionNo`. `status` is caller-supplied rather than
+ * always RELEASED — a revision can be issued as DRAFT (still being checked)
+ * without gating anything yet; only a RELEASED current revision clears the
+ * CUTTING gate. SUPERSEDED is not accepted here — that transition happens
+ * only as a side effect of a later revision's own creation
+ * (drawing.service.ts's `createDrawingRevision`), never chosen directly.
+ */
+export const createDrawingRevisionSchema = z
+  .object({
+    assemblyDrawingId: id,
+    revisionNo: z.number().int().positive(),
+    status: z.enum(["DRAFT", "RELEASED"]),
+  })
+  .strict();
+export type CreateDrawingRevisionInput = z.infer<typeof createDrawingRevisionSchema>;
+
 /** Receive a lot of stock against a BOM item (B6, Phase 4) — creates a `StockLot`. */
 export const receiveStockSchema = z
   .object({

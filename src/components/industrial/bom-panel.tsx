@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { StatusChip } from "./status-chip";
 import { STAGE_STATUS } from "./stage-status";
 import { recordMtcAction } from "@/app/actions/bom";
+import { createDrawingRevisionAction } from "@/app/actions/drawing";
 import {
   startComponentOperationAction,
   submitComponentOperationAction,
@@ -13,7 +14,7 @@ import {
   rejectComponentOperationAction,
 } from "@/app/actions/component";
 import type { ActionResult } from "@/app/actions/_action";
-import { formatBomQty, type BomTree, type BomItemRow, type BomComponentOp, type WelderOption, type DelayCategoryOption } from "@/lib/services/bom.read";
+import { formatBomQty, type BomTree, type BomItemRow, type BomComponentOp, type BomGoverningDrawing, type WelderOption, type DelayCategoryOption } from "@/lib/services/bom.read";
 import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
@@ -325,6 +326,11 @@ function ComponentDetail({
         <button className="btn" style={{ marginBottom: 14 }} onClick={() => setRecording(true)}>Record MTC…</button>
       )}
 
+      {/* B9, Phase 4 — SEAM: only rendered once a governingDrawingId is
+          recorded on this component (not yet authorable from this screen,
+          same precedent as parentComponentId). */}
+      {comp?.governingDrawing && <GoverningDrawingSection jobId={jobId} drawing={comp.governingDrawing} />}
+
       <div className="sh-sec">Component route</div>
       {comp && comp.operations.length > 0 ? (
         <RouteSteps jobId={jobId} operations={comp.operations} welders={welders} delayCategories={delayCategories} />
@@ -361,6 +367,82 @@ function stepStatusLabel(status: string): string {
 /** Full planned route (§ component route projection): a leading run of completed steps
  * collapses into one chip so a component deep into fabrication doesn't render its whole
  * finished history every time — the current/next steps are what matter day to day. */
+/**
+ * B9, Phase 4 — minimal history list for a component's governing drawing:
+ * every issued revision stays visible (invariant #9, issuing Rev B never
+ * hides Rev A), reusing the same `sh-hist` list pattern the "Process log"
+ * section above already uses rather than inventing new markup. Not a
+ * drawing-management page — just enough to see the history and issue the
+ * next revision.
+ */
+function GoverningDrawingSection({ jobId, drawing }: { jobId: number; drawing: BomGoverningDrawing }) {
+  const router = useRouter();
+  const [issuing, setIssuing] = useState(false);
+  const [revisionNo, setRevisionNo] = useState("");
+  const [status, setStatus] = useState<"DRAFT" | "RELEASED">("RELEASED");
+  const [pending, start] = useTransition();
+
+  const issue = () => {
+    const n = Number(revisionNo);
+    if (!Number.isInteger(n) || n <= 0) return toast.error("Revision number must be a positive integer.");
+    start(async () => {
+      const r = await createDrawingRevisionAction(jobId, drawing.id, n, status);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("Drawing revision issued.");
+        setIssuing(false);
+        setRevisionNo("");
+        router.refresh();
+      }
+    });
+  };
+
+  return (
+    <>
+      <div className="sh-sec">Governing drawing{drawing.drawingNo ? ` — ${drawing.drawingNo}` : ""}</div>
+      {drawing.revisions.length > 0 ? (
+        <div className="sh-hist">
+          {drawing.revisions.map((r) => (
+            <div key={r.id}>
+              Rev {r.revisionNo}
+              <span
+                className={`chip ${r.status === "RELEASED" ? "c-complete" : r.status === "SUPERSEDED" ? "c-idle" : "c-progress"}`}
+                style={{ marginLeft: 6 }}
+              >
+                <i />{r.status === "RELEASED" ? "Released" : r.status === "SUPERSEDED" ? "Superseded" : r.status.toLowerCase()}
+              </span>
+              <small>{r.releasedAt ? `released ${fmtDate(r.releasedAt)}` : ""}</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No revision issued yet — cutting cannot start.</p>
+      )}
+
+      {issuing ? (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0 14px" }}>
+          <input
+            className="ws-detail"
+            placeholder="Revision no."
+            value={revisionNo}
+            onChange={(e) => setRevisionNo(e.target.value)}
+            style={{ flex: 1, minWidth: 100 }}
+            autoFocus
+          />
+          <select className="btn" value={status} onChange={(e) => setStatus(e.target.value as typeof status)} aria-label="Revision status">
+            <option value="RELEASED">Released</option>
+            <option value="DRAFT">Draft</option>
+          </select>
+          <button className="btn btn-accent" disabled={pending} onClick={issue}>Save</button>
+          <button className="btn" disabled={pending} onClick={() => setIssuing(false)}>Cancel</button>
+        </div>
+      ) : (
+        <button className="btn" style={{ margin: "8px 0 14px" }} onClick={() => setIssuing(true)}>Issue new revision…</button>
+      )}
+    </>
+  );
+}
+
 function RouteSteps({
   jobId,
   operations,

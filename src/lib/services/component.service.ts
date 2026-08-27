@@ -2,7 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { assertKitReady } from "./_shared";
+import { assertKitReady, assertDrawingReleased } from "./_shared";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
 import {
@@ -117,6 +117,8 @@ async function lockComponentOperationForUpdate(
 ): Promise<{
   op: ComponentOperation;
   departmentId: number | null;
+  /** OperationRef.code (e.g. "CUTTING") — B9's drawing gate is CUTTING-specific, identified by code, never a hardcoded id. */
+  operationCode: string;
   previousOp: { seq: number; status: OperationStatus } | null;
 }> {
   await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ${componentOperationId} FOR UPDATE`;
@@ -131,7 +133,7 @@ async function lockComponentOperationForUpdate(
 
   const previousOp = await findPreviousComponentOperation(tx, op, op.component.routeVersionId);
 
-  return { op, departmentId: op.operation.defaultDepartmentId, previousOp };
+  return { op, departmentId: op.operation.defaultDepartmentId, operationCode: op.operation.code, previousOp };
 }
 
 function requireOperationDepartment(actor: Actor, departmentId: number | null): void {
@@ -162,7 +164,7 @@ export async function startComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op, departmentId, previousOp } = await lockComponentOperationForUpdate(
+    const { op, departmentId, operationCode, previousOp } = await lockComponentOperationForUpdate(
       tx,
       componentOperationId,
       actor.tenantId,
@@ -183,11 +185,25 @@ export async function startComponentOperation(
     // stocked parts — see _shared.ts's assertKitReady.
     await assertKitReady(tx, op.componentId, actor.tenantId);
 
+    // B9, Phase 4: CUTTING is the one operation gated on the component's
+    // governing drawing being RELEASED — identified by OperationRef.code,
+    // never a hardcoded id, and never applied to any other operation (scope
+    // boundary per the plan). SEAM no-op (returns null) when the component
+    // has no governingDrawingId; non-null return is the current revision's
+    // id, stamped onto Component.builtToRevisionId below.
+    const builtToRevisionId =
+      operationCode === "CUTTING" ? await assertDrawingReleased(tx, op.componentId, actor.tenantId) : null;
+
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
         data: { status: to, startedAt: new Date() },
       });
+      // Server-derived stamp (invariant #1), same transaction the gate
+      // check ran in — never a client-supplied revision id.
+      if (builtToRevisionId != null) {
+        await tx.component.update({ where: { id: op.componentId }, data: { builtToRevisionId } });
+      }
       return {
         result: updated,
         audit: {
@@ -195,7 +211,11 @@ export async function startComponentOperation(
           entityType: "ComponentOperation",
           entityId: op.id,
           before: { status: op.status },
-          after: { status: updated.status, startedAt: updated.startedAt },
+          after: {
+            status: updated.status,
+            startedAt: updated.startedAt,
+            ...(builtToRevisionId != null ? { builtToRevisionId } : {}),
+          },
           eventType: "ComponentOperationStarted",
           eventPayload: { componentOperationId: op.id, componentId: op.componentId },
         },

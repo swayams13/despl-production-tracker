@@ -533,16 +533,25 @@ async function main() {
         });
 
         for (const d of de0467Source.assemblyDrawings) {
+          // B9, Phase 4: revision_no/status/dates moved off AssemblyDrawing
+          // onto DrawingRevision child rows — see prisma/seed.ts's matching
+          // comment for the same shape.
+          const revisionNo = Number(d.revNo);
           await tx.assemblyDrawing.create({
             data: {
               jobId: jobRow.id,
               drawingTypeId: refs.drawingTypeIdByName.get(d.name)!,
               drawingNo: d.drawingNo,
-              revisionNo: d.revNo ?? null,
-              approvedDate: isoDate(d.approvalDate ?? null),
-              releasedDate: isoDate(d.releasedDate ?? null),
-              revisedDate: isoDate(d.revisedDate ?? null),
               remarks: d.remarks ?? null,
+              revisions: {
+                create: [
+                  {
+                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : 1,
+                    status: d.releasedDate ? "RELEASED" : "DRAFT",
+                    releasedAt: isoDate(d.releasedDate ?? null),
+                  },
+                ],
+              },
             },
           });
         }

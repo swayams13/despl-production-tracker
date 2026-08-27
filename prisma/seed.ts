@@ -1013,16 +1013,28 @@ async function seedDemo(
         });
 
         for (const d of job.assemblyDrawings) {
+          // B9, Phase 4: revision_no/status/dates moved off AssemblyDrawing
+          // onto DrawingRevision child rows — one revision per seeded
+          // drawing here (the source data never carries more than one), its
+          // revisionNo parsed from the source `revNo` (falls back to 1 when
+          // absent, e.g. every DESPL-320 drawing) and its status derived
+          // from whether a releasedDate is present.
+          const revisionNo = Number(d.revNo);
           await tx.assemblyDrawing.create({
             data: {
               jobId: jobRow.id,
               drawingTypeId: drawingTypeIdByName.get(d.name)!,
               drawingNo: d.drawingNo,
-              revisionNo: d.revNo ?? null,
-              approvedDate: isoDate(d.approvalDate ?? null),
-              releasedDate: isoDate(d.releasedDate ?? null),
-              revisedDate: isoDate(d.revisedDate ?? null),
               remarks: d.remarks ?? null,
+              revisions: {
+                create: [
+                  {
+                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : 1,
+                    status: d.releasedDate ? "RELEASED" : "DRAFT",
+                    releasedAt: isoDate(d.releasedDate ?? null),
+                  },
+                ],
+              },
             },
           });
         }

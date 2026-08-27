@@ -39,6 +39,21 @@ export interface BomComponentOp extends ProjectedOp {
   qcpCheckpoints: BomQcpCheckpoint[];
 }
 
+/** B9, Phase 4: one issued revision of a component's governing drawing. */
+export interface BomDrawingRevision {
+  id: number;
+  revisionNo: number;
+  status: string;
+  releasedAt: string | null;
+}
+
+/** B9, Phase 4: the drawing gating this component's CUTTING start, when `governingDrawingId` is set. */
+export interface BomGoverningDrawing {
+  id: number;
+  drawingNo: string | null;
+  revisions: BomDrawingRevision[];
+}
+
 export interface BomComponentSummary {
   id: number;
   tag: string;
@@ -46,6 +61,8 @@ export interface BomComponentSummary {
   componentTypeName?: string;
   displayStatus: StageDisplayStatus;
   operations: BomComponentOp[];
+  /** B9, Phase 4 — null (SEAM) when no `governingDrawingId` is recorded on this component (the common case). */
+  governingDrawing: BomGoverningDrawing | null;
 }
 
 export interface BomMtc {
@@ -212,6 +229,11 @@ interface RawComponentForSummary {
   id: number;
   tag: string;
   componentType?: { name: string } | null;
+  governingDrawing: {
+    id: number;
+    drawingNo: string | null;
+    revisions: { id: number; revisionNo: number; status: string; releasedAt: Date | null }[];
+  } | null;
   routeVersion: {
     steps: { seq: number; operation: { id: number; name: string; leadTimeProcessSeq: number | null } }[];
   } | null;
@@ -270,7 +292,16 @@ function buildComponentSummary(
       : ops.every((o) => o.status === "COMPLETE")
         ? "complete"
         : opDisplayStatus(ops.find((o) => o.status !== "COMPLETE" && o.status !== "NOT_STARTED")?.status ?? ops[0].status);
-  return { id: c.id, tag: c.tag, componentTypeName: c.componentType?.name, displayStatus, operations: ops };
+  const governingDrawing: BomGoverningDrawing | null = c.governingDrawing
+    ? {
+        id: c.governingDrawing.id,
+        drawingNo: c.governingDrawing.drawingNo,
+        revisions: [...c.governingDrawing.revisions]
+          .sort((a, b) => b.revisionNo - a.revisionNo)
+          .map((r) => ({ id: r.id, revisionNo: r.revisionNo, status: r.status, releasedAt: r.releasedAt?.toISOString() ?? null })),
+      }
+    : null;
+  return { id: c.id, tag: c.tag, componentTypeName: c.componentType?.name, displayStatus, operations: ops, governingDrawing };
 }
 
 export async function loadBomTree(
@@ -340,6 +371,13 @@ export async function loadBomTree(
             id: true,
             tag: true,
             componentType: { select: { name: true } },
+            governingDrawing: {
+              select: {
+                id: true,
+                drawingNo: true,
+                revisions: { select: { id: true, revisionNo: true, status: true, releasedAt: true } },
+              },
+            },
             routeVersion: {
               select: {
                 steps: {
@@ -386,6 +424,13 @@ export async function loadBomTree(
         id: true,
         tag: true,
         componentType: { select: { name: true } },
+        governingDrawing: {
+          select: {
+            id: true,
+            drawingNo: true,
+            revisions: { select: { id: true, revisionNo: true, status: true, releasedAt: true } },
+          },
+        },
         routeVersion: {
           select: {
             steps: {

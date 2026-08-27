@@ -173,6 +173,9 @@ enum DrawingStatus {
   SUBMITTED
   APPROVED
   RELEASED
+  /// B9, Phase 4: a prior RELEASED revision flips here when a new revision
+  /// is issued — never deleted, still queryable (invariant #9/#6).
+  SUPERSEDED
 }
 
 enum DelayReviewStatus {
@@ -913,13 +916,13 @@ model ProcessPlan {
 /// row per equipment (scripts/backfill-bom-revision.ts) — the write path for
 /// authoring a new revision belongs to a later, separately-dispatched task.
 model BomRevision {
-  id         Int                @id @default(autoincrement())
+  id          Int               @id @default(autoincrement())
   equipmentId Int               @map("equipment_id")
-  revisionNo Int                @map("revision_no")
-  status     BomRevisionStatus  @default(DRAFT)
-  releasedAt DateTime?          @map("released_at")
-  createdBy  Int?               @map("created_by")
-  createdAt  DateTime           @default(now()) @map("created_at")
+  revisionNo  Int               @map("revision_no")
+  status      BomRevisionStatus @default(DRAFT)
+  releasedAt  DateTime?         @map("released_at")
+  createdBy   Int?              @map("created_by")
+  createdAt   DateTime          @default(now()) @map("created_at")
 
   equipment Equipment @relation(fields: [equipmentId], references: [id])
   bomItems  BomItem[]
@@ -945,7 +948,7 @@ model BomItem {
   /// Parsed out of `sourceQty` by `scripts/backfill-bom-item-qty-per.ts`
   /// (regex `/^(\d+(?:\.\d+)?)\s*(.*)$/`). Nullable — free-text source
   /// values (e.g. "As required") are left null, never guessed.
-  qtyPer          Decimal? @db.Decimal(12, 3) @map("qty_per")
+  qtyPer          Decimal? @map("qty_per") @db.Decimal(12, 3)
   uom             String?  @map("uom")
   unit            String?
   componentTypeId Int?     @map("component_type_id")
@@ -1033,7 +1036,7 @@ model MaterialIdentification {
   pmiResult   PmiResult?
   /// B8, Phase 4: how much of this heat went into this component — a
   /// traceability fact, distinct from `StockTxn`'s ledger-level quantity.
-  qtyIssued   Decimal?   @db.Decimal(12, 3) @map("qty_issued")
+  qtyIssued   Decimal?   @map("qty_issued") @db.Decimal(12, 3)
 
   bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
   component Component? @relation(fields: [componentId], references: [id], onDelete: SetNull)
@@ -1157,14 +1160,14 @@ model RouteStep {
 /// nozzles, another wants 8" representable: one BOM line spawns N tagged
 /// component instances, each with its own ordered operation route.
 model Component {
-  id                Int    @id @default(autoincrement())
-  equipmentId       Int    @map("equipment_id")
-  unitId            Int?   @map("unit_id")
-  bomItemId         Int?   @map("bom_item_id")
+  id                 Int    @id @default(autoincrement())
+  equipmentId        Int    @map("equipment_id")
+  unitId             Int?   @map("unit_id")
+  bomItemId          Int?   @map("bom_item_id")
   /// N1, N2, M1, Shell-1, Top Head…
-  tag               String
-  componentTypeId   Int    @map("component_type_id")
-  routeVersionId    Int?   @map("route_version_id")
+  tag                String
+  componentTypeId    Int    @map("component_type_id")
+  routeVersionId     Int?   @map("route_version_id")
   /// F7b (Phase 1, pulled forward from Phase 4 — see
   /// docs/ADR-product-family-agnostic-platform-v1.md's schema-shape review,
   /// approved 26 Aug 2026). Self-referencing, nullable: schema shape only,
@@ -1173,7 +1176,20 @@ model Component {
   /// instead of collapsed into one fabrication unit — the gap F4 names.
   /// Added while Component still has zero real rows so this never needs a
   /// backfill migration later.
-  parentComponentId Int?   @map("parent_component_id")
+  parentComponentId  Int?   @map("parent_component_id")
+  /// B9, Phase 4: which `AssemblyDrawing` gates this component's CUTTING
+  /// start. Nullable, MANUALLY set by whoever authors the component's
+  /// route/BOM link — not auto-derived (the schema has no rule for e.g.
+  /// "the GA drawing always gates the shell"), same precedent as
+  /// `WeldJoint.componentId` being set by whoever logs the joint. A null
+  /// value is a no-op (SEAM): components with no drawing link are
+  /// completely unaffected by the CUTTING gate.
+  governingDrawingId Int?   @map("governing_drawing_id")
+  /// B9, Phase 4: which `DrawingRevision` this component was actually built
+  /// to. SERVER-STAMPED (invariant #1) inside the same transaction
+  /// `startComponentOperation` succeeds in for a CUTTING operation — never
+  /// client-supplied.
+  builtToRevisionId  Int?   @map("built_to_revision_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   unit                    Unit?                    @relation(fields: [unitId], references: [id])
@@ -1186,6 +1202,8 @@ model Component {
   weldJoints              WeldJoint[]
   stockTxns               StockTxn[]
   materialIdentifications MaterialIdentification[]
+  governingDrawing        AssemblyDrawing?         @relation("ComponentGoverningDrawing", fields: [governingDrawingId], references: [id])
+  builtToRevision         DrawingRevision?         @relation("ComponentBuiltToRevision", fields: [builtToRevisionId], references: [id])
 
   /// Component grain follows the serial (unitId), not the equipment — a
   /// serialised job's components carry a plain tag ("SHELL", not
@@ -1203,6 +1221,8 @@ model Component {
   @@index([parentComponentId])
   @@index([bomItemId])
   @@index([componentTypeId])
+  @@index([governingDrawingId])
+  @@index([builtToRevisionId])
   @@map("components")
 }
 
@@ -1691,23 +1711,43 @@ model QcpExecution {
 // ── Drawings ────────────────────────────────────────────────────────────
 
 model AssemblyDrawing {
-  id            Int           @id @default(autoincrement())
-  jobId         Int           @map("job_id")
-  drawingTypeId Int           @map("drawing_type_id")
-  drawingNo     String?       @map("drawing_no")
-  revisionNo    String?       @map("revision_no")
-  status        DrawingStatus @default(DRAFT)
-  approvedDate  DateTime?     @map("approved_date")
-  releasedDate  DateTime?     @map("released_date")
-  revisedDate   DateTime?     @map("revised_date")
+  id            Int     @id @default(autoincrement())
+  jobId         Int     @map("job_id")
+  drawingTypeId Int     @map("drawing_type_id")
+  drawingNo     String? @map("drawing_no")
   remarks       String?
 
-  job         Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  drawingType DrawingTypeRef @relation(fields: [drawingTypeId], references: [id])
+  job                 Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  drawingType         DrawingTypeRef    @relation(fields: [drawingTypeId], references: [id])
+  revisions           DrawingRevision[]
+  governingComponents Component[]       @relation("ComponentGoverningDrawing")
 
   @@index([jobId])
   @@index([drawingTypeId])
   @@map("assembly_drawings")
+}
+
+/// B9, Phase 4: revisionNo/status/dates used to be flat, overwritten fields
+/// on `AssemblyDrawing` — mutating them in place destroyed the prior
+/// revision, violating invariant #9 (versioned things are never edited in
+/// place). Each revision is now its own row; issuing Rev B flips a prior
+/// RELEASED revision to SUPERSEDED (drawing.service.ts's
+/// `createDrawingRevision`) rather than overwriting it. The current
+/// revision for a drawing is the one with the highest `revisionNo`.
+model DrawingRevision {
+  id                Int           @id @default(autoincrement())
+  assemblyDrawingId Int           @map("assembly_drawing_id")
+  revisionNo        Int           @map("revision_no")
+  status            DrawingStatus @default(DRAFT)
+  releasedAt        DateTime?     @map("released_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  assemblyDrawing   AssemblyDrawing @relation(fields: [assemblyDrawingId], references: [id], onDelete: Cascade)
+  builtByComponents Component[]     @relation("ComponentBuiltToRevision")
+
+  @@unique([assemblyDrawingId, revisionNo])
+  @@index([assemblyDrawingId])
+  @@map("drawing_revisions")
 }
 
 /// Staged/partial dispatch dates for a single job. Found on DE0463 (QTY-40

@@ -126,6 +126,13 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let kitUntrackedOp = 0; // Component.bomItemId null (SEAM) → allowed
   let kitNoActivityOp = 0; // bomItem set, zero StockLot rows at all (SEAM) → allowed
   let kitCrossTenantOp = 0; // Component.bomItemId points at another tenant's BomItem → NOT_FOUND
+  // B9 — assertDrawingReleased fixtures, wired into startComponentOperation's CUTTING-only gate.
+  let drawingGatedCuttingOp = 0; // governingDrawingId → a drawing whose current revision is DRAFT → refused
+  let drawingReleasedCuttingOp = 0; // governingDrawingId → a drawing whose current revision is RELEASED → allowed, stamps builtToRevisionId
+  let drawingReleasedComponentId = 0;
+  let drawingReleasedRevisionId = 0;
+  let drawingSeamCuttingOp = 0; // governingDrawingId null (SEAM) → allowed, no stamp
+  let drawingGatedNonCuttingOp = 0; // RECEIPT (not CUTTING) on a component whose drawing is unreleased → allowed, gate is CUTTING-specific
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -329,6 +336,62 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     kitCrossTenantOp = (
       await owner.componentOperation.create({
         data: { componentId: componentKitCrossTenant.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    // B9 — assertDrawingReleased fixtures.
+    const drawingType = await owner.drawingTypeRef.create({
+      data: { tenantId, code: "GA", name: "General Arrangement" },
+    });
+    const drawingDraft = await owner.assemblyDrawing.create({
+      data: { jobId: job.id, drawingTypeId: drawingType.id, drawingNo: "GA-1" },
+    });
+    await owner.drawingRevision.create({
+      data: { assemblyDrawingId: drawingDraft.id, revisionNo: 1, status: "DRAFT" },
+    });
+    const drawingReleased = await owner.assemblyDrawing.create({
+      data: { jobId: job.id, drawingTypeId: drawingType.id, drawingNo: "GA-2" },
+    });
+    drawingReleasedRevisionId = (
+      await owner.drawingRevision.create({
+        data: { assemblyDrawingId: drawingReleased.id, revisionNo: 1, status: "RELEASED", releasedAt: new Date() },
+      })
+    ).id;
+
+    const componentDrawingGated = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "DWG-GATED", componentTypeId: componentType.id, governingDrawingId: drawingDraft.id },
+    });
+    drawingGatedCuttingOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentDrawingGated.id, seq: 1, operationId: opCutting.id },
+      })
+    ).id;
+
+    const componentDrawingReleased = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "DWG-RELEASED", componentTypeId: componentType.id, governingDrawingId: drawingReleased.id },
+    });
+    drawingReleasedComponentId = componentDrawingReleased.id;
+    drawingReleasedCuttingOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentDrawingReleased.id, seq: 1, operationId: opCutting.id },
+      })
+    ).id;
+
+    const componentDrawingSeam = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "DWG-SEAM", componentTypeId: componentType.id }, // governingDrawingId left null
+    });
+    drawingSeamCuttingOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentDrawingSeam.id, seq: 1, operationId: opCutting.id },
+      })
+    ).id;
+
+    const componentDrawingGatedNonCutting = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "DWG-GATED-RECEIPT", componentTypeId: componentType.id, governingDrawingId: drawingDraft.id },
+    });
+    drawingGatedNonCuttingOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentDrawingGatedNonCutting.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
@@ -561,5 +624,32 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
 
   it("kit gate cross-tenant: a Component.bomItemId pointing at another tenant's BomItem is refused as NOT_FOUND, not read across (violation case 5)", async () => {
     await expectCode(startComponentOperation(supA, { componentOperationId: kitCrossTenantOp }), ERROR_CODES.NOT_FOUND);
+  });
+
+  // ── B9: assertDrawingReleased, wired into startComponentOperation's CUTTING-only gate ────
+
+  it("drawing gate: CUTTING is refused when the governing drawing's current revision isn't RELEASED (violation case 1)", async () => {
+    await expectCode(
+      startComponentOperation(supA, { componentOperationId: drawingGatedCuttingOp }),
+      ERROR_CODES.DRAWING_NOT_RELEASED,
+    );
+  });
+
+  it("drawing gate: CUTTING succeeds and stamps Component.builtToRevisionId when the current revision is RELEASED (violation case 2)", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: drawingReleasedCuttingOp });
+    expect(started.status).toBe("IN_PROGRESS");
+
+    const component = await owner.component.findUniqueOrThrow({ where: { id: drawingReleasedComponentId } });
+    expect(component.builtToRevisionId).toBe(drawingReleasedRevisionId);
+  });
+
+  it("drawing gate SEAM: Component.governingDrawingId null starts unaffected — no drawing link, nothing to check (violation case 3)", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: drawingSeamCuttingOp });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  it("drawing gate is CUTTING-specific: a non-CUTTING operation (RECEIPT) on a component with an unreleased governing drawing is NOT blocked (violation case 4)", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: drawingGatedNonCuttingOp });
+    expect(started.status).toBe("IN_PROGRESS");
   });
 });

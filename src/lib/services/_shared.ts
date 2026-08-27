@@ -589,6 +589,53 @@ export async function assertKitReady(tx: Tx, componentId: number, tenantId: numb
   }
 }
 
+/**
+ * B9, Phase 4: a CUTTING `ComponentOperation` may only start once its
+ * component's governing drawing's CURRENT revision (highest `revisionNo`) is
+ * RELEASED — invariant #9's versioning only means something if RELEASED
+ * actually gates something. SEAM, same convention as `assertKitReady`:
+ * no-op when `Component.governingDrawingId` is null (no drawing link
+ * recorded — the common case, since nothing auto-derives it, see the schema
+ * comment on `governingDrawingId`). Returns the current revision's id on
+ * success so the caller can stamp `Component.builtToRevisionId` in the same
+ * transaction the operation start succeeds in; returns null on the SEAM
+ * no-op (nothing to stamp).
+ */
+export async function assertDrawingReleased(
+  tx: Tx,
+  componentId: number,
+  tenantId: number,
+): Promise<number | null> {
+  const component = await tx.component.findFirst({
+    where: { id: componentId, equipment: { job: { tenantId } } },
+    select: { governingDrawingId: true },
+  });
+  if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+  if (component.governingDrawingId == null) return null; // SEAM: no drawing link, nothing to check
+
+  const drawing = await tx.assemblyDrawing.findFirst({
+    where: { id: component.governingDrawingId, job: { tenantId } },
+    select: {
+      drawingNo: true,
+      revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true, status: true } },
+    },
+  });
+  if (!drawing) {
+    throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId: component.governingDrawingId });
+  }
+
+  const current = drawing.revisions[0];
+  if (!current || current.status !== "RELEASED") {
+    throw new AppError(ERROR_CODES.DRAWING_NOT_RELEASED, {
+      componentId,
+      assemblyDrawingId: component.governingDrawingId,
+      drawingNo: drawing.drawingNo,
+      currentStatus: current?.status ?? "NO_REVISION_ISSUED",
+    });
+  }
+  return current.id;
+}
+
 // ── Notification context ────────────────────────────────────────────────
 
 /** Enough context to build a human-readable notification title/deep-link for a plan. */
