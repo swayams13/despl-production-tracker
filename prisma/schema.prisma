@@ -891,6 +891,17 @@ model ScheduleRun {
 
 /// `unitId` nullable closes the schedule↔execution grain gap: equipment-level
 /// plans before Final Assembly, per-serial plans after it (BUILD-SPEC §0 #2).
+///
+/// UNIQUENESS CONSTRAINT (DDL-only, not representable in Prisma schema DSL):
+/// Enforced by raw SQL in migration 20260827170000_actor_fks_and_partial_unique.
+/// Two indexes jointly prevent duplicate rows:
+/// 1. Partial unique on (schedule_run_id, job_process_id, unit_id) WHERE unit_id IS NOT NULL
+/// 2. Partial unique on (schedule_run_id, job_process_id) WHERE unit_id IS NULL
+/// This allows per-unit schedule expansion (multiple rows same scheduleRunId/jobProcessId with different unitId)
+/// while preventing duplicate null-unitId rows (PostgreSQL treats NULL as distinct in regular indexes).
+/// Do not let a future `prisma migrate dev` drift proposal recreate a plain/full unique index
+/// under the "process_plans_schedule_run_id_job_process_id_unit_id_key" name — such a proposal
+/// should be rejected as it would recreate the original bug (null duplicate rows).
 model ProcessPlan {
   id                Int               @id @default(autoincrement())
   scheduleRunId     Int               @map("schedule_run_id")
@@ -920,12 +931,7 @@ model ProcessPlan {
   verifier        User?         @relation("ProcessPlanVerifiedBy", fields: [verifiedBy], references: [id])
   delayReasons    DelayReason[]
 
-  /// Unique constraint on non-null unitId; null unitId case is handled by
-  /// a partial unique index in the migration (PostgreSQL treats NULL as
-  /// distinct in a regular unique constraint, so this DDL-only index enforces
-  /// single-row uniqueness per (scheduleRunId, jobProcessId) when unitId IS NULL).
-  @@unique([scheduleRunId, jobProcessId, unitId])
-  @@index([scheduleRunId])
+@@index([scheduleRunId])
   @@index([jobProcessId])
   @@index([unitId])
   // drives every "due this week", notification and escalation query
