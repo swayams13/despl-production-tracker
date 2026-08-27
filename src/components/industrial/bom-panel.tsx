@@ -251,6 +251,26 @@ function ComponentDetail({
       <div className="sh-kv">
         <dt>Material</dt><dd>{item.material ?? "—"}</dd>
         <dt>Qty</dt><dd>{formatBomQty(item)}</dd>
+        <dt>Required</dt>
+        <dd>
+          {item.requiredQty != null ? (
+            <span className="mono">{item.requiredQty}{item.uom ? ` ${item.uom}` : ""}</span>
+          ) : (
+            <span style={{ color: "var(--muted)" }}>—</span>
+          )}
+          {/* SEAM: no StockLot activity at all → shortage stays null, never a fabricated
+              "0 available"/"fully short" number (B6 acceptance). */}
+          {item.shortage != null && (
+            <span className={`chip ${item.shortage > 0 ? "c-overdue" : item.shortage < 0 ? "c-complete" : "c-idle"}`} style={{ marginLeft: 6 }}>
+              <i />
+              {item.shortage > 0
+                ? `Short ${item.shortage}`
+                : item.shortage < 0
+                  ? `Surplus ${Math.abs(item.shortage)}`
+                  : "On hand"}
+            </span>
+          )}
+        </dd>
         <dt>Procurement</dt>
         <dd>
           <span className={`chip ${procurementChipClass(item.procurement.status)}`}>

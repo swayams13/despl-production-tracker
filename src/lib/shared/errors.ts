@@ -83,6 +83,8 @@ export const ERROR_CODES = {
   COMPONENT_OPS_INCOMPLETE: "COMPONENT_OPS_INCOMPLETE",
   /** explodeBomItem: a malformed parentBomItemId chain cycles back on itself — a defensive guard against a bad direct DB write, not a normal user-facing refusal. */
   BOM_CYCLE_DETECTED: "BOM_CYCLE_DETECTED",
+  /** issueStock/scrapStock: this would drive the lot's available quantity below zero. */
+  INSUFFICIENT_STOCK: "INSUFFICIENT_STOCK",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -140,6 +142,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   COMPONENT_OPS_INCOMPLETE:
     "One or more fabrication or assembly operations backing this process are not yet complete on this unit.",
   BOM_CYCLE_DETECTED: "This BOM item's parent chain is malformed (a cycle). Contact an administrator.",
+  INSUFFICIENT_STOCK: "This would take the lot's available quantity below zero.",
 };
 
 /**

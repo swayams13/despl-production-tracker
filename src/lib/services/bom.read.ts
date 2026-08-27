@@ -1,4 +1,4 @@
-import type { Decimal } from "@prisma/client/runtime/library";
+import { Decimal } from "@prisma/client/runtime/library";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -91,6 +91,15 @@ export interface BomItemRow {
   mtc: BomMtc[];
   procurement: BomProcurementSummary;
   components: BomComponentSummary[];
+  /** B6, Phase 4 — required quantity across the equipment's units (`explodeBomItem`).
+   * `null` when this item's own chain has an unparsed `qtyPer` (nothing display-worthy to explode). */
+  requiredQty: number | null;
+  /** B6, Phase 4 — on-hand quantity from `StockLot`/`StockTxn`. `null` (never `0`) when this
+   * item has zero stock activity at all — the SEAM principle: never tracked stays silent. */
+  availableQty: number | null;
+  /** B6, Phase 4 — `requiredQty - availableQty`; negative is surplus, shown as such, never clamped
+   * here (the panel clamps for display). `null` whenever `availableQty` is `null`. */
+  shortage: number | null;
 }
 
 /** No events yet → "NOT_STARTED", a status no `ProcurementEvent.type` value
@@ -305,10 +314,14 @@ export async function loadBomTree(
         sourceQty: true,
         qtyPer: true,
         uom: true,
+        parentBomItemId: true,
         componentType: { select: { name: true } },
         materialIdentifications: { select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true } },
         procurementEvents: {
           select: { id: true, type: true, qty: true, refNo: true, at: true },
+        },
+        stockLots: {
+          select: { qty: true, txns: { select: { type: true, qty: true } } },
         },
         components: {
           select: {
@@ -412,9 +425,41 @@ export async function loadBomTree(
 
     const subAssemblyComponents = bomlessComponents.map((c) => buildComponentSummary(c, checkpointsByProcessCode));
 
+    // B6, Phase 4: required/available/shortage, computed inline (same
+    // transaction, already-loaded data) rather than by calling the separate
+    // exported `requiredQty`/`availableQty`/`shortage` — those each open
+    // their own `withTenant` transaction, which would nest awkwardly if
+    // called from inside this one. `itemsById` mirrors what `requiredQty`
+    // builds itself; `unitCount` is this equipment's `Unit` row count, same
+    // derivation.
+    const itemsById = new Map<number, ExplodableBomItem>(
+      items.map((it) => [it.id, { id: it.id, qtyPer: it.qtyPer, parentBomItemId: it.parentBomItemId }]),
+    );
+    const unitCount = units.length;
+
     const byGroup = new Map<string, BomItemRow[]>();
     for (const it of items) {
       const groupName = it.componentType?.name ?? "Uncategorized";
+
+      let required: Decimal | null;
+      try {
+        required = explodeBomItem(itemsById.get(it.id)!, unitCount, itemsById);
+      } catch {
+        required = null; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to explode
+      }
+
+      // SEAM: zero StockLot rows for this item → null, never 0.
+      let available: Decimal | null = null;
+      if (it.stockLots.length > 0) {
+        available = it.stockLots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
+        for (const lot of it.stockLots) {
+          for (const t of lot.txns) {
+            available = t.type === "RETURN" ? available.plus(t.qty) : available.minus(t.qty);
+          }
+        }
+      }
+      const shortageVal = available != null && required != null ? required.minus(available) : null;
+
       const row: BomItemRow = {
         id: it.id,
         itemNo: it.itemNo,
@@ -427,6 +472,9 @@ export async function loadBomTree(
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING" })),
         procurement: summarizeProcurement(it.procurementEvents),
         components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),
+        requiredQty: required?.toNumber() ?? null,
+        availableQty: available?.toNumber() ?? null,
+        shortage: shortageVal?.toNumber() ?? null,
       };
       const list = byGroup.get(groupName) ?? [];
       list.push(row);
@@ -489,4 +537,54 @@ export async function requiredQty(actor: Actor, bomItemId: number): Promise<Deci
 
     return explodeBomItem(target, unitCount, itemsById);
   });
+}
+
+/**
+ * B6, Phase 4: on-hand quantity for a BOM item, derived from `StockLot` +
+ * `StockTxn` — `sum(StockLot.qty) - sum(StockTxn.qty where ISSUE|SCRAP) +
+ * sum(StockTxn.qty where RETURN)`. Same tenant-anchoring shape as
+ * `requiredQty` (through `equipment.job`, since `bom_items` carries no
+ * tenant_id of its own).
+ *
+ * Returns `null` — not `0` — when this BOM item has zero `StockLot` rows
+ * (and by construction, zero `StockTxn` rows too, since a txn always belongs
+ * to a lot for this item). This is the SEAM principle: "never tracked" must
+ * stay silent, not render as "0 available".
+ */
+export async function availableQty(actor: Actor, bomItemId: number): Promise<Decimal | null> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const bomItem = await tx.bomItem.findFirst({
+      where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
+      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+    });
+    if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { bomItemId });
+    assertClientScope(actor, bomItem.equipment.job.clientId);
+
+    const lots = await tx.stockLot.findMany({
+      where: { bomItemId },
+      select: { qty: true, txns: { select: { type: true, qty: true } } },
+    });
+    if (lots.length === 0) return null;
+
+    let total = lots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
+    for (const lot of lots) {
+      for (const t of lot.txns) {
+        total = t.type === "RETURN" ? total.plus(t.qty) : total.minus(t.qty);
+      }
+    }
+    return total;
+  });
+}
+
+/**
+ * B6, Phase 4: `requiredQty - availableQty` — a negative result is surplus,
+ * not hidden as 0 (display layer clamps for the "shortage" label, this
+ * helper does not). Returns `null` whenever `availableQty` does — a BOM item
+ * with no stock activity at all must never render a fabricated "fully
+ * short" number.
+ */
+export async function shortage(actor: Actor, bomItemId: number): Promise<Decimal | null> {
+  const [required, available] = await Promise.all([requiredQty(actor, bomItemId), availableQty(actor, bomItemId)]);
+  if (available == null) return null;
+  return required.minus(available);
 }

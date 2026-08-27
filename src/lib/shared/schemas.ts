@@ -213,6 +213,31 @@ export const recordProcurementEventSchema = z
   });
 export type RecordProcurementEventInput = z.infer<typeof recordProcurementEventSchema>;
 
+/** Receive a lot of stock against a BOM item (B6, Phase 4) — creates a `StockLot`. */
+export const receiveStockSchema = z
+  .object({
+    bomItemId: id,
+    heatNumber: z.string().trim().min(1).optional(),
+    location: z.string().trim().min(1, "Location is required"),
+    qty: z.number().positive(),
+    sourceProcurementEventId: id.optional(),
+  })
+  .strict();
+export type ReceiveStockInput = z.infer<typeof receiveStockSchema>;
+
+/** Move stock against an existing `StockLot` — issue to a component, return, or scrap.
+ * One shared shape for all three (same near-identical-mutation-family convention as
+ * `recordProcurementEventSchema`); `type` is supplied by the thin service function, not the caller. */
+export const issueStockSchema = z
+  .object({
+    stockLotId: id,
+    qty: z.number().positive(),
+    componentId: id.optional(),
+    note: z.string().trim().optional(),
+  })
+  .strict();
+export type IssueStockInput = z.infer<typeof issueStockSchema>;
+
 /** File the categorised delay reason invariant #7 requires to unblock a dept. */
 export const fileDelayReasonSchema = z
   .object({ processPlanId: id, categoryId: id, detail: z.string().trim().optional() })

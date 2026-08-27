@@ -121,6 +121,15 @@ enum ProcurementEventType {
   RECEIPT
 }
 
+/// B6, Phase 4: StockTxn's kind. Receipt itself is NOT a txn type — it's a
+/// `StockLot` creation (see StockLot's doc comment) — so this enum only ever
+/// covers what happens to stock AFTER it lands on a lot.
+enum StockTxnType {
+  ISSUE
+  RETURN
+  SCRAP
+}
+
 enum PmiResult {
   NA
   PENDING
@@ -283,6 +292,7 @@ model User {
   performedComponentOperations ComponentOperation[]
   performedAssemblySteps       AssemblyStep[]
   procurementEvents            ProcurementEvent[]
+  stockTxns                    StockTxn[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -958,6 +968,7 @@ model BomItem {
   bomRevision             BomRevision?             @relation(fields: [bomRevisionId], references: [id])
   procurementEvents       ProcurementEvent[]
   materialIdentifications MaterialIdentification[]
+  stockLots               StockLot[]
   components              Component[]
   tests                   ItemTest[]
   parent                  BomItem?                 @relation("BomItemHierarchy", fields: [parentBomItemId], references: [id])
@@ -996,8 +1007,9 @@ model ProcurementEvent {
   /// immediately instead of deferring it.
   by        Int
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
-  actor   User    @relation(fields: [by], references: [id])
+  bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  actor     User       @relation(fields: [by], references: [id])
+  stockLots StockLot[]
 
   @@index([bomItemId])
   @@index([bomItemId, at])
@@ -1018,6 +1030,59 @@ model MaterialIdentification {
   @@index([bomItemId])
   @@index([heatNumber])
   @@map("material_identifications")
+}
+
+/// B6, Phase 4: a physical lot of stock for one BOM item — part + heat +
+/// location + qty. Receipt itself IS `StockLot` creation, not a paired
+/// "RECEIPT StockTxn" row: there is no meaningful "before" state for a lot
+/// that didn't exist yet, so a separate receipt-txn would just duplicate what
+/// the row's own existence + `qty` already says. `sourceProcurementEventId`
+/// links back to the `ProcurementEvent` that caused this receipt when there
+/// is one — nullable because a lot can be logged for stock already on hand
+/// before this system existed (no procurement history to point at).
+model StockLot {
+  id                       Int      @id @default(autoincrement())
+  bomItemId                Int      @map("bom_item_id")
+  heatNumber               String?  @map("heat_number")
+  location                 String
+  qty                      Decimal  @db.Decimal(12, 3)
+  /// SERVER CLOCK ONLY (invariant #1)
+  receivedAt               DateTime @default(now()) @map("received_at")
+  sourceProcurementEventId Int?     @map("source_procurement_event_id")
+
+  bomItem                BomItem           @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  sourceProcurementEvent ProcurementEvent? @relation(fields: [sourceProcurementEventId], references: [id])
+  txns                   StockTxn[]
+
+  @@index([bomItemId])
+  @@index([sourceProcurementEventId])
+  @@map("stock_lots")
+}
+
+/// B6, Phase 4: a movement against one `StockLot` — issued to a component,
+/// returned, or scrapped. `by` gets its `@relation` immediately (same
+/// reasoning as `ProcurementEvent.by`) rather than being left FK-less for a
+/// later dispatch to fix.
+model StockTxn {
+  id          Int          @id @default(autoincrement())
+  stockLotId  Int          @map("stock_lot_id")
+  type        StockTxnType
+  qty         Decimal      @db.Decimal(12, 3)
+  /// SERVER CLOCK ONLY (invariant #1)
+  at          DateTime     @default(now())
+  by          Int
+  /// Which component the issue went to — nullable (a RETURN/SCRAP need not
+  /// name one, and an ISSUE against general stock may not either).
+  componentId Int?         @map("component_id")
+  note        String?
+
+  stockLot  StockLot   @relation(fields: [stockLotId], references: [id], onDelete: Cascade)
+  actor     User       @relation(fields: [by], references: [id])
+  component Component? @relation(fields: [componentId], references: [id])
+
+  @@index([stockLotId])
+  @@index([componentId])
+  @@map("stock_txns")
 }
 
 // ── Component route library ─────────────────────────────────────────────
@@ -1107,6 +1172,7 @@ model Component {
   children      Component[]           @relation("ComponentHierarchy")
   operations    ComponentOperation[]
   weldJoints    WeldJoint[]
+  stockTxns     StockTxn[]
 
   /// Component grain follows the serial (unitId), not the equipment — a
   /// serialised job's components carry a plain tag ("SHELL", not
