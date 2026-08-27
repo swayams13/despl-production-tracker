@@ -1041,9 +1041,12 @@ model Component {
   /// serialised job's components carry a plain tag ("SHELL", not
   /// "SHELL-320SR01"). Equipment-grain components (unitId null, e.g.
   /// DE0463/DE0467's BOM-item-derived rows) are not uniqueness-checked by
-  /// this index (Postgres treats NULL as distinct per row); their tags are
-  /// already collision-free by construction (`B${blockNo}-I${itemNo}`,
-  /// itemNo unique per equipment) — see scripts/seed-despl320-and-de0467.ts.
+  /// this index (Postgres treats NULL as distinct per row); DB-enforced
+  /// instead by a partial unique index on (equipmentId, tag) WHERE unitId IS
+  /// NULL, added by migration 20260827050000_component_equipment_grain_tag_unique.
+  /// Not representable in Prisma's schema DSL (no filtered-index syntax), so
+  /// it has no `@@` counterpart here — do not let a future `prisma migrate
+  /// dev` diff propose dropping it as drift; that migration is authoritative.
   @@unique([unitId, tag])
   @@index([equipmentId])
   @@index([unitId])

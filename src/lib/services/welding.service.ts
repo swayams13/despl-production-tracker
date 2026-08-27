@@ -26,6 +26,30 @@ async function fabricationDepartmentId(tx: Tx, tenantId: number): Promise<number
   return dept.id;
 }
 
+/**
+ * Tenant-scoped existence check for the performedByWelderId/performedByUserId
+ * pair components carry (schema.prisma's Component/AssemblyStep comment) —
+ * shared by component.service.ts's submitComponentOperation and
+ * assembly.service.ts's submitAssemblyStep, the two other write paths that
+ * accept these fields straight from client input. Mirrors the tenant check
+ * createWeldJointTx already does for welderIds; those two callers had none.
+ */
+export async function assertPerformedByValid(
+  tx: Tx,
+  actor: Actor,
+  performedByWelderId: number | null | undefined,
+  performedByUserId: number | null | undefined,
+): Promise<void> {
+  if (performedByWelderId != null) {
+    const welder = await tx.welder.findFirst({ where: { id: performedByWelderId, tenantId: actor.tenantId } });
+    if (!welder) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Welder", welderId: performedByWelderId });
+  }
+  if (performedByUserId != null) {
+    const user = await tx.user.findFirst({ where: { id: performedByUserId, tenantId: actor.tenantId } });
+    if (!user) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "User", userId: performedByUserId });
+  }
+}
+
 export interface CreateWeldJointFields {
   jointNo: string;
   jointType: string;

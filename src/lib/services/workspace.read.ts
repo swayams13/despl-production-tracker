@@ -4,7 +4,7 @@ import { computeCpm, workingDaysBetween } from "@/lib/schedule";
 import { loadJobSpine, getCurrentScheduleRun, computeOrRefuse } from "./_shared";
 import { prioritize, type PlanState, type RankedPlan } from "./prioritizer";
 import type { Department, DelayCategoryRef, ProcessPlan } from "@/generated/prisma/client";
-import { isOnTime } from "@/lib/shared/business-day";
+import { isOnTime, istCalendarDayMarker } from "@/lib/shared/business-day";
 
 /**
  * The current run's per-department prioritized view — the shared read behind
@@ -813,7 +813,7 @@ export async function loadMyOverdueCount(actor: Actor): Promise<number> {
     return tx.processPlan.count({
       where: {
         status: { not: "COMPLETE" },
-        plannedFinish: { lt: new Date() },
+        plannedFinish: { lt: istCalendarDayMarker() },
         scheduleRun: { isCurrent: true },
         ...(scoped ? { ownerDepartmentId: { in: actor.departmentIds } } : {}),
       },

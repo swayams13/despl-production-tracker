@@ -3,6 +3,7 @@ import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentS
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
+import { assertPerformedByValid } from "./welding.service";
 import {
   startComponentOperationSchema,
   submitComponentOperationSchema,
@@ -218,6 +219,7 @@ export async function submitComponentOperation(
     const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
     requireOperationDepartment(actor, departmentId);
     const to = assertComponentOpTransition("submit", op.status);
+    await assertPerformedByValid(tx, actor, performedByWelderId, performedByUserId);
 
     // F3/F4 fields are all optional (schema) — `undefined` here (rather than
     // `null`) leaves an already-recorded value untouched instead of wiping it

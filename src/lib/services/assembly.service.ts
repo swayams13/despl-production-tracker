@@ -1,9 +1,9 @@
 import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope } from "@/lib/authz";
-import { audited } from "@/lib/audit";
+import { audited, recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
-import { createWeldJointTx, recordNdtResultTx } from "./welding.service";
+import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
 import {
   startAssemblyStepSchema,
   submitAssemblyStepSchema,
@@ -150,6 +150,8 @@ export async function submitAssemblyStep(actor: Actor, input: SubmitAssemblyStep
       );
     }
 
+    await assertPerformedByValid(tx, actor, performedByWelderId, performedByUserId);
+
     return audited(tx, actor, async () => {
       let boundWeldJointId = weldJointId ?? step.weldJointId ?? null;
       if (newJoint) {
@@ -267,7 +269,19 @@ export async function rejectAssemblyStep(actor: Actor, input: RejectAssemblyStep
         data: { assemblyStepId: step.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId },
       });
       if (testTypeId != null && step.weldJointId != null) {
-        await recordNdtResultTx(tx, actor, step.weldJointId, testTypeId, "REJECT");
+        const ndt = await recordNdtResultTx(tx, actor, step.weldJointId, testTypeId, "REJECT");
+        // recordNdtResultTx itself is bare (no audited() wrapper, shared with
+        // rejectAssemblyStep's other caller, recordNdtResult, which supplies
+        // its own) — record this write's own audit row here so the "an NdtResult
+        // was created" mutation is never silently un-audited (invariant #5).
+        await recordAudit(tx, actor, {
+          action: "welding.recordNdt",
+          entityType: "NdtResult",
+          entityId: ndt.id,
+          after: { weldJointId: step.weldJointId, testTypeId, result: "REJECT" },
+          eventType: "NdtResultRecorded",
+          eventPayload: { ndtResultId: ndt.id, weldJointId: step.weldJointId, result: "REJECT" },
+        });
       }
       return {
         result: updated,
