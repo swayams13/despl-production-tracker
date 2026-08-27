@@ -125,10 +125,10 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
     const b = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 2, partName: "B", sourceQty: "1 NOS", parentBomItemId: a.id });
 
     // A -> B already; making B the parent of A would close the loop.
-    await expectCode(updateBomItem(actor, a.id, { parentBomItemId: b.id }), ERROR_CODES.BOM_CYCLE_DETECTED);
+    await expectCode(updateBomItem(actor, a.id, { parentBomItemId: b.id }), ERROR_CODES.BOM_PARENT_WOULD_CYCLE);
 
     // Immediate self-parent is refused too.
-    await expectCode(updateBomItem(actor, a.id, { parentBomItemId: a.id }), ERROR_CODES.BOM_CYCLE_DETECTED);
+    await expectCode(updateBomItem(actor, a.id, { parentBomItemId: a.id }), ERROR_CODES.BOM_PARENT_WOULD_CYCLE);
 
     // Neither attempt mutated the real chain.
     const reloaded = await owner.bomItem.findUnique({ where: { id: a.id } });
@@ -143,7 +143,7 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
     const b = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 2, partName: "B", sourceQty: "1 NOS", parentBomItemId: a.id });
     const c = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 3, partName: "C", sourceQty: "1 NOS", parentBomItemId: b.id });
 
-    await expectCode(updateBomItem(actor, a.id, { parentBomItemId: c.id }), ERROR_CODES.BOM_CYCLE_DETECTED);
+    await expectCode(updateBomItem(actor, a.id, { parentBomItemId: c.id }), ERROR_CODES.BOM_PARENT_WOULD_CYCLE);
 
     const reloaded = await owner.bomItem.findUnique({ where: { id: a.id } });
     expect(reloaded?.parentBomItemId).toBeNull();
@@ -152,6 +152,39 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
     // isn't refusing every parent change, only the ones that close a loop.
     const moved = await updateBomItem(actor, c.id, { parentBomItemId: a.id });
     expect(moved.parentBomItemId).toBe(a.id);
+  });
+
+  // ── clearing a nullable field (task review Important #2) ────────────────
+
+  it("clearing parentBomItemId (and other nullable fields) with an explicit null actually clears them, not just no-ops", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+
+    const a = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 1, partName: "A", sourceQty: "1 NOS" });
+    const b = await createBomItem(actor, {
+      equipmentId: equipment.id,
+      itemNo: 2,
+      partName: "B",
+      sourceQty: "1 NOS",
+      material: "SA 105",
+      parentBomItemId: a.id,
+    });
+    expect(b.parentBomItemId).toBe(a.id);
+    expect(b.material).toBe("SA 105");
+
+    // omitting a field entirely still leaves it alone (undefined semantics unchanged)
+    const untouched = await updateBomItem(actor, b.id, { partName: "B renamed" });
+    expect(untouched.parentBomItemId).toBe(a.id);
+    expect(untouched.material).toBe("SA 105");
+
+    // explicit null clears it
+    const cleared = await updateBomItem(actor, b.id, { parentBomItemId: null, material: null });
+    expect(cleared.parentBomItemId).toBeNull();
+    expect(cleared.material).toBeNull();
+
+    const reloaded = await owner.bomItem.findUnique({ where: { id: b.id } });
+    expect(reloaded?.parentBomItemId).toBeNull();
+    expect(reloaded?.material).toBeNull();
   });
 
   it("a parentBomItemId from a different equipment is refused (not found in this equipment's chain)", async () => {
@@ -234,6 +267,58 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
 
     const persisted = await owner.bomItem.findMany({ where: { equipmentId: equipment.id } });
     expect(persisted).toHaveLength(2);
+  });
+
+  it("import: accepts rows shaped like the repo's own real BOM data (qty, not sourceQty)", async () => {
+    // Task review Important #1 — seed/despl-320-bom-items.json's real shape:
+    // {itemNo, partName, description, material, qty, unit, remarks}. Before
+    // the fix, every real row failed twice over: missing `sourceQty` AND
+    // `qty` rejected as an unrecognized key under `.strict()`.
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+
+    const { created, failures } = await importBomItems(actor, {
+      equipmentId: equipment.id,
+      rows: [
+        { itemNo: 1, partName: "Flange", description: "N1", material: "SA 105", qty: "1", unit: "NOS", remarks: "per detail" },
+        { itemNo: 2, partName: "Flange", description: "N2", material: "SA 105", qty: "1", unit: "NOS", remarks: "DN25 class" },
+      ],
+    });
+
+    expect(failures).toHaveLength(0);
+    expect(created).toHaveLength(2);
+    expect(created.map((c) => c.sourceQty)).toEqual(["1", "1"]);
+    expect(created.map((c) => c.unit)).toEqual(["NOS", "NOS"]);
+  });
+
+  it("import: header aliasing is case/space-insensitive, and an unrecognized extra column doesn't fail the row", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+
+    const { created, failures } = await importBomItems(actor, {
+      equipmentId: equipment.id,
+      rows: [
+        // "Item No"/"Part Name"/"Quantity" — real-workbook-style headers, plus
+        // a stray "Drawing Ref" column this schema doesn't model at all.
+        { "Item No": 1, "Part Name": "Shell", Quantity: "1 NOS", "Drawing Ref": "GA-1" },
+      ],
+    });
+
+    expect(failures).toHaveLength(0);
+    expect(created).toHaveLength(1);
+    expect(created[0].partName).toBe("Shell");
+    expect(created[0].sourceQty).toBe("1 NOS");
+  });
+
+  it("import: a file over the row cap is refused upfront, before any row is written", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+
+    const rows = Array.from({ length: 1001 }, (_, i) => ({ itemNo: i + 1, partName: `Part ${i + 1}`, sourceQty: "1 NOS" }));
+    await expectCode(importBomItems(actor, { equipmentId: equipment.id, rows }), ERROR_CODES.VALIDATION_FAILED);
+
+    const persisted = await owner.bomItem.findMany({ where: { equipmentId: equipment.id } });
+    expect(persisted).toHaveLength(0);
   });
 
   it("import: role gate — SUPERVISOR cannot import", async () => {

@@ -93,6 +93,8 @@ export const ERROR_CODES = {
   DRAWING_REVISION_NOT_INCREASING: "DRAWING_REVISION_NOT_INCREASING",
   /** createBomRevision: revisionNo must be strictly greater than the equipment's current highest (B4, Phase 4). */
   BOM_REVISION_NOT_INCREASING: "BOM_REVISION_NOT_INCREASING",
+  /** createBomItem/updateBomItem: the chosen parentBomItemId is a descendant of the item being written — a normal user refusal, not malformed data (B4, Phase 4). */
+  BOM_PARENT_WOULD_CYCLE: "BOM_PARENT_WOULD_CYCLE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -155,6 +157,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   DRAWING_NOT_RELEASED: "This component's governing drawing is not released yet. Cutting cannot start until it is.",
   DRAWING_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the drawing's current revision.",
   BOM_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the equipment's current BOM revision.",
+  BOM_PARENT_WOULD_CYCLE: "Can't set this parent: it would create a circular reference. Pick a different parent item.",
 };
 
 /**

@@ -41,8 +41,12 @@ const STATUS: Record<ErrorCode, number> = {
   STALE_WRITE: 409,
   OVERRIDE_NOT_SUPPORTED_WITH_UNITS: 409,
   COMPONENT_OPS_INCOMPLETE: 409,
-  // Malformed DB data (bad direct write), not a normal client refusal.
+  // Malformed DB data (bad direct write), not a normal client refusal —
+  // explodeBomItem's (read-side) defensive throw against a chain that's
+  // already broken in the DB. createBomItem/updateBomItem's write-time
+  // cycle guard throws BOM_PARENT_WOULD_CYCLE instead, a normal 409 refusal.
   BOM_CYCLE_DETECTED: 500,
+  BOM_PARENT_WOULD_CYCLE: 409,
   INSUFFICIENT_STOCK: 409,
   MATERIAL_NOT_AVAILABLE: 409,
   DRAWING_NOT_RELEASED: 409,

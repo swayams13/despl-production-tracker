@@ -12,6 +12,7 @@ import {
   type UpdateBomItemInput,
   type ImportBomItemsInput,
   type CreateBomRevisionInput,
+  type BomImportRow,
 } from "@/lib/shared/schemas";
 import type { BomItem, BomRevision } from "@/generated/prisma/client";
 
@@ -37,6 +38,13 @@ import type { BomItem, BomRevision } from "@/generated/prisma/client";
  * cycle. `bomItemId` is `null` on create — a brand-new row can't yet be
  * anyone's ancestor, so only "does the parent exist in this equipment" is
  * checked.
+ *
+ * Task review Important #3: throws `BOM_PARENT_WOULD_CYCLE`, not
+ * `BOM_CYCLE_DETECTED` — the latter is `bom-explosion.ts`'s read-side
+ * defensive throw against a chain the DB already got wrong (500, "malformed
+ * data, contact an administrator"). This is an ordinary write-time refusal a
+ * Production Head can act on directly ("pick a different parent"), not
+ * malformed data, so it gets its own code/copy/status (409).
  */
 async function assertParentValid(
   tx: Tx,
@@ -45,7 +53,7 @@ async function assertParentValid(
   parentBomItemId: number,
 ): Promise<void> {
   if (bomItemId != null && parentBomItemId === bomItemId) {
-    throw new AppError(ERROR_CODES.BOM_CYCLE_DETECTED, { bomItemId, parentBomItemId });
+    throw new AppError(ERROR_CODES.BOM_PARENT_WOULD_CYCLE, { bomItemId, parentBomItemId });
   }
 
   const siblings = await tx.bomItem.findMany({
@@ -61,7 +69,7 @@ async function assertParentValid(
   const visited = new Set<number>();
   while (current != null) {
     if (bomItemId != null && current === bomItemId) {
-      throw new AppError(ERROR_CODES.BOM_CYCLE_DETECTED, { bomItemId, parentBomItemId, cycleAt: current });
+      throw new AppError(ERROR_CODES.BOM_PARENT_WOULD_CYCLE, { bomItemId, parentBomItemId, cycleAt: current });
     }
     if (visited.has(current)) break; // malformed pre-existing chain — not this call's problem to diagnose further
     visited.add(current);
@@ -168,6 +176,56 @@ export async function updateBomItem(actor: Actor, bomItemId: number, input: Upda
   });
 }
 
+/**
+ * Task review Important #1: this repo's own real BOM data
+ * (`seed/despl-320-bom-items.json`, read by `scripts/seed-despl320-bom.ts`)
+ * is shaped `{itemNo, partName, description, material, qty, unit, remarks}`
+ * — `qty`, not `sourceQty` — and a real spreadsheet export routinely carries
+ * extra columns `bomImportRowSchema` doesn't model at all. Normalizes each
+ * row's keys (trim/lowercase/strip separators, so "Item No", "item_no",
+ * "ItemNo" all match one alias) and maps common real-world header variants
+ * onto the schema's canonical field names before validation ever sees the
+ * row. An unrecognized column is dropped here — and `bomImportRowSchema` is
+ * non-`.strict()` as a second line of defense — rather than failing the
+ * whole row.
+ */
+const IMPORT_HEADER_ALIASES: Record<string, keyof BomImportRow> = {
+  itemno: "itemNo",
+  srno: "itemNo",
+  sno: "itemNo",
+  blockno: "blockNo",
+  partname: "partName",
+  description: "description",
+  material: "material",
+  sourceqty: "sourceQty",
+  qty: "sourceQty",
+  quantity: "sourceQty",
+  qtyper: "qtyPer",
+  uom: "uom",
+  unit: "unit",
+  remarks: "remarks",
+  notes: "remarks",
+  parentbomitemid: "parentBomItemId",
+};
+
+function normalizeImportRow(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== "object" || raw === null) return {};
+  const out: Record<string, unknown> = {};
+  for (const [rawKey, value] of Object.entries(raw as Record<string, unknown>)) {
+    const norm = rawKey.trim().toLowerCase().replace(/[\s_.-]+/g, "");
+    const canonical = IMPORT_HEADER_ALIASES[norm];
+    if (canonical) out[canonical] = value;
+  }
+  return out;
+}
+
+/** ponytail: a flat row-count cap, not chunked sub-transactions — a real BOM
+ * workbook runs to hundreds of rows, not tens of thousands; refusing upfront
+ * with a clear reason is a smaller diff than a batching scheme, and cheaper
+ * than finding out mid-import. Raise (or replace with real chunking) if a
+ * genuinely larger single import shows up. */
+const IMPORT_MAX_ROWS = 1000;
+
 export interface BomImportFailure {
   row: number;
   error: string;
@@ -191,48 +249,66 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
-  return withTenant(actor.tenantId, async (tx) => {
-    await loadEquipment(tx, actor, equipmentId);
-    if (bomRevisionId != null) await assertBomRevisionValid(tx, equipmentId, bomRevisionId);
+  // Task review Important #4: refuse an oversized file upfront rather than
+  // discovering the transaction timeout mid-import.
+  if (rows.length > IMPORT_MAX_ROWS) {
+    throw new AppError(ERROR_CODES.VALIDATION_FAILED, { rowCount: rows.length, max: IMPORT_MAX_ROWS },
+      `This file has ${rows.length} rows — imports are capped at ${IMPORT_MAX_ROWS} at a time. Split it into smaller files.`);
+  }
 
-    const created: BomItem[] = [];
-    const failures: BomImportFailure[] = [];
+  return withTenant(
+    actor.tenantId,
+    async (tx) => {
+      await loadEquipment(tx, actor, equipmentId);
+      if (bomRevisionId != null) await assertBomRevisionValid(tx, equipmentId, bomRevisionId);
 
-    for (let i = 0; i < rows.length; i++) {
-      const rowNo = i + 1;
-      const parsedRow = bomImportRowSchema.safeParse(rows[i]);
-      if (!parsedRow.success) {
-        failures.push({ row: rowNo, error: parsedRow.error.issues.map((iss) => iss.message).join("; ") });
-        continue;
-      }
-      const data = { ...parsedRow.data, equipmentId, bomRevisionId: bomRevisionId ?? null };
+      const created: BomItem[] = [];
+      const failures: BomImportFailure[] = [];
 
-      try {
-        if (data.parentBomItemId != null) {
-          await assertParentValid(tx, equipmentId, null, data.parentBomItemId);
+      for (let i = 0; i < rows.length; i++) {
+        const rowNo = i + 1;
+        const parsedRow = bomImportRowSchema.safeParse(normalizeImportRow(rows[i]));
+        if (!parsedRow.success) {
+          failures.push({ row: rowNo, error: parsedRow.error.issues.map((iss) => iss.message).join("; ") });
+          continue;
         }
-        const item = await audited(tx, actor, async () => {
-          const createdRow = await tx.bomItem.create({ data });
-          return {
-            result: createdRow,
-            audit: {
-              action: "bom.importItem",
-              entityType: "BomItem",
-              entityId: createdRow.id,
-              after: data,
-              eventType: "BomItemImported",
-              eventPayload: { equipmentId, itemNo: data.itemNo, row: rowNo },
-            },
-          };
-        });
-        created.push(item);
-      } catch (e) {
-        failures.push({ row: rowNo, error: e instanceof AppError ? e.message : "Could not create this row." });
-      }
-    }
+        const data = { ...parsedRow.data, equipmentId, bomRevisionId: bomRevisionId ?? null };
 
-    return { created, failures };
-  });
+        try {
+          if (data.parentBomItemId != null) {
+            await assertParentValid(tx, equipmentId, null, data.parentBomItemId);
+          }
+          const item = await audited(tx, actor, async () => {
+            const createdRow = await tx.bomItem.create({ data });
+            return {
+              result: createdRow,
+              audit: {
+                action: "bom.importItem",
+                entityType: "BomItem",
+                entityId: createdRow.id,
+                after: data,
+                eventType: "BomItemImported",
+                eventPayload: { equipmentId, itemNo: data.itemNo, row: rowNo },
+              },
+            };
+          });
+          created.push(item);
+        } catch (e) {
+          failures.push({ row: rowNo, error: e instanceof AppError ? e.message : "Could not create this row." });
+        }
+      }
+
+      return { created, failures };
+    },
+    // Task review Important #4: a real 200-300 row import (2 round-trips per
+    // row: create + audit insert, plus a findMany for any row with a parent)
+    // over real network latency plausibly exceeds even the client-wide 20s
+    // default (src/lib/db.ts) — 2 minutes gives real headroom without
+    // chunking into sub-transactions, which would reintroduce the
+    // whole-batch-rollback risk this function's per-row try/catch exists to
+    // avoid (a chunk boundary mid-batch is itself a partial-rollback hazard).
+    { timeoutMs: 120_000 },
+  );
 }
 
 /**

@@ -756,32 +756,72 @@ export const createBomItemSchema = z
   .strict();
 export type CreateBomItemInput = z.infer<typeof createBomItemSchema>;
 
-/** Edit an existing `BomItem` — every field optional; `equipmentId` is not
+/**
+ * Edit an existing `BomItem` — every field optional; `equipmentId` is not
  * editable here (moving a row to a different equipment isn't "editing," see
- * `updateJobDetailsSchema`'s equivalent exclusion of structural fields). */
-export const updateBomItemSchema = createBomItemSchema.omit({ equipmentId: true }).partial().strict();
+ * `updateJobDetailsSchema`'s equivalent exclusion of structural fields).
+ *
+ * Task review Important #2: every nullable-in-the-DB field is `.nullable()`
+ * here too, not just `.optional()` — `undefined` (key omitted) means "leave
+ * this field alone," `null` (key present, value null) means "clear it."
+ * Collapsing those to one `optional()` made clearing `parentBomItemId` (or
+ * any other nullable field) silently no-op: the UI's "no parent" choice sent
+ * `undefined`, Prisma's `update` omits an undefined key entirely, and the
+ * row came back unchanged while the caller still saw success. `itemNo`/
+ * `partName`/`sourceQty` stay non-nullable — they're `NOT NULL` columns, so
+ * "clear" isn't a valid state for them; only "leave alone" (omit) or "set to
+ * a new value" apply.
+ */
+export const updateBomItemSchema = z
+  .object({
+    itemNo: z.number().int().positive().optional(),
+    blockNo: z.number().int().positive().nullable().optional(),
+    partName: z.string().trim().min(1, "Part name is required").optional(),
+    description: z.string().trim().min(1).nullable().optional(),
+    material: z.string().trim().min(1).nullable().optional(),
+    sourceQty: z.string().trim().min(1, "Quantity is required").optional(),
+    qtyPer: z.number().positive().nullable().optional(),
+    uom: z.string().trim().min(1).nullable().optional(),
+    unit: z.string().trim().min(1).nullable().optional(),
+    componentTypeId: id.nullable().optional(),
+    remarks: z.string().trim().min(1).nullable().optional(),
+    parentBomItemId: id.nullable().optional(),
+    bomRevisionId: id.nullable().optional(),
+  })
+  .strict();
 export type UpdateBomItemInput = z.infer<typeof updateBomItemSchema>;
 
-/** One row of a bulk BOM import (CSV/XLSX). Validated per-row in
+/**
+ * One row of a bulk BOM import (CSV/XLSX). Validated per-row in
  * `bom.service.ts`'s `importBomItems` so one malformed row is reported by
  * name rather than aborting or silently dropping the whole batch.
  * `z.coerce` on the numeric fields — spreadsheet cells commonly arrive as
- * strings even when they read as numbers. */
-export const bomImportRowSchema = z
-  .object({
-    itemNo: z.coerce.number().int().positive(),
-    blockNo: z.coerce.number().int().positive().optional(),
-    partName: z.string().trim().min(1, "Part name is required"),
-    description: z.string().trim().min(1).optional(),
-    material: z.string().trim().min(1).optional(),
-    sourceQty: z.coerce.string().trim().min(1, "Quantity is required"),
-    qtyPer: z.coerce.number().positive().optional(),
-    uom: z.string().trim().min(1).optional(),
-    unit: z.string().trim().min(1).optional(),
-    remarks: z.string().trim().min(1).optional(),
-    parentBomItemId: z.coerce.number().int().positive().optional(),
-  })
-  .strict();
+ * strings even when they read as numbers.
+ *
+ * Task review Important #1: NOT `.strict()`. The real BOM data this app
+ * seeds from (`seed/despl-320-bom-items.json`, read by
+ * `scripts/seed-despl320-bom.ts`) is shaped `{itemNo, partName, description,
+ * material, qty, unit, remarks}` — note `qty`, not `sourceQty` — and a real
+ * workbook export routinely carries extra columns (a serial/notes column, a
+ * drawing ref) this schema doesn't model at all. `bom.service.ts`'s
+ * `importBomItems` normalizes each row's keys (case/space-insensitive,
+ * aliasing `qty`/`quantity` → `sourceQty` etc.) before this schema ever sees
+ * it; staying non-strict here means a column that survives normalization
+ * unrecognized is quietly dropped rather than failing the whole row.
+ */
+export const bomImportRowSchema = z.object({
+  itemNo: z.coerce.number().int().positive(),
+  blockNo: z.coerce.number().int().positive().optional(),
+  partName: z.string().trim().min(1, "Part name is required"),
+  description: z.string().trim().min(1).optional(),
+  material: z.string().trim().min(1).optional(),
+  sourceQty: z.coerce.string().trim().min(1, "Quantity is required"),
+  qtyPer: z.coerce.number().positive().optional(),
+  uom: z.string().trim().min(1).optional(),
+  unit: z.string().trim().min(1).optional(),
+  remarks: z.string().trim().min(1).optional(),
+  parentBomItemId: z.coerce.number().int().positive().optional(),
+});
 export type BomImportRow = z.infer<typeof bomImportRowSchema>;
 
 export const importBomItemsSchema = z

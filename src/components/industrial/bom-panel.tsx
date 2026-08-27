@@ -256,13 +256,47 @@ function mapOpStatus(status: string): "idle" | "progress" | "submitted" | "compl
 }
 
 /**
+ * Task review Important #3: excludes descendants of the item being edited
+ * from its own parent-choice list, not just the item itself. Server-side
+ * `assertParentValid` still refuses a cycle if one somehow gets submitted
+ * (e.g. a stale `items` snapshot), but filtering the dropdown up front means
+ * the normal case never surfaces that refusal at all — a Production Head
+ * shouldn't have to be told "no" for an option that should never have been
+ * offered.
+ */
+function descendantIds(items: BomItemRow[], rootId: number): Set<number> {
+  const childrenOf = new Map<number, number[]>();
+  for (const it of items) {
+    if (it.parentBomItemId != null) {
+      const siblings = childrenOf.get(it.parentBomItemId) ?? [];
+      siblings.push(it.id);
+      childrenOf.set(it.parentBomItemId, siblings);
+    }
+  }
+  const result = new Set<number>();
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const childId of childrenOf.get(current) ?? []) {
+      if (!result.has(childId)) {
+        result.add(childId);
+        stack.push(childId);
+      }
+    }
+  }
+  return result;
+}
+
+/**
  * B4, Phase 4 — manual BOM authoring: one inline form used for both add
  * (`editing` undefined) and edit (`editing` set), matching this panel's
  * existing inline-form pattern (`ComponentDetail`'s MTC recorder,
  * `GoverningDrawingSection`'s revision issuer). `parentBomItemId` is a plain
- * select over the equipment's existing rows — cycle rejection is enforced
- * server-side (`bom.service.ts`'s `assertParentValid`), this is just the
- * affordance to pick one.
+ * select over the equipment's existing rows, minus the item's own
+ * descendants (`descendantIds`, above) — cycle rejection is still enforced
+ * server-side (`bom.service.ts`'s `assertParentValid`) as the real guard,
+ * this is just the affordance to pick one without hitting it in the normal
+ * case.
  */
 function BomItemForm({
   jobId,
@@ -293,14 +327,20 @@ function BomItemForm({
     if (!Number.isInteger(n) || n <= 0) return toast.error("Item no. must be a positive integer.");
 
     start(async () => {
+      // Task review Important #2: in edit mode, an emptied field means
+      // "clear it" and must send `null` (updateBomItemSchema is now
+      // `.nullable()` on every clearable field) — `undefined` means "leave
+      // alone" and would silently no-op a real change. Create mode has
+      // nothing to clear yet, so `undefined` (simply don't set it) is
+      // correct there.
       const r = editing
         ? await updateBomItemAction(jobId, editing.id, {
             itemNo: n,
             partName: partName.trim(),
             sourceQty: sourceQty.trim(),
-            material: material.trim() || undefined,
-            uom: uom.trim() || undefined,
-            parentBomItemId: parentBomItemId ? Number(parentBomItemId) : undefined,
+            material: material.trim() || null,
+            uom: uom.trim() || null,
+            parentBomItemId: parentBomItemId ? Number(parentBomItemId) : null,
           })
         : await createBomItemAction(jobId, {
             equipmentId,
@@ -320,7 +360,8 @@ function BomItemForm({
     });
   };
 
-  const parentOptions = items.filter((it) => it.id !== editing?.id);
+  const excludedParentIds = editing ? descendantIds(items, editing.id) : new Set<number>();
+  const parentOptions = items.filter((it) => it.id !== editing?.id && !excludedParentIds.has(it.id));
 
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
