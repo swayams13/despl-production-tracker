@@ -46,6 +46,7 @@ const STATUS: Record<ErrorCode, number> = {
   INSUFFICIENT_STOCK: 409,
   MATERIAL_NOT_AVAILABLE: 409,
   DRAWING_NOT_RELEASED: 409,
+  DRAWING_REVISION_NOT_INCREASING: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

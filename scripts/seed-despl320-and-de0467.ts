@@ -532,28 +532,45 @@ async function main() {
           ),
         });
 
+        // B9, Phase 4: revision_no/status/dates moved off AssemblyDrawing
+        // onto DrawingRevision child rows, grouped by drawingNo where shared
+        // across entries (the same physical drawing at different revisions)
+        // — see prisma/seed.ts's matching comment for the full rationale.
+        // DE0467's own source data carries no drawingNo at all today, so
+        // this is a no-op grouping here (one group per entry); kept
+        // identical to prisma/seed.ts so the two seed paths don't diverge.
+        const drawingGroups = new Map<string, typeof de0467Source.assemblyDrawings>();
+        let ungroupedDrawingIdx = 0;
         for (const d of de0467Source.assemblyDrawings) {
-          // B9, Phase 4: revision_no/status/dates moved off AssemblyDrawing
-          // onto DrawingRevision child rows — see prisma/seed.ts's matching
-          // comment for the same shape.
-          const revisionNo = Number(d.revNo);
-          await tx.assemblyDrawing.create({
+          const key = d.drawingNo ?? `__no-drawing-no-${ungroupedDrawingIdx++}`;
+          const list = drawingGroups.get(key) ?? [];
+          list.push(d);
+          drawingGroups.set(key, list);
+        }
+        let multiRevisionDrawingId: number | null = null;
+        for (const group of drawingGroups.values()) {
+          const first = group[0];
+          const created = await tx.assemblyDrawing.create({
             data: {
               jobId: jobRow.id,
-              drawingTypeId: refs.drawingTypeIdByName.get(d.name)!,
-              drawingNo: d.drawingNo,
-              remarks: d.remarks ?? null,
+              drawingTypeId: refs.drawingTypeIdByName.get(first.name)!,
+              drawingNo: first.drawingNo,
+              remarks: group.map((d) => d.remarks).filter(Boolean).join(" / ") || null,
               revisions: {
-                create: [
-                  {
-                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : 1,
+                create: group.map((d, i) => {
+                  const revisionNo = Number(d.revNo);
+                  return {
+                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : i + 1,
                     status: d.releasedDate ? "RELEASED" : "DRAFT",
+                    approvedAt: isoDate(d.approvalDate ?? null),
+                    revisedAt: isoDate(d.revisedDate ?? null),
                     releasedAt: isoDate(d.releasedDate ?? null),
-                  },
-                ],
+                  };
+                }),
               },
             },
           });
+          if (group.length > 1) multiRevisionDrawingId = created.id;
         }
 
         for (const block of de0467Source.equipmentBlocks) {
@@ -592,6 +609,10 @@ async function main() {
               });
             }
             const typeCode = suggestedType ?? "OTHER";
+            // B9, Phase 4: the job's multi-revision drawing (if any) governs
+            // its FIRST component only — see prisma/seed.ts's matching comment.
+            const governingDrawingIdForThisComponent = multiRevisionDrawingId;
+            multiRevisionDrawingId = null;
             const component = await tx.component.create({
               data: {
                 equipmentId: equipment.id,
@@ -599,6 +620,7 @@ async function main() {
                 tag: `B${block.blockNo}-I${item.itemNo}`,
                 componentTypeId: refs.componentTypeIdByCode.get(typeCode)!,
                 routeVersionId: refs.routeVersionIdByType.get(typeCode) ?? null,
+                governingDrawingId: governingDrawingIdForThisComponent ?? undefined,
               },
             });
             let seq = 0;

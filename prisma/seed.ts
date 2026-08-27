@@ -1012,32 +1012,62 @@ async function seedDemo(
           ),
         });
 
+        // B9, Phase 4 (task review Important): revision_no/status/dates moved
+        // off AssemblyDrawing onto DrawingRevision child rows. Entries that
+        // share a real drawingNo (e.g. DE0463-001's "GA Drawing" rev "1" and
+        // "Fabrication Drawing" rev "2", both stamped drawingNo "DE0463-001"
+        // in the source tracker) are the SAME physical drawing at different
+        // revisions, not two drawings — group by drawingNo so this collapses
+        // into one AssemblyDrawing with two DrawingRevision rows, exactly
+        // the case this task exists to model. Entries with no drawingNo
+        // can't be told apart this way and stay one-drawing-per-entry
+        // (unchanged from before this fix).
+        const drawingGroups = new Map<string, typeof job.assemblyDrawings>();
+        let ungroupedDrawingIdx = 0;
         for (const d of job.assemblyDrawings) {
-          // B9, Phase 4: revision_no/status/dates moved off AssemblyDrawing
-          // onto DrawingRevision child rows — one revision per seeded
-          // drawing here (the source data never carries more than one), its
-          // revisionNo parsed from the source `revNo` (falls back to 1 when
-          // absent, e.g. every DESPL-320 drawing) and its status derived
-          // from whether a releasedDate is present.
-          const revisionNo = Number(d.revNo);
-          await tx.assemblyDrawing.create({
+          const key = d.drawingNo ?? `__no-drawing-no-${ungroupedDrawingIdx++}`;
+          const list = drawingGroups.get(key) ?? [];
+          list.push(d);
+          drawingGroups.set(key, list);
+        }
+
+        // Demo-reachability (task review Important): point the job's FIRST
+        // seeded Component at whichever drawing ended up with 2+ revisions
+        // (if any), via governingDrawingId, further down where components
+        // are created — otherwise the CUTTING gate and the new UI section
+        // are provable only in tests, never in a running instance.
+        let multiRevisionDrawingId: number | null = null;
+        for (const group of drawingGroups.values()) {
+          const first = group[0];
+          const created = await tx.assemblyDrawing.create({
             data: {
               jobId: jobRow.id,
-              drawingTypeId: drawingTypeIdByName.get(d.name)!,
-              drawingNo: d.drawingNo,
-              remarks: d.remarks ?? null,
+              drawingTypeId: drawingTypeIdByName.get(first.name)!,
+              drawingNo: first.drawingNo,
+              remarks: group.map((d) => d.remarks).filter(Boolean).join(" / ") || null,
               revisions: {
-                create: [
-                  {
-                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : 1,
+                create: group.map((d, i) => {
+                  const revisionNo = Number(d.revNo);
+                  return {
+                    // Fallback is the group's own 1-based position, not a
+                    // blanket 1 — two entries in the same group both falling
+                    // back to 1 would collide on the (assemblyDrawingId,
+                    // revisionNo) unique index.
+                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : i + 1,
                     status: d.releasedDate ? "RELEASED" : "DRAFT",
+                    approvedAt: isoDate(d.approvalDate ?? null),
+                    revisedAt: isoDate(d.revisedDate ?? null),
                     releasedAt: isoDate(d.releasedDate ?? null),
-                  },
-                ],
+                  };
+                }),
               },
             },
           });
+          if (group.length > 1) multiRevisionDrawingId = created.id;
         }
+        // Counts DrawingRevision rows (one per source entry) that will carry
+        // approvedAt — a source-JSON stat, not a DB read, so unaffected by
+        // AssemblyDrawing's flat approved_date column being dropped.
         drawingsWithDatesCount += job.assemblyDrawings.filter((d) => d.approvalDate).length;
 
         // staged/partial dispatch dates — DE0463 only, see interface comment
@@ -1098,6 +1128,12 @@ async function seedDemo(
             // tagged components against the same BOM line — which is exactly
             // what the old ItemOperation shape could not express.
             const typeCode = suggestedType ?? "OTHER";
+            // B9, Phase 4 (task review Important, demo-reachability): the
+            // job's multi-revision drawing (if any) governs its FIRST
+            // component only — consumed here so no other component on this
+            // job also claims it.
+            const governingDrawingIdForThisComponent = multiRevisionDrawingId;
+            multiRevisionDrawingId = null;
             const component = await tx.component.create({
               data: {
                 equipmentId: equipment.id,
@@ -1105,6 +1141,7 @@ async function seedDemo(
                 tag: `B${block.blockNo}-I${item.itemNo}`,
                 componentTypeId: componentTypeIdByCode.get(typeCode)!,
                 routeVersionId: routeVersionIdByType.get(typeCode) ?? null,
+                governingDrawingId: governingDrawingIdForThisComponent ?? undefined,
               },
             });
             componentCount++;

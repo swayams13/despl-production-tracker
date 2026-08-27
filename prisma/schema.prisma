@@ -1739,6 +1739,13 @@ model DrawingRevision {
   assemblyDrawingId Int           @map("assembly_drawing_id")
   revisionNo        Int           @map("revision_no")
   status            DrawingStatus @default(DRAFT)
+  /// Task review Important: AssemblyDrawing's old approved_date/revised_date
+  /// moved here rather than being dropped — the brief's own wording ("moved
+  /// onto the revision rows") plus real seed data (e.g. DE0463-001) carrying
+  /// both. Set at seed/authoring time; not stamped by the CUTTING gate the
+  /// way releasedAt effectively is via createDrawingRevision.
+  approvedAt        DateTime?     @map("approved_at")
+  revisedAt         DateTime?     @map("revised_at")
   releasedAt        DateTime?     @map("released_at")
   createdAt         DateTime      @default(now()) @map("created_at")
 
