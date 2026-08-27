@@ -182,25 +182,26 @@ model Organization {
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
-  clients          Client[]
-  users            User[]
-  roles            Role[]
-  departments      Department[]
-  productFamilies  ProductFamily[]
-  processTemplates ProcessTemplate[]
-  jobs             Job[]
-  componentTypes   ComponentTypeRef[]
-  equipmentTypes   EquipmentTypeRef[]
-  operations       OperationRef[]
-  testTypes        TestTypeRef[]
-  drawingTypes     DrawingTypeRef[]
-  delayCategories  DelayCategoryRef[]
-  qcpCodes         QcpCodeRef[]
-  routeTemplates   RouteTemplate[]
-  calendars        WorkCalendar[]
-  snapshots        ProgressSnapshot[]
-  notifications    Notification[]
-  welders          Welder[]
+  clients           Client[]
+  users             User[]
+  roles             Role[]
+  departments       Department[]
+  productFamilies   ProductFamily[]
+  processTemplates  ProcessTemplate[]
+  jobs              Job[]
+  componentTypes    ComponentTypeRef[]
+  equipmentTypes    EquipmentTypeRef[]
+  operations        OperationRef[]
+  testTypes         TestTypeRef[]
+  drawingTypes      DrawingTypeRef[]
+  delayCategories   DelayCategoryRef[]
+  qcpCodes          QcpCodeRef[]
+  routeTemplates    RouteTemplate[]
+  calendars         WorkCalendar[]
+  snapshots         ProgressSnapshot[]
+  notifications     Notification[]
+  welders           Welder[]
+  assemblyTemplates AssemblyTemplate[]
 
   @@map("organizations")
 }
@@ -275,6 +276,7 @@ model User {
   departments                  UserDepartment[]
   assignedPlans                ProcessPlan[]
   performedComponentOperations ComponentOperation[]
+  performedAssemblySteps       AssemblyStep[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -318,13 +320,14 @@ model Department {
   name     String
   scope    String?
 
-  tenant            Organization      @relation(fields: [tenantId], references: [id])
-  users             UserDepartment[]
-  templateProcesses TemplateProcess[]
-  jobProcesses      JobProcess[]
-  processPlans      ProcessPlan[]
-  operations        OperationRef[]
-  welders           Welder[]
+  tenant                Organization           @relation(fields: [tenantId], references: [id])
+  users                 UserDepartment[]
+  templateProcesses     TemplateProcess[]
+  jobProcesses          JobProcess[]
+  processPlans          ProcessPlan[]
+  operations            OperationRef[]
+  welders               Welder[]
+  assemblyTemplateSteps AssemblyTemplateStep[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -461,6 +464,7 @@ model DelayCategoryRef {
   tenant                       Organization                  @relation(fields: [tenantId], references: [id])
   delayReasons                 DelayReason[]
   componentOperationRejections ComponentOperationRejection[]
+  assemblyStepRejections       AssemblyStepRejection[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -531,11 +535,12 @@ model ProductFamily {
   name     String
   active   Boolean @default(true)
 
-  tenant         Organization       @relation(fields: [tenantId], references: [id])
-  templates      ProcessTemplate[]
-  jobs           Job[]
-  routes         RouteTemplate[]
-  equipmentTypes EquipmentTypeRef[]
+  tenant            Organization       @relation(fields: [tenantId], references: [id])
+  templates         ProcessTemplate[]
+  jobs              Job[]
+  routes            RouteTemplate[]
+  equipmentTypes    EquipmentTypeRef[]
+  assemblyTemplates AssemblyTemplate[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -650,59 +655,66 @@ model TemplateEdge {
 /// and every existing doc. `clientOrderNo` vs `jobNumber` resolves C5: both
 /// live CSVs carry Work Order DE0455-01 while the jobs are DE0463/DE0467.
 model Job {
-  id                    Int         @id @default(autoincrement())
-  tenantId              Int         @map("tenant_id")
+  id                        Int         @id @default(autoincrement())
+  tenantId                  Int         @map("tenant_id")
   /// Opaque id for client-facing URLs — sequential ids leak order volume.
-  publicId              String      @unique @map("public_id")
-  clientId              Int         @map("client_id")
-  familyId              Int         @map("family_id")
-  templateVersionId     Int         @map("template_version_id")
-  calendarId            Int?        @map("calendar_id")
-  jobNumber             String      @map("job_number")
+  publicId                  String      @unique @map("public_id")
+  clientId                  Int         @map("client_id")
+  familyId                  Int         @map("family_id")
+  templateVersionId         Int         @map("template_version_id")
+  /// Nullable — a family with no authored assembly sequence yet
+  /// (HEAT_EXCHANGER, PIPING_SYSTEM as of Phase 2) must still create jobs.
+  /// Pinned at intake exactly like templateVersionId once an intake UI exists
+  /// for it; for now set directly (see A2's materialisation script).
+  assemblyTemplateVersionId Int?        @map("assembly_template_version_id")
+  calendarId                Int?        @map("calendar_id")
+  jobNumber                 String      @map("job_number")
   /// The client's own order number, when it differs from ours (C5).
-  clientOrderNo         String?     @map("client_order_no")
-  projectName           String?     @map("project_name")
-  poRef                 String?     @map("po_ref")
-  designCode            String?     @map("design_code")
-  orderDate             DateTime?   @map("order_date")
+  clientOrderNo             String?     @map("client_order_no")
+  projectName               String?     @map("project_name")
+  poRef                     String?     @map("po_ref")
+  designCode                String?     @map("design_code")
+  orderDate                 DateTime?   @map("order_date")
   /// The contractual date given to the client. BACKWARD scheduling anchors on
   /// this by default, and every overdue / KPI / forecast-vs-due calculation
   /// measures against it. Renamed from `deliveryDate` (22 Aug 2026): the CSV
   /// import was writing a *dispatch* date into a field the scheduler read as a
   /// *required delivery* date, conflating two different commitments.
-  committedDeliveryDate DateTime?   @map("committed_delivery_date")
+  committedDeliveryDate     DateTime?   @map("committed_delivery_date")
   /// DESPL's own internal target, normally earlier than the committed date and
   /// carrying their buffer. Never shown to a client user.
-  targetDispatchDate    DateTime?   @map("target_dispatch_date")
+  targetDispatchDate        DateTime?   @map("target_dispatch_date")
   /// Family-shaped design configuration (design pressure, MDMT, MOC, …).
   /// Display and reference data ONLY. Nothing in lib/schedule/ or the gating
   /// path may read it — the moment a schedule depends on a free-shaped blob,
   /// refusals stop being explainable (invariant #12).
-  specs                 Json?
-  priority              JobPriority @default(NORMAL)
-  status                JobStatus   @default(ACTIVE)
-  remarks               String?
+  specs                     Json?
+  priority                  JobPriority @default(NORMAL)
+  status                    JobStatus   @default(ACTIVE)
+  remarks                   String?
 
-  tenant          Organization           @relation(fields: [tenantId], references: [id])
-  client          Client                 @relation(fields: [clientId], references: [id])
-  family          ProductFamily          @relation(fields: [familyId], references: [id])
-  templateVersion ProcessTemplateVersion @relation(fields: [templateVersionId], references: [id])
-  calendar        WorkCalendar?          @relation(fields: [calendarId], references: [id])
-  equipments      Equipment[]
-  processes       JobProcess[]
-  scheduleRuns    ScheduleRun[]
-  qcpTemplates    QcpTemplate[]
-  drawings        AssemblyDrawing[]
-  snapshots       ProgressSnapshot[]
-  dispatchBatches DispatchBatch[]
-  weldJoints      WeldJoint[]
-  weldLogs        WeldLog[]
+  tenant                  Organization             @relation(fields: [tenantId], references: [id])
+  client                  Client                   @relation(fields: [clientId], references: [id])
+  family                  ProductFamily            @relation(fields: [familyId], references: [id])
+  templateVersion         ProcessTemplateVersion   @relation(fields: [templateVersionId], references: [id])
+  assemblyTemplateVersion AssemblyTemplateVersion? @relation(fields: [assemblyTemplateVersionId], references: [id])
+  calendar                WorkCalendar?            @relation(fields: [calendarId], references: [id])
+  equipments              Equipment[]
+  processes               JobProcess[]
+  scheduleRuns            ScheduleRun[]
+  qcpTemplates            QcpTemplate[]
+  drawings                AssemblyDrawing[]
+  snapshots               ProgressSnapshot[]
+  dispatchBatches         DispatchBatch[]
+  weldJoints              WeldJoint[]
+  weldLogs                WeldLog[]
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
   @@index([clientId])
   @@index([familyId])
   @@index([templateVersionId])
+  @@index([assemblyTemplateVersionId])
   @@index([calendarId])
   @@map("jobs")
 }
@@ -744,6 +756,7 @@ model Unit {
   components    Component[]
   snapshots     ProgressSnapshot[]
   weldJoints    WeldJoint[]
+  assemblySteps AssemblyStep[]
 
   @@unique([equipmentId, serialNo])
   @@index([equipmentId])
@@ -1022,6 +1035,7 @@ model Component {
   parent        Component?            @relation("ComponentHierarchy", fields: [parentComponentId], references: [id])
   children      Component[]           @relation("ComponentHierarchy")
   operations    ComponentOperation[]
+  weldJoints    WeldJoint[]
 
   /// Component grain follows the serial (unitId), not the equipment — a
   /// serialised job's components carry a plain tag ("SHELL", not
@@ -1152,6 +1166,7 @@ model Welder {
   joints              WeldJointWelder[]
   logs                WeldLog[]
   componentOperations ComponentOperation[]
+  assemblySteps       AssemblyStep[]
 
   @@unique([tenantId, employeeCode])
   @@index([tenantId])
@@ -1163,24 +1178,30 @@ model Welder {
 /// number is the printed weld-map id (e.g. LS-1, CS-2, N4-W1) — free text,
 /// not unique, since re-numbering across jobs is a real-world fact of life.
 model WeldJoint {
-  id        Int      @id @default(autoincrement())
-  jobId     Int      @map("job_id")
-  unitId    Int?     @map("unit_id")
-  jointNo   String   @map("joint_no")
-  jointType String   @map("joint_type")
-  weldSize  String?  @map("weld_size")
+  id          Int      @id @default(autoincrement())
+  jobId       Int      @map("job_id")
+  unitId      Int?     @map("unit_id")
+  jointNo     String   @map("joint_no")
+  jointType   String   @map("joint_type")
+  weldSize    String?  @map("weld_size")
   /// §4.7 dialog field: Welding Procedure Specification reference.
-  wpsRef    String?  @map("wps_ref")
-  loggedBy  Int      @map("logged_by")
-  createdAt DateTime @default(now()) @map("created_at")
+  wpsRef      String?  @map("wps_ref")
+  /// Set by whoever logs the joint, not auto-derived from jointNo — DESPL-320's
+  /// spec has no job-agnostic joint-number → component mapping (A3, Phase 2).
+  componentId Int?     @map("component_id")
+  loggedBy    Int      @map("logged_by")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  job        Job               @relation(fields: [jobId], references: [id])
-  unit       Unit?             @relation(fields: [unitId], references: [id])
-  welders    WeldJointWelder[]
-  ndtResults NdtResult[]
+  job           Job               @relation(fields: [jobId], references: [id])
+  unit          Unit?             @relation(fields: [unitId], references: [id])
+  component     Component?        @relation(fields: [componentId], references: [id])
+  welders       WeldJointWelder[]
+  ndtResults    NdtResult[]
+  assemblySteps AssemblyStep[]
 
   @@index([jobId])
   @@index([unitId])
+  @@index([componentId])
   @@map("weld_joints")
 }
 
@@ -1242,6 +1263,151 @@ model NdtResult {
   @@map("ndt_results")
 }
 
+// ── Assembly tracking (Phase 2 — addendum §2) ────────────────────────────
+// Assembly is a third grain, distinct from the 36-process spine (JobProcess)
+// and component-level fabrication (ComponentOperation): it's the vessel's
+// whole life from document gate to MDR (groups A–Q), not a per-component
+// route. Same three-layer template/version/instance pattern as everything
+// else in this schema (ProcessTemplate→JobProcess, RouteTemplate→
+// ComponentOperation) so a second family's assembly sequence is data, not
+// code — see docs/ADR-product-family-agnostic-platform-v1.md and §0's
+// generality rule in docs/PHASE-PROMPTS.md.
+
+enum AssemblyStepKind {
+  WORK
+  INSPECTION
+}
+
+model AssemblyTemplate {
+  id       Int    @id @default(autoincrement())
+  tenantId Int    @map("tenant_id")
+  familyId Int    @map("family_id")
+  name     String
+
+  tenant   Organization              @relation(fields: [tenantId], references: [id])
+  family   ProductFamily             @relation(fields: [familyId], references: [id])
+  versions AssemblyTemplateVersion[]
+
+  @@index([tenantId])
+  @@index([familyId])
+  @@map("assembly_templates")
+}
+
+model AssemblyTemplateVersion {
+  id          Int            @id @default(autoincrement())
+  templateId  Int            @map("template_id")
+  version     Int
+  status      TemplateStatus @default(DRAFT)
+  publishedAt DateTime?      @map("published_at")
+  notes       String?
+
+  template AssemblyTemplate       @relation(fields: [templateId], references: [id])
+  steps    AssemblyTemplateStep[]
+  jobs     Job[]
+
+  @@unique([templateId, version])
+  @@index([templateId])
+  @@map("assembly_template_versions")
+}
+
+/// One row per printed A–Q checkpoint, authored once per family from the
+/// QAP (spec §2). `kind` is the QAP-conflation split (addendum §2): the same
+/// sr no often contains both work and its inspection as separate printed
+/// lines, and this schema keeps them as separate rows/steps, matching the
+/// spec document's own row-per-checkpoint layout.
+model AssemblyTemplateStep {
+  id                  Int              @id @default(autoincrement())
+  versionId           Int              @map("version_id")
+  seq                 Int
+  groupCode           String           @map("group_code")
+  groupName           String           @map("group_name")
+  /// Printed QAP reference, e.g. "4.5" — deliberately not unique (same
+  /// discipline as QcpItem.srNo: several rows share one sr no).
+  srNo                String           @map("sr_no")
+  activity            String
+  kind                AssemblyStepKind
+  defaultDepartmentId Int              @map("default_department_id")
+  /// Resolves to QcpItem.srNo at materialisation — match-by-code, never by
+  /// id, the same discipline cloneQcpTemplate already uses so it survives
+  /// QCP renumbering across template versions.
+  qcpSrNo             String?          @map("qcp_sr_no")
+  /// Printed weld-map reference ("LS-1", "CS-2", ...), set only on the six
+  /// weld groups (E/G/H/J/K/L per spec §3). Not a WeldJoint FK — the actual
+  /// joint doesn't exist until the floor logs it against this step.
+  jointRef            String?          @map("joint_ref")
+
+  version           AssemblyTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  defaultDepartment Department              @relation(fields: [defaultDepartmentId], references: [id])
+  steps             AssemblyStep[]
+
+  @@unique([versionId, seq])
+  @@index([versionId])
+  @@index([defaultDepartmentId])
+  @@map("assembly_template_steps")
+}
+
+/// Materialised per unit from the job's pinned AssemblyTemplateVersion, the
+/// same way ProcessPlan/ComponentOperation are — reuses OperationStatus and
+/// F8's generic assertStateTransition (see assembly.service.ts).
+model AssemblyStep {
+  id                  Int             @id @default(autoincrement())
+  unitId              Int             @map("unit_id")
+  templateStepId      Int             @map("template_step_id")
+  seq                 Int
+  status              OperationStatus @default(NOT_STARTED)
+  /// SERVER CLOCK ONLY (invariant #1)
+  startedAt           DateTime?       @map("started_at")
+  /// SERVER CLOCK ONLY (invariant #1)
+  finishedAt          DateTime?       @map("finished_at")
+  performedByWelderId Int?            @map("performed_by_welder_id")
+  performedByUserId   Int?            @map("performed_by_user_id")
+  submittedBy         Int?            @map("submitted_by")
+  verifiedBy          Int?            @map("verified_by")
+  /// Bound as the joint is logged (WORK weld steps only).
+  weldJointId         Int?            @map("weld_joint_id")
+  /// Bound at materialisation by qcpSrNo match (INSPECTION steps that map to
+  /// a real QcpItem — links the hold/witness points assertNoOpenHoldPoint
+  /// already enforces, no change needed there).
+  qcpItemId           Int?            @map("qcp_item_id")
+  remarks             String?
+
+  unit              Unit                    @relation(fields: [unitId], references: [id])
+  templateStep      AssemblyTemplateStep    @relation(fields: [templateStepId], references: [id])
+  weldJoint         WeldJoint?              @relation(fields: [weldJointId], references: [id])
+  qcpItem           QcpItem?                @relation(fields: [qcpItemId], references: [id])
+  performedByWelder Welder?                 @relation(fields: [performedByWelderId], references: [id])
+  performedByUser   User?                   @relation(fields: [performedByUserId], references: [id])
+  rejections        AssemblyStepRejection[]
+
+  @@unique([unitId, seq])
+  @@index([unitId])
+  @@index([templateStepId])
+  @@index([status])
+  @@index([weldJointId])
+  @@index([qcpItemId])
+  @@index([performedByWelderId])
+  @@index([performedByUserId])
+  @@map("assembly_steps")
+}
+
+/// Mirrors ComponentOperationRejection (F5) — same durable-reason pattern,
+/// same DelayCategoryRef taxonomy, for the assembly grain's reject flow.
+model AssemblyStepRejection {
+  id             Int      @id @default(autoincrement())
+  assemblyStepId Int      @map("assembly_step_id")
+  categoryId     Int      @map("category_id")
+  detail         String?
+  rejectedBy     Int      @map("rejected_by")
+  rejectedAt     DateTime @default(now()) @map("rejected_at")
+
+  assemblyStep AssemblyStep     @relation(fields: [assemblyStepId], references: [id], onDelete: Cascade)
+  category     DelayCategoryRef @relation(fields: [categoryId], references: [id])
+
+  @@index([assemblyStepId])
+  @@index([categoryId])
+  @@map("assembly_step_rejections")
+}
+
 // ── QCP / ITP engine (dynamic parties, per-project code sets) ───────────
 
 model QcpTemplate {
@@ -1296,10 +1462,11 @@ model QcpItem {
   record             String?
   remarks            String?
 
-  qcpTemplate  QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
-  partyCodes   QcpItemPartyCode[]
-  executions   QcpExecution[]
-  processLinks QcpItemProcess[]
+  qcpTemplate   QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
+  partyCodes    QcpItemPartyCode[]
+  executions    QcpExecution[]
+  processLinks  QcpItemProcess[]
+  assemblySteps AssemblyStep[]
 
   @@unique([qcpTemplateId, sequence])
   @@index([qcpTemplateId])

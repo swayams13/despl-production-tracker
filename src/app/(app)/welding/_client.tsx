@@ -1,9 +1,11 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { logWeldJointAction, recordNdtResultAction } from "@/app/actions/welding";
-import type { WeldingView, WeldJointOption } from "@/lib/services/welding.read";
+import { createWelderAction, updateWelderAction } from "@/app/actions/welder";
+import type { WeldingView, WeldJointOption, WelderRegistryRow } from "@/lib/services/welding.read";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -24,12 +26,15 @@ function sparklinePoints(values: number[]): string {
 export function WeldingClient({
   view,
   jobs,
+  canManageWelders,
 }: {
   view: WeldingView;
   jobs: { jobId: number; jobNumber: string }[];
+  canManageWelders: boolean;
 }) {
   const [logging, setLogging] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [managing, setManaging] = useState(false);
 
   return (
     <>
@@ -46,11 +51,20 @@ export function WeldingClient({
               {view.teamRepairRatePct == null ? "—" : `${view.teamRepairRatePct}%`}
             </b>
           </span>
+          {canManageWelders && (
+            <button className="btn" onClick={() => setManaging((v) => !v)}>
+              {managing ? "Close registry" : "Manage welders…"}
+            </button>
+          )}
           <button className="btn btn-accent" onClick={() => setLogging((v) => !v)}>
             {logging ? "Cancel" : "Log joint…"}
           </button>
         </span>
       </div>
+
+      {managing && canManageWelders && (
+        <WelderRegistryPanel welders={view.welderRegistry} departments={view.departments} />
+      )}
 
       {logging && (
         <LogJointForm jobs={jobs} welders={view.welders} onDone={() => setLogging(false)} />
@@ -180,6 +194,152 @@ export function WeldingClient({
         </div>
       </div>
     </>
+  );
+}
+
+/** A5 (Phase 2) — Welder had no write path at all before this; the wrapping
+ * page gates visibility to ADMIN/PRODUCTION_HEAD (server also enforces it —
+ * this is UX, not the gate). Inline add form + a flat list with
+ * name/department edit and an active toggle; no delete (deactivate only —
+ * historical ComponentOperation/AssemblyStep/WeldJointWelder rows keep
+ * resolving the welder). */
+function WelderRegistryPanel({
+  welders,
+  departments,
+}: {
+  welders: WelderRegistryRow[];
+  departments: { id: number; name: string }[];
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [name, setName] = useState("");
+  const [employeeCode, setEmployeeCode] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editDepartmentId, setEditDepartmentId] = useState("");
+
+  const addWelder = () => {
+    if (!name.trim()) return toast.error("Name is required.");
+    if (!employeeCode.trim()) return toast.error("Employee code is required.");
+    start(async () => {
+      const r = await createWelderAction({
+        name: name.trim(),
+        employeeCode: employeeCode.trim(),
+        departmentId: departmentId ? Number(departmentId) : null,
+      });
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("Welder added.");
+        setName("");
+        setEmployeeCode("");
+        setDepartmentId("");
+        router.refresh();
+      }
+    });
+  };
+
+  const startEdit = (w: WelderRegistryRow) => {
+    setEditingId(w.id);
+    setEditName(w.name);
+    setEditDepartmentId(w.departmentId != null ? String(w.departmentId) : "");
+  };
+
+  const saveEdit = (id: number) => {
+    start(async () => {
+      const r = await updateWelderAction({
+        id,
+        name: editName.trim() || undefined,
+        departmentId: editDepartmentId ? Number(editDepartmentId) : null,
+      });
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("Welder updated.");
+        setEditingId(null);
+        router.refresh();
+      }
+    });
+  };
+
+  const toggleActive = (w: WelderRegistryRow) => {
+    start(async () => {
+      const r = await updateWelderAction({ id: w.id, active: !w.active });
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success(w.active ? "Welder deactivated." : "Welder reactivated.");
+        router.refresh();
+      }
+    });
+  };
+
+  return (
+    <div className="card" style={{ margin: "0 24px 14px", padding: 16 }}>
+      <div className="hd" style={{ padding: 0, marginBottom: 10 }}>
+        <h3>Welder registry</h3>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <input className="ws-detail" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} style={{ minWidth: 140 }} />
+        <input className="ws-detail" placeholder="Employee code" value={employeeCode} onChange={(e) => setEmployeeCode(e.target.value)} style={{ minWidth: 120 }} />
+        <select className="btn" value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} aria-label="Department">
+          <option value="">Department (optional)…</option>
+          {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <button className="btn btn-accent" disabled={pending} onClick={addWelder}>Add welder</button>
+      </div>
+      {welders.length === 0 ? (
+        <p className="note" style={{ margin: 0 }}>No welders in the registry yet.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Employee code</th>
+              <th>Department</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {welders.map((w) => (
+              <tr className="row" key={w.id}>
+                {editingId === w.id ? (
+                  <>
+                    <td><input className="ws-detail" value={editName} onChange={(e) => setEditName(e.target.value)} /></td>
+                    <td className="mono" style={{ color: "var(--muted)" }}>{w.employeeCode}</td>
+                    <td>
+                      <select className="btn" value={editDepartmentId} onChange={(e) => setEditDepartmentId(e.target.value)} aria-label="Department">
+                        <option value="">—</option>
+                        {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      </select>
+                    </td>
+                    <td>{w.active ? "Active" : "Inactive"}</td>
+                    <td style={{ display: "flex", gap: 6 }}>
+                      <button className="btn btn-accent" disabled={pending} onClick={() => saveEdit(w.id)}>Save</button>
+                      <button className="btn" disabled={pending} onClick={() => setEditingId(null)}>Cancel</button>
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td>{w.name}</td>
+                    <td className="mono" style={{ color: "var(--muted)" }}>{w.employeeCode}</td>
+                    <td>{w.departmentName ?? "—"}</td>
+                    <td>
+                      <span className={`chip ${w.active ? "c-complete" : "c-idle"}`}><i />{w.active ? "Active" : "Inactive"}</span>
+                    </td>
+                    <td style={{ display: "flex", gap: 6 }}>
+                      <button className="btn" disabled={pending} onClick={() => startEdit(w)}>Edit</button>
+                      <button className="btn" disabled={pending} onClick={() => toggleActive(w)}>
+                        {w.active ? "Deactivate" : "Reactivate"}
+                      </button>
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

@@ -2,6 +2,138 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Phase 2 (Assembly tracking) implemented per the approved plan, 26–27 Aug 2026
+
+**Status: A1/A3 (schema), A2 (template authored + materialised for DESPL-320), A5 (welder CRUD),
+A6 (state machine + UI) all implemented, tested (pure + DB-gated + live browser click-through as
+three real accounts), typechecked, linted. A7 and A8 deferred per the approved plan, not silently
+dropped. Plan: `docs/superpowers/plans/2026-08-26-assembly-tracking.md`.**
+
+### What changed
+
+**A1 — Schema.** `AssemblyTemplate → AssemblyTemplateVersion → AssemblyTemplateStep → AssemblyStep`
++ `AssemblyStepRejection`, plus `AssemblyStepKind` enum and `Job.assemblyTemplateVersionId`. Two
+deliberate departures from the addendum's sketch (flagged in the plan before implementation, not
+discovered mid-session): `AssemblyTemplateStep.defaultDepartmentId` (needed for
+`requireDepartmentScope`, matching every other gated entity) and `AssemblyStepRejection` (needed
+for reject-with-reason parity with `ComponentOperationRejection`). Migration
+`20260826133424_assembly_tracking`. **Caught by `rls-coverage.test.ts` exactly as designed**: the
+new `assembly_templates` table is tenant-root and shipped with no RLS policy on the first pass — a
+second migration, `20260826140500_assembly_templates_rls`, closed it before any code built on top.
+Both migrations applied to `despl` and `despl_test`.
+
+**A3 — `WeldJoint.componentId`.** Nullable, set by whoever logs the joint (not auto-derived — no
+job-agnostic joint-number → component mapping exists, and inventing one would be exactly the
+DESPL-320-shaped code §0 forbids). Bundled into the same migration. `logWeldJoint` extended;
+`welding.service.ts`'s joint-creation write extracted into `createWeldJointTx` (and NDT-recording
+into `recordNdtResultTx`) so `assembly.service.ts` could reuse both inside its own transaction
+without nesting a second `withTenant()`.
+
+**A2 — PRESSURE_VESSEL assembly template v1.** `seed/assembly-template-pressure-vessel-v1.json` —
+54 rows transcribed verbatim from `docs/DESPL-320-fabrication-assembly-spec.md` §2. Seeded via a new
+block in `prisma/seed.ts` (for future fresh databases) plus `scripts/backfill-assembly-template-v1.ts`
+(one-off, idempotent — the main seed skips its whole body once org DESPL exists, so an
+already-seeded local/CI database needed a catch-up path, same shape Phase 1 hit). Materialised for
+DESPL-320's 9 existing units via `scripts/seed-despl320-assembly-steps.ts` — 486 `AssemblyStep` rows,
+**all 486 resolved to a matching `QcpItem`** via the srNo+activity-overlap matcher (no ambiguous or
+unmatched rows — a good sign the transcription and the seeded QCP agree). `defaultDepartment` per
+row is a judgment call, not floor-confirmed: derived by analogy to `seed/lead-time-model.json`'s
+existing 36-process department assignments for the same physical activity (weld NDE → QC, PWHT →
+HEAT_TREATMENT, hydro test → QC, painting → SURFACE_PAINT, etc.) — flagged in the JSON's own
+`$schema` note and here, not asked of the floor this session.
+
+**A5 — Welder registry CRUD.** `createWelder`/`updateWelder` (`src/lib/services/welder.service.ts`),
+gated ADMIN/PRODUCTION_HEAD (production's own vocabulary, matching `createEquipmentType`'s gate, not
+ADMIN-only). Deactivate-only, never delete. `WeldingView` gained `welderRegistry`/`departments`; the
+Welding page gained a "Manage welders…" panel (visibility gated to ADMIN/PH, server enforces it
+independently). F-f (real welder list) is still unresolved with the floor — this only closes the
+mechanism gap; DESPL-320's five dev-seeded welders (W-101..105) already existed and were enough to
+exercise the flow end-to-end.
+
+**A6 — AssemblyStep state machine + UI.** `assembly.service.ts` — F8's third consumer of
+`assertStateTransition`, mirroring `component.service.ts` almost exactly (flat seq gate, not a DAG;
+no HOLD state). `submitAssemblyStep` on a `jointRef` step (the three single-joint weld-execution
+rows — LS-1/CS-2/CS-1) requires either an existing `weldJointId` or inline fields to create one now;
+refused `VALIDATION_FAILED` with neither. `rejectAssemblyStep` on a joint-bound step optionally
+records an `NdtResult(REJECT)` in the same transaction, so a PAUT/TOFD reject reaches
+`welding.read.ts`'s repair-rate calc in one QC action. New `assembly.read.ts` (grouped-by-A–Q
+projection) and `assembly-panel.tsx` (new "Assembly" tab on the job detail page, between BOM and
+QCP), wired into `page.tsx`/`_client.tsx`.
+
+**One real bug caught by the DB-gated test suite before it shipped**: `submitAssemblyStep`'s
+joint-required gate checked only the *input's* `weldJointId`/`newJoint`, not the step's
+*already-bound* one — so resubmitting a step after a QC reject (which had legitimately bound a
+joint on the first submit) was wrongly refused a second time. Fixed by also checking
+`step.weldJointId`; caught by the reject-then-resubmit test case, not by inspection.
+
+### Tests
+`assembly.service.test.ts` (32 cases — transition matrix, maker-checker guard, DB-backed: gating,
+department scope, joint-required validation, reject-records-NDT, cross-tenant, cross-unit
+isolation), `welder.service.test.ts` (pure refusals + DB-backed create/duplicate/update/deactivate),
+`welding.service.test.ts` gained two A3 cases (componentId round-trips; cross-job componentId
+refused NOT_FOUND). `pnpm test`: 532 passed. `pnpm test:db`: 767 passed, all Phase 2 work included.
+
+**One unrelated, pre-existing failure found at session end**: `myday.read.test.ts`'s
+`onTimePct30d = 1 on-time of 2 completed in the window → 50` now fails (expects 50, gets 0) — the
+system date rolled from 26 to 27 Aug mid-session and this is a day-boundary bug in that test's own
+relative-date fixture, not a regression from this session (`git diff` confirms `myday.read.ts`/
+`myday.read.test.ts` were never touched here). Left unfixed — out of scope for Phase 2 per §0's
+scope-discipline rule ("no unrelated refactors"). Flagging it rather than silently leaving a red
+`pnpm test:db` unexplained.
+
+### Verified live, not just by test
+Logged in via the real `/login` form as three real accounts (`sj` — Production Head, `sup.fabrication`
+— Fabrication Supervisor, `qc` — QC Inspector; never forged a session, per CLAUDE.md's Agent-conduct
+rule) and drove DESPL-320 unit 320SR01's Assembly tab: Start → Submit → Verify on a plain step;
+maker-checker correctly refused `sj` verifying their own submission (`FORBIDDEN`, clean toast, not a
+crash); a weld step (Weld Long Seam Of Shell — LS-1) correctly refused Submit with no joint bound,
+then correctly succeeded with the inline joint form (welder picker populated from the real registry);
+the logged joint immediately showed up on `/welding` (V. Yadav: 1 joint, 1 open) — confirming A3 and
+A6 are actually wired together, not just independently passing tests. Also exercised A5 live: added
+welder "P. Kumar" (W-106) via the Welding page's registry panel, then deactivated them — both
+persisted and the UI updated without a refresh.
+
+### Remaining limitations / not done this session
+- **A7 (`ComponentConsumption`)** and **A8 (QCP template authoring UI)** — deferred per the plan,
+  explicitly, not silently. Neither blocks anything shipped this session.
+- **Department-per-A–Q-group mapping is a judgment call**, not floor-confirmed (see A2 above) — if
+  the floor corrects it, it's a data change (`seed/assembly-template-pressure-vessel-v1.json` +
+  re-run the backfill/materialisation scripts against a fresh `RouteTemplateVersion`-style bump), not
+  a code change.
+- **F-f (welder list) still open** — A5 only closes the write-path gap.
+- Multi-joint weld groups (F: nozzle-to-flange M1/N2/N3; H: nozzle-to-shell M1,N1–N6) deliberately
+  carry no `jointRef` on their template step — the floor logs each individual joint via the existing
+  Welding page workflow instead of through an inline form on one combined checkpoint row. Named as a
+  scope call in the plan, not discovered as a gap here.
+- Did not touch the pre-existing `myday.read.test.ts` date-boundary failure (see Tests above).
+
+### Acceptance criteria status (§3 of PHASE-PROMPTS.md)
+- Unit 320SR01 shows all 54 steps in order, grouped A–Q, document gate through MDR — **implemented**,
+  verified live.
+- Logging weld LS-1 records its welders and appears on the assembly step and in the welding module —
+  **implemented**, verified live.
+- A PAUT/TOFD reject shows against the welder's repair rate — **implemented** (reject-with-testTypeId
+  records `NdtResult(REJECT)` in the same transaction; `welding.read.ts`'s repair-rate calc already
+  reads that table); **untested live** this session (would need a joint reaching SUBMITTED+rejected
+  with an NDT type — covered by the DB-gated test, not re-driven through the browser for time reasons).
+- Pre-PWHT clearance / heat treatment / post-PWHT NDT / hydro / painting / nameplate individually
+  startable/submittable/verifiable — **implemented** (same generic mechanism as every other group,
+  all 54 rows materialised); **untested live** beyond groups A–E this session.
+- H-coded checkpoint still blocks completion — **unchanged**, not touched this session; not
+  independently re-verified here (Phase 0/1 already covers `assertNoOpenHoldPoint`).
+- Welder can be created, edited, deactivated — **implemented**, verified live (create + deactivate;
+  edit-name/department not separately live-tested, covered by `welder.service.test.ts`).
+- Violation-case tests for out-of-sequence assembly steps and maker-checker on verify — **implemented
+  and tested**.
+
+### Next
+1. Phase 3 (the rollup) — percent-complete as projection, `submitProcess`'s `COMPONENT_OPS_INCOMPLETE`
+   gate, StageSheet showing contributing operations. Needs Phase 2's `AssemblyStep`/`ComponentOperation`
+   grains to both exist, which they now do.
+2. Confirm the department-per-A–Q-group mapping with the floor before treating it as final.
+3. F-f (welder list + employee codes) still blocks getting DESPL-320's *real* welders into the
+   registry, though the mechanism no longer blocks on it.
+
 ## Session — F6 closed for DESPL-320, on explicit instruction to continue past the diagnosis, 26 Aug 2026
 
 Prior session left F6 diagnosed but deliberately unfixed (see block below), pending floor input. User

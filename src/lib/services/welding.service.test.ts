@@ -31,7 +31,8 @@ describe.skipIf(!RUN_DB)("welding.service (DB-backed)", async () => {
     const qcDept = await owner.department.findFirstOrThrow({ where: { tenantId: job.tenantId, code: "QC" } });
     const welder = await owner.welder.findFirstOrThrow({ where: { tenantId: job.tenantId } });
     const testType = await owner.testTypeRef.findFirstOrThrow({ where: { tenantId: job.tenantId } });
-    return { job, unit, fabDept, qcDept, welder, testType };
+    const component = await owner.component.findFirstOrThrow({ where: { unitId: unit.id } });
+    return { job, unit, fabDept, qcDept, welder, testType, component };
   }
 
   async function expectCode(p: Promise<unknown>, expected: string): Promise<void> {
@@ -66,6 +67,57 @@ describe.skipIf(!RUN_DB)("welding.service (DB-backed)", async () => {
     expect(joint.jobId).toBe(job.id);
     const link = await owner.weldJointWelder.findUnique({ where: { weldJointId_welderId: { weldJointId: joint.id, welderId: welder.id } } });
     expect(link).not.toBeNull();
+  });
+
+  it("logWeldJoint persists and round-trips a valid componentId (A3)", async () => {
+    const { job, unit, fabDept, welder, component } = await fixture();
+    const supervisor: Actor = { ...actorBase(job.tenantId), roles: [ROLES.SUPERVISOR], departmentIds: [fabDept.id] };
+    const joint = await logWeldJoint(supervisor, {
+      jobId: job.id,
+      unitId: unit.id,
+      componentId: component.id,
+      jointNo: `T-${Date.now()}`,
+      jointType: "Test seam",
+      welderIds: [welder.id],
+    });
+    expect(joint.componentId).toBe(component.id);
+  });
+
+  it("logWeldJoint refuses a componentId belonging to a different job (A3, NOT_FOUND)", async () => {
+    const { job, unit, fabDept, welder } = await fixture();
+    const otherOrg = await owner.organization.create({ data: { code: `TEST-WELD-XT-${Date.now()}`, name: "Other tenant" } });
+    const otherFamily = await owner.productFamily.create({ data: { tenantId: otherOrg.id, code: "PRESSURE_VESSEL", name: "PV" } });
+    const otherTemplate = await owner.processTemplate.create({ data: { tenantId: otherOrg.id, familyId: otherFamily.id, name: "PV" } });
+    const otherVersion = await owner.processTemplateVersion.create({ data: { templateId: otherTemplate.id, version: 1 } });
+    const otherClient = await owner.client.create({ data: { tenantId: otherOrg.id, name: "Other client" } });
+    const otherJob = await owner.job.create({
+      data: {
+        tenantId: otherOrg.id,
+        publicId: `pub-weld-xt-${Date.now()}`,
+        clientId: otherClient.id,
+        familyId: otherFamily.id,
+        templateVersionId: otherVersion.id,
+        jobNumber: `JOB-WELD-XT-${Date.now()}`,
+      },
+    });
+    const otherEquipment = await owner.equipment.create({ data: { jobId: otherJob.id, name: "Other vessel" } });
+    const otherType = await owner.componentTypeRef.create({ data: { tenantId: otherOrg.id, code: "PLATE", name: "Plate" } });
+    const otherComponent = await owner.component.create({
+      data: { equipmentId: otherEquipment.id, tag: "X1", componentTypeId: otherType.id },
+    });
+
+    const supervisor: Actor = { ...actorBase(job.tenantId), roles: [ROLES.SUPERVISOR], departmentIds: [fabDept.id] };
+    await expectCode(
+      logWeldJoint(supervisor, {
+        jobId: job.id,
+        unitId: unit.id,
+        componentId: otherComponent.id,
+        jointNo: `T-${Date.now()}`,
+        jointType: "Test seam",
+        welderIds: [welder.id],
+      }),
+      ERROR_CODES.NOT_FOUND,
+    );
   });
 
   it("logWeldJoint refuses a client user — read-only, no exceptions", async () => {

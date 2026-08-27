@@ -200,6 +200,27 @@ interface ProvisionalTemplateFile {
   processes: { seq: number; code: string; name: string; department: string; derivedFrom: string }[];
 }
 
+/// Phase 2 (A2) — the A–Q assembly & weld sequence, transcribed from
+/// docs/DESPL-320-fabrication-assembly-spec.md §2. See
+/// seed/assembly-template-pressure-vessel-v1.json's own `$schema` note for
+/// what's floor-confirmed (WORK/INSPECTION split, sequence content) vs.
+/// judgment-called (defaultDepartment).
+interface AssemblyTemplateFile {
+  family: string;
+  name: string;
+  notes: string;
+  steps: {
+    seq: number;
+    groupCode: string;
+    groupName: string;
+    srNo: string;
+    activity: string;
+    kind: "WORK" | "INSPECTION";
+    defaultDepartment: string;
+    jointRef?: string;
+  }[];
+}
+
 interface QcpTemplatesFile {
   model: { codes: Record<string, QcpCodeMeta> };
   template: {
@@ -351,6 +372,7 @@ interface Sources {
   qcpFile: QcpTemplatesFile;
   qcpBatch2: QcpBatchFile;
   pipeSpoolTemplate: ProvisionalTemplateFile;
+  assemblyTemplate: AssemblyTemplateFile;
   issues: DataIssue[];
 }
 
@@ -425,7 +447,7 @@ async function loadRefIds(tx: Tx, tenantId: number): Promise<RefIds> {
 /// of times. Reference/template *changes* propagate via a migration or a
 /// dedicated update path, never by piling on another copy here.
 async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>): Promise<RefIds> {
-  const { leadTime, liveJobs, routesFile, qcpFile, pipeSpoolTemplate } = src;
+  const { leadTime, liveJobs, routesFile, qcpFile, pipeSpoolTemplate, assemblyTemplate } = src;
 
   // ── 1. Tenant (idempotency sentinel) ─────────────────────────────
   const existing = await tx.organization.findUnique({ where: { code: "DESPL" } });
@@ -708,6 +730,46 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
       });
       stats.pipeSpoolTemplateProcesses = psProcesses.length;
       stats.pipeSpoolTemplateEdges = await tx.templateEdge.count({ where: { versionId: psV1.id } });
+
+      // ── 7c. PRESSURE_VESSEL assembly template v1 (Phase 2, A2) — the A–Q
+      // assembly & weld sequence, distinct from the 36-process spine above.
+      // Seeded from seed/assembly-template-pressure-vessel-v1.json (transcribed
+      // from docs/DESPL-320-fabrication-assembly-spec.md §2). Materialising it
+      // per unit for DESPL-320's already-existing units is a SEPARATE step —
+      // scripts/seed-despl320-assembly-steps.ts — mirroring how
+      // scripts/seed-despl320-components.ts materialises ComponentOperation
+      // rows outside this main seed run.
+      const asmTemplate = await tx.assemblyTemplate.create({
+        data: {
+          tenantId,
+          familyId: familyIdByCode.get(assemblyTemplate.family)!,
+          name: assemblyTemplate.name,
+        },
+      });
+      const asmV1 = await tx.assemblyTemplateVersion.create({
+        data: {
+          templateId: asmTemplate.id,
+          version: 1,
+          status: TemplateStatus.PUBLISHED,
+          publishedAt: new Date(),
+          notes: assemblyTemplate.notes,
+        },
+      });
+      await tx.assemblyTemplateStep.createMany({
+        data: assemblyTemplate.steps.map((s) => ({
+          versionId: asmV1.id,
+          seq: s.seq,
+          groupCode: s.groupCode,
+          groupName: s.groupName,
+          srNo: s.srNo,
+          activity: s.activity,
+          kind: s.kind,
+          defaultDepartmentId: deptIdByCode.get(s.defaultDepartment)!,
+          qcpSrNo: s.srNo,
+          jointRef: s.jointRef ?? null,
+        })),
+      });
+      stats.assemblyTemplateSteps = await tx.assemblyTemplateStep.count({ where: { versionId: asmV1.id } });
 
       // ── 8. Component route library (25 routes) ───────────────────────
       // Previously present in seed/component-routes.json but modelled nowhere.
@@ -1335,6 +1397,7 @@ async function main() {
       qcpFile: readJson<QcpTemplatesFile>("qcp-templates.json"),
       qcpBatch2: readJson<QcpBatchFile>("qcp-templates-batch2.json"),
       pipeSpoolTemplate: readJson<ProvisionalTemplateFile>("pipe-spool-template.json"),
+      assemblyTemplate: readJson<AssemblyTemplateFile>("assembly-template-pressure-vessel-v1.json"),
       issues: readJson<DataIssuesFile>("data-issues.json").issues,
     };
   })();

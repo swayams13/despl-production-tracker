@@ -103,6 +103,66 @@ export const rejectComponentOperationSchema = z
   .strict();
 export type RejectComponentOperationInput = z.infer<typeof rejectComponentOperationSchema>;
 
+// ── AssemblyStep (Phase 2 — A6) ──────────────────────────────────────────
+
+/** Start an assembly step. */
+export const startAssemblyStepSchema = z.object({ assemblyStepId: id }).strict();
+export type StartAssemblyStepInput = z.infer<typeof startAssemblyStepSchema>;
+
+/**
+ * Submit an assembly step for QC verification (maker step). For a WORK step
+ * whose template step carries a `jointRef` (the three single-joint weld
+ * groups — LS-1/CS-2/CS-1), submission must bind a WeldJoint: either an
+ * already-logged one (`weldJointId`) or inline fields to create one now
+ * (`newJoint`) — never both, and the service refuses a jointRef step
+ * submitted with neither. Steps with no `jointRef` ignore both fields.
+ */
+export const submitAssemblyStepSchema = z
+  .object({
+    assemblyStepId: id,
+    performedByWelderId: id.nullish(),
+    performedByUserId: id.nullish(),
+    remarks: z.string().trim().max(2000).optional(),
+    weldJointId: id.optional(),
+    newJoint: z
+      .object({
+        jointNo: z.string().trim().min(1, "Joint number is required"),
+        jointType: z.string().trim().min(1, "Joint type is required"),
+        weldSize: z.string().trim().optional(),
+        wpsRef: z.string().trim().optional(),
+        welderIds: z.array(id).min(1, "At least one welder is required"),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine((v) => !(v.weldJointId != null && v.newJoint != null), {
+    message: "Provide either an existing weldJointId or newJoint fields, not both.",
+  });
+export type SubmitAssemblyStepInput = z.infer<typeof submitAssemblyStepSchema>;
+
+/** Verify a submitted assembly step (checker step, maker-checker enforced in the service). */
+export const verifyAssemblyStepSchema = z.object({ assemblyStepId: id }).strict();
+export type VerifyAssemblyStepInput = z.infer<typeof verifyAssemblyStepSchema>;
+
+/**
+ * QC rejects a submitted assembly step back to the maker. Mirrors
+ * rejectComponentOperationSchema's categorised-reason shape. `testTypeId` is
+ * optional and only meaningful when the step has a bound `weldJointId` — the
+ * service then also records an NdtResult(result: REJECT) against that
+ * joint's welder(s), so the reject shows in welding.read.ts's repair-rate
+ * calc in the same action, not a second one.
+ */
+export const rejectAssemblyStepSchema = z
+  .object({
+    assemblyStepId: id,
+    categoryId: id,
+    detail: z.string().trim().optional(),
+    testTypeId: id.optional(),
+  })
+  .strict();
+export type RejectAssemblyStepInput = z.infer<typeof rejectAssemblyStepSchema>;
+
 /** Put a process plan ON_HOLD with a recorded reason. */
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
 export type HoldProcessInput = z.infer<typeof holdProcessSchema>;
@@ -144,6 +204,8 @@ export const logWeldJointSchema = z
   .object({
     jobId: id,
     unitId: id.nullish(),
+    /** A3 (Phase 2): set by whoever logs the joint, not auto-derived. */
+    componentId: id.nullish(),
     jointNo: z.string().trim().min(1, "Joint number is required"),
     jointType: z.string().trim().min(1, "Joint type is required"),
     weldSize: z.string().trim().optional(),
@@ -452,6 +514,29 @@ export const updateEquipmentTypeSchema = z
   })
   .strict();
 export type UpdateEquipmentTypeInput = z.infer<typeof updateEquipmentTypeSchema>;
+
+// ── Welder registry (Phase 2 — A5) ──────────────────────────────────────
+
+export const createWelderSchema = z
+  .object({
+    name: z.string().trim().min(1, "A name is required"),
+    employeeCode: z.string().trim().min(1, "An employee code is required"),
+    departmentId: id.nullable().default(null),
+  })
+  .strict();
+export type CreateWelderInput = z.infer<typeof createWelderSchema>;
+
+/** Deactivate rather than delete — set active: false (Component/Assembly rows reference welders, invariant #6). */
+export const updateWelderSchema = z
+  .object({
+    id,
+    name: z.string().trim().min(1).optional(),
+    employeeCode: z.string().trim().min(1).optional(),
+    departmentId: id.nullable().optional(),
+    active: z.boolean().optional(),
+  })
+  .strict();
+export type UpdateWelderInput = z.infer<typeof updateWelderSchema>;
 
 /** Inline client creation from the intake wizard. Name + optional code only. */
 export const createClientSchema = z

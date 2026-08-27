@@ -7,6 +7,7 @@ import { StatusChip } from "@/components/industrial/status-chip";
 import { STAGE_STATUS, showsOverduePip, showsRejectedMarker, type StageSegment } from "@/components/industrial/stage-status";
 import { JobGantt } from "@/components/industrial/job-gantt";
 import { BomPanel } from "@/components/industrial/bom-panel";
+import { AssemblyPanel } from "@/components/industrial/assembly-panel";
 import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { ClientPortalView } from "@/components/industrial/client-portal-view";
@@ -18,6 +19,7 @@ import type { UnitSpine } from "@/lib/services/spine.read";
 import type { ActivityEvent } from "@/lib/services/events.read";
 import type { JobGanttData } from "@/lib/services/gantt-layout";
 import type { BomTree } from "@/lib/services/bom.read";
+import type { AssemblyGrid } from "@/lib/services/assembly.read";
 import type { QcpGrid as QcpGridData } from "@/lib/services/qcp-grid.read";
 import type { ClientPreview } from "@/lib/services/client-snapshot.read";
 
@@ -42,6 +44,7 @@ export function JobDetailClient({
   events,
   gantt,
   bom,
+  assembly,
   qcp,
   clientPreview,
   canReviewClientUpdates,
@@ -57,11 +60,12 @@ export function JobDetailClient({
   events: ActivityEvent[];
   gantt: JobGanttData | null;
   bom: BomTree | null;
+  assembly: AssemblyGrid | null;
   qcp: QcpGridData | null;
   clientPreview: ClientPreview | null;
   canReviewClientUpdates: boolean;
   canEditJobDates: boolean;
-  tab: "overview" | "gantt" | "bom" | "qcp" | "activity" | "client";
+  tab: "overview" | "gantt" | "bom" | "assembly" | "qcp" | "activity" | "client";
   /** Deep-link from a notification (`?openUnit=&openStage=`) — auto-opens the StageSheet once on mount. */
   openUnit?: number;
   openStage?: number;
@@ -138,6 +142,7 @@ export function JobDetailClient({
         <Link href={`/jobs/${jobId}?tab=overview`} className={`tab${tab === "overview" ? " on" : ""}`}>Overview</Link>
         <Link href={`/jobs/${jobId}?tab=gantt`} className={`tab${tab === "gantt" ? " on" : ""}`}>Timeline (Gantt)</Link>
         <Link href={`/jobs/${jobId}?tab=bom`} className={`tab${tab === "bom" ? " on" : ""}`}>BOM &amp; Components</Link>
+        <Link href={`/jobs/${jobId}?tab=assembly`} className={`tab${tab === "assembly" ? " on" : ""}`}>Assembly</Link>
         <Link href={`/jobs/${jobId}?tab=qcp`} className={`tab${tab === "qcp" ? " on" : ""}`}>QCP / Hold points</Link>
         <Link href={`/jobs/${jobId}?tab=activity`} className={`tab${tab === "activity" ? " on" : ""}`}>Activity</Link>
         {canReviewClientUpdates && (
@@ -149,6 +154,8 @@ export function JobDetailClient({
         gantt ? <JobGantt data={gantt} onOpenStage={openStageInJob} /> : <p className="note" style={{ margin: "16px 0" }}>No current schedule for this job.</p>
       ) : tab === "bom" ? (
         bom ? <BomPanel jobId={jobId} bom={bom} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
+      ) : tab === "assembly" ? (
+        assembly ? <AssemblyPanel jobId={jobId} data={assembly} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
       ) : tab === "qcp" ? (
         qcp ? <QcpGrid jobId={jobId} data={qcp} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
       ) : tab === "client" ? (

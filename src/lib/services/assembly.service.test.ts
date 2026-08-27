@@ -1,0 +1,330 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { assertAssemblyStepTransition, ASSEMBLY_STEP_TRANSITIONS, type AssemblyStepAction } from "./assembly.service";
+import { assertMakerChecker, ROLES, type Actor } from "@/lib/authz";
+import { ERROR_CODES, isAppError } from "@/lib/shared/errors";
+import type { OperationStatus } from "@/generated/prisma/client";
+
+/**
+ * Pure guard tests, mirroring component.service.test.ts's structure — the
+ * transition matrix and maker–checker guard, no DB. Full locked-tx coverage
+ * (department scope, sequential gate, joint binding, audit) lives in the
+ * RUN_DB_TESTS block below.
+ */
+
+const ALL_STATUSES: OperationStatus[] = ["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "COMPLETE"];
+
+function code(fn: () => unknown): string | undefined {
+  try {
+    fn();
+  } catch (e) {
+    return isAppError(e) ? e.code : "NON_APP_ERROR";
+  }
+  return undefined;
+}
+
+describe("assertAssemblyStepTransition", () => {
+  const legal: Array<[AssemblyStepAction, OperationStatus, OperationStatus]> = [
+    ["start", "NOT_STARTED", "IN_PROGRESS"],
+    ["submit", "IN_PROGRESS", "SUBMITTED"],
+    ["verify", "SUBMITTED", "COMPLETE"],
+    ["reject", "SUBMITTED", "IN_PROGRESS"],
+  ];
+
+  it.each(legal)("%s from %s → %s", (action, from, to) => {
+    expect(assertAssemblyStepTransition(action, from)).toBe(to);
+  });
+
+  const legalSet = new Set(legal.map(([a, f]) => `${a}:${f}`));
+  const actions = Object.keys(ASSEMBLY_STEP_TRANSITIONS) as AssemblyStepAction[];
+  const illegal: Array<[AssemblyStepAction, OperationStatus]> = [];
+  for (const a of actions) for (const f of ALL_STATUSES) if (!legalSet.has(`${a}:${f}`)) illegal.push([a, f]);
+
+  it.each(illegal)("%s from %s → INVALID_STATE_TRANSITION", (action, from) => {
+    expect(code(() => assertAssemblyStepTransition(action, from))).toBe(ERROR_CODES.INVALID_STATE_TRANSITION);
+  });
+});
+
+describe("verify/reject maker–checker guard", () => {
+  const qc = (userId: number): Actor => ({
+    userId,
+    tenantId: 1,
+    clientId: null,
+    name: "QC",
+    email: "qc@x",
+    roles: [ROLES.QC],
+    departmentIds: [],
+    mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
+  });
+  const supervisorQc = (userId: number): Actor => ({ ...qc(userId), roles: [ROLES.SUPERVISOR, ROLES.QC] });
+
+  const cases: Array<[string, Actor, number | null, string | undefined]> = [
+    ["same human submitted and verifies/rejects → violation", supervisorQc(7), 7, ERROR_CODES.MAKER_CHECKER_VIOLATION],
+    ["different QC user → allowed", qc(8), 7, undefined],
+    ["no QC role → forbidden", { ...qc(8), roles: [ROLES.SUPERVISOR] }, 7, ERROR_CODES.FORBIDDEN],
+    ["admin is not exempt (no QC role) → forbidden", { ...qc(9), roles: [ROLES.ADMIN] }, 7, ERROR_CODES.FORBIDDEN],
+  ];
+
+  it.each(cases)("%s", (_label, actor, submittedBy, expected) => {
+    expect(code(() => assertMakerChecker(actor, submittedBy))).toBe(expected);
+  });
+});
+
+/**
+ * Full locked-transaction path against a live DB, same RUN_DB_TESTS gate and
+ * disposable-org-per-run pattern as component.service.test.ts. Builds its
+ * own throwaway AssemblyTemplate/Step/Unit fixture rather than DESPL-320's
+ * seeded rows.
+ *
+ * // ponytail: no cleanup — disposable test DB, per-run org code.
+ */
+const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
+
+describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startAssemblyStep, submitAssemblyStep, verifyAssemblyStep, rejectAssemblyStep } = await import(
+    "./assembly.service"
+  );
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  let tenantId = 0;
+  let supA: Actor; // supervisor+QC in deptA (maker)
+  let qc: Actor; // QC only, different user (checker)
+  let supB: Actor; // supervisor in a DIFFERENT department (wrong-department attempt)
+  let clientActor: Actor;
+  let step1 = 0; // unit1, seq1 (deptA, no jointRef)
+  let step2 = 0; // unit1, seq2 (deptA, jointRef "LS-1") — gated on step1
+  let step3 = 0; // unit1, seq3 (deptB, no jointRef) — gated on step2
+  let unit2Step1 = 0; // unit2, seq1 — cross-unit isolation
+  let rejectCategoryId = 0;
+  let testTypeId = 0;
+
+  async function auditCount(entityId: number): Promise<number> {
+    return owner.auditLog.count({ where: { tenantId, entityType: "AssemblyStep", entityId: String(entityId) } });
+  }
+
+  beforeAll(async () => {
+    const org = await owner.organization.create({ data: { code: `TEST-ASM-${Date.now()}`, name: "Assembly svc test" } });
+    tenantId = org.id;
+
+    const deptA = await owner.department.create({ data: { tenantId, code: "A", name: "Dept A" } });
+    const deptB = await owner.department.create({ data: { tenantId, code: "B", name: "Dept B" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-asm-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-ASM-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
+    const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "02" } });
+
+    const asmTemplate = await owner.assemblyTemplate.create({ data: { tenantId, familyId: family.id, name: "A-Q" } });
+    const asmVersion = await owner.assemblyTemplateVersion.create({
+      data: { templateId: asmTemplate.id, version: 1, status: "PUBLISHED" },
+    });
+    const ts1 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 1,
+        groupCode: "C",
+        groupName: "Shell Prep",
+        srNo: "4.1",
+        activity: "Transfer Of Marking And Cutting",
+        kind: "WORK",
+        defaultDepartmentId: deptA.id,
+      },
+    });
+    const ts2 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 2,
+        groupCode: "E",
+        groupName: "Shell Sub-Assembly (LS-1)",
+        srNo: "4.5",
+        activity: "Weld Long Seam Of Shell (LS-1)",
+        kind: "WORK",
+        defaultDepartmentId: deptA.id,
+        jointRef: "LS-1",
+      },
+    });
+    const ts3 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 3,
+        groupCode: "E",
+        groupName: "Shell Sub-Assembly (LS-1)",
+        srNo: "4.5",
+        activity: "Weld Visual Of LS-1",
+        kind: "INSPECTION",
+        defaultDepartmentId: deptB.id,
+      },
+    });
+
+    step1 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts1.id, seq: 1 } })).id;
+    step2 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts2.id, seq: 2 } })).id;
+    step3 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts3.id, seq: 3 } })).id;
+    unit2Step1 = (await owner.assemblyStep.create({ data: { unitId: unit2.id, templateStepId: ts1.id, seq: 1 } })).id;
+
+    rejectCategoryId = (await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })).id;
+    testTypeId = (await owner.testTypeRef.create({ data: { tenantId, code: "PAUT", name: "PAUT" } })).id;
+
+    const userSup = await owner.user.create({
+      data: { tenantId, email: "asm-sup@x", username: "asm-sup", name: "Sup", passwordHash: "x" },
+    });
+    const userQc = await owner.user.create({
+      data: { tenantId, email: "asm-qc@x", username: "asm-qc", name: "Qc", passwordHash: "x" },
+    });
+    const userSupB = await owner.user.create({
+      data: { tenantId, email: "asm-supb@x", username: "asm-supb", name: "SupB", passwordHash: "x" },
+    });
+    const base = { tenantId, clientId: null, mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
+    supA = { ...base, userId: userSup.id, name: "Sup", email: "asm-sup@x", roles: [ROLES.SUPERVISOR, ROLES.QC], departmentIds: [deptA.id] };
+    qc = { ...base, userId: userQc.id, name: "Qc", email: "asm-qc@x", roles: [ROLES.QC], departmentIds: [deptB.id] };
+    supB = { ...base, userId: userSupB.id, name: "SupB", email: "asm-supb@x", roles: [ROLES.SUPERVISOR], departmentIds: [deptB.id] };
+    clientActor = { ...base, userId: userQc.id, clientId: 1, name: "Client", email: "asm-client@x", roles: [ROLES.QC], departmentIds: [] };
+  });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  async function expectCode(p: Promise<unknown>, expected: string): Promise<void> {
+    let thrown: unknown;
+    try {
+      await p;
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isAppError(thrown) && thrown.code).toBe(expected);
+  }
+
+  it("out-of-order start: seq 2 cannot start before seq 1 on the same unit", async () => {
+    await expectCode(startAssemblyStep(supA, { assemblyStepId: step2 }), ERROR_CODES.GATING_BLOCKED);
+  });
+
+  it("wrong department: a supervisor outside the step's department cannot start it", async () => {
+    await expectCode(startAssemblyStep(supB, { assemblyStepId: step1 }), ERROR_CODES.FORBIDDEN);
+  });
+
+  it("client user cannot start — read-only, no exceptions", async () => {
+    await expectCode(startAssemblyStep(clientActor, { assemblyStepId: step1 }), ERROR_CODES.FORBIDDEN);
+  });
+
+  it("cross-unit isolation: unit1's own sequence never gates unit2", async () => {
+    const started = await startAssemblyStep(supA, { assemblyStepId: unit2Step1 });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  it("happy path start → submit → verify (no jointRef), one audit row per mutation", async () => {
+    const before = await auditCount(step1);
+
+    const started = await startAssemblyStep(supA, { assemblyStepId: step1 });
+    expect(started.status).toBe("IN_PROGRESS");
+    expect(started.startedAt).toBeInstanceOf(Date);
+    expect(await auditCount(step1)).toBe(before + 1);
+
+    const submitted = await submitAssemblyStep(supA, { assemblyStepId: step1 });
+    expect(submitted.status).toBe("SUBMITTED");
+    expect(submitted.submittedBy).toBe(supA.userId);
+    expect(await auditCount(step1)).toBe(before + 2);
+
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step1 });
+    expect(verified.status).toBe("COMPLETE");
+    expect(verified.finishedAt).toBeInstanceOf(Date);
+    expect(verified.verifiedBy).toBe(qc.userId);
+    expect(await auditCount(step1)).toBe(before + 3);
+  });
+
+  it("weld step with a jointRef refuses submit with neither an existing joint nor inline fields", async () => {
+    await startAssemblyStep(supA, { assemblyStepId: step2 });
+    await expectCode(submitAssemblyStep(supA, { assemblyStepId: step2 }), ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  it("weld step with a jointRef accepts inline newJoint fields, creates the joint and binds it", async () => {
+    const welder = await owner.welder.create({ data: { tenantId, name: "V. Yadav", employeeCode: `W-${Date.now()}` } });
+    const submitted = await submitAssemblyStep(supA, {
+      assemblyStepId: step2,
+      newJoint: { jointNo: "LS-1", jointType: "Long Seam", welderIds: [welder.id] },
+    });
+    expect(submitted.status).toBe("SUBMITTED");
+    expect(submitted.weldJointId).not.toBeNull();
+
+    const joint = await owner.weldJoint.findUniqueOrThrow({ where: { id: submitted.weldJointId! } });
+    expect(joint.jointNo).toBe("LS-1");
+  });
+
+  it("maker–checker: the submitter cannot verify or reject their own submission", async () => {
+    await expectCode(verifyAssemblyStep(supA, { assemblyStepId: step2 }), ERROR_CODES.MAKER_CHECKER_VIOLATION);
+    await expectCode(
+      rejectAssemblyStep(supA, { assemblyStepId: step2, categoryId: rejectCategoryId }),
+      ERROR_CODES.MAKER_CHECKER_VIOLATION,
+    );
+  });
+
+  it("QC reject on the joint-bound step returns it to IN_PROGRESS, clears submittedBy, retains the rejection, and records an NdtResult(REJECT) — this is what makes the reject show against the welder's repair rate", async () => {
+    const rejected = await rejectAssemblyStep(qc, {
+      assemblyStepId: step2,
+      categoryId: rejectCategoryId,
+      detail: "PAUT indication",
+      testTypeId,
+    });
+    expect(rejected.status).toBe("IN_PROGRESS");
+    expect(rejected.submittedBy).toBeNull();
+
+    const rejections = await owner.assemblyStepRejection.findMany({ where: { assemblyStepId: step2 } });
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]).toMatchObject({ categoryId: rejectCategoryId, detail: "PAUT indication", rejectedBy: qc.userId });
+
+    const ndt = await owner.ndtResult.findMany({ where: { weldJointId: rejected.weldJointId! } });
+    expect(ndt).toHaveLength(1);
+    expect(ndt[0].result).toBe("REJECT");
+
+    // Rejected work restarts from the SAME step — must be resubmittable.
+    const resubmitted = await submitAssemblyStep(supA, { assemblyStepId: step2 });
+    expect(resubmitted.status).toBe("SUBMITTED");
+
+    // Unblock step3 (seq 3, gated on step2 = seq 2) for the tests below.
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step2 });
+    expect(verified.status).toBe("COMPLETE");
+  });
+
+  it("reject with a testTypeId requires a bound weld joint — refused on a step with none", async () => {
+    await startAssemblyStep(supB, { assemblyStepId: step3 });
+    await submitAssemblyStep(supB, { assemblyStepId: step3 });
+    await expectCode(
+      rejectAssemblyStep(qc, { assemblyStepId: step3, categoryId: rejectCategoryId, testTypeId }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+  });
+
+  it("illegal transition: verifying a NOT_STARTED step is refused", async () => {
+    await expectCode(verifyAssemblyStep(qc, { assemblyStepId: unit2Step1 }), ERROR_CODES.INVALID_STATE_TRANSITION);
+  });
+
+  it("cross-tenant: another tenant's actor cannot reach this step by id (NOT_FOUND)", async () => {
+    const otherOrg = await owner.organization.create({ data: { code: `TEST-ASM-XT-${Date.now()}`, name: "Other tenant" } });
+    const intruder: Actor = {
+      userId: 999_999,
+      tenantId: otherOrg.id,
+      clientId: null,
+      name: "Intruder",
+      email: "intruder@other",
+      roles: [ROLES.SUPERVISOR, ROLES.QC],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+    await expectCode(startAssemblyStep(intruder, { assemblyStepId: unit2Step1 }), ERROR_CODES.NOT_FOUND);
+  });
+});

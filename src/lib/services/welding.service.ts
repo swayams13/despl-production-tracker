@@ -26,6 +26,67 @@ async function fabricationDepartmentId(tx: Tx, tenantId: number): Promise<number
   return dept.id;
 }
 
+export interface CreateWeldJointFields {
+  jointNo: string;
+  jointType: string;
+  weldSize?: string | null;
+  wpsRef?: string | null;
+  welderIds: number[];
+}
+
+/**
+ * The joint-creation write, factored out so assembly.service.ts's
+ * submitAssemblyStep (Phase 2, A6) can create a joint inline for a WORK weld
+ * step without duplicating this validation. Tenant-scoping, welder
+ * existence and the actual insert only — no department check and no
+ * audited() wrapper, both of which differ by caller (logWeldJoint's own
+ * FABRICATION-department gate vs. an assembly step's own template-derived
+ * department; "welding.logJoint" vs "assembly.submitStep" as the audit
+ * action).
+ */
+export async function createWeldJointTx(
+  tx: Tx,
+  actor: Actor,
+  jobId: number,
+  unitId: number | null,
+  componentId: number | null,
+  fields: CreateWeldJointFields,
+): Promise<WeldJoint> {
+  // RLS on `jobs` (tenant-root) makes this the tenant-scoping check: a
+  // cross-tenant jobId resolves to zero rows rather than a leaked row.
+  const job = await tx.job.findUnique({ where: { id: jobId } });
+  if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
+
+  if (unitId != null) {
+    const unit = await tx.unit.findFirst({ where: { id: unitId, equipment: { jobId } } });
+    if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+  }
+
+  if (componentId != null) {
+    const component = await tx.component.findFirst({ where: { id: componentId, equipment: { jobId } } });
+    if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+  }
+
+  const welders = await tx.welder.findMany({ where: { id: { in: fields.welderIds }, tenantId: actor.tenantId } });
+  if (welders.length !== fields.welderIds.length) {
+    throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Welder", welderIds: fields.welderIds });
+  }
+
+  return tx.weldJoint.create({
+    data: {
+      jobId,
+      unitId: unitId ?? null,
+      componentId: componentId ?? null,
+      jointNo: fields.jointNo,
+      jointType: fields.jointType,
+      weldSize: fields.weldSize ?? null,
+      wpsRef: fields.wpsRef ?? null,
+      loggedBy: actor.userId,
+      welders: { create: fields.welderIds.map((welderId) => ({ welderId })) },
+    },
+  });
+}
+
 /**
  * §4.7 "Welding supervisor can Log joints". Department-scoped like every
  * other floor mutation (requireDepartmentScope also passes PRODUCTION_HEAD/
@@ -34,40 +95,21 @@ async function fabricationDepartmentId(tx: Tx, tenantId: number): Promise<number
  * PH/admin), matching startProcess/submitProcess's own gate shape.
  */
 export async function logWeldJoint(actor: Actor, input: LogWeldJointInput): Promise<WeldJoint> {
-  const { jobId, unitId, jointNo, jointType, weldSize, wpsRef, welderIds } = logWeldJointSchema.parse(input);
+  const { jobId, unitId, componentId, jointNo, jointType, weldSize, wpsRef, welderIds } =
+    logWeldJointSchema.parse(input);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
     const deptId = await fabricationDepartmentId(tx, actor.tenantId);
     requireDepartmentScope(actor, deptId);
 
-    // RLS on `jobs` (tenant-root) makes this the tenant-scoping check: a
-    // cross-tenant jobId resolves to zero rows rather than a leaked row.
-    const job = await tx.job.findUnique({ where: { id: jobId } });
-    if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
-
-    if (unitId != null) {
-      const unit = await tx.unit.findFirst({ where: { id: unitId, equipment: { jobId } } });
-      if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
-    }
-
-    const welders = await tx.welder.findMany({ where: { id: { in: welderIds }, tenantId: actor.tenantId } });
-    if (welders.length !== welderIds.length) {
-      throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Welder", welderIds });
-    }
-
     return audited(tx, actor, async () => {
-      const joint = await tx.weldJoint.create({
-        data: {
-          jobId,
-          unitId: unitId ?? null,
-          jointNo,
-          jointType,
-          weldSize: weldSize ?? null,
-          wpsRef: wpsRef ?? null,
-          loggedBy: actor.userId,
-          welders: { create: welderIds.map((welderId) => ({ welderId })) },
-        },
+      const joint = await createWeldJointTx(tx, actor, jobId, unitId ?? null, componentId ?? null, {
+        jointNo,
+        jointType,
+        weldSize,
+        wpsRef,
+        welderIds,
       });
       return {
         result: joint,
@@ -75,12 +117,44 @@ export async function logWeldJoint(actor: Actor, input: LogWeldJointInput): Prom
           action: "welding.logJoint",
           entityType: "WeldJoint",
           entityId: joint.id,
-          after: { jobId, unitId: unitId ?? null, jointNo, jointType, welderIds },
+          after: { jobId, unitId: unitId ?? null, componentId: componentId ?? null, jointNo, jointType, welderIds },
           eventType: "WeldJointLogged",
           eventPayload: { weldJointId: joint.id, jobId, jointNo, welderIds },
         },
       };
     });
+  });
+}
+
+/**
+ * The NDT-result write, factored out so assembly.service.ts's
+ * rejectAssemblyStep (Phase 2, A6) can record a REJECT result against a
+ * step's bound joint in the same transaction as the reject, without nesting
+ * a second withTenant()/audited() pair inside the first. No role check here
+ * — both callers (recordNdtResult below, rejectAssemblyStep) already
+ * enforce QC before reaching this point.
+ */
+export async function recordNdtResultTx(
+  tx: Tx,
+  actor: Actor,
+  weldJointId: number,
+  testTypeId: number,
+  result: "PENDING" | "ACCEPT" | "REJECT",
+): Promise<NdtResult> {
+  const joint = await tx.weldJoint.findFirst({
+    where: { id: weldJointId, job: { tenantId: actor.tenantId } },
+  });
+  if (!joint) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "WeldJoint", weldJointId });
+
+  return tx.ndtResult.create({
+    data: {
+      weldJointId,
+      testTypeId,
+      result,
+      recordedBy: actor.userId,
+      // SERVER CLOCK ONLY (invariant #1).
+      recordedAt: new Date(),
+    },
   });
 }
 
@@ -95,22 +169,8 @@ export async function recordNdtResult(actor: Actor, input: RecordNdtResultInput)
   requireRole(actor, ROLES.QC);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const joint = await tx.weldJoint.findFirst({
-      where: { id: weldJointId, job: { tenantId: actor.tenantId } },
-    });
-    if (!joint) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "WeldJoint", weldJointId });
-
     return audited(tx, actor, async () => {
-      const ndt = await tx.ndtResult.create({
-        data: {
-          weldJointId,
-          testTypeId,
-          result,
-          recordedBy: actor.userId,
-          // SERVER CLOCK ONLY (invariant #1).
-          recordedAt: new Date(),
-        },
-      });
+      const ndt = await recordNdtResultTx(tx, actor, weldJointId, testTypeId, result);
       return {
         result: ndt,
         audit: {

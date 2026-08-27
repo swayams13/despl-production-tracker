@@ -1,0 +1,78 @@
+{
+  "$schema": "AssemblyTemplate v1 for PRESSURE_VESSEL — Phase 2 (A2). Transcribed verbatim from docs/DESPL-320-fabrication-assembly-spec.md §2 (the A–Q assembly & weld sequence, 54 checkpoints). `kind` reproduces that document's own WORK/INSPECTION annotation (not a workbook column — the QAP conflates the two, per the addendum). `defaultDepartment` is derived from the existing PRESSURE_VESSEL 36-process department assignments (seed/lead-time-model.json) for the same physical activity — e.g. weld NDE rows use QC, matching process #17 'Weld NDE -> QC'; heat-treatment rows use HEAT_TREATMENT, matching process #21; hydrostatic test uses QC, matching process #27 — not asked of the floor directly, and flagged as a judgment call in progress.md pending confirmation. `jointRef` is set only on the three single-joint weld-execution rows (LS-1/CS-2/CS-1) where one AssemblyStep maps to exactly one WeldJoint; the multi-joint groups (F: M1/N2/N3, H: M1,N1-N6) are left unset deliberately — see the note at the bottom — the floor logs each individual joint via the existing Welding module instead.",
+  "family": "PRESSURE_VESSEL",
+  "name": "DESPL standard pressure vessel — A–Q assembly & weld sequence",
+  "notes": "Seeded from docs/DESPL-320-fabrication-assembly-spec.md §2 (transcribed from the QAP). WORK/INSPECTION split is this document's own annotation, not a workbook field — confirm with the floor before treating it as final. defaultDepartment values are derived by analogy to seed/lead-time-model.json's 36-process department assignments, not floor-confirmed for this specific sequence.",
+  "steps": [
+    { "seq": 1, "groupCode": "A", "groupName": "Document & Procedure Gate", "srNo": "1.1", "activity": "Drawing Approval", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 2, "groupCode": "A", "groupName": "Document & Procedure Gate", "srNo": "1.2", "activity": "Review And Approval Of Quality Control Plan", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 3, "groupCode": "A", "groupName": "Document & Procedure Gate", "srNo": "1.3", "activity": "Hot Forming Procedure, HT Procedure, RT Procedure, PT Procedure, PAUT & TOFD Procedure", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 4, "groupCode": "A", "groupName": "Document & Procedure Gate", "srNo": "2.1", "activity": "Welding Procedure & Performance Qualification", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 5, "groupCode": "B", "groupName": "Material Inspection & Traceability", "srNo": "3.1", "activity": "Pressure Part - Plates, Pipes/Forgings/Flange/Fittings", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 6, "groupCode": "B", "groupName": "Material Inspection & Traceability", "srNo": "3.2", "activity": "Non Pressure Parts & Attachment To Pressure Parts", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 7, "groupCode": "B", "groupName": "Material Inspection & Traceability", "srNo": "3.3", "activity": "Welding Consumable", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 8, "groupCode": "B", "groupName": "Material Inspection & Traceability", "srNo": "3.4", "activity": "Weld Plan/Weld Map", "kind": "WORK", "defaultDepartment": "PLANNING" },
+
+    { "seq": 9, "groupCode": "C", "groupName": "Shell & Head Prep", "srNo": "4.1", "activity": "Transfer Of Marking And Cutting (Shell And Dished End)", "kind": "WORK", "defaultDepartment": "FABRICATION_PREP" },
+
+    { "seq": 10, "groupCode": "D", "groupName": "Head Sub-Assembly", "srNo": "4.2", "activity": "Inspection Of Top & Bottom Dished", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 11, "groupCode": "D", "groupName": "Head Sub-Assembly", "srNo": "4.2", "activity": "Simulation Heat Treatment Of Test Coupon After Forming & Testing", "kind": "INSPECTION", "defaultDepartment": "HEAT_TREATMENT" },
+    { "seq": 12, "groupCode": "D", "groupName": "Head Sub-Assembly", "srNo": "4.4", "activity": "Weld Edge Preparation Of Top & Bottom Dished End", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+
+    { "seq": 13, "groupCode": "E", "groupName": "Shell Sub-Assembly (LS-1)", "srNo": "4.5", "activity": "Shell Weld Edge Preparation", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 14, "groupCode": "E", "groupName": "Shell Sub-Assembly (LS-1)", "srNo": "4.5", "activity": "L' Seam Set Up Of Shell (LS-1) Along With PTC", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 15, "groupCode": "E", "groupName": "Shell Sub-Assembly (LS-1)", "srNo": "4.5", "activity": "Weld Long Seam Of Shell (LS-1)", "kind": "WORK", "defaultDepartment": "FABRICATION", "jointRef": "LS-1" },
+    { "seq": 16, "groupCode": "E", "groupName": "Shell Sub-Assembly (LS-1)", "srNo": "4.5", "activity": "Weld Visual Of LS-1", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 17, "groupCode": "E", "groupName": "Shell Sub-Assembly (LS-1)", "srNo": "4.5", "activity": "PAUT/TOFD Of LS-1", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 18, "groupCode": "F", "groupName": "Nozzle Sub-Assembly (flange/elbow)", "srNo": "4.6", "activity": "Nozzle To Flange/Elbow Set Up (M1/N2/N3)", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 19, "groupCode": "F", "groupName": "Nozzle Sub-Assembly (flange/elbow)", "srNo": "4.6", "activity": "Weld Of Nozzle To Flange/Elbow (M1/N2/N3)", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 20, "groupCode": "F", "groupName": "Nozzle Sub-Assembly (flange/elbow)", "srNo": "4.6", "activity": "Weld Visual Of CS Joint Nozzle M1/N2/N3", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 21, "groupCode": "F", "groupName": "Nozzle Sub-Assembly (flange/elbow)", "srNo": "4.6", "activity": "RT Circ Seam Of Nozzle Pipe To Flange (M1/N2/N3)", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 22, "groupCode": "G", "groupName": "Shell + Bottom Head (CS-2)", "srNo": "4.7", "activity": "Bottom Dished End To Shell Set Up (CS-2)", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 23, "groupCode": "G", "groupName": "Shell + Bottom Head (CS-2)", "srNo": "4.7", "activity": "Weld Circ Seam Of Bottom Dishend To Shell (CS-2)", "kind": "WORK", "defaultDepartment": "FABRICATION", "jointRef": "CS-2" },
+    { "seq": 24, "groupCode": "G", "groupName": "Shell + Bottom Head (CS-2)", "srNo": "4.7", "activity": "Weld Visual Of CS-2", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 25, "groupCode": "G", "groupName": "Shell + Bottom Head (CS-2)", "srNo": "4.7", "activity": "PAUT/TOFD Of CS-2", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 26, "groupCode": "H", "groupName": "Nozzle & Manway Sub-Assembly", "srNo": "4.8", "activity": "Marking For Nozzle On Shell And Dished End (M1, N1 To N6)", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 27, "groupCode": "H", "groupName": "Nozzle & Manway Sub-Assembly", "srNo": "4.8", "activity": "Nozzle To Shell & Dished End Set Up (M1/N1/N2/N3/N4/N5/N6)", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 28, "groupCode": "H", "groupName": "Nozzle & Manway Sub-Assembly", "srNo": "4.8", "activity": "Weld Of Nozzle To Shell & Dished End (M1/N1/N2/N3/N4/N5/N6)", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 29, "groupCode": "H", "groupName": "Nozzle & Manway Sub-Assembly", "srNo": "4.8", "activity": "Weld Visual Of Nozzle To Shell & Dished End (M1/N1/N2/N3/N4/N5/N6)", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 30, "groupCode": "H", "groupName": "Nozzle & Manway Sub-Assembly", "srNo": "4.8", "activity": "Ultrasonic Test Of Nozzle To Shell & Dished End (M1/N1/N2/N3)", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 31, "groupCode": "I", "groupName": "Final Closure Gate", "srNo": "4.9", "activity": "Clearance Of Shell Before Closing Dished End Set Up", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 32, "groupCode": "J", "groupName": "Shell + Top Head (CS-1)", "srNo": "4.10", "activity": "Top Dished End To Shell Set Up (CS-1)", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 33, "groupCode": "J", "groupName": "Shell + Top Head (CS-1)", "srNo": "4.10", "activity": "Weld Circ Seam Of Top Dishend To Shell (CS-1)", "kind": "WORK", "defaultDepartment": "FABRICATION", "jointRef": "CS-1" },
+    { "seq": 34, "groupCode": "J", "groupName": "Shell + Top Head (CS-1)", "srNo": "4.10", "activity": "Weld Visual Of CS-1", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 35, "groupCode": "J", "groupName": "Shell + Top Head (CS-1)", "srNo": "4.10", "activity": "PAUT/TOFD Of CS-1", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 36, "groupCode": "K", "groupName": "Attachments Sub-Assembly", "srNo": "4.11", "activity": "Lifting Lug & Name Plate Bracket Set Up", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 37, "groupCode": "K", "groupName": "Attachments Sub-Assembly", "srNo": "4.12", "activity": "Weld Of Lifting Lug", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 38, "groupCode": "K", "groupName": "Attachments Sub-Assembly", "srNo": "4.12", "activity": "Weld Of Name Plate Bracket", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+
+    { "seq": 39, "groupCode": "L", "groupName": "Skirt Sub-Assembly", "srNo": "4.13", "activity": "Skirt Support Set Up", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+    { "seq": 40, "groupCode": "L", "groupName": "Skirt Sub-Assembly", "srNo": "4.14", "activity": "Weld Skirt Support", "kind": "WORK", "defaultDepartment": "FABRICATION" },
+
+    { "seq": 41, "groupCode": "M", "groupName": "Pre-PWHT Gate", "srNo": "4.15", "activity": "Clearance Before PWHT", "kind": "INSPECTION", "defaultDepartment": "QC" },
+
+    { "seq": 42, "groupCode": "N", "groupName": "Heat Treatment & Post-PWHT NDT", "srNo": "5.1", "activity": "Inspection Of Vessel Heat Treatment", "kind": "INSPECTION", "defaultDepartment": "HEAT_TREATMENT" },
+    { "seq": 43, "groupCode": "N", "groupName": "Heat Treatment & Post-PWHT NDT", "srNo": "5.2", "activity": "Weld Visual Of All Weld Joints", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 44, "groupCode": "N", "groupName": "Heat Treatment & Post-PWHT NDT", "srNo": "5.3", "activity": "MPT Of All Weld Joint", "kind": "WORK", "defaultDepartment": "QC" },
+    { "seq": 45, "groupCode": "N", "groupName": "Heat Treatment & Post-PWHT NDT", "srNo": "5.4", "activity": "RT Testing On All Butt Weld Joints (M1/N2/N3), PAUT/TOFD For L'Seam & C'Seam Joints (After PWHT)", "kind": "WORK", "defaultDepartment": "QC" },
+
+    { "seq": 46, "groupCode": "O", "groupName": "Hydrostatic Test", "srNo": "6.1", "activity": "Clearance For Hydrostatic Test", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 47, "groupCode": "O", "groupName": "Hydrostatic Test", "srNo": "6.2", "activity": "Before Hydrostatic Test Clearance", "kind": "WORK", "defaultDepartment": "QC" },
+    { "seq": 48, "groupCode": "O", "groupName": "Hydrostatic Test", "srNo": "6.3", "activity": "Hydrostatic Test", "kind": "WORK", "defaultDepartment": "QC" },
+    { "seq": 49, "groupCode": "O", "groupName": "Hydrostatic Test", "srNo": "6.4", "activity": "MPT / LPT All Weld Joints After Hydro Test", "kind": "WORK", "defaultDepartment": "QC" },
+
+    { "seq": 50, "groupCode": "P", "groupName": "Surface Treatment & Painting", "srNo": "7.1", "activity": "Cleaning & Surface Preparation", "kind": "WORK", "defaultDepartment": "SURFACE_PAINT" },
+    { "seq": 51, "groupCode": "P", "groupName": "Surface Treatment & Painting", "srNo": "7.2", "activity": "Painting", "kind": "WORK", "defaultDepartment": "SURFACE_PAINT" },
+
+    { "seq": 52, "groupCode": "Q", "groupName": "Final Inspection, Nameplate & MDR", "srNo": "8.1", "activity": "Verification Of Name Plate", "kind": "INSPECTION", "defaultDepartment": "QC" },
+    { "seq": 53, "groupCode": "Q", "groupName": "Final Inspection, Nameplate & MDR", "srNo": "8.2", "activity": "Attachment Of Name Plate To Name Plate Bracket", "kind": "WORK", "defaultDepartment": "QC" },
+    { "seq": 54, "groupCode": "Q", "groupName": "Final Inspection, Nameplate & MDR", "srNo": "9.1", "activity": "Documentation", "kind": "WORK", "defaultDepartment": "DOCUMENTATION" }
+  ]
+}
