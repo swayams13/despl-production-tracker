@@ -1,11 +1,17 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { StatusChip } from "./status-chip";
 import { STAGE_STATUS } from "./stage-status";
-import { recordMtcAction } from "@/app/actions/bom";
+import {
+  recordMtcAction,
+  createBomItemAction,
+  updateBomItemAction,
+  importBomItemsAction,
+  createBomRevisionAction,
+} from "@/app/actions/bom";
 import { createDrawingRevisionAction } from "@/app/actions/drawing";
 import {
   startComponentOperationAction,
@@ -42,10 +48,13 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
   const router = useRouter();
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(bom.groups[0] ? [bom.groups[0].name] : []));
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [addingItem, setAddingItem] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   // Derived from the current `bom` prop (not a stored snapshot) so a
   // router.refresh() after a mutation (e.g. Record MTC) reflects immediately
   // instead of showing the pre-mutation object.
-  const selected = selectedId != null ? bom.groups.flatMap((g) => g.items).find((it) => it.id === selectedId) ?? null : null;
+  const allItems = bom.groups.flatMap((g) => g.items);
+  const selected = selectedId != null ? allItems.find((it) => it.id === selectedId) ?? null : null;
 
   if (bom.equipments.length === 0) {
     return <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>;
@@ -59,7 +68,7 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
       return next;
     });
 
-  const totalItems = bom.groups.reduce((n, g) => n + g.items.length, 0);
+  const totalItems = allItems.length;
 
   return (
     <div className="grid-2">
@@ -79,6 +88,23 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
             </select>
           )}
         </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 16px 0" }}>
+          <button className="btn" onClick={() => { setEditingId(null); setAddingItem((s) => !s); }}>
+            {addingItem ? "Cancel add" : "+ Add item…"}
+          </button>
+          <ImportBomControl jobId={jobId} equipmentId={bom.equipmentId} />
+          <IssueBomRevisionControl jobId={jobId} equipmentId={bom.equipmentId} />
+        </div>
+        {addingItem && (
+          <div style={{ padding: "10px 16px" }}>
+            <BomItemForm
+              jobId={jobId}
+              equipmentId={bom.equipmentId}
+              items={allItems}
+              onDone={() => setAddingItem(false)}
+            />
+          </div>
+        )}
         <div>
           {totalItems === 0 ? (
             <p className="note" style={{ margin: "16px 0" }}>No BOM items recorded for this equipment.</p>
@@ -92,24 +118,42 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
                   {g.items.map((it) => {
                     const comp = it.components[0];
                     return (
-                      <div
-                        key={it.id}
-                        className={`bom-item${selected?.id === it.id ? " selected" : ""}`}
-                        onClick={() => setSelectedId(it.id)}
-                        role="button"
-                        tabIndex={0}
-                      >
-                        <span>
-                          {it.partName}
-                          <div className="mat">{it.material ?? "—"}{it.mtc[0] ? ` · ${it.mtc[0].heatNumber}` : ""}</div>
-                        </span>
-                        <span className="spine-mini">
-                          {(comp?.operations.length ? comp.operations.map((op) => op.status) : ["NOT_STARTED"]).map((status, k) => (
-                            <i key={k} style={{ background: STAGE_STATUS[mapOpStatus(status)].colorVar }} />
-                          ))}
-                        </span>
-                        <StatusChip status={comp?.displayStatus ?? "idle"} />
-                        <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); setSelectedId(it.id); }}>→</button>
+                      <div key={it.id}>
+                        <div
+                          className={`bom-item${selected?.id === it.id ? " selected" : ""}`}
+                          onClick={() => setSelectedId(it.id)}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <span>
+                            {it.partName}
+                            <div className="mat">{it.material ?? "—"}{it.mtc[0] ? ` · ${it.mtc[0].heatNumber}` : ""}</div>
+                          </span>
+                          <span className="spine-mini">
+                            {(comp?.operations.length ? comp.operations.map((op) => op.status) : ["NOT_STARTED"]).map((status, k) => (
+                              <i key={k} style={{ background: STAGE_STATUS[mapOpStatus(status)].colorVar }} />
+                            ))}
+                          </span>
+                          <StatusChip status={comp?.displayStatus ?? "idle"} />
+                          <button
+                            className="btn btn-ghost"
+                            onClick={(e) => { e.stopPropagation(); setAddingItem(false); setEditingId((s) => (s === it.id ? null : it.id)); }}
+                          >
+                            {editingId === it.id ? "×" : "Edit"}
+                          </button>
+                          <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); setSelectedId(it.id); }}>→</button>
+                        </div>
+                        {editingId === it.id && (
+                          <div style={{ padding: "10px 16px" }}>
+                            <BomItemForm
+                              jobId={jobId}
+                              equipmentId={bom.equipmentId}
+                              items={allItems}
+                              editing={it}
+                              onDone={() => setEditingId(null)}
+                            />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -209,6 +253,200 @@ function mapOpStatus(status: string): "idle" | "progress" | "submitted" | "compl
   if (status === "SUBMITTED") return "submitted";
   if (status === "IN_PROGRESS") return "progress";
   return "idle";
+}
+
+/**
+ * B4, Phase 4 — manual BOM authoring: one inline form used for both add
+ * (`editing` undefined) and edit (`editing` set), matching this panel's
+ * existing inline-form pattern (`ComponentDetail`'s MTC recorder,
+ * `GoverningDrawingSection`'s revision issuer). `parentBomItemId` is a plain
+ * select over the equipment's existing rows — cycle rejection is enforced
+ * server-side (`bom.service.ts`'s `assertParentValid`), this is just the
+ * affordance to pick one.
+ */
+function BomItemForm({
+  jobId,
+  equipmentId,
+  items,
+  editing,
+  onDone,
+}: {
+  jobId: number;
+  equipmentId: number;
+  items: BomItemRow[];
+  editing?: BomItemRow;
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [itemNo, setItemNo] = useState(editing ? String(editing.itemNo) : "");
+  const [partName, setPartName] = useState(editing?.partName ?? "");
+  const [sourceQty, setSourceQty] = useState(editing?.sourceQty ?? "");
+  const [material, setMaterial] = useState(editing?.material ?? "");
+  const [uom, setUom] = useState(editing?.uom ?? "");
+  const [parentBomItemId, setParentBomItemId] = useState(editing?.parentBomItemId != null ? String(editing.parentBomItemId) : "");
+
+  const save = () => {
+    if (!partName.trim()) return toast.error("Part name is required.");
+    if (!sourceQty.trim()) return toast.error("Quantity is required.");
+    const n = Number(itemNo);
+    if (!Number.isInteger(n) || n <= 0) return toast.error("Item no. must be a positive integer.");
+
+    start(async () => {
+      const r = editing
+        ? await updateBomItemAction(jobId, editing.id, {
+            itemNo: n,
+            partName: partName.trim(),
+            sourceQty: sourceQty.trim(),
+            material: material.trim() || undefined,
+            uom: uom.trim() || undefined,
+            parentBomItemId: parentBomItemId ? Number(parentBomItemId) : undefined,
+          })
+        : await createBomItemAction(jobId, {
+            equipmentId,
+            itemNo: n,
+            partName: partName.trim(),
+            sourceQty: sourceQty.trim(),
+            material: material.trim() || undefined,
+            uom: uom.trim() || undefined,
+            parentBomItemId: parentBomItemId ? Number(parentBomItemId) : undefined,
+          });
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success(editing ? "BOM item updated." : "BOM item added.");
+        onDone();
+        router.refresh();
+      }
+    });
+  };
+
+  const parentOptions = items.filter((it) => it.id !== editing?.id);
+
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <input className="ws-detail" type="number" min={1} placeholder="Item no." value={itemNo} onChange={(e) => setItemNo(e.target.value)} style={{ width: 90 }} />
+      <input className="ws-detail" placeholder="Part name" value={partName} onChange={(e) => setPartName(e.target.value)} style={{ flex: 1, minWidth: 140 }} autoFocus />
+      <input className="ws-detail" placeholder="Qty (e.g. 40 NOS)" value={sourceQty} onChange={(e) => setSourceQty(e.target.value)} style={{ width: 130 }} />
+      <input className="ws-detail" placeholder="Material (optional)" value={material} onChange={(e) => setMaterial(e.target.value)} style={{ width: 130 }} />
+      <input className="ws-detail" placeholder="UoM (optional)" value={uom} onChange={(e) => setUom(e.target.value)} style={{ width: 90 }} />
+      <select className="btn" value={parentBomItemId} onChange={(e) => setParentBomItemId(e.target.value)} aria-label="Parent BOM item">
+        <option value="">No parent (top level)</option>
+        {parentOptions.map((it) => <option key={it.id} value={it.id}>{it.itemNo} — {it.partName}</option>)}
+      </select>
+      <button className="btn btn-accent" disabled={pending} onClick={save}>Save</button>
+      <button className="btn" disabled={pending} onClick={onDone}>Cancel</button>
+    </div>
+  );
+}
+
+/**
+ * B4, Phase 4 — bulk CSV/XLSX import. Parses the file in the browser with
+ * `xlsx` (already a dependency, used server-side by the QCP export route —
+ * no new dependency added here) into plain row objects, then hands them to
+ * `importBomItemsAction`. Reports both the created count and any named
+ * per-row failures — never a silent success toast when some rows failed
+ * (functional-first rule #3).
+ */
+function ImportBomControl({ jobId, equipmentId }: { jobId: number; equipmentId: number }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const onFile = async (file: File) => {
+    setPending(true);
+    try {
+      const XLSX = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: undefined });
+      if (rows.length === 0) {
+        toast.error("The file has no rows to import.");
+        return;
+      }
+      const r = await importBomItemsAction(jobId, equipmentId, rows);
+      if (!r.ok) {
+        toast.error(r.message);
+        return;
+      }
+      if (r.failures.length === 0) {
+        toast.success(`Imported ${r.createdCount} item${r.createdCount === 1 ? "" : "s"}.`);
+      } else {
+        toast.error(
+          `Imported ${r.createdCount} item${r.createdCount === 1 ? "" : "s"}; ${r.failures.length} row${r.failures.length === 1 ? "" : "s"} failed: ` +
+            r.failures.map((f) => `row ${f.row} (${f.error})`).join("; "),
+        );
+      }
+      router.refresh();
+    } catch {
+      toast.error("Could not read that file. Use a .csv or .xlsx export.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,.xlsx,.xls"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void onFile(file);
+        }}
+      />
+      <button className="btn" disabled={pending} onClick={() => inputRef.current?.click()}>
+        {pending ? "Importing…" : "Import…"}
+      </button>
+    </>
+  );
+}
+
+/**
+ * B4, Phase 4 — issue a new `BomRevision` for the current equipment (create
+ * -path B3 deferred). `BomRevisionStatus` is DRAFT/RELEASED only — no history
+ * list rendered here (unlike `GoverningDrawingSection`'s per-component
+ * revision history), since `BomTree` doesn't currently project revision rows
+ * to the UI; this is the minimal authoring affordance the brief calls for.
+ */
+function IssueBomRevisionControl({ jobId, equipmentId }: { jobId: number; equipmentId: number }) {
+  const router = useRouter();
+  const [issuing, setIssuing] = useState(false);
+  const [revisionNo, setRevisionNo] = useState("");
+  const [status, setStatus] = useState<"DRAFT" | "RELEASED">("RELEASED");
+  const [pending, start] = useTransition();
+
+  const issue = () => {
+    const n = Number(revisionNo);
+    if (!Number.isInteger(n) || n <= 0) return toast.error("Revision number must be a positive integer.");
+    start(async () => {
+      const r = await createBomRevisionAction(jobId, equipmentId, n, status);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("BOM revision issued.");
+        setIssuing(false);
+        setRevisionNo("");
+        router.refresh();
+      }
+    });
+  };
+
+  if (!issuing) return <button className="btn" onClick={() => setIssuing(true)}>Issue BOM revision…</button>;
+
+  return (
+    <>
+      <input className="ws-detail" placeholder="Revision no." value={revisionNo} onChange={(e) => setRevisionNo(e.target.value)} style={{ width: 100 }} autoFocus />
+      <select className="btn" value={status} onChange={(e) => setStatus(e.target.value as typeof status)} aria-label="Revision status">
+        <option value="RELEASED">Released</option>
+        <option value="DRAFT">Draft</option>
+      </select>
+      <button className="btn btn-accent" disabled={pending} onClick={issue}>Save</button>
+      <button className="btn" disabled={pending} onClick={() => setIssuing(false)}>Cancel</button>
+    </>
+  );
 }
 
 function ComponentDetail({

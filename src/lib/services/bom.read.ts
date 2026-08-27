@@ -117,6 +117,8 @@ export interface BomItemRow {
   /** Parsed numeric quantity (B1); null when `sourceQty` didn't match the "N UOM" shape. */
   qtyPer: number | null;
   uom: string | null;
+  /** B2/B4, Phase 4 — multi-level BOM tree parent; null for a top-level row. */
+  parentBomItemId: number | null;
   mtc: BomMtc[];
   procurement: BomProcurementSummary;
   components: BomComponentSummary[];
@@ -526,6 +528,7 @@ export async function loadBomTree(
         sourceQty: it.sourceQty,
         qtyPer: it.qtyPer?.toNumber() ?? null,
         uom: it.uom,
+        parentBomItemId: it.parentBomItemId,
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING", componentId: m.componentId })),
         procurement: summarizeProcurement(it.procurementEvents),
         components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),

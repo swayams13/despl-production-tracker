@@ -728,3 +728,83 @@ export const updateJobDetailsSchema = z
   })
   .strict();
 export type UpdateJobDetailsInput = z.infer<typeof updateJobDetailsSchema>;
+
+/**
+ * Manual BOM authoring (B4, Phase 4) — first direct writer of `BomItem`
+ * besides `copyBom`. `parentBomItemId`'s cycle check needs a DB read (walking
+ * the equipment's existing parent chain) and so lives in `bom.service.ts`,
+ * not here — this schema only validates shape.
+ */
+export const createBomItemSchema = z
+  .object({
+    equipmentId: id,
+    itemNo: z.number().int().positive(),
+    blockNo: z.number().int().positive().optional(),
+    partName: z.string().trim().min(1, "Part name is required"),
+    description: z.string().trim().min(1).optional(),
+    material: z.string().trim().min(1).optional(),
+    /** Raw source value, e.g. "40 NOS." — kept verbatim, same as the CSV import path (`BomItem.sourceQty`). */
+    sourceQty: z.string().trim().min(1, "Quantity is required"),
+    qtyPer: z.number().positive().optional(),
+    uom: z.string().trim().min(1).optional(),
+    unit: z.string().trim().min(1).optional(),
+    componentTypeId: id.optional(),
+    remarks: z.string().trim().min(1).optional(),
+    parentBomItemId: id.optional(),
+    bomRevisionId: id.optional(),
+  })
+  .strict();
+export type CreateBomItemInput = z.infer<typeof createBomItemSchema>;
+
+/** Edit an existing `BomItem` — every field optional; `equipmentId` is not
+ * editable here (moving a row to a different equipment isn't "editing," see
+ * `updateJobDetailsSchema`'s equivalent exclusion of structural fields). */
+export const updateBomItemSchema = createBomItemSchema.omit({ equipmentId: true }).partial().strict();
+export type UpdateBomItemInput = z.infer<typeof updateBomItemSchema>;
+
+/** One row of a bulk BOM import (CSV/XLSX). Validated per-row in
+ * `bom.service.ts`'s `importBomItems` so one malformed row is reported by
+ * name rather than aborting or silently dropping the whole batch.
+ * `z.coerce` on the numeric fields — spreadsheet cells commonly arrive as
+ * strings even when they read as numbers. */
+export const bomImportRowSchema = z
+  .object({
+    itemNo: z.coerce.number().int().positive(),
+    blockNo: z.coerce.number().int().positive().optional(),
+    partName: z.string().trim().min(1, "Part name is required"),
+    description: z.string().trim().min(1).optional(),
+    material: z.string().trim().min(1).optional(),
+    sourceQty: z.coerce.string().trim().min(1, "Quantity is required"),
+    qtyPer: z.coerce.number().positive().optional(),
+    uom: z.string().trim().min(1).optional(),
+    unit: z.string().trim().min(1).optional(),
+    remarks: z.string().trim().min(1).optional(),
+    parentBomItemId: z.coerce.number().int().positive().optional(),
+  })
+  .strict();
+export type BomImportRow = z.infer<typeof bomImportRowSchema>;
+
+export const importBomItemsSchema = z
+  .object({
+    equipmentId: id,
+    bomRevisionId: id.optional(),
+    /** Raw, per-row validation happens in the service (`bomImportRowSchema.safeParse`
+     * per row) — kept as `z.unknown()` here so one malformed row doesn't fail this
+     * top-level parse and silently discard every other (valid) row in the batch. */
+    rows: z.array(z.unknown()).min(1, "At least one row is required"),
+  })
+  .strict();
+export type ImportBomItemsInput = z.infer<typeof importBomItemsSchema>;
+
+/** Issue a new `BomRevision` for an equipment (B4, Phase 4 — the create-path
+ * B3 deferred). `BomRevisionStatus` is DRAFT/RELEASED only — no SUPERSEDED
+ * concept — see `bom.service.ts`'s `createBomRevision` for how supersession
+ * is handled with that narrower enum. */
+export const createBomRevisionSchema = z
+  .object({
+    equipmentId: id,
+    revisionNo: z.number().int().positive(),
+    status: z.enum(["DRAFT", "RELEASED"]),
+  })
+  .strict();
+export type CreateBomRevisionInput = z.infer<typeof createBomRevisionSchema>;
