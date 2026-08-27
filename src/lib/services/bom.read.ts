@@ -53,6 +53,18 @@ export interface BomMtc {
   heatNumber: string;
   mtcRef: string | null;
   pmiResult: PmiResult;
+  componentId: number | null;
+}
+
+/** B8, Phase 4: one row of a heat/component trace — either direction. */
+export interface MtcTraceRow {
+  id: number;
+  heatNumber: string;
+  mtcRef: string | null;
+  pmiResult: PmiResult;
+  qtyIssued: number | null;
+  componentId: number | null;
+  componentTag: string | null;
 }
 
 /**
@@ -316,7 +328,7 @@ export async function loadBomTree(
         uom: true,
         parentBomItemId: true,
         componentType: { select: { name: true } },
-        materialIdentifications: { select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true } },
+        materialIdentifications: { select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true, componentId: true } },
         procurementEvents: {
           select: { id: true, type: true, qty: true, refNo: true, at: true },
         },
@@ -469,7 +481,7 @@ export async function loadBomTree(
         sourceQty: it.sourceQty,
         qtyPer: it.qtyPer?.toNumber() ?? null,
         uom: it.uom,
-        mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING" })),
+        mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING", componentId: m.componentId })),
         procurement: summarizeProcurement(it.procurementEvents),
         components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),
         requiredQty: required?.toNumber() ?? null,
@@ -587,4 +599,66 @@ export async function shortage(actor: Actor, bomItemId: number): Promise<Decimal
   const [required, available] = await Promise.all([requiredQty(actor, bomItemId), availableQty(actor, bomItemId)]);
   if (available == null) return null;
   return required.minus(available);
+}
+
+function toMtcTraceRow(m: {
+  id: number;
+  heatNumber: string;
+  mtcRef: string | null;
+  pmiResult: PmiResult | null;
+  qtyIssued: Decimal | null;
+  componentId: number | null;
+  component: { tag: string } | null;
+}): MtcTraceRow {
+  return {
+    id: m.id,
+    heatNumber: m.heatNumber,
+    mtcRef: m.mtcRef,
+    pmiResult: m.pmiResult ?? "PENDING",
+    qtyIssued: m.qtyIssued?.toNumber() ?? null,
+    componentId: m.componentId,
+    componentTag: m.component?.tag ?? null,
+  };
+}
+
+/**
+ * B8, Phase 4 — forward trace: "one heat traces forward to every serial it
+ * entered" = every `MaterialIdentification` row sharing `heatNumber`, tenant
+ * -scoped through `bomItem.equipment.job.tenantId` (every row here always
+ * carries a `bomItemId`, so that anchor alone is enough — no need to touch
+ * the optional `componentId` chain for scoping).
+ */
+export async function heatTrace(actor: Actor, heatNumber: string): Promise<MtcTraceRow[]> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const rows = await tx.materialIdentification.findMany({
+      where: { heatNumber, bomItem: { equipment: { job: { tenantId: actor.tenantId } } } },
+      select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true, qtyIssued: true, componentId: true, component: { select: { tag: true } } },
+      orderBy: { id: "asc" },
+    });
+    return rows.map(toMtcTraceRow);
+  });
+}
+
+/**
+ * B8, Phase 4 — backward trace: "one serial traces back to every heat in
+ * it" = every `MaterialIdentification` row for a given `componentId`. Tenant
+ * -anchored via the component's own chain (`equipment.job.tenantId`), same
+ * pattern as `recordMtc`'s componentId path.
+ */
+export async function componentHeats(actor: Actor, componentId: number): Promise<MtcTraceRow[]> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const component = await tx.component.findFirst({
+      where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
+      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+    });
+    if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+    assertClientScope(actor, component.equipment.job.clientId);
+
+    const rows = await tx.materialIdentification.findMany({
+      where: { componentId },
+      select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true, qtyIssued: true, componentId: true, component: { select: { tag: true } } },
+      orderBy: { id: "asc" },
+    });
+    return rows.map(toMtcTraceRow);
+  });
 }

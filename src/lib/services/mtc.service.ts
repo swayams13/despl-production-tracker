@@ -16,7 +16,7 @@ import type { MaterialIdentification } from "@/generated/prisma/client";
  * state, not a traceability field with no such requirement in the spec).
  */
 export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<MaterialIdentification> {
-  const { bomItemId, heatNumber, mtcRef, pmiResult } = recordMtcSchema.parse(input);
+  const { bomItemId, componentId, heatNumber, mtcRef, pmiResult, qtyIssued } = recordMtcSchema.parse(input);
   assertNotClientUser(actor);
   requireRole(actor, ROLES.QC);
 
@@ -26,16 +26,35 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
     // and was doing all the work here, which is none for the common internal
     // case. Anchor the id lookup itself through `equipment.job`, which IS
     // tenant-scoped — same pattern as `lockProcessPlanForUpdate` (_shared.ts).
-    const bomItem = await tx.bomItem.findFirst({
-      where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
-      select: { equipment: { select: { job: { select: { clientId: true } } } } },
-    });
-    if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
-    assertClientScope(actor, bomItem.equipment.job.clientId);
+    //
+    // B8: when `componentId` is supplied, anchor the tenant check through the
+    // component's own chain (`equipment.job.tenantId`) instead — same shape,
+    // different join root. `bomItemId` stays required regardless (a heat
+    // record still wants to know which part this is; `Component.bomItemId`
+    // is itself nullable, so it can't always stand in for it), but its own
+    // tenant lookup is redundant once the component anchor already proved
+    // the row belongs to this tenant.
+    let clientId: number | null;
+    if (componentId != null) {
+      const component = await tx.component.findFirst({
+        where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
+        select: { equipment: { select: { job: { select: { clientId: true } } } } },
+      });
+      if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+      clientId = component.equipment.job.clientId;
+    } else {
+      const bomItem = await tx.bomItem.findFirst({
+        where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
+        select: { equipment: { select: { job: { select: { clientId: true } } } } },
+      });
+      if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
+      clientId = bomItem.equipment.job.clientId;
+    }
+    assertClientScope(actor, clientId);
 
     return audited(tx, actor, async () => {
       const record = await tx.materialIdentification.create({
-        data: { bomItemId, heatNumber, mtcRef: mtcRef ?? null, pmiResult },
+        data: { bomItemId, componentId: componentId ?? null, heatNumber, mtcRef: mtcRef ?? null, pmiResult, qtyIssued: qtyIssued ?? null },
       });
       return {
         result: record,
@@ -43,9 +62,9 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
           action: "mtc.record",
           entityType: "MaterialIdentification",
           entityId: record.id,
-          after: { bomItemId, heatNumber, mtcRef: mtcRef ?? null, pmiResult },
+          after: { bomItemId, componentId: componentId ?? null, heatNumber, mtcRef: mtcRef ?? null, pmiResult, qtyIssued: qtyIssued ?? null },
           eventType: "MtcRecorded",
-          eventPayload: { bomItemId, heatNumber, pmiResult },
+          eventPayload: { bomItemId, componentId: componentId ?? null, heatNumber, pmiResult },
         },
       };
     });

@@ -186,9 +186,14 @@ export type RecordQcpExecutionInput = z.infer<typeof recordQcpExecutionSchema>;
 export const recordMtcSchema = z
   .object({
     bomItemId: id,
+    /** B8, Phase 4: which serial this heat entered — optional, since
+     * equipment with no per-unit `Component` fan-out has none to attach to. */
+    componentId: id.optional(),
     heatNumber: z.string().trim().min(1, "Heat number is required"),
     mtcRef: z.string().trim().optional(),
     pmiResult: z.enum(["NA", "PENDING", "ACCEPT", "REJECT"]),
+    /** B8, Phase 4: how much of this heat went into this component. */
+    qtyIssued: z.number().positive().optional(),
   })
   .strict();
 export type RecordMtcInput = z.infer<typeof recordMtcSchema>;

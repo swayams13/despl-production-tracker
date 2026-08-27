@@ -234,7 +234,7 @@ function ComponentDetail({
   const submitMtc = () => {
     if (!heatNumber.trim()) return toast.error("Heat number is required.");
     start(async () => {
-      const r = await recordMtcAction(jobId, item.id, heatNumber.trim(), pmiResult, mtcRef.trim() || undefined);
+      const r = await recordMtcAction(jobId, item.id, heatNumber.trim(), pmiResult, mtcRef.trim() || undefined, comp?.id);
       if (!r.ok) toast.error(r.message);
       else {
         toast.success("MTC recorded.");
@@ -297,6 +297,13 @@ function ComponentDetail({
             </span>
           ) : (
             <span style={{ color: "var(--muted)" }}>Not recorded</span>
+          )}
+          {/* B8, Phase 4: heat traces to a specific serial once componentId is set —
+              distinct from the equipment-shared BomItem grain everything else here reads at. */}
+          {mtc?.componentId != null && (
+            <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 11 }}>
+              Traces to {comp && comp.id === mtc.componentId ? comp.tag : `component #${mtc.componentId}`}
+            </span>
           )}
         </dd>
       </div>

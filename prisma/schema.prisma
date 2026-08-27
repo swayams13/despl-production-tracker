@@ -1019,15 +1019,27 @@ model ProcurementEvent {
 /// Real traceability: heat number + MTC. Replaces the misused
 /// "Material Identification" CSV column, which held a sourcing type (C8).
 model MaterialIdentification {
-  id         Int        @id @default(autoincrement())
-  bomItemId  Int        @map("bom_item_id")
-  heatNumber String     @map("heat_number")
-  mtcRef     String?    @map("mtc_ref")
-  pmiResult  PmiResult?
+  id          Int        @id @default(autoincrement())
+  bomItemId   Int        @map("bom_item_id")
+  /// B8, Phase 4: nullable during transition — equipment whose `Component.unitId`
+  /// is null (BOM-item-linked data with no per-serial fan-out) has no single
+  /// component to attach a heat record to and stays at `bomItemId` grain; a
+  /// serialised job's per-unit `Component` rows make this meaningful. Lets one
+  /// heat record trace forward to the actual serial it entered, not just the
+  /// BOM item shared across every unit of an equipment.
+  componentId Int?       @map("component_id")
+  heatNumber  String     @map("heat_number")
+  mtcRef      String?    @map("mtc_ref")
+  pmiResult   PmiResult?
+  /// B8, Phase 4: how much of this heat went into this component — a
+  /// traceability fact, distinct from `StockTxn`'s ledger-level quantity.
+  qtyIssued   Decimal?   @db.Decimal(12, 3) @map("qty_issued")
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  component Component? @relation(fields: [componentId], references: [id], onDelete: SetNull)
 
   @@index([bomItemId])
+  @@index([componentId])
   @@index([heatNumber])
   @@map("material_identifications")
 }
@@ -1163,16 +1175,17 @@ model Component {
   /// backfill migration later.
   parentComponentId Int?   @map("parent_component_id")
 
-  equipment     Equipment             @relation(fields: [equipmentId], references: [id])
-  unit          Unit?                 @relation(fields: [unitId], references: [id])
-  bomItem       BomItem?              @relation(fields: [bomItemId], references: [id])
-  componentType ComponentTypeRef      @relation(fields: [componentTypeId], references: [id])
-  routeVersion  RouteTemplateVersion? @relation(fields: [routeVersionId], references: [id])
-  parent        Component?            @relation("ComponentHierarchy", fields: [parentComponentId], references: [id])
-  children      Component[]           @relation("ComponentHierarchy")
-  operations    ComponentOperation[]
-  weldJoints    WeldJoint[]
-  stockTxns     StockTxn[]
+  equipment               Equipment                @relation(fields: [equipmentId], references: [id])
+  unit                    Unit?                    @relation(fields: [unitId], references: [id])
+  bomItem                 BomItem?                 @relation(fields: [bomItemId], references: [id])
+  componentType           ComponentTypeRef         @relation(fields: [componentTypeId], references: [id])
+  routeVersion            RouteTemplateVersion?    @relation(fields: [routeVersionId], references: [id])
+  parent                  Component?               @relation("ComponentHierarchy", fields: [parentComponentId], references: [id])
+  children                Component[]              @relation("ComponentHierarchy")
+  operations              ComponentOperation[]
+  weldJoints              WeldJoint[]
+  stockTxns               StockTxn[]
+  materialIdentifications MaterialIdentification[]
 
   /// Component grain follows the serial (unitId), not the equipment — a
   /// serialised job's components carry a plain tag ("SHELL", not

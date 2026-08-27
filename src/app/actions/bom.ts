@@ -11,9 +11,11 @@ export async function recordMtcAction(
   heatNumber: string,
   pmiResult: "NA" | "PENDING" | "ACCEPT" | "REJECT",
   mtcRef?: string,
+  componentId?: number,
+  qtyIssued?: number,
 ): Promise<ActionResult> {
   try {
-    await recordMtc(await requireActor(), { bomItemId, heatNumber, mtcRef, pmiResult });
+    await recordMtc(await requireActor(), { bomItemId, heatNumber, mtcRef, pmiResult, componentId, qtyIssued });
     revalidatePath(`/jobs/${jobId}`);
     return { ok: true };
   } catch (e) {
