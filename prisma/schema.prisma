@@ -102,6 +102,15 @@ enum TemplateStatus {
   ARCHIVED
 }
 
+/// BomRevision (Phase 4, B3): DRAFT is unused by anything in this dispatch —
+/// the backfill script only ever creates RELEASED rows (invariant #9: a new
+/// revision is a new row, never an edit). DRAFT exists for the later BOM
+/// authoring dispatch, which will create/edit a revision before releasing it.
+enum BomRevisionStatus {
+  DRAFT
+  RELEASED
+}
+
 enum ProcurementStatus {
   NOT_STARTED
   INDENT_RAISED
@@ -734,6 +743,7 @@ model Equipment {
   equipmentType EquipmentTypeRef?  @relation(fields: [equipmentTypeId], references: [id])
   units         Unit[]
   bomItems      BomItem[]
+  bomRevisions  BomRevision[]
   components    Component[]
   scheduleRuns  ScheduleRun[]
   snapshots     ProgressSnapshot[]
@@ -889,6 +899,29 @@ model ProcessPlan {
 
 // ── BOM, components and traceability ────────────────────────────────────
 
+/// One equipment can have many revisions over time (invariant #9's versioning
+/// convention — same shape as TemplateVersion/AssemblyTemplateVersion: a new
+/// revision is a new row, never an edit to a released one). Phase 4, B3: this
+/// dispatch only ever creates the one auto-backfilled "Revision 1, RELEASED"
+/// row per equipment (scripts/backfill-bom-revision.ts) — the write path for
+/// authoring a new revision belongs to a later, separately-dispatched task.
+model BomRevision {
+  id         Int                @id @default(autoincrement())
+  equipmentId Int               @map("equipment_id")
+  revisionNo Int                @map("revision_no")
+  status     BomRevisionStatus  @default(DRAFT)
+  releasedAt DateTime?          @map("released_at")
+  createdBy  Int?               @map("created_by")
+  createdAt  DateTime           @default(now()) @map("created_at")
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id])
+  bomItems  BomItem[]
+
+  @@unique([equipmentId, revisionNo])
+  @@index([equipmentId])
+  @@map("bom_revisions")
+}
+
 model BomItem {
   id              Int      @id @default(autoincrement())
   equipmentId     Int      @map("equipment_id")
@@ -915,9 +948,17 @@ model BomItem {
   /// import, which carries no parent signal. First writer is the (later,
   /// separately-dispatched) BOM authoring UI.
   parentBomItemId Int?     @map("parent_bom_item_id")
+  /// B3, Phase 4: which BomRevision this row belongs to. Nullable during
+  /// migration only — scripts/backfill-bom-revision.ts sets every existing
+  /// row onto its equipment's auto-created "Revision 1, RELEASED" row
+  /// immediately after the column is added, since the seed data has always
+  /// been the de-facto released BOM. A fresh import path setting this at
+  /// write time is a later dispatch's job.
+  bomRevisionId   Int?     @map("bom_revision_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   componentType           ComponentTypeRef?        @relation(fields: [componentTypeId], references: [id])
+  bomRevision             BomRevision?             @relation(fields: [bomRevisionId], references: [id])
   procurement             Procurement?
   materialIdentifications MaterialIdentification[]
   components              Component[]
@@ -928,6 +969,7 @@ model BomItem {
   @@index([equipmentId])
   @@index([componentTypeId])
   @@index([parentBomItemId])
+  @@index([bomRevisionId])
   @@map("bom_items")
 }
 

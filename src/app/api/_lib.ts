@@ -41,6 +41,8 @@ const STATUS: Record<ErrorCode, number> = {
   STALE_WRITE: 409,
   OVERRIDE_NOT_SUPPORTED_WITH_UNITS: 409,
   COMPONENT_OPS_INCOMPLETE: 409,
+  // Malformed DB data (bad direct write), not a normal client refusal.
+  BOM_CYCLE_DETECTED: 500,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

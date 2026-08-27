@@ -1,8 +1,11 @@
+import type { Decimal } from "@prisma/client/runtime/library";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
 import { projectComponentRoute, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
+import { explodeBomItem, type ExplodableBomItem } from "./bom-explosion";
 
 /**
  * Job detail — BOM & Components tab (§4.3, §9.6).
@@ -395,5 +398,40 @@ export async function loadBomTree(
       welders,
       delayCategories,
     };
+  });
+}
+
+/**
+ * B3, Phase 4: the required-quantity wrapper — loads the target `BomItem`'s
+ * whole equipment tree once (thin DB call), then hands off to the pure
+ * `explodeBomItem` for the actual walk-and-multiply. Nothing calls this yet;
+ * a later dispatch (stock/shortage) is the first real caller.
+ *
+ * `unitCount` is the equipment's `Unit` row count (invariant: never a typed
+ * literal) — e.g. 9 for DESPL-320's serials, derived from the DB, not passed
+ * in.
+ */
+export async function requiredQty(actor: Actor, bomItemId: number): Promise<Decimal> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const bomItem = await tx.bomItem.findUnique({
+      where: { id: bomItemId },
+      select: { equipmentId: true, equipment: { select: { job: { select: { clientId: true } } } } },
+    });
+    if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { bomItemId });
+    assertClientScope(actor, bomItem.equipment.job.clientId);
+
+    const [unitCount, siblingItems] = await Promise.all([
+      tx.unit.count({ where: { equipmentId: bomItem.equipmentId } }),
+      tx.bomItem.findMany({
+        where: { equipmentId: bomItem.equipmentId },
+        select: { id: true, qtyPer: true, parentBomItemId: true },
+      }),
+    ]);
+
+    const itemsById = new Map<number, ExplodableBomItem>(siblingItems.map((it) => [it.id, it]));
+    const target = itemsById.get(bomItemId);
+    if (!target) throw new AppError(ERROR_CODES.NOT_FOUND, { bomItemId });
+
+    return explodeBomItem(target, unitCount, itemsById);
   });
 }

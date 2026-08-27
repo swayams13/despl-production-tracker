@@ -215,3 +215,97 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("BomItem.parentBomItemId (DB)", async
     expect(parentWithChildren.children.map((c) => c.id)).toEqual([child.id]);
   });
 });
+
+/**
+ * B3, Phase 4: `requiredQty`'s DB-loading wrapper against a real (fixture)
+ * equipment — confirms it produces the same number as calling
+ * `explodeBomItem` by hand on the loaded rows, i.e. the wrapper's Prisma load
+ * doesn't lose or misassemble anything the pure function needs.
+ *
+ * // ponytail: no cleanup — disposable test DB, per-run org code.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("requiredQty (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { requiredQty } = await import("./bom.read");
+  const { explodeBomItem } = await import("./bom-explosion");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("matches explodeBomItem called by hand on the same rows, for a 2-level tree across multiple units", async () => {
+    const org = await owner.organization.create({ data: { code: `TEST-REQQTY-${Date.now()}`, name: "requiredQty test" } });
+    const client = await owner.client.create({ data: { tenantId: org.id, name: "ACME", code: `ACME-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId: org.id, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId: org.id, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId: org.id,
+        publicId: `pub-reqqty-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DE-REQQTY-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
+    await owner.unit.createMany({
+      data: [
+        { equipmentId: equipment.id, serialNo: "SR01" },
+        { equipmentId: equipment.id, serialNo: "SR02" },
+        { equipmentId: equipment.id, serialNo: "SR03" },
+      ],
+    });
+
+    const top = await owner.bomItem.create({
+      data: { equipmentId: equipment.id, itemNo: 1, partName: "Skirt Assembly", sourceQty: "1", qtyPer: 1 },
+    });
+    const nozzle = await owner.bomItem.create({
+      data: {
+        equipmentId: equipment.id,
+        itemNo: 2,
+        partName: "Nozzle Assembly",
+        sourceQty: "2",
+        qtyPer: 2,
+        parentBomItemId: top.id,
+      },
+    });
+    const bolt = await owner.bomItem.create({
+      data: {
+        equipmentId: equipment.id,
+        itemNo: 3,
+        partName: "Nozzle Bolt",
+        sourceQty: "4",
+        qtyPer: 4,
+        parentBomItemId: nozzle.id,
+      },
+    });
+
+    const actor: Actor = {
+      userId: 1,
+      tenantId: org.id,
+      clientId: null,
+      name: "Test Actor",
+      email: "actor@test.local",
+      roles: [ROLES.ADMIN],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+
+    const result = await requiredQty(actor, bolt.id);
+
+    const rows = await owner.bomItem.findMany({
+      where: { equipmentId: equipment.id },
+      select: { id: true, qtyPer: true, parentBomItemId: true },
+    });
+    const itemsById = new Map(rows.map((r) => [r.id, r]));
+    const expected = explodeBomItem(itemsById.get(bolt.id)!, 3, itemsById);
+
+    expect(result.toNumber()).toBe(expected.toNumber());
+    expect(result.toNumber()).toBe(4 * 2 * 1 * 3);
+  });
+});

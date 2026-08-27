@@ -81,6 +81,8 @@ export const ERROR_CODES = {
   OVERRIDE_NOT_SUPPORTED_WITH_UNITS: "OVERRIDE_NOT_SUPPORTED_WITH_UNITS",
   /** submitProcess: a mapped ComponentOperation or AssemblyStep on this (process, unit) is not yet COMPLETE (Phase 3, R2). */
   COMPONENT_OPS_INCOMPLETE: "COMPONENT_OPS_INCOMPLETE",
+  /** explodeBomItem: a malformed parentBomItemId chain cycles back on itself — a defensive guard against a bad direct DB write, not a normal user-facing refusal. */
+  BOM_CYCLE_DETECTED: "BOM_CYCLE_DETECTED",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -137,6 +139,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This job already has per-unit schedules. A duration override at job level would replace them and cannot be applied here.",
   COMPONENT_OPS_INCOMPLETE:
     "One or more fabrication or assembly operations backing this process are not yet complete on this unit.",
+  BOM_CYCLE_DETECTED: "This BOM item's parent chain is malformed (a cycle). Contact an administrator.",
 };
 
 /**
