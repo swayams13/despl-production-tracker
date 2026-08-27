@@ -171,6 +171,15 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     await expectCode(scrapStock(intruder, { stockLotId: lot.id, qty: 1 }), ERROR_CODES.NOT_FOUND);
   });
 
+  it("cross-tenant: requiredQty/availableQty/shortage all refuse a bomItemId belonging to another tenant", async () => {
+    const { bomItem } = await fixture();
+    const { tenantId: otherTenantId, user: otherUser } = await fixture();
+    const intruder: Actor = { ...actorBase(otherTenantId, otherUser.id), roles: [ROLES.PRODUCTION_HEAD] };
+    await expectCode(requiredQty(intruder, bomItem.id), ERROR_CODES.NOT_FOUND);
+    await expectCode(availableQty(intruder, bomItem.id), ERROR_CODES.NOT_FOUND);
+    await expectCode(shortage(intruder, bomItem.id), ERROR_CODES.NOT_FOUND);
+  });
+
   it("SEAM: a BomItem with zero StockLot/StockTxn rows reports null, never 0", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };

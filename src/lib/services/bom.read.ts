@@ -516,8 +516,8 @@ export async function loadBomTree(
  */
 export async function requiredQty(actor: Actor, bomItemId: number): Promise<Decimal> {
   return withTenant(actor.tenantId, async (tx) => {
-    const bomItem = await tx.bomItem.findUnique({
-      where: { id: bomItemId },
+    const bomItem = await tx.bomItem.findFirst({
+      where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
       select: { equipmentId: true, equipment: { select: { job: { select: { clientId: true } } } } },
     });
     if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { bomItemId });
