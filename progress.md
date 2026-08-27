@@ -83,6 +83,19 @@ specifically, since the DB-gated automated test already exercises that exact cod
 Nothing from R1–R4 was deferred. R0 (the schema gap) was folded in rather than deferred, per §0's
 "say so before implementing" rule for anything that turns out materially different from the brief.
 
+### Follow-up, same session — unrelated loose end committed separately (`613ce68`)
+
+Found uncommitted, pre-existing (not from this session's work) changes on the tree while wrapping
+up: `createUserSchema` already had `mustChangePassword` (default `true`, unused); `admin.service.ts`'s
+`createUser` now threads it through explicitly. `scripts/bootstrap-admin.ts` opts the admin account
+into the forced-change flow; new `scripts/create-department-accounts.ts` (dated 26 Aug in its own
+comment — the user's ask that day was to replace the single `ba@despl.local` login with 4
+department-scoped accounts: fabrication/production SUPERVISOR, QC, procurement) opts out for
+immediate team access. Wired `pnpm db:create-dept-accounts` in `package.json` (was documented in the
+script's own header comment but never actually added). `pnpm typecheck`/`lint` clean. Committed as
+its own commit, separate from the Phase 3 rollup work above — **not run against any environment yet**,
+real accounts still need to be created by someone actually invoking the script.
+
 ## Session — Phase 2 (Assembly tracking) implemented per the approved plan, 26–27 Aug 2026
 
 **Status: A1/A3 (schema), A2 (template authored + materialised for DESPL-320), A5 (welder CRUD),
