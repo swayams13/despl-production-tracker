@@ -142,6 +142,22 @@ describe.skipIf(!RUN_DB)("mtc.service (DB-backed)", async () => {
     );
   });
 
+  it("cross-tenant: a same-tenant componentId cannot legitimize a bomItemId from a different tenant (NOT_FOUND) — task review round 2", async () => {
+    const { componentA } = await fixture();
+    const otherFixture = await fixture();
+    const attacker: Actor = { ...actorBase(otherFixture.tenantId, otherFixture.user.id), roles: [ROLES.QC] };
+    // attacker's own componentId (their tenant) + victim's bomItemId (a different tenant, guessed/enumerated).
+    await expectCode(
+      recordMtc(attacker, {
+        bomItemId: componentA.bomItemId ?? -1,
+        componentId: otherFixture.componentA.id,
+        heatNumber: "H-FORGED",
+        pmiResult: "ACCEPT",
+      }),
+      ERROR_CODES.NOT_FOUND,
+    );
+  });
+
   it("heatTrace / componentHeats: one heat recorded against two components traces forward and back", async () => {
     const { tenantId, bomItem, componentA, componentB, user } = await fixture();
     const qc: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.QC] };

@@ -27,14 +27,22 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
     // case. Anchor the id lookup itself through `equipment.job`, which IS
     // tenant-scoped — same pattern as `lockProcessPlanForUpdate` (_shared.ts).
     //
-    // B8: when `componentId` is supplied, anchor the tenant check through the
-    // component's own chain (`equipment.job.tenantId`) instead — same shape,
-    // different join root. `bomItemId` stays required regardless (a heat
-    // record still wants to know which part this is; `Component.bomItemId`
-    // is itself nullable, so it can't always stand in for it), but its own
-    // tenant lookup is redundant once the component anchor already proved
-    // the row belongs to this tenant.
-    let clientId: number | null;
+    // B8: `bomItemId` is ALWAYS independently verified against the actor's
+    // tenant, regardless of whether `componentId` is also supplied — task
+    // review (round 2) caught that skipping this when `componentId` was
+    // present let a same-tenant `componentId` legitimize an attacker-guessed
+    // `bomItemId` belonging to a different tenant (autoincrement PK, no RLS
+    // on `material_identifications` itself). When `componentId` IS supplied,
+    // it gets its own independent tenant check too (same shape, different
+    // join root) — both ids must resolve inside this tenant before the row
+    // is created.
+    const bomItem = await tx.bomItem.findFirst({
+      where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
+      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+    });
+    if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
+    let clientId = bomItem.equipment.job.clientId;
+
     if (componentId != null) {
       const component = await tx.component.findFirst({
         where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
@@ -42,13 +50,6 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
       });
       if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
       clientId = component.equipment.job.clientId;
-    } else {
-      const bomItem = await tx.bomItem.findFirst({
-        where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
-        select: { equipment: { select: { job: { select: { clientId: true } } } } },
-      });
-      if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
-      clientId = bomItem.equipment.job.clientId;
     }
     assertClientScope(actor, clientId);
 
