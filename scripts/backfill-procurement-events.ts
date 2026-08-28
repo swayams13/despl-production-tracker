@@ -7,6 +7,13 @@
 // deliberately, see that migration's header), so the generated client has no
 // typed accessor for it any more.
 //
+// DEAD/REDUNDANT for a fresh `prisma migrate deploy` as of the Phase-4 fix
+// wave (Critical #2): migration 20260827120001 now folds this exact logic
+// into itself as a plain SQL INSERT ... SELECT that runs before its own
+// guard, so an unattended deploy no longer depends on this script running in
+// between. Kept as a diagnostic/dry-run tool only — e.g. to preview what the
+// migration's SQL would insert against a given database before applying it.
+//
 // One event per non-null date field on the old row:
 //   indent_date    -> INDENT_RAISED  (refNo = indent_no)
 //   approved_date  -> INDENT_APPROVED
