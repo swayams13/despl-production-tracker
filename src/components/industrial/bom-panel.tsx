@@ -10,7 +10,6 @@ import {
   createBomItemAction,
   updateBomItemAction,
   importBomItemsAction,
-  createBomRevisionAction,
 } from "@/app/actions/bom";
 import { createDrawingRevisionAction } from "@/app/actions/drawing";
 import {
@@ -93,7 +92,6 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
             {addingItem ? "Cancel add" : "+ Add item…"}
           </button>
           <ImportBomControl jobId={jobId} equipmentId={bom.equipmentId} />
-          <IssueBomRevisionControl jobId={jobId} equipmentId={bom.equipmentId} />
         </div>
         {addingItem && (
           <div style={{ padding: "10px 16px" }}>
@@ -442,50 +440,6 @@ function ImportBomControl({ jobId, equipmentId }: { jobId: number; equipmentId: 
       <button className="btn" disabled={pending} onClick={() => inputRef.current?.click()}>
         {pending ? "Importing…" : "Import…"}
       </button>
-    </>
-  );
-}
-
-/**
- * B4, Phase 4 — issue a new `BomRevision` for the current equipment (create
- * -path B3 deferred). `BomRevisionStatus` is DRAFT/RELEASED only — no history
- * list rendered here (unlike `GoverningDrawingSection`'s per-component
- * revision history), since `BomTree` doesn't currently project revision rows
- * to the UI; this is the minimal authoring affordance the brief calls for.
- */
-function IssueBomRevisionControl({ jobId, equipmentId }: { jobId: number; equipmentId: number }) {
-  const router = useRouter();
-  const [issuing, setIssuing] = useState(false);
-  const [revisionNo, setRevisionNo] = useState("");
-  const [status, setStatus] = useState<"DRAFT" | "RELEASED">("RELEASED");
-  const [pending, start] = useTransition();
-
-  const issue = () => {
-    const n = Number(revisionNo);
-    if (!Number.isInteger(n) || n <= 0) return toast.error("Revision number must be a positive integer.");
-    start(async () => {
-      const r = await createBomRevisionAction(jobId, equipmentId, n, status);
-      if (!r.ok) toast.error(r.message);
-      else {
-        toast.success("BOM revision issued.");
-        setIssuing(false);
-        setRevisionNo("");
-        router.refresh();
-      }
-    });
-  };
-
-  if (!issuing) return <button className="btn" onClick={() => setIssuing(true)}>Issue BOM revision…</button>;
-
-  return (
-    <>
-      <input className="ws-detail" placeholder="Revision no." value={revisionNo} onChange={(e) => setRevisionNo(e.target.value)} style={{ width: 100 }} autoFocus />
-      <select className="btn" value={status} onChange={(e) => setStatus(e.target.value as typeof status)} aria-label="Revision status">
-        <option value="RELEASED">Released</option>
-        <option value="DRAFT">Draft</option>
-      </select>
-      <button className="btn btn-accent" disabled={pending} onClick={issue}>Save</button>
-      <button className="btn" disabled={pending} onClick={() => setIssuing(false)}>Cancel</button>
     </>
   );
 }
