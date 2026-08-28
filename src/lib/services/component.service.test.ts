@@ -102,6 +102,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { startComponentOperation, submitComponentOperation, verifyComponentOperation, rejectComponentOperation } =
     await import("./component.service");
+  const { issueStock } = await import("./stock.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
@@ -126,6 +127,13 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let kitUntrackedOp = 0; // Component.bomItemId null (SEAM) → allowed
   let kitNoActivityOp = 0; // bomItem set, zero StockLot rows at all (SEAM) → allowed
   let kitCrossTenantOp = 0; // Component.bomItemId points at another tenant's BomItem → NOT_FOUND
+  // Fix wave, Critical #1 regression: a full kit (received === required),
+  // issuing part of it to the component the first op starts on must not
+  // manufacture a false shortage that then refuses the SAME component's next op.
+  let kitIssueRegressionOp1 = 0;
+  let kitIssueRegressionOp2 = 0;
+  let kitIssueRegressionLotId = 0;
+  let kitIssueRegressionComponentId = 0;
   // B9 — assertDrawingReleased fixtures, wired into startComponentOperation's CUTTING-only gate.
   let drawingGatedCuttingOp = 0; // governingDrawingId → a drawing whose current revision is DRAFT → refused
   let drawingReleasedCuttingOp = 0; // governingDrawingId → a drawing whose current revision is RELEASED → allowed, stamps builtToRevisionId
@@ -336,6 +344,31 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     kitCrossTenantOp = (
       await owner.componentOperation.create({
         data: { componentId: componentKitCrossTenant.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    // Fix wave, Critical #1 regression fixture: a full kit (required 9 ===
+    // received 9), two ops on the SAME component, so issuing material after
+    // op1 starts can be checked against op2's start on that very component.
+    const bomItemIssueRegression = await owner.bomItem.create({
+      data: { equipmentId: equipment.id, itemNo: 4, partName: "Gasket, Full Kit", sourceQty: "9 NOS.", qtyPer: 9, uom: "NOS." },
+    });
+    const issueRegressionLot = await owner.stockLot.create({
+      data: { bomItemId: bomItemIssueRegression.id, location: "Yard A", qty: 9 },
+    });
+    kitIssueRegressionLotId = issueRegressionLot.id;
+    const componentIssueRegression = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "KIT-ISSUE-REGRESSION", componentTypeId: componentType.id, bomItemId: bomItemIssueRegression.id },
+    });
+    kitIssueRegressionComponentId = componentIssueRegression.id;
+    kitIssueRegressionOp1 = (
+      await owner.componentOperation.create({
+        data: { componentId: componentIssueRegression.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+    kitIssueRegressionOp2 = (
+      await owner.componentOperation.create({
+        data: { componentId: componentIssueRegression.id, seq: 2, operationId: opCutting.id },
       })
     ).id;
 
@@ -624,6 +657,27 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
 
   it("kit gate cross-tenant: a Component.bomItemId pointing at another tenant's BomItem is refused as NOT_FOUND, not read across (violation case 5)", async () => {
     await expectCode(startComponentOperation(supA, { componentOperationId: kitCrossTenantOp }), ERROR_CODES.NOT_FOUND);
+  });
+
+  it("kit gate regression (fix wave Critical #1): issuing material to a component after starting its first operation does not manufacture a false shortage for its NEXT operation on that same component", async () => {
+    // Full kit received (qty 9 === required 9): first op starts clean.
+    const started1 = await startComponentOperation(supA, { componentOperationId: kitIssueRegressionOp1 });
+    expect(started1.status).toBe("IN_PROGRESS");
+
+    // Issue 1 unit's worth of material to that component — the normal,
+    // correct action. Before the fix, ISSUE decremented the shortage-relevant
+    // `available`, manufacturing a shortage that then refused EVERY
+    // subsequent start on any component linked to this BomItem — including
+    // this very component's next operation.
+    const ph: Actor = { ...supA, roles: [ROLES.PRODUCTION_HEAD] };
+    await issueStock(ph, { stockLotId: kitIssueRegressionLotId, qty: 1, componentId: kitIssueRegressionComponentId });
+
+    // Route gate: op2 needs op1 COMPLETE first.
+    await submitComponentOperation(supA, { componentOperationId: kitIssueRegressionOp1 });
+    await verifyComponentOperation(qc, { componentOperationId: kitIssueRegressionOp1 });
+
+    const started2 = await startComponentOperation(supA, { componentOperationId: kitIssueRegressionOp2 });
+    expect(started2.status).toBe("IN_PROGRESS");
   });
 
   // ── B9: assertDrawingReleased, wired into startComponentOperation's CUTTING-only gate ────

@@ -5,7 +5,7 @@ import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
 import { projectComponentRoute, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
-import { explodeBomItem, type ExplodableBomItem } from "./bom-explosion";
+import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
 
 /**
  * Job detail — BOM & Components tab (§4.3, §9.6).
@@ -507,16 +507,10 @@ export async function loadBomTree(
         required = null; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to explode
       }
 
-      // SEAM: zero StockLot rows for this item → null, never 0.
-      let available: Decimal | null = null;
-      if (it.stockLots.length > 0) {
-        available = it.stockLots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
-        for (const lot of it.stockLots) {
-          for (const t of lot.txns) {
-            available = t.type === "RETURN" ? available.plus(t.qty) : available.minus(t.qty);
-          }
-        }
-      }
+      // Fix wave, Critical #1: shared with `availableQty`/`assertKitReady` —
+      // SEAM: zero StockLot rows for this item → null, never 0. ISSUE/RETURN
+      // do not move this number (only SCRAP does) — see `computeAvailableForShortage`.
+      const available = computeAvailableForShortage(it.stockLots);
       const shortageVal = available != null && required != null ? required.minus(available) : null;
 
       const row: BomItemRow = {
@@ -600,16 +594,20 @@ export async function requiredQty(actor: Actor, bomItemId: number): Promise<Deci
 }
 
 /**
- * B6, Phase 4: on-hand quantity for a BOM item, derived from `StockLot` +
- * `StockTxn` — `sum(StockLot.qty) - sum(StockTxn.qty where ISSUE|SCRAP) +
- * sum(StockTxn.qty where RETURN)`. Same tenant-anchoring shape as
- * `requiredQty` (through `equipment.job`, since `bom_items` carries no
- * tenant_id of its own).
+ * B6, Phase 4 (arithmetic fixed in the Phase-4 fix wave, Critical #1):
+ * shortage-relevant on-hand quantity for a BOM item — `sum(StockLot.qty) -
+ * sum(StockTxn.qty where SCRAP)` via the shared `computeAvailableForShortage`
+ * (`bom-explosion.ts`), also used by `loadBomTree` and `assertKitReady`.
+ * `ISSUE` and `RETURN` do NOT move this number: issuing material into the
+ * product is consumption as intended, not loss (the original formula
+ * subtracted `ISSUE`, which meant issuing material to production
+ * manufactured a false shortage against the very component it was issued
+ * to). Same tenant-anchoring shape as `requiredQty` (through `equipment.job`,
+ * since `bom_items` carries no tenant_id of its own).
  *
- * Returns `null` — not `0` — when this BOM item has zero `StockLot` rows
- * (and by construction, zero `StockTxn` rows too, since a txn always belongs
- * to a lot for this item). This is the SEAM principle: "never tracked" must
- * stay silent, not render as "0 available".
+ * Returns `null` — not `0` — when this BOM item has zero `StockLot` rows.
+ * This is the SEAM principle: "never tracked" must stay silent, not render
+ * as "0 available".
  */
 export async function availableQty(actor: Actor, bomItemId: number): Promise<Decimal | null> {
   return withTenant(actor.tenantId, async (tx) => {
@@ -624,15 +622,7 @@ export async function availableQty(actor: Actor, bomItemId: number): Promise<Dec
       where: { bomItemId },
       select: { qty: true, txns: { select: { type: true, qty: true } } },
     });
-    if (lots.length === 0) return null;
-
-    let total = lots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
-    for (const lot of lots) {
-      for (const t of lot.txns) {
-        total = t.type === "RETURN" ? total.plus(t.qty) : total.minus(t.qty);
-      }
-    }
-    return total;
+    return computeAvailableForShortage(lots);
   });
 }
 
@@ -689,21 +679,31 @@ export async function heatTrace(actor: Actor, heatNumber: string): Promise<MtcTr
 
 /**
  * B8, Phase 4 — backward trace: "one serial traces back to every heat in
- * it" = every `MaterialIdentification` row for a given `componentId`. Tenant
- * -anchored via the component's own chain (`equipment.job.tenantId`), same
- * pattern as `recordMtc`'s componentId path.
+ * it" = every `MaterialIdentification` row for a given `componentId`, PLUS
+ * (fix wave, Minor #b — the plan's §B8-specified fallback, previously
+ * missing) every legacy `bomItemId`-only row (recorded before `componentId`
+ * existed on the model, so `componentId` is null) for the component's own
+ * `bomItemId` — those rows don't say which component they went to, so they
+ * trace back to EVERY component under that `bomItemId`, this one included.
+ * Tenant-anchored via the component's own chain (`equipment.job.tenantId`),
+ * same pattern as `recordMtc`'s componentId path.
  */
 export async function componentHeats(actor: Actor, componentId: number): Promise<MtcTraceRow[]> {
   return withTenant(actor.tenantId, async (tx) => {
     const component = await tx.component.findFirst({
       where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
-      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+      select: { bomItemId: true, equipment: { select: { job: { select: { clientId: true } } } } },
     });
     if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
     assertClientScope(actor, component.equipment.job.clientId);
 
     const rows = await tx.materialIdentification.findMany({
-      where: { componentId },
+      where: {
+        OR: [
+          { componentId },
+          ...(component.bomItemId != null ? [{ componentId: null, bomItemId: component.bomItemId }] : []),
+        ],
+      },
       select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true, qtyIssued: true, componentId: true, component: { select: { tag: true } } },
       orderBy: { id: "asc" },
     });

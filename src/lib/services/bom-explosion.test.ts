@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explodeBomItem, type ExplodableBomItem } from "./bom-explosion";
+import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem, type StockLotForAvailability } from "./bom-explosion";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 
 /** Pure — no DB. B3's qty-explosion walk: parentBomItemId up to the root,
@@ -45,5 +45,50 @@ describe("explodeBomItem", () => {
     const top: ExplodableBomItem = { id: 1, qtyPer: null, parentBomItemId: null };
     const itemsById = new Map<number, ExplodableBomItem>([[1, top]]);
     expect(() => explodeBomItem(top, 9, itemsById)).toThrow(AppError);
+  });
+});
+
+/**
+ * Pure — no DB. Fix wave (Critical #1): the single shared shortage-relevant
+ * availability calc — `sum(lot.qty) - sum(SCRAP txns)`. ISSUE and RETURN
+ * must NOT move this number: issuing material into the product is
+ * consumption as intended, not loss. The bug this replaces subtracted ISSUE,
+ * which meant issuing a full kit's material to production manufactured a
+ * false shortage against the very component it was issued to.
+ */
+describe("computeAvailableForShortage", () => {
+  it("zero lots → null (SEAM: never tracked, distinct from zero available)", () => {
+    expect(computeAvailableForShortage([])).toBeNull();
+  });
+
+  it("no txns at all: available is just the received quantity", () => {
+    const lots: StockLotForAvailability[] = [{ qty: 9, txns: [] }];
+    expect(computeAvailableForShortage(lots)!.toNumber()).toBe(9);
+  });
+
+  it("ISSUE does not reduce availability — the regression this fix wave exists for", () => {
+    const lots: StockLotForAvailability[] = [{ qty: 9, txns: [{ type: "ISSUE", qty: 9 }] }];
+    expect(computeAvailableForShortage(lots)!.toNumber()).toBe(9);
+  });
+
+  it("RETURN does not increase availability either (nothing to add back to a number ISSUE never reduced)", () => {
+    const lots: StockLotForAvailability[] = [
+      { qty: 9, txns: [{ type: "ISSUE", qty: 4 }, { type: "RETURN", qty: 4 }] },
+    ];
+    expect(computeAvailableForShortage(lots)!.toNumber()).toBe(9);
+  });
+
+  it("SCRAP is the only real deduction from what was received", () => {
+    const lots: StockLotForAvailability[] = [{ qty: 9, txns: [{ type: "SCRAP", qty: 2 }] }];
+    expect(computeAvailableForShortage(lots)!.toNumber()).toBe(7);
+  });
+
+  it("multiple lots and mixed txn types sum correctly", () => {
+    const lots: StockLotForAvailability[] = [
+      { qty: 9, txns: [{ type: "ISSUE", qty: 1 }, { type: "SCRAP", qty: 1 }] },
+      { qty: 5, txns: [{ type: "RETURN", qty: 2 }] }, // RETURN with no prior ISSUE on this lot — still a no-op
+    ];
+    // (9 - 1 SCRAP) + (5 - 0) = 8 + 5 = 13
+    expect(computeAvailableForShortage(lots)!.toNumber()).toBe(13);
   });
 });

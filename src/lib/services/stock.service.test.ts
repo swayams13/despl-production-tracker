@@ -108,33 +108,34 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     await expectCode(scrapStock(supervisor, { stockLotId: lot.id, qty: 1 }), ERROR_CODES.FORBIDDEN);
   });
 
-  it("receive then issue reduces available", async () => {
+  it("receive then issue does NOT reduce shortage-relevant available (fix wave, Critical #1) — issuing into the product is consumption as intended, not loss", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 10, heatNumber: "H100" });
     expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
 
     await issueStock(ph, { stockLotId: lot.id, qty: 4 });
-    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(6);
+    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
   });
 
-  it("issuing exactly the available amount succeeds; one more fails (exact boundary)", async () => {
+  it("issuing exactly the lot's physical available amount succeeds; one more fails (exact boundary) — the lot-level over-issue guard is a separate, unaffected physical-ledger check", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 5 });
 
-    // Issue exactly the available amount — succeeds, leaves 0.
+    // Issue exactly the lot's physical available amount — succeeds. The
+    // shortage-relevant availableQty is unaffected by ISSUE (fix wave).
     await issueStock(ph, { stockLotId: lot.id, qty: 5 });
-    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(0);
+    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(5);
 
-    // A second lot to isolate the "one more than available" boundary cleanly.
+    // A second lot to isolate the "one more than physically available" boundary cleanly.
     const lot2 = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 5 });
     await expectCode(issueStock(ph, { stockLotId: lot2.id, qty: 6 }), ERROR_CODES.INSUFFICIENT_STOCK);
-    // Lot2's own available is unaffected by the refused attempt.
-    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(5);
+    // Both lots' qty still count toward shortage-relevant available (no SCRAP recorded).
+    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
   });
 
-  it("scrap moves the number down the same way issue does, and is refused past the boundary", async () => {
+  it("scrap is the only txn type that moves shortage-relevant available down, and is refused past the lot's physical boundary", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 8 });
@@ -143,15 +144,21 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     await expectCode(scrapStock(ph, { stockLotId: lot.id, qty: 6 }), ERROR_CODES.INSUFFICIENT_STOCK);
   });
 
-  it("return moves the number back up, with no over-issue-style guard", async () => {
+  it("return does not move shortage-relevant available either (fix wave) — only SCRAP does; at the physical lot level, a return still restores headroom for a further issue", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 10 });
     await issueStock(ph, { stockLotId: lot.id, qty: 7 });
-    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(3);
+    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
 
     await returnStock(ph, { stockLotId: lot.id, qty: 4 });
-    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(7);
+    expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
+
+    // Physical lot-level effect of the return (unaffected by this fix): issued
+    // 7, returned 4 → physical available is 7 (10 - 7 + 4); a further issue
+    // up to 7 succeeds, one more fails.
+    await issueStock(ph, { stockLotId: lot.id, qty: 7 });
+    await expectCode(issueStock(ph, { stockLotId: lot.id, qty: 1 }), ERROR_CODES.INSUFFICIENT_STOCK);
   });
 
   it("cross-tenant: another tenant's actor cannot reach this bom item or lot", async () => {
@@ -187,14 +194,15 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     expect(await shortage(ph, bomItem.id)).toBeNull();
   });
 
-  it("shortage calc against explodeBomItem's output for a real multi-unit equipment (table-driven)", async () => {
+  it("shortage calc against explodeBomItem's output for a real multi-unit equipment (table-driven; fix wave, Critical #1: only SCRAP moves the number, ISSUE/RETURN don't)", async () => {
     // qtyPer 2, 3 units → required = 6 (B3's explosion). Table of
-    // (received, issued/scrapped, returned) → expected shortage.
-    const cases: { received: number; issued: number; returned: number; expectedShortage: number }[] = [
-      { received: 6, issued: 0, returned: 0, expectedShortage: 0 }, // exactly covers required
-      { received: 4, issued: 0, returned: 0, expectedShortage: 2 }, // short by 2
-      { received: 10, issued: 0, returned: 0, expectedShortage: -4 }, // surplus of 4 (negative, not clamped here)
-      { received: 10, issued: 3, returned: 1, expectedShortage: -2 }, // 10 - 3 + 1 = 8 available, 6 required → surplus 2
+    // (received, issued, returned, scrapped) → expected shortage.
+    const cases: { received: number; issued: number; returned: number; scrapped: number; expectedShortage: number }[] = [
+      { received: 6, issued: 0, returned: 0, scrapped: 0, expectedShortage: 0 }, // exactly covers required
+      { received: 4, issued: 0, returned: 0, scrapped: 0, expectedShortage: 2 }, // short by 2
+      { received: 10, issued: 0, returned: 0, scrapped: 0, expectedShortage: -4 }, // surplus of 4 (negative, not clamped here)
+      { received: 10, issued: 3, returned: 1, scrapped: 0, expectedShortage: -4 }, // ISSUE/RETURN don't move it — same surplus as the no-activity case above (the regression this fix wave exists for)
+      { received: 10, issued: 0, returned: 0, scrapped: 2, expectedShortage: -2 }, // SCRAP is the only real deduction: 10 - 2 = 8 available, 6 required → surplus 2
     ];
     for (const c of cases) {
       const { tenantId, bomItem, user } = await fixture(3);
@@ -204,6 +212,7 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
       const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: c.received });
       if (c.issued > 0) await issueStock(ph, { stockLotId: lot.id, qty: c.issued });
       if (c.returned > 0) await returnStock(ph, { stockLotId: lot.id, qty: c.returned });
+      if (c.scrapped > 0) await scrapStock(ph, { stockLotId: lot.id, qty: c.scrapped });
 
       const result = await shortage(ph, bomItem.id);
       expect(result?.toNumber()).toBe(c.expectedShortage);

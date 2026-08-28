@@ -1,5 +1,6 @@
 import { Decimal } from "@prisma/client/runtime/library";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import type { StockTxnType } from "@/generated/prisma/client";
 
 /** The minimal shape `explodeBomItem` needs — callers load a real `BomItem`
  * row (or a fixture) and pick these three fields off it. */
@@ -49,4 +50,43 @@ export function explodeBomItem(
   }
 
   return total.times(unitCount);
+}
+
+/** The minimal shape the shortage-relevant availability calc needs off a
+ * `StockLot` (+ its `StockTxn`s) — callers pick these fields off a real row. */
+export interface StockLotForAvailability {
+  qty: Decimal | number | string;
+  txns: { type: StockTxnType; qty: Decimal | number | string }[];
+}
+
+/**
+ * Fix wave, Phase 4 (Critical #1): the single, shared "how much of this BOM
+ * item's kit is actually available for the gate/shortage number" calc.
+ * Previously hand-copied in three places (`bom.read.ts`'s `loadBomTree` and
+ * `availableQty`, `_shared.ts`'s `assertKitReady`) with wrong arithmetic —
+ * `ISSUE` was subtracted, which meant issuing material to production (the
+ * normal, correct action) manufactured a false shortage against the very
+ * component it was issued to.
+ *
+ * `ISSUE` and `RETURN` do NOT move this number: issuing material into the
+ * product is consumption as intended, not loss — it must not read as "less
+ * available" for kit-readiness purposes. Only `SCRAP` is a real deduction
+ * from what was received (material that will never make it into a unit).
+ * (`RETURN`'s physical on-hand effect, if ever surfaced as a separate
+ * concern from shortage, lives in `stock.service.ts`'s own per-lot
+ * available-to-issue check — untouched by this fix.)
+ *
+ * Returns `null` — not `0` — when there are zero lots: the SEAM principle,
+ * "never tracked" must stay silent, not render as "0 available"/"fully
+ * short".
+ */
+export function computeAvailableForShortage(lots: StockLotForAvailability[]): Decimal | null {
+  if (lots.length === 0) return null;
+  let available = lots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
+  for (const lot of lots) {
+    for (const t of lot.txns) {
+      if (t.type === "SCRAP") available = available.minus(t.qty);
+    }
+  }
+  return available;
 }

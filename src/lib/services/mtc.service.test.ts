@@ -172,4 +172,20 @@ describe.skipIf(!RUN_DB)("mtc.service (DB-backed)", async () => {
     const backB = await componentHeats(qc, componentB.id);
     expect(backB.map((r) => r.heatNumber)).toEqual(["H-SHARED"]);
   });
+
+  it("componentHeats fallback (fix wave, Minor #b): a legacy bomItemId-only heat record (no componentId) traces back to every Component under that bomItemId", async () => {
+    const { tenantId, bomItem, componentA, componentB, user } = await fixture();
+    const qc: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.QC] };
+    // Legacy row: recorded before componentId existed on the model — no componentId supplied.
+    await recordMtc(qc, { bomItemId: bomItem.id, heatNumber: "H-LEGACY", pmiResult: "ACCEPT" });
+    // A componentId-anchored row on componentA, for contrast — must not leak into componentB's trace.
+    await recordMtc(qc, { bomItemId: bomItem.id, componentId: componentA.id, heatNumber: "H-DIRECT-A", pmiResult: "ACCEPT" });
+
+    const backA = await componentHeats(qc, componentA.id);
+    expect(backA.map((r) => r.heatNumber).sort()).toEqual(["H-DIRECT-A", "H-LEGACY"].sort());
+
+    // componentB has no direct record, but the legacy bomItemId-only row still traces to it.
+    const backB = await componentHeats(qc, componentB.id);
+    expect(backB.map((r) => r.heatNumber)).toEqual(["H-LEGACY"]);
+  });
 });

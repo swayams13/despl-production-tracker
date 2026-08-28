@@ -5,7 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
 import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
-import { explodeBomItem, type ExplodableBomItem } from "./bom-explosion";
+import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
 import type {
   ScheduleProcess,
   ScheduleEdge,
@@ -527,11 +527,15 @@ export async function assertComponentOpsComplete(
  * `bom.read.ts`'s exported `requiredQty`/`availableQty`/`shortage` each open
  * their own `withTenant` transaction — calling them here would nest a
  * transaction inside the caller's already-open one, which Prisma's
- * interactive-transaction client doesn't support. So the required/available
- * arithmetic is re-implemented inline against `tx`, the same way
+ * interactive-transaction client doesn't support. So the required side
+ * (`explodeBomItem`) is re-walked inline against `tx`, the same way
  * `bom.read.ts`'s `loadBomTree` already does it for the same reason (see its
  * comment above `itemsById`) — not a divergent copy, the established pattern
- * for "needs the same numbers but from inside a transaction."
+ * for "needs the same numbers but from inside a transaction." The available
+ * side is NOT re-implemented here: it calls the shared, tx-free
+ * `computeAvailableForShortage` (`bom-explosion.ts`) that `loadBomTree` and
+ * `availableQty` also call, so the SCRAP-only arithmetic (fix wave, Critical
+ * #1) lives in exactly one place.
  */
 export async function assertKitReady(tx: Tx, componentId: number, tenantId: number): Promise<void> {
   const component = await tx.component.findFirst({
@@ -571,12 +575,7 @@ export async function assertKitReady(tx: Tx, componentId: number, tenantId: numb
     return; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to check (same fallback as loadBomTree)
   }
 
-  let available = bomItem.stockLots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
-  for (const lot of bomItem.stockLots) {
-    for (const t of lot.txns) {
-      available = t.type === "RETURN" ? available.plus(t.qty) : available.minus(t.qty);
-    }
-  }
+  const available = computeAvailableForShortage(bomItem.stockLots)!; // non-null: stockLots.length === 0 already returned above
 
   const shortfall = required.minus(available);
   if (shortfall.gt(0)) {
