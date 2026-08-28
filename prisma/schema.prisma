@@ -931,7 +931,7 @@ model ProcessPlan {
   verifier        User?         @relation("ProcessPlanVerifiedBy", fields: [verifiedBy], references: [id])
   delayReasons    DelayReason[]
 
-@@index([scheduleRunId])
+  @@index([scheduleRunId])
   @@index([jobProcessId])
   @@index([unitId])
   // drives every "due this week", notification and escalation query

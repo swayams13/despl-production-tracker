@@ -1,6 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { audited } from "@/lib/audit";
-import { assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
+import { assertClientScope, assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { recordProcurementEventSchema, type RecordProcurementEventInput } from "@/lib/shared/schemas";
 import type { ProcurementEvent } from "@/generated/prisma/client";
@@ -27,9 +27,13 @@ export async function recordProcurementEvent(
   return withTenant(actor.tenantId, async (tx) => {
     const bomItem = await tx.bomItem.findFirst({
       where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
-      select: { id: true },
+      select: { equipment: { select: { job: { select: { clientId: true } } } } },
     });
     if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
+    // Consistency with every sibling service (mtc/stock/drawing) — a no-op
+    // today since `assertNotClientUser` above already refuses every client
+    // actor before this point, but matching the pattern here.
+    assertClientScope(actor, bomItem.equipment.job.clientId);
 
     return audited(tx, actor, async () => {
       const record = await tx.procurementEvent.create({
