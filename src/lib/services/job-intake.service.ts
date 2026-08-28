@@ -511,6 +511,21 @@ async function cloneQcpTemplate(
  * Component and ItemTest are execution records belonging to the source job —
  * heat numbers, MTC references, PO numbers. Copying them would fabricate
  * traceability, which is the opposite of what this system exists for.
+ * `bomRevisionId` is also deliberately left null on the copy — a separate,
+ * already-flagged gap (B3 create-path), not this fix's job.
+ *
+ * Fix wave (Important #4): preserves `parentBomItemId` hierarchies, which
+ * B4 (Dispatch 8) made the first real writer of. `createMany` can't point a
+ * self-referencing FK at a row created in the same batch, so this is a
+ * two-pass copy: pass 1 creates every row with `parentBomItemId` left null,
+ * tracking a source-id -> target-id map keyed by `itemNo` (the CSV's stable
+ * business key, unlike an autoincrement id which obviously can't survive a
+ * copy); pass 2, in the same transaction, sets each copy's `parentBomItemId`
+ * to the mapped target id wherever the source had one. Without this, a
+ * sub-assembly's exploded required qty on the new job silently drops a
+ * multiplication level (e.g. child qtyPer 4 under a parent qtyPer 2 becomes
+ * `4 x unitCount` instead of `4 x 2 x unitCount`) — wrong for shortage/kit-
+ * gating purposes.
  */
 async function copyBom(
   tx: Tx,
@@ -527,7 +542,7 @@ async function copyBom(
   }
   if (source.bomItems.length === 0) return 0;
 
-  await tx.bomItem.createMany({
+  const created = await tx.bomItem.createManyAndReturn({
     data: source.bomItems.map((b) => ({
       equipmentId: targetEquipmentId,
       itemNo: b.itemNo,
@@ -542,6 +557,20 @@ async function copyBom(
       componentTypeId: b.componentTypeId,
       remarks: b.remarks,
     })),
+    select: { id: true, itemNo: true },
   });
+
+  const targetIdByItemNo = new Map(created.map((c) => [c.itemNo, c.id]));
+  const sourceItemNoById = new Map(source.bomItems.map((b) => [b.id, b.itemNo]));
+
+  for (const b of source.bomItems) {
+    if (b.parentBomItemId == null) continue;
+    const parentItemNo = sourceItemNoById.get(b.parentBomItemId);
+    const targetParentId = parentItemNo != null ? targetIdByItemNo.get(parentItemNo) : undefined;
+    const targetChildId = targetIdByItemNo.get(b.itemNo);
+    if (targetParentId == null || targetChildId == null) continue; // defensive: shouldn't happen, source's own FK is internally consistent
+    await tx.bomItem.update({ where: { id: targetChildId }, data: { parentBomItemId: targetParentId } });
+  }
+
   return source.bomItems.length;
 }

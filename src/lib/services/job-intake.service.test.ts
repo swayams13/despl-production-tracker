@@ -428,6 +428,47 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     ).toBe(0);
   });
 
+  it("copyBom preserves a parent/child BOM hierarchy (fix wave, Important #4)", async () => {
+    const refs = await seedRefs();
+
+    // Own source equipment (not the generic seed data, which has no
+    // hierarchy) — a real job/equipment via the service itself, then a
+    // parent + child BomItem written directly, itemNo as the stable key.
+    const sourceJob = await createJob(actor(), base({ jobNumber: "TEST-BOM-HIER-SRC" }, refs));
+    created.push(sourceJob.jobId);
+    const sourceEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: sourceJob.jobId } });
+
+    const parent = await owner.bomItem.create({
+      data: { equipmentId: sourceEquipment.id, itemNo: 101, partName: "Sub-assembly", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+    });
+    const child = await owner.bomItem.create({
+      data: {
+        equipmentId: sourceEquipment.id,
+        itemNo: 102,
+        partName: "Bolt",
+        sourceQty: "4 NOS.",
+        qtyPer: 4,
+        uom: "NOS.",
+        parentBomItemId: parent.id,
+      },
+    });
+
+    const r = await createJob(
+      actor(),
+      base({ jobNumber: "TEST-BOM-HIER-DST", copyBomFromEquipmentId: sourceEquipment.id }, refs),
+    );
+    created.push(r.jobId);
+
+    const targetEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+    const copiedParent = await owner.bomItem.findFirstOrThrow({ where: { equipmentId: targetEquipment.id, itemNo: parent.itemNo } });
+    const copiedChild = await owner.bomItem.findFirstOrThrow({ where: { equipmentId: targetEquipment.id, itemNo: child.itemNo } });
+
+    expect(copiedParent.id).not.toBe(parent.id); // a real copy, not the source row
+    expect(copiedChild.parentBomItemId).toBe(copiedParent.id); // points at the COPIED parent...
+    expect(copiedChild.parentBomItemId).not.toBe(parent.id); // ...never the source's
+    expect(copiedChild.parentBomItemId).not.toBeNull();
+  });
+
   it("stores only spec keys defined for the family", async () => {
     const refs = await seedRefs();
     const r = await createJob(
