@@ -1,22 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
-import { formatBomQty } from "./bom.read";
-
-/** Pure — no DB. B1's quantity cell: parsed `qtyPer`/`uom` renders numeric, an
- * unparsed row falls back to the raw `sourceQty` string and never throws. */
-describe("formatBomQty", () => {
-  it("renders qtyPer + uom when parsed", () => {
-    expect(formatBomQty({ qtyPer: 40, uom: "NOS.", sourceQty: "40 NOS." })).toBe("40 NOS.");
-  });
-
-  it("renders a bare qtyPer when there's no uom", () => {
-    expect(formatBomQty({ qtyPer: 24, uom: null, sourceQty: "24" })).toBe("24");
-  });
-
-  it("falls back to the raw sourceQty when unparsed, without throwing", () => {
-    expect(formatBomQty({ qtyPer: null, uom: null, sourceQty: "As required" })).toBe("As required");
-  });
-});
 
 /**
  * DB-backed coverage for `loadBomTree`'s component-route projection: a
@@ -39,6 +22,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
   let jobId = 0;
   let unit1Id = 0;
   let unit2Id = 0;
+  let bomItemId = 0;
 
   afterAll(async () => {
     await owner.$disconnect();
@@ -86,6 +70,21 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     const component = await owner.component.create({
       data: { equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SHELL-1", componentTypeId: componentType.id, routeVersionId: routeVersion.id },
     });
+    bomItemId = bomItem.id;
+
+    // Two lots, oldest first, one partially scrapped — proves stockLots is exposed
+    // in received-order with the raw lot qty (not net-of-scrap; that arithmetic is
+    // availableQty's job, not this list's).
+    const lot1 = await owner.stockLot.create({
+      data: { bomItemId: bomItem.id, heatNumber: "H-100", location: "Yard A", qty: 10, receivedAt: new Date("2026-08-01") },
+    });
+    await owner.stockLot.create({
+      data: { bomItemId: bomItem.id, heatNumber: null, location: "Yard B", qty: 5, receivedAt: new Date("2026-08-05") },
+    });
+    const scrapUser = await owner.user.create({
+      data: { tenantId, email: `bomread-${Date.now()}@test.local`, username: `bomread-${Date.now()}`, passwordHash: "x", name: "Test User", themePreference: "SYSTEM" },
+    });
+    await owner.stockTxn.create({ data: { stockLotId: lot1.id, type: "SCRAP", qty: 2, by: scrapUser.id } });
     // Only the first route step has actually been tracked — Forming/Welding
     // have no ComponentOperation row yet, same as real live-CSV data where
     // future steps were never recorded.
@@ -135,6 +134,18 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     const ops = tree!.groups[0].items[0].components[0].operations;
     expect(ops.map((o) => o.operationName)).toEqual(["Cutting", "Forming", "Welding"]);
     expect(ops.map((o) => o.status)).toEqual(["COMPLETE", "NOT_STARTED", "NOT_STARTED"]);
+  });
+
+  it("exposes stockLots oldest-first, with the raw lot qty (not net of scrap)", async () => {
+    const tree = await loadBomTree(actor, jobId);
+    const item = tree!.groups[0].items.find((i) => i.id === bomItemId)!;
+    expect(item.stockLots).toEqual([
+      { id: expect.any(Number), heatNumber: "H-100", location: "Yard A", qty: 10, receivedAt: expect.any(String) },
+      { id: expect.any(Number), heatNumber: null, location: "Yard B", qty: 5, receivedAt: expect.any(String) },
+    ]);
+    // availableQty nets out the SCRAP txn against lot1's raw qty (10 - 2 + 5 = 13) —
+    // proves this list and the shortage arithmetic agree on the same underlying data.
+    expect(item.availableQty).toBe(13);
   });
 
   it("attaches QCP checkpoints gated to a route step via leadTimeProcessSeq", async () => {

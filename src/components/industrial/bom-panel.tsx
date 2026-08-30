@@ -7,11 +7,13 @@ import { StatusChip } from "./status-chip";
 import { STAGE_STATUS } from "./stage-status";
 import {
   recordMtcAction,
+  recordProcurementEventAction,
   createBomItemAction,
   updateBomItemAction,
   importBomItemsAction,
 } from "@/app/actions/bom";
 import { createDrawingRevisionAction } from "@/app/actions/drawing";
+import { receiveStockAction, issueStockAction, returnStockAction, scrapStockAction } from "@/app/actions/stock";
 import {
   startComponentOperationAction,
   submitComponentOperationAction,
@@ -19,7 +21,8 @@ import {
   rejectComponentOperationAction,
 } from "@/app/actions/component";
 import type { ActionResult } from "@/app/actions/_action";
-import { formatBomQty, type BomTree, type BomItemRow, type BomComponentOp, type BomGoverningDrawing, type WelderOption, type DelayCategoryOption } from "@/lib/services/bom.read";
+import { type BomTree, type BomItemRow, type BomComponentOp, type BomGoverningDrawing, type WelderOption, type DelayCategoryOption } from "@/lib/services/bom.read";
+import { formatBomQty } from "@/lib/services/bom-format";
 import { groupProjectedRoute } from "@/lib/services/bom-route";
 
 function fmtDate(iso: string | null): string {
@@ -521,6 +524,8 @@ function ComponentDetail({
             </span>
           )}
         </dd>
+        <dt></dt>
+        <dd><ProcurementEventControl jobId={jobId} bomItemId={item.id} /></dd>
         <dt>Heat no.</dt><dd className="mono">{mtc?.heatNumber ?? "—"}</dd>
         <dt>MTC</dt>
         <dd>
@@ -559,6 +564,8 @@ function ComponentDetail({
         <button className="btn" style={{ marginBottom: 14 }} onClick={() => setRecording(true)}>Record MTC…</button>
       )}
 
+      <StockSection jobId={jobId} item={item} componentId={comp?.id} />
+
       {/* B9, Phase 4 — SEAM: only rendered once a governingDrawingId is
           recorded on this component (not yet authorable from this screen,
           same precedent as parentComponentId). */}
@@ -585,6 +592,174 @@ function ComponentDetail({
         </div>
       ) : (
         <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No activity yet.</p>
+      )}
+    </div>
+  );
+}
+
+/** Log a procurement event (indent raised/approved, PO placed, or a receipt) against a
+ * BOM item — same inline toggle-form idiom as "Record MTC…" above. `qty` only appears
+ * (and is required) for RECEIPT, matching `recordProcurementEventSchema`'s cross-field
+ * rule server-side; the client mirrors that rule so the form doesn't round-trip a refusal
+ * for something it could refuse to submit in the first place. */
+function ProcurementEventControl({ jobId, bomItemId }: { jobId: number; bomItemId: number }) {
+  const router = useRouter();
+  const [logging, setLogging] = useState(false);
+  const [type, setType] = useState<"INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT">("INDENT_RAISED");
+  const [qty, setQty] = useState("");
+  const [refNo, setRefNo] = useState("");
+  const [pending, start] = useTransition();
+
+  const submit = () => {
+    const qtyNum = qty.trim() ? Number(qty) : undefined;
+    if (type === "RECEIPT" && !qtyNum) return toast.error("Quantity is required for a receipt.");
+    if (type !== "RECEIPT" && qtyNum != null) return toast.error("Quantity only applies to a receipt.");
+    start(async () => {
+      const r = await recordProcurementEventAction(jobId, bomItemId, type, qtyNum, refNo.trim() || undefined);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("Procurement event logged.");
+        setLogging(false);
+        setQty("");
+        setRefNo("");
+        router.refresh();
+      }
+    });
+  };
+
+  if (!logging) return <button className="btn" onClick={() => setLogging(true)}>Log procurement event…</button>;
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <select className="btn" value={type} onChange={(e) => setType(e.target.value as typeof type)} aria-label="Event type">
+        <option value="INDENT_RAISED">Indent raised</option>
+        <option value="INDENT_APPROVED">Indent approved</option>
+        <option value="PO_PLACED">PO placed</option>
+        <option value="RECEIPT">Receipt</option>
+      </select>
+      {type === "RECEIPT" && (
+        <input className="ws-detail" type="number" min="0" step="any" placeholder="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} style={{ width: 100 }} autoFocus />
+      )}
+      <input className="ws-detail" placeholder="Ref no. (optional)" value={refNo} onChange={(e) => setRefNo(e.target.value)} style={{ flex: 1, minWidth: 100 }} />
+      <button className="btn btn-accent" disabled={pending} onClick={submit}>Save</button>
+      <button className="btn" disabled={pending} onClick={() => setLogging(false)}>Cancel</button>
+    </div>
+  );
+}
+
+/** One StockLot row's Issue/Return/Scrap controls — a single shared inline qty+note
+ * prompt, since the three actions differ only in which service function they call.
+ * Defaults `componentId` to the panel's currently-open component, matching "Record
+ * MTC…"'s own default — there is no picker because this screen already shows one
+ * component at a time. */
+function StockLotMoveControl({
+  jobId,
+  lotId,
+  componentId,
+}: {
+  jobId: number;
+  lotId: number;
+  componentId: number | undefined;
+}) {
+  const router = useRouter();
+  const [mode, setMode] = useState<"idle" | "ISSUE" | "RETURN" | "SCRAP">("idle");
+  const [qty, setQty] = useState("");
+  const [note, setNote] = useState("");
+  const [pending, start] = useTransition();
+
+  const submit = () => {
+    const qtyNum = Number(qty);
+    if (!qty.trim() || !(qtyNum > 0)) return toast.error("Enter a quantity greater than zero.");
+    start(async () => {
+      const action = mode === "ISSUE" ? issueStockAction : mode === "RETURN" ? returnStockAction : scrapStockAction;
+      const r = await action(jobId, lotId, qtyNum, componentId, note.trim() || undefined);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success(`${mode === "ISSUE" ? "Issued" : mode === "RETURN" ? "Returned" : "Scrapped"}.`);
+        setMode("idle");
+        setQty("");
+        setNote("");
+        router.refresh();
+      }
+    });
+  };
+
+  if (mode === "idle") {
+    return (
+      <span style={{ display: "inline-flex", gap: 4 }}>
+        <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setMode("ISSUE")}>Issue</button>
+        <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setMode("RETURN")}>Return</button>
+        <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setMode("SCRAP")}>Scrap</button>
+      </span>
+    );
+  }
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+      <input className="ws-detail" type="number" min="0" step="any" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} style={{ width: 70 }} autoFocus />
+      <input className="ws-detail" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ width: 100 }} />
+      <button className="btn btn-accent" style={{ padding: "2px 8px", fontSize: 11 }} disabled={pending} onClick={submit}>
+        {mode === "ISSUE" ? "Issue" : mode === "RETURN" ? "Return" : "Scrap"}
+      </button>
+      <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} disabled={pending} onClick={() => setMode("idle")}>Cancel</button>
+    </span>
+  );
+}
+
+/** Receive stock against a BOM item, and the list of lots received so far with their
+ * Issue/Return/Scrap controls. `availableQty`/`shortage` (rendered above, in the kv grid)
+ * already reflect this data — this section is where that number is actually produced. */
+function StockSection({ jobId, item, componentId }: { jobId: number; item: BomItemRow; componentId: number | undefined }) {
+  const router = useRouter();
+  const [receiving, setReceiving] = useState(false);
+  const [heatNumber, setHeatNumber] = useState("");
+  const [location, setLocation] = useState("");
+  const [qty, setQty] = useState("");
+  const [pending, start] = useTransition();
+
+  const submitReceive = () => {
+    const qtyNum = Number(qty);
+    if (!location.trim()) return toast.error("Location is required.");
+    if (!qty.trim() || !(qtyNum > 0)) return toast.error("Enter a quantity greater than zero.");
+    start(async () => {
+      const r = await receiveStockAction(jobId, item.id, location.trim(), qtyNum, heatNumber.trim() || undefined);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("Stock received.");
+        setReceiving(false);
+        setHeatNumber("");
+        setLocation("");
+        setQty("");
+        router.refresh();
+      }
+    });
+  };
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      {receiving ? (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+          <input className="ws-detail" placeholder="Location" value={location} onChange={(e) => setLocation(e.target.value)} style={{ flex: 1, minWidth: 100 }} autoFocus />
+          <input className="ws-detail" type="number" min="0" step="any" placeholder="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} style={{ width: 100 }} />
+          <input className="ws-detail" placeholder="Heat number (optional)" value={heatNumber} onChange={(e) => setHeatNumber(e.target.value)} style={{ flex: 1, minWidth: 120 }} />
+          <button className="btn btn-accent" disabled={pending} onClick={submitReceive}>Save</button>
+          <button className="btn" disabled={pending} onClick={() => setReceiving(false)}>Cancel</button>
+        </div>
+      ) : (
+        <button className="btn" onClick={() => setReceiving(true)}>Receive stock…</button>
+      )}
+
+      {item.stockLots.length > 0 && (
+        <ul className="sh-hist" style={{ marginTop: 8 }}>
+          {item.stockLots.map((lot) => (
+            <li key={lot.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <span>
+                <span className="mono">{lot.qty}</span> at {lot.location}
+                {lot.heatNumber ? ` · heat ${lot.heatNumber}` : ""}
+                <span style={{ color: "var(--muted)", fontSize: 11 }}> · {new Date(lot.receivedAt).toLocaleDateString()}</span>
+              </span>
+              <StockLotMoveControl jobId={jobId} lotId={lot.id} componentId={componentId} />
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

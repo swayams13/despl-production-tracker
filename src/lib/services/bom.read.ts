@@ -106,6 +106,16 @@ export interface BomProcurementSummary {
   events: { id: number; type: Exclude<ProcurementDisplayStatus, "NOT_STARTED">; qty: number | null; refNo: string | null; at: string }[];
 }
 
+/** B6, Phase 4 — one received lot, exposed so the UI can target Issue/Return/Scrap
+ * at a specific lot (those mutations take a `stockLotId`, not a `bomItemId`). */
+export interface BomStockLot {
+  id: number;
+  heatNumber: string | null;
+  location: string;
+  qty: number;
+  receivedAt: string;
+}
+
 export interface BomItemRow {
   id: number;
   itemNo: number;
@@ -131,6 +141,10 @@ export interface BomItemRow {
   /** B6, Phase 4 — `requiredQty - availableQty`; negative is surplus, shown as such, never clamped
    * here (the panel clamps for display). `null` whenever `availableQty` is `null`. */
   shortage: number | null;
+  /** B6, Phase 4 — every received lot for this item, oldest first; empty array (not null) when
+   * nothing has ever been received — distinct from `availableQty === null`'s "never tracked" SEAM,
+   * this is just "no lots yet," a normal empty-list case for the receive/issue UI. */
+  stockLots: BomStockLot[];
 }
 
 /** No events yet → "NOT_STARTED", a status no `ProcurementEvent.type` value
@@ -159,12 +173,6 @@ function summarizeProcurement(
       at: e.at.toISOString(),
     })),
   };
-}
-
-/** Quantity cell for the BOM tab: `qtyPer uom` when parsed, else the raw `sourceQty` — never `null`. */
-export function formatBomQty(row: Pick<BomItemRow, "qtyPer" | "uom" | "sourceQty">): string {
-  if (row.qtyPer == null) return row.sourceQty;
-  return row.uom ? `${row.qtyPer} ${row.uom}` : String(row.qtyPer);
 }
 
 export interface BomGroup {
@@ -366,7 +374,7 @@ export async function loadBomTree(
           select: { id: true, type: true, qty: true, refNo: true, at: true },
         },
         stockLots: {
-          select: { qty: true, txns: { select: { type: true, qty: true } } },
+          select: { id: true, heatNumber: true, location: true, qty: true, receivedAt: true, txns: { select: { type: true, qty: true } } },
         },
         components: {
           select: {
@@ -529,6 +537,9 @@ export async function loadBomTree(
         requiredQty: required?.toNumber() ?? null,
         availableQty: available?.toNumber() ?? null,
         shortage: shortageVal?.toNumber() ?? null,
+        stockLots: [...it.stockLots]
+          .sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime())
+          .map((lot) => ({ id: lot.id, heatNumber: lot.heatNumber, location: lot.location, qty: lot.qty.toNumber(), receivedAt: lot.receivedAt.toISOString() })),
       };
       const list = byGroup.get(groupName) ?? [];
       list.push(row);
