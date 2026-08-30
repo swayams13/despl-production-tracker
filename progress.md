@@ -2,6 +2,71 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Stock/procurement UI controls added, closing Phase 4's named follow-up gap, 30 Aug 2026
+
+**Status: implemented, live-verified, one pre-existing bug found and root-caused along the way.
+Commit `fbe3a8e` on `demo`, not yet pushed to `origin/demo` — awaiting go-ahead.**
+
+### What changed
+
+Bounded task (brainstorming skill's classification — a well-scoped addition to code that already
+existed, not architectural): wired the four `stock.service.ts` actions
+(`receiveStockAction`/`issueStockAction`/`returnStockAction`/`scrapStockAction`) and
+`recordProcurementEventAction` into `BomPanel`'s `ComponentDetail`, matching the file's existing
+inline-toggle-form idiom ("Record MTC…", "Issue new revision…") rather than introducing a
+dialog/modal. New `StockSection` (receive form + a stock-lot list with per-lot Issue/Return/Scrap),
+new `ProcurementEventControl` (type select, qty only shown/required for Receipt, matching the
+server schema's cross-field `.refine()` rule client-side too). `BomItemRow` gained a `stockLots`
+field (id/heatNumber/location/qty/receivedAt) — the query already loaded this data for the shortage
+arithmetic but never returned it to callers.
+
+### Real bug found and fixed, not just worked around
+
+Live verification (driving the actual `/login` form, `sj@despl.local`, no forged session — the
+`CLAUDE.md` "Agent conduct" rule) hit two real problems before the feature could even be exercised:
+
+1. **`pnpm build`/`pnpm dev` (both `--turbopack`) failed to compile `/jobs` at all.** `bom-panel.tsx`
+   (a client component) imported `formatBomQty` as a runtime value from `bom.read.ts` — a
+   server-only module (Prisma, `withTenant`, `authz` → `next/headers`) — and Turbopack bundled the
+   whole server module into the client graph. This was flagged as a "pre-existing, unrelated"
+   concern by three separate Phase 4 dispatch reports and never actually fixed or root-caused.
+   Confirmed pre-existing this session via `git stash` (identical error on committed `demo` HEAD),
+   then fixed at the root: extracted `formatBomQty` into a new dependency-free
+   `src/lib/services/bom-format.ts`, moved its tests to `bom-format.test.ts`. `pnpm build` now
+   succeeds — first time this phase.
+2. **The local `despl` dev database was 6 migrations behind** (everything from B6 onward never
+   applied locally, only to `despl_test`) — crashed with `material_identifications.component_id
+   does not exist`. Ran `prisma migrate deploy` against it (explicit user approval obtained first,
+   per the permission classifier's block on schema-mutating commands). Hit a second wrinkle:
+   `20260827120001_procurement_event_drop_procurements` had a **stale failed-migration record**
+   from an earlier local attempt (before the fix-wave's self-backfill logic landed in that file) —
+   confirmed the underlying data was intact (`procurements`: 54 rows, `procurement_events`: 0, no
+   partial-insert state) before running `prisma migrate resolve --rolled-back` and retrying. All 6
+   pending migrations then applied cleanly, backfilling exactly 54 real rows and dropping
+   `procurements` — a genuine, real-data confirmation that the Phase 4 final-fix-wave's migration
+   fix (Critical #2, tested only against a throwaway DB before) works correctly.
+
+### Tests / verification
+
+New `bom.read.test.ts` case: `stockLots` renders oldest-first with raw lot qty (not net of scrap),
+cross-checked against `availableQty`'s netted arithmetic on the same fixture. `pnpm typecheck`/
+`lint`/`test` (549/0 failed)/`test:db` (852/1 — same pre-existing, already-diagnosed
+`process.service.test.ts` hold-point flake, confirmed unrelated yet again)/`build` all clean.
+Live-verified end to end on DESPL-320's "Flange" BOM item: received a 10-unit lot at "Yard A" with
+heat "H-501", issued 4 of it to the open component (confirmed the lot's displayed qty correctly
+stays at 10 — the fix-wave's ISSUE-doesn't-deduct-from-shortage arithmetic, not a bug), logged a
+RECEIPT procurement event for qty 5 (status chip correctly updated to "RECEIVED · 5 received"), and
+confirmed the client-side "quantity required for a receipt" refusal fires with no server round-trip
+when Receipt is selected with an empty qty. Zero server errors across the entire click-through
+(server log tail: all `GET`/`POST /jobs/3?tab=bom` returned 200).
+
+### Remaining limitation, unchanged from Phase 4's own log
+
+`recordProcurementEventAction` still has no separate procurement-focused view beyond this one BOM
+item's inline control — this session closes the "no UI at all" gap, not a full inventory/procurement
+management surface. Sufficient to make the four acceptance criteria genuinely demoable per-item,
+which was the named gap.
+
 ## Session — Phase 4 (BOM, materials and procurement) implemented per the approved plan, 27–28 Aug 2026
 
 **Status: B1–B10 all implemented, tested (pure + DB-gated), reviewed via subagent-driven-development
