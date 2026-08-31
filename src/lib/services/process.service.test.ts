@@ -664,3 +664,136 @@ describe.skipIf(!RUN_DB)("submitProcess component-ops gate (Phase 3, R2, DB-back
     expect(submitted.status).toBe("SUBMITTED");
   });
 });
+
+/**
+ * Phase 5, N3: `verifyProcess` refuses when a mapped ComponentOperation on
+ * this (process, unit) has an open Ncr — created here the real way, via
+ * component.service's start/submit/reject flow (Task 2), not a hand-inserted
+ * row. Own minimal fixture, same shape as the component-ops gate above:
+ * a single JobProcess with no predecessors, so gating/hold-point checks never
+ * enter the picture and the test isolates the new NCR gate only.
+ */
+describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startProcess, submitProcess, verifyProcess } = await import("./process.service");
+  const { startComponentOperation, submitComponentOperation, rejectComponentOperation } = await import(
+    "./component.service"
+  );
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("refuses verify while a mapped operation has an open Ncr, naming it, then allows it once the Ncr is closed", async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-NCRGATE-${Date.now()}`, name: "Ncr gate test" },
+    });
+    const tenantId = org.id;
+
+    const dept = await owner.department.create({ data: { tenantId, code: "F", name: "Fabrication" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-ncrgate-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-NCRGATE-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+
+    // seq 13 is arbitrary here — just a code the mapped OperationRef can point at.
+    const jobProcess = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 13, code: "13", name: "Welding", departmentId: dept.id },
+    });
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+    const operation = await owner.operationRef.create({
+      data: { tenantId, code: "WELDING", name: "Shell Welding", leadTimeProcessSeq: 13, defaultDepartmentId: dept.id },
+    });
+    const component = await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    const componentOp = await owner.componentOperation.create({
+      data: { componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
+    });
+    const rejectCategoryId = (
+      await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })
+    ).id;
+
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const plan = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    const userSup = await owner.user.create({
+      data: { tenantId, email: "ncrgate-sup@x", username: "ncrgate-sup", name: "Sup", passwordHash: "x" },
+    });
+    const userQc = await owner.user.create({
+      data: { tenantId, email: "ncrgate-qc@x", username: "ncrgate-qc", name: "Qc", passwordHash: "x" },
+    });
+    const base = { tenantId, clientId: null, mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
+    const maker: Actor = {
+      ...base,
+      userId: userSup.id,
+      name: "Sup",
+      email: "ncrgate-sup@x",
+      roles: [ROLES.SUPERVISOR, ROLES.QC],
+      departmentIds: [dept.id],
+    };
+    const checker: Actor = {
+      ...base,
+      userId: userQc.id,
+      name: "Qc",
+      email: "ncrgate-qc@x",
+      roles: [ROLES.QC],
+      departmentIds: [],
+    };
+
+    // Real reject flow (Task 2), not a hand-inserted Ncr row: this is what
+    // produces the OPEN Ncr the gate must see.
+    await startComponentOperation(maker, { componentOperationId: componentOp.id });
+    await submitComponentOperation(maker, { componentOperationId: componentOp.id });
+    await rejectComponentOperation(checker, {
+      componentOperationId: componentOp.id,
+      categoryId: rejectCategoryId,
+      detail: "porosity",
+    });
+
+    const rejection = await owner.componentOperationRejection.findFirstOrThrow({
+      where: { componentOperationId: componentOp.id },
+    });
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejection.id } });
+    expect(ncr.status).toBe("OPEN");
+
+    // Isolate the NCR gate from the (already-covered, Phase 3 R2) component-ops
+    // gate on submitProcess: reject leaves the ComponentOperation IN_PROGRESS,
+    // not COMPLETE, which would otherwise trip COMPONENT_OPS_INCOMPLETE before
+    // verify is even reached. Force it COMPLETE directly — real rework would
+    // do this via startComponentOperation/submitComponentOperation, tested
+    // elsewhere; the Ncr staying OPEN independent of the op's own status is
+    // exactly the scenario this gate exists for (rework done, disposition/close
+    // still pending).
+    await owner.componentOperation.update({ where: { id: componentOp.id }, data: { status: "COMPLETE" } });
+
+    await startProcess(maker, { processPlanId: plan.id });
+    await submitProcess(maker, { processPlanId: plan.id });
+
+    const err = await verifyProcess(checker, { processPlanId: plan.id }).catch((e) => e);
+    expect(isAppError(err) && err.code).toBe(ERROR_CODES.NCR_OPEN);
+    expect(isAppError(err) && (err.detail?.blockingOperations as string[])).toContain("Shell Welding");
+
+    await owner.ncr.update({ where: { id: ncr.id }, data: { status: "CLOSED" } });
+
+    const verified = await verifyProcess(checker, { processPlanId: plan.id });
+    expect(verified.status).toBe("COMPLETE");
+  });
+});

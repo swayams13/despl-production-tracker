@@ -29,6 +29,7 @@ import {
 import {
   assertComponentOpsComplete,
   assertNoOpenHoldPoint,
+  assertNoOpenNcr,
   assertNoUnfiledDelayBlock,
   jobEdgeToScheduleEdge,
   lockProcessPlanForUpdate,
@@ -218,6 +219,7 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
     const { edges, states } = await loadGate(tx, plan);
     assertCanComplete(edges, states);
     await assertNoOpenHoldPoint(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+    await assertNoOpenNcr(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
 
     return audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({

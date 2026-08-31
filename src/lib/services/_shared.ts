@@ -516,6 +516,76 @@ export async function assertComponentOpsComplete(
   }
 }
 
+const OPEN_NCR_STATUSES = ["OPEN", "DISPOSITIONED", "REWORK_IN_PROGRESS"] as const;
+
+/**
+ * `verifyProcess` gate (Phase 5, N3): refuses when any `ComponentOperation`/
+ * `AssemblyStep` mapped to `(jobProcessId, unitId)` — same
+ * `leadTimeProcessSeq == JobProcess.code` join as `loadMappedOps` — has a
+ * linked `Ncr` that isn't `CLOSED` yet. A narrower sibling query rather than
+ * an extension of `loadMappedOps`: that helper's `MappedOp` return shape is
+ * relied on by `assertComponentOpsComplete`'s existing callers/tests, and
+ * this gate needs Ncr status, not operation status. No-op when `unitId` is
+ * null — same SEAM convention as `assertNoOpenHoldPoint`/
+ * `assertComponentOpsComplete`.
+ */
+export async function assertNoOpenNcr(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<void> {
+  if (args.unitId == null) return;
+
+  const jobProcess = await tx.jobProcess.findUnique({
+    where: { id: args.jobProcessId },
+    select: { code: true },
+  });
+  if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return;
+  const seq = Number(jobProcess.code);
+
+  const openNcrs = await tx.ncr.findMany({
+    where: {
+      status: { in: [...OPEN_NCR_STATUSES] },
+      OR: [
+        {
+          componentOperationRejection: {
+            componentOperation: {
+              component: { unitId: args.unitId },
+              operation: { leadTimeProcessSeq: seq },
+            },
+          },
+        },
+        {
+          assemblyStepRejection: {
+            assemblyStep: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
+          },
+        },
+      ],
+    },
+    select: {
+      componentOperationRejection: {
+        select: { componentOperation: { select: { operation: { select: { name: true } } } } },
+      },
+      assemblyStepRejection: {
+        select: { assemblyStep: { select: { templateStep: { select: { activity: true } } } } },
+      },
+    },
+  });
+
+  if (openNcrs.length > 0) {
+    const blockingOperations = openNcrs.map(
+      (n) =>
+        n.componentOperationRejection?.componentOperation.operation.name ??
+        n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
+        "unknown operation",
+    );
+    throw new AppError(ERROR_CODES.NCR_OPEN, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      blockingOperations,
+    });
+  }
+}
+
 /**
  * B7, Phase 4 (CLAUDE.md #2's fourth gate): a component's linked `BomItem`
  * must not be recorded short before its next operation starts. SEAM, same

@@ -15,6 +15,8 @@ export const ERROR_CODES = {
   MAKER_CHECKER_VIOLATION: "MAKER_CHECKER_VIOLATION",
   /** An uncleared hold-point checkpoint blocks completion. */
   HOLD_POINT_OPEN: "HOLD_POINT_OPEN",
+  /** verifyProcess: a mapped ComponentOperation/AssemblyStep has a non-CLOSED Ncr (Phase 5, N3). */
+  NCR_OPEN: "NCR_OPEN",
   /** Department has an overdue process and owes a categorised delay reason. */
   REASON_REQUIRED: "REASON_REQUIRED",
   /** Caller lacks the role, or is outside their department scope. */
@@ -107,6 +109,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "The person who submitted an entry cannot also verify it. A different QC user must verify.",
   HOLD_POINT_OPEN:
     "An inspection hold point on this item is still open. It must be cleared before completion.",
+  NCR_OPEN:
+    "An operation feeding this stage has an open non-conformance report. It must be closed before this stage can verify.",
   REASON_REQUIRED:
     "This department has an overdue process on this unit. File a categorised delay reason to continue.",
   FORBIDDEN: "You do not have permission to do this.",
