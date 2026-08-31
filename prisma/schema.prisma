@@ -184,6 +184,27 @@ enum DelayReviewStatus {
   DISPUTED
 }
 
+enum NcrDisposition {
+  USE_AS_IS
+  REPAIR
+  REWORK
+  SCRAP
+  CONCESSION
+}
+
+enum NcrStatus {
+  OPEN
+  DISPOSITIONED
+  REWORK_IN_PROGRESS
+  CLOSED
+}
+
+enum ProcessEvidenceKind {
+  MDR_COMPILED
+  PACKING_DONE
+  DISPATCH_RECORDED
+}
+
 enum SnapshotCadence {
   LIVE
   DAILY
@@ -287,8 +308,8 @@ model User {
   /// later UI that splits them back into two controls (D25).
   outdoorMode        Boolean         @default(false) @map("outdoor_mode")
 
-  tenant                       Organization         @relation(fields: [tenantId], references: [id])
-  client                       Client?              @relation(fields: [clientId], references: [id])
+  tenant                       Organization                  @relation(fields: [tenantId], references: [id])
+  client                       Client?                       @relation(fields: [clientId], references: [id])
   roles                        UserRole[]
   departments                  UserDepartment[]
   assignedPlans                ProcessPlan[]
@@ -297,25 +318,30 @@ model User {
   procurementEvents            ProcurementEvent[]
   stockTxns                    StockTxn[]
   createdScheduleRuns          ScheduleRun[]
-  submittedProcessPlans        ProcessPlan[]        @relation("ProcessPlanSubmittedBy")
-  verifiedProcessPlans         ProcessPlan[]        @relation("ProcessPlanVerifiedBy")
-  submittedComponentOps        ComponentOperation[] @relation("ComponentOperationSubmittedBy")
-  verifiedComponentOps         ComponentOperation[] @relation("ComponentOperationVerifiedBy")
+  submittedProcessPlans        ProcessPlan[]                 @relation("ProcessPlanSubmittedBy")
+  verifiedProcessPlans         ProcessPlan[]                 @relation("ProcessPlanVerifiedBy")
+  submittedComponentOps        ComponentOperation[]          @relation("ComponentOperationSubmittedBy")
+  verifiedComponentOps         ComponentOperation[]          @relation("ComponentOperationVerifiedBy")
   rejectedComponentOps         ComponentOperationRejection[]
   loggedWeldJoints             WeldJoint[]
   loggedWeldLogs               WeldLog[]
-  submittedAssemblySteps       AssemblyStep[]       @relation("AssemblyStepSubmittedBy")
-  verifiedAssemblySteps        AssemblyStep[]       @relation("AssemblyStepVerifiedBy")
+  submittedAssemblySteps       AssemblyStep[]                @relation("AssemblyStepSubmittedBy")
+  verifiedAssemblySteps        AssemblyStep[]                @relation("AssemblyStepVerifiedBy")
   rejectedAssemblySteps        AssemblyStepRejection[]
-  clearedQcpExecutions         QcpExecution[]       @relation("QcpExecutionClearedBy")
-  waiverApprovedQcpExecutions  QcpExecution[]       @relation("QcpExecutionWaiverApprovedBy")
-  filedDelayReasons            DelayReason[]        @relation("DelayReasonFiledBy")
-  reviewedDelayReasons         DelayReason[]        @relation("DelayReasonReviewedBy")
-  publishedSnapshots           ProgressSnapshot[]   @relation("ProgressSnapshotPublishedBy")
-  verifiedSnapshots            ProgressSnapshot[]   @relation("ProgressSnapshotVerifiedBy")
+  clearedQcpExecutions         QcpExecution[]                @relation("QcpExecutionClearedBy")
+  waiverApprovedQcpExecutions  QcpExecution[]                @relation("QcpExecutionWaiverApprovedBy")
+  filedDelayReasons            DelayReason[]                 @relation("DelayReasonFiledBy")
+  reviewedDelayReasons         DelayReason[]                 @relation("DelayReasonReviewedBy")
+  publishedSnapshots           ProgressSnapshot[]            @relation("ProgressSnapshotPublishedBy")
+  verifiedSnapshots            ProgressSnapshot[]            @relation("ProgressSnapshotVerifiedBy")
   createdBomRevisions          BomRevision[]
   recordedNdtResults           NdtResult[]
   publishedTemplateVersions    ProcessTemplateVersion[]
+  ncrsDispositioned            Ncr[]                         @relation("NcrDispositionedBy")
+  ncrsReworkOwned              Ncr[]                         @relation("NcrReworkOwner")
+  ncrsClosed                   Ncr[]                         @relation("NcrClosedBy")
+  recordedDftReadings          DftReading[]
+  dispatchBatchesApproved      DispatchBatch[]               @relation("DispatchBatchReleaseApprovedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -618,7 +644,7 @@ model ProcessTemplateVersion {
   processes TemplateProcess[]
   edges     TemplateEdge[]
   jobs      Job[]
-  publisher User?            @relation(fields: [publishedBy], references: [id])
+  publisher User?             @relation(fields: [publishedBy], references: [id])
 
   @@unique([templateId, version])
   @@index([templateId])
@@ -628,34 +654,35 @@ model ProcessTemplateVersion {
 /// One process in a template version. For PRESSURE_VESSEL v1 these are the
 /// 36 rows of DESPL's Lead Time table.
 model TemplateProcess {
-  id                      Int     @id @default(autoincrement())
-  versionId               Int     @map("version_id")
+  id                      Int                  @id @default(autoincrement())
+  versionId               Int                  @map("version_id")
   seq                     Int
   code                    String
   name                    String
-  mainActivities          String? @map("main_activities")
+  mainActivities          String?              @map("main_activities")
   /// Nullable + `provisional` together, deliberately: a family with a process
   /// ROUTE but no confirmed durations (e.g. PIPE_SPOOL, derived from a QAP's
   /// activity sequence, not a lead-time document) can exist without inventing
   /// numbers. `lib/schedule/` MUST refuse to compute a plan — return a clear
   /// "SCHEDULE_DATA_MISSING"-style refusal, never a 0-day or guessed date —
   /// for any process where `provisional` is true or a duration is null.
-  durationMinDays         Int?    @map("duration_min_days")
-  durationMaxDays         Int?    @map("duration_max_days")
-  cumulativePrinted       String? @map("cumulative_printed")
-  defaultDepartmentId     Int     @map("default_department_id")
+  durationMinDays         Int?                 @map("duration_min_days")
+  durationMaxDays         Int?                 @map("duration_max_days")
+  cumulativePrinted       String?              @map("cumulative_printed")
+  defaultDepartmentId     Int                  @map("default_department_id")
   /// Crosswalk to the 25-stage work-order reporting view. Pressure-Vessel-
   /// specific; empty for families with no equivalent reporting view.
-  workOrderStages         Int[]   @map("work_order_stages")
-  envelopeFinishByMinDays Int?    @map("envelope_finish_by_min_days")
-  envelopeFinishByMaxDays Int?    @map("envelope_finish_by_max_days")
-  envelopeStartByMinDays  Int?    @map("envelope_start_by_min_days")
-  envelopeStartByMaxDays  Int?    @map("envelope_start_by_max_days")
+  workOrderStages         Int[]                @map("work_order_stages")
+  envelopeFinishByMinDays Int?                 @map("envelope_finish_by_min_days")
+  envelopeFinishByMaxDays Int?                 @map("envelope_finish_by_max_days")
+  envelopeStartByMinDays  Int?                 @map("envelope_start_by_min_days")
+  envelopeStartByMaxDays  Int?                 @map("envelope_start_by_max_days")
   /// Conditional processes (e.g. PWHT) can be excluded per job.
-  optional                Boolean @default(false)
+  optional                Boolean              @default(false)
   /// True = process/sequence is real (sourced from a QAP or lead-time doc),
   /// but duration is not confirmed by DESPL. Distinct from `optional`.
-  provisional             Boolean @default(false)
+  provisional             Boolean              @default(false)
+  evidenceKind            ProcessEvidenceKind? @map("evidence_kind")
 
   version            ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment  Department             @relation(fields: [defaultDepartmentId], references: [id])
@@ -746,6 +773,7 @@ model Job {
   drawings                AssemblyDrawing[]
   snapshots               ProgressSnapshot[]
   dispatchBatches         DispatchBatch[]
+  packages                Package[]
   weldJoints              WeldJoint[]
   weldLogs                WeldLog[]
 
@@ -789,19 +817,47 @@ model Unit {
   id          Int      @id @default(autoincrement())
   equipmentId Int      @map("equipment_id")
   serialNo    String   @map("serial_no")
+  packageId   Int?     @map("package_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  equipment     Equipment          @relation(fields: [equipmentId], references: [id])
-  qcpExecutions QcpExecution[]
-  processPlans  ProcessPlan[]
-  components    Component[]
-  snapshots     ProgressSnapshot[]
-  weldJoints    WeldJoint[]
-  assemblySteps AssemblyStep[]
+  equipment          Equipment           @relation(fields: [equipmentId], references: [id])
+  package            Package?            @relation(fields: [packageId], references: [id])
+  qcpExecutions      QcpExecution[]
+  processPlans       ProcessPlan[]
+  components         Component[]
+  snapshots          ProgressSnapshot[]
+  weldJoints         WeldJoint[]
+  assemblySteps      AssemblyStep[]
+  dispatchBatchUnits DispatchBatchUnit[]
 
   @@unique([equipmentId, serialNo])
   @@index([equipmentId])
+  @@index([packageId])
   @@map("units")
+}
+
+/// D1 — a Unit belongs to at most one Package (simplest cardinality that
+/// fits "packing list of contents by serial"). D2's DispatchBatchUnit is a
+/// separate join because a dispatch batch groups units directly, not via
+/// Package.
+model Package {
+  id                Int      @id @default(autoincrement())
+  jobId             Int      @map("job_id")
+  packageNo         String   @map("package_no")
+  weightKg          Decimal? @map("weight_kg")
+  lengthMm          Int?     @map("length_mm")
+  widthMm           Int?     @map("width_mm")
+  heightMm          Int?     @map("height_mm")
+  preservationNotes String?  @map("preservation_notes")
+  createdBy         Int      @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  units Unit[]
+
+  @@unique([jobId, packageNo])
+  @@index([jobId])
+  @@map("packages")
 }
 
 /// The job's own copy of the process spine, materialised from the pinned
@@ -959,7 +1015,7 @@ model BomRevision {
   createdAt   DateTime          @default(now()) @map("created_at")
 
   equipment Equipment @relation(fields: [equipmentId], references: [id])
-  creator   User?    @relation(fields: [createdBy], references: [id])
+  creator   User?     @relation(fields: [createdBy], references: [id])
   bomItems  BomItem[]
 
   @@unique([equipmentId, revisionNo])
@@ -1300,6 +1356,8 @@ model ComponentOperation {
   submitter         User?                         @relation("ComponentOperationSubmittedBy", fields: [submittedBy], references: [id])
   verifier          User?                         @relation("ComponentOperationVerifiedBy", fields: [verifiedBy], references: [id])
   rejections        ComponentOperationRejection[]
+  paintRecord       PaintRecord?
+  dftReadings       DftReading[]
 
   @@unique([componentId, seq])
   @@index([componentId])
@@ -1326,10 +1384,47 @@ model ComponentOperationRejection {
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
   category           DelayCategoryRef   @relation(fields: [categoryId], references: [id])
   rejector           User               @relation(fields: [rejectedBy], references: [id])
+  ncr                Ncr?
 
   @@index([componentOperationId])
   @@index([categoryId])
   @@map("component_operation_rejections")
+}
+
+/// P1 — paint tracking rides the existing PAINTING ComponentOperation grain
+/// (already a per-component RouteStep per seed/component-routes.json); no
+/// new grain needed.
+model PaintRecord {
+  id                   Int    @id @default(autoincrement())
+  componentOperationId Int    @unique @map("component_operation_id")
+  coatingSystem        String @map("coating_system")
+  coatsPlanned         Int?   @map("coats_planned")
+
+  componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
+
+  @@map("paint_records")
+}
+
+/// `accepted` is self-attested by whoever records the reading (open
+/// question flagged in the plan's cover note — no DFT spec-range table
+/// exists to check against automatically; building one is out of scope
+/// unless the floor confirms it's needed).
+model DftReading {
+  id                   Int      @id @default(autoincrement())
+  componentOperationId Int      @map("component_operation_id")
+  coatNumber           Int?     @map("coat_number")
+  location             String?
+  readingMicrons       Int      @map("reading_microns")
+  accepted             Boolean
+  recordedBy           Int      @map("recorded_by")
+  /// SERVER CLOCK ONLY (invariant #1)
+  recordedAt           DateTime @default(now()) @map("recorded_at")
+
+  componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
+  recordedByUser     User               @relation(fields: [recordedBy], references: [id])
+
+  @@index([componentOperationId])
+  @@map("dft_readings")
 }
 
 model ItemTest {
@@ -1624,10 +1719,46 @@ model AssemblyStepRejection {
   assemblyStep AssemblyStep     @relation(fields: [assemblyStepId], references: [id], onDelete: Cascade)
   category     DelayCategoryRef @relation(fields: [categoryId], references: [id])
   rejector     User             @relation(fields: [rejectedBy], references: [id])
+  ncr          Ncr?
 
   @@index([assemblyStepId])
   @@index([categoryId])
   @@map("assembly_step_rejections")
+}
+
+/// N1 — layered on top of ComponentOperationRejection/AssemblyStepRejection,
+/// not a replacement: the rejection row is the immutable "why reopened"
+/// record (F5); Ncr is the disposition/rework workflow that follows it.
+/// Exactly one of componentOperationRejectionId/assemblyStepRejectionId is
+/// set — enforced by a raw CHECK constraint added in this task's migration
+/// (Prisma has no native XOR-column support), plus an app-level assert in
+/// ncr.service.ts (Task 2).
+model Ncr {
+  id                            Int             @id @default(autoincrement())
+  componentOperationRejectionId Int?            @unique @map("component_operation_rejection_id")
+  assemblyStepRejectionId       Int?            @unique @map("assembly_step_rejection_id")
+  status                        NcrStatus       @default(OPEN)
+  disposition                   NcrDisposition?
+  dispositionedBy               Int?            @map("dispositioned_by")
+  dispositionedAt               DateTime?       @map("dispositioned_at")
+  dispositionNotes              String?         @map("disposition_notes")
+  reworkOwnerId                 Int?            @map("rework_owner_id")
+  reworkDueDate                 DateTime?       @map("rework_due_date")
+  /// SERVER CLOCK ONLY (invariant #1) — stamped by Task 2's start/submit hooks.
+  reworkStartedAt               DateTime?       @map("rework_started_at")
+  /// SERVER CLOCK ONLY (invariant #1)
+  reworkFinishedAt              DateTime?       @map("rework_finished_at")
+  closedBy                      Int?            @map("closed_by")
+  closedAt                      DateTime?       @map("closed_at")
+
+  componentOperationRejection ComponentOperationRejection? @relation(fields: [componentOperationRejectionId], references: [id], onDelete: Cascade)
+  assemblyStepRejection       AssemblyStepRejection?       @relation(fields: [assemblyStepRejectionId], references: [id], onDelete: Cascade)
+  dispositionedByUser         User?                        @relation("NcrDispositionedBy", fields: [dispositionedBy], references: [id])
+  reworkOwner                 User?                        @relation("NcrReworkOwner", fields: [reworkOwnerId], references: [id])
+  closedByUser                User?                        @relation("NcrClosedBy", fields: [closedBy], references: [id])
+
+  @@index([status])
+  @@map("ncrs")
 }
 
 // ── QCP / ITP engine (dynamic parties, per-project code sets) ───────────
@@ -1810,18 +1941,41 @@ model DrawingRevision {
 /// still holds the tracker's own "Dispatch Date" field (the first batch);
 /// this table is purely additive.
 model DispatchBatch {
-  id          Int      @id @default(autoincrement())
-  jobId       Int      @map("job_id")
-  seq         Int
-  plannedDate DateTime @map("planned_date")
-  qty         Int?
-  remarks     String?
+  id                 Int       @id @default(autoincrement())
+  jobId              Int       @map("job_id")
+  seq                Int
+  plannedDate        DateTime  @map("planned_date")
+  qty                Int?
+  remarks            String?
+  dispatchNoteNo     String?   @map("dispatch_note_no")
+  gatePassNo         String?   @map("gate_pass_no")
+  vehicleNo          String?   @map("vehicle_no")
+  lrNo               String?   @map("lr_no")
+  releaseApprovedBy  Int?      @map("release_approved_by")
+  releaseApprovedAt  DateTime? @map("release_approved_at")
+  /// SERVER CLOCK ONLY (invariant #1)
+  actualDispatchDate DateTime? @map("actual_dispatch_date")
 
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job                   Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  releaseApprovedByUser User?               @relation("DispatchBatchReleaseApprovedBy", fields: [releaseApprovedBy], references: [id])
+  dispatchBatchUnits    DispatchBatchUnit[]
 
   @@unique([jobId, seq])
   @@index([jobId])
   @@map("dispatch_batches")
+}
+
+model DispatchBatchUnit {
+  id              Int @id @default(autoincrement())
+  dispatchBatchId Int @map("dispatch_batch_id")
+  unitId          Int @map("unit_id")
+
+  dispatchBatch DispatchBatch @relation(fields: [dispatchBatchId], references: [id], onDelete: Cascade)
+  unit          Unit          @relation(fields: [unitId], references: [id])
+
+  @@unique([dispatchBatchId, unitId])
+  @@index([dispatchBatchId])
+  @@map("dispatch_batch_units")
 }
 
 // ── Delay, notifications ────────────────────────────────────────────────
