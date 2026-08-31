@@ -787,9 +787,19 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
     await startProcess(maker, { processPlanId: plan.id });
     await submitProcess(maker, { processPlanId: plan.id });
 
-    const err = await verifyProcess(checker, { processPlanId: plan.id }).catch((e) => e);
-    expect(isAppError(err) && err.code).toBe(ERROR_CODES.NCR_OPEN);
-    expect(isAppError(err) && (err.detail?.blockingOperations as string[])).toContain("Shell Welding");
+    // Table-driven: all three non-CLOSED statuses must refuse verify, naming
+    // the blocking operation — not just the freshly-rejected OPEN case.
+    // DISPOSITIONED/REWORK_IN_PROGRESS are the states dispositionNcr actually
+    // leaves an Ncr in mid-rework-cycle, so they're the more common real-world
+    // shape, not an edge case.
+    for (const status of ["OPEN", "DISPOSITIONED", "REWORK_IN_PROGRESS"] as const) {
+      await owner.ncr.update({ where: { id: ncr.id }, data: { status } });
+      const err = await verifyProcess(checker, { processPlanId: plan.id }).catch((e) => e);
+      expect(isAppError(err) && err.code, `status=${status}`).toBe(ERROR_CODES.NCR_OPEN);
+      expect(isAppError(err) && (err.detail?.blockingOperations as string[]), `status=${status}`).toContain(
+        "Shell Welding",
+      );
+    }
 
     await owner.ncr.update({ where: { id: ncr.id }, data: { status: "CLOSED" } });
 
