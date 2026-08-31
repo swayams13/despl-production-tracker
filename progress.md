@@ -2,6 +2,158 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Phase 5 (NCR, paint, packing, dispatch) — back-end/service layer, 31 Aug 2026
+
+**Status: N1–N4, P1, D1–D4 all implemented (service/schema layer only, no UI — this phase's
+brief has no UI item), tested (pure + DB-gated), reviewed via subagent-driven-development
+(fresh implementer + task reviewer per task, fix-loop where findings surfaced). Worked in an
+isolated worktree/branch `phase5-ncr-paint-packing-dispatch`, based on `demo`, not yet merged
+or pushed — awaiting go-ahead. Plan:
+`docs/superpowers/plans/2026-08-31-phase5-ncr-paint-packing-dispatch.md`.**
+
+### What changed, by work item
+
+- **N1 — `Ncr` model.** Layered on top of `ComponentOperationRejection`/`AssemblyStepRejection`
+  (Phase 1's F5), not a replacement — the rejection row stays the immutable "why reopened"
+  record, `Ncr` is the new disposition/rework workflow on top, created automatically inside the
+  same `audited()` transaction as every reject. Exactly-one-of-two-FK enforced by both a raw
+  Postgres CHECK constraint and app-level design. `dispositionNcr` (QC-role only) and `closeNcr`
+  (internal, called from verify) in new `src/lib/services/ncr.service.ts`. **Implemented**, with
+  one real Critical bug found and fixed in review: repeated reject→resubmit→reject cycles before
+  any disposition could open multiple `Ncr` rows on the same operation, and the original verify
+  logic only closed one (`findFirst`) — the survivor would have been permanently stuck
+  non-`CLOSED` with no code path to ever close it, which would have permanently blocked N3's
+  gate on that stage forever. Fixed to close all non-`CLOSED` Ncrs on verify (`findMany`), with
+  a regression test for the exact cycle that exposed it.
+- **N2 — rework visibility.** No new "work item" entity — reopening the operation back to
+  `IN_PROGRESS` already is the rework. `workspace.read.ts` gained an open-NCR count per unit row
+  plus a `?status=rework` cross-filter value reusing the existing URL convention;
+  `departments.read.ts` gained a department-scoped open-rework list. **Implemented.**
+- **N3 — `NCR_OPEN` gate.** `verifyProcess` refuses (new `ERROR_CODES.NCR_OPEN`, 409) while any
+  operation/assembly-step mapped to that `(jobProcessId, unitId)` has a non-`CLOSED` Ncr, reusing
+  the same `leadTimeProcessSeq`-based join `assertComponentOpsComplete`/`loadMappedOps` already
+  established — both fabrication and assembly grains covered, verified against the schema.
+  Table-driven across all three open statuses (`OPEN`/`DISPOSITIONED`/`REWORK_IN_PROGRESS`).
+  **Implemented.**
+- **N4 — rework hours/qty on dashboards.** `qc-cockpit.read.ts` gained
+  `QcCockpit.rework: {openCount, totalReworkHours}` (summed from `reworkStartedAt`/
+  `reworkFinishedAt`, stamped at disposition-time and at verify-close respectively);
+  `departments.read.ts`'s `DeptCard` gained `openReworkCount`. **Implemented.**
+- **P1 — Paint/DFT.** New `PaintRecord` (1:1, coating system + planned coats) and `DftReading`
+  (N per operation, per-coat micron readings, self-attested `accepted` boolean) rows on the
+  existing `PAINTING`-coded `ComponentOperation` grain — no new grain needed, matching the
+  existing per-component route. Verify is gated on distinct-coat coverage (one Critical bug
+  found and fixed in review: the first pass counted total accepted readings, not distinct coat
+  numbers — N accepted readings all on one coat would have falsely satisfied `coatsPlanned=N`;
+  fixed to `groupBy(coatNumber)`). **Implemented. Open question, not resolved — needs the
+  floor's input, not guessed**: whether `accepted` should be checked against a spec'd min/max
+  micron range (would need a new range table); shipped as self-attested only, per the plan's
+  explicit instruction not to invent one.
+- **D1 — `Package`.** A `Unit` belongs to at most one `Package` (simplest cardinality for
+  "packing list of contents by serial" — no join table needed here, unlike D2).
+  `packing.service.ts`: `createPackage`, `assignUnitToPackage` (refuses cross-job assignment).
+  **Implemented.**
+- **D2 — `DispatchBatchUnit`.** Join table added; `DispatchBatch` (previously an unused,
+  Phase-0-flagged dead model with zero application callers) now has a real write path.
+  **Implemented.**
+- **D3 — dispatch note/gate pass/vehicle/LR/actual date/release approval.** `DispatchBatch`
+  extended with those fields plus `releaseApprovedBy`/`At`. `dispatch.service.ts`:
+  `createDispatchBatch`, `addUnitToBatch` (refuses an unpacked unit), `approveDispatchRelease`
+  (Production Head only), `recordDispatch` (stamps `actualDispatchDate = now()` server-side —
+  invariant #1, the schema literally has no field a client could use to set it). **Note on
+  scope**: `DispatchBatch` got no persisted `status` column — Task 1's schema missed it and the
+  plan's state-machine description assumed one existed. Ruled during implementation to derive
+  status from the existing nullable fields (`PLANNED`/`RELEASED`/`DISPATCHED` inferred from
+  `releaseApprovedAt`/`actualDispatchDate` being set) via one shared `deriveDispatchBatchStatus`
+  helper feeding the normal `assertStateTransition` machinery, rather than adding a redundant
+  column — avoids a second migration and a column that could drift from the fields that
+  actually gate behavior. **Implemented.**
+- **D4 — evidence-gated stages.** New `ProcessEvidenceKind` enum (`MDR_COMPILED`/
+  `PACKING_DONE`/`DISPATCH_RECORDED`) on `TemplateProcess`, generic gate (`assertEvidenceSatisfied`
+  in `verifyProcess`) — no hardcoded stage number in `src/`, per §0's generality rule. A new
+  PRESSURE_VESSEL template version (v2, via `cloneVersion`/`publishVersion`, matching Phase 1
+  F6's versioned-template-via-script precedent) tags its Packing (`TemplateProcess.seq` 34,
+  "Packing & Preservation" — the plan's own guess of seq 23/24/25 was wrong, that's the 25-stage
+  *display* numbering from `stage-names.ts`, a different scheme than `TemplateProcess.seq`'s
+  36-process lead-time grain; caught and corrected during implementation, not guessed past) and
+  Dispatch (seq 36) rows with `PACKING_DONE`/`DISPATCH_RECORDED`. **`MDR_COMPILED` is wired
+  (enum value + gate-handling logic exists, refuses cleanly rather than crashing) but
+  deliberately NOT tagged on any real row this phase — no task in this plan adds an "MDR
+  compiled" action, so tagging it would make that stage permanently unverifiable. Flagging this
+  honestly, not silently dropping it: a future phase needs a real "compile MDR" action before
+  `MDR_COMPILED` can be used.** **Important, state plainly: DESPL-320 itself is NOT gated by
+  this work.** Invariant #9 (running units keep their pinned template version) means the new v2
+  template applies only to jobs created after it publishes — DESPL-320 is still pinned to v1 and
+  was deliberately NOT re-pinned (re-pinning a running job is a separate, human decision outside
+  this phase's scope, not a mechanical follow-on). Confirmed via direct DB query at every review
+  step. **Implemented as designed; DESPL-320-specific enforcement is a follow-up decision, not
+  a gap in this task.**
+
+### Real bugs found and fixed in review, not worked around
+
+Two Critical, one Important, all caught by the task-reviewer loop (fresh subagent per review,
+independent of the implementer) before merge, not discovered later:
+1. Multi-open-Ncr orphan risk (N1/N3) — see above.
+2. DFT coat-coverage raw-count vs. distinct-coat bug (P1) — see above.
+3. Task 1's migration: the implementer's first pass used `prisma db push` to work around what it
+   believed was a blocked `prisma migrate dev`, which silently skipped the hand-added CHECK
+   constraint (Prisma can't express CHECK via `db push`'s schema diff) and left the migration
+   unrecorded in `_prisma_migrations` — a drift that would have broken `prisma migrate deploy`
+   in production. The claimed root cause (a stale failed-migration conflict) did not reproduce
+   under independent verification; fixed by applying the CHECK constraint for real and
+   `prisma migrate resolve --applied` to reconcile history. Also found in the same pass (both
+   independently and via a background security-review hook on the commit): `packages.created_by`
+   had no FK constraint — every sibling actor FK in the same migration had one, this was simply
+   missed.
+
+### Tests / verification
+
+`pnpm typecheck` clean. `pnpm lint`: 0 errors, 2 pre-existing unrelated warnings in
+`process.service.ts` (unused imports, not introduced by this branch). `pnpm test`: 571/571
+passing (was 549 at session start; +22 new pure tests across all 6 tasks, 0 regressions).
+`pnpm test:db`: 898/899 passing in the full run — the 1 failure
+(`process.service.test.ts` > "verify refuses at a genuinely uncleared hold point") is a known
+pre-existing DB-test-pollution flake, confirmed **not** a Phase 5 regression by two independent
+methods: every task's implementer confirmed it via `git stash`-to-baseline (identical failure on
+the unmodified tree), and this session's final full-suite run confirmed the same test passes
+cleanly (37/37) when the file runs in isolation — it only fails as part of the full multi-file
+`test:db` run, a cross-file test-ordering/DB-state artifact, not a logic defect in the test or in
+any Phase 5 code. `pnpm build` clean.
+
+### Remaining limitations
+
+- **No UI was built this phase.** Every N/P/D item is service-layer and schema only — no Server
+  Actions, no pages, no components. This phase's brief (`docs/PHASE-PROMPTS.md` §6) lists no
+  UI work item, unlike Phases 1/2/4 which named explicit UI items (F9/A6/stock-controls) — the
+  service layer being real and tested is the deliverable; wiring it into the UI is follow-up
+  work, not a gap in this session's scope.
+- DFT `accepted` is self-attested with no spec-range validation table (open question above).
+- `MDR_COMPILED` has no producer action anywhere yet (flagged above).
+- DESPL-320 itself is not evidence-gated by D4's new template version (flagged above) — only
+  new jobs created after the v2 template publishes are.
+- `dispatchBatchUnits`/`assignUnitToPackage` row-reads (not the primary mutated row) aren't
+  row-locked — confirmed to match this codebase's existing baseline (e.g.
+  `component.service.ts` only locks its primary mutated row too, not siblings it reads), not a
+  new gap introduced by this phase.
+
+### Acceptance-criteria status (§6's brief has no explicit acceptance-criteria block; judged
+against the work items' own descriptions)
+
+- N1–N4: implemented and tested, including the maker-checker-adjacent QC-only disposition gate
+  and the department/dashboard visibility items.
+- P1: implemented and tested; DFT-acceptance-range question open per the floor.
+- D1–D3: implemented and tested.
+- D4: implemented and tested for new jobs; DESPL-320 itself deliberately not re-pinned (see
+  above) — this is a design decision to honor invariant #9, not an incomplete implementation.
+
+### Next recommended phase
+
+Phase 6 (Enterprise UX) per `docs/PHASE-PROMPTS.md` §7 is next in sequence, but given this
+phase shipped no UI, a strong case exists for a short UI-wiring follow-up first (Server
+Actions + `<BomPanel />`/department-page/dashboard wiring for N/P/D, matching the pattern the
+30 Aug stock/procurement session used for Phase 4's own analogous gap) before jumping to Phase
+6's broader UX work — worth a decision before starting the next session.
+
 ## Session — Stock/procurement UI controls added, closing Phase 4's named follow-up gap, 30 Aug 2026
 
 **Status: implemented, live-verified, one pre-existing bug found and root-caused along the way.
