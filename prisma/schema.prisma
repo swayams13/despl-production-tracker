@@ -342,6 +342,7 @@ model User {
   ncrsClosed                   Ncr[]                         @relation("NcrClosedBy")
   recordedDftReadings          DftReading[]
   dispatchBatchesApproved      DispatchBatch[]               @relation("DispatchBatchReleaseApprovedBy")
+  createdPackages              Package[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -852,8 +853,9 @@ model Package {
   createdBy         Int      @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")
 
-  job   Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  units Unit[]
+  job          Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdByUser User  @relation(fields: [createdBy], references: [id])
+  units        Unit[]
 
   @@unique([jobId, packageNo])
   @@index([jobId])

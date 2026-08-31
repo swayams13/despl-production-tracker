@@ -134,6 +134,9 @@ ALTER TABLE "dft_readings" ADD CONSTRAINT "dft_readings_recorded_by_fkey" FOREIG
 ALTER TABLE "packages" ADD CONSTRAINT "packages_job_id_fkey" FOREIGN KEY ("job_id") REFERENCES "jobs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "packages" ADD CONSTRAINT "packages_created_by_fkey" FOREIGN KEY ("created_by") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "dispatch_batch_units" ADD CONSTRAINT "dispatch_batch_units_dispatch_batch_id_fkey" FOREIGN KEY ("dispatch_batch_id") REFERENCES "dispatch_batches"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
