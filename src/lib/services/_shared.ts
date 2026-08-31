@@ -587,6 +587,70 @@ export async function assertNoOpenNcr(
 }
 
 /**
+ * `verifyProcess` gate (Phase 5, D4): a stage tagged with
+ * `TemplateProcess.evidenceKind` cannot verify until the matching evidence
+ * exists for this unit. No-op when `unitId` is null (job/equipment grain —
+ * same SEAM convention as `assertNoOpenHoldPoint`/`assertNoOpenNcr`) or when
+ * the `JobProcess` wasn't materialised from a `TemplateProcess` with an
+ * `evidenceKind` set (most stages have none).
+ *
+ * PACKING_DONE / DISPATCH_RECORDED have real evidence sources wired this
+ * phase (Task 5's Package/DispatchBatch). MDR_COMPILED has no producer
+ * anywhere yet — no task adds a "compile MDR" action — so it always refuses
+ * rather than silently no-op'ing (a no-op would make the enum value
+ * meaningless) or crashing on an unhandled case. Per the controller ruling
+ * that shipped this gate, nothing is tagged `MDR_COMPILED` on a real
+ * `TemplateProcess` row this phase, so this branch is dead code in practice
+ * until a future phase adds the compile action and this message can be
+ * revisited.
+ */
+export async function assertEvidenceSatisfied(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<void> {
+  if (args.unitId == null) return;
+
+  const jobProcess = await tx.jobProcess.findUnique({
+    where: { id: args.jobProcessId },
+    select: { templateProcess: { select: { evidenceKind: true } } },
+  });
+  const evidenceKind = jobProcess?.templateProcess?.evidenceKind;
+  if (evidenceKind == null) return;
+
+  let satisfied: boolean;
+  switch (evidenceKind) {
+    case "PACKING_DONE": {
+      const unit = await tx.unit.findUnique({ where: { id: args.unitId }, select: { packageId: true } });
+      satisfied = unit?.packageId != null;
+      break;
+    }
+    case "DISPATCH_RECORDED": {
+      const dispatched = await tx.dispatchBatchUnit.findFirst({
+        where: { unitId: args.unitId, dispatchBatch: { actualDispatchDate: { not: null } } },
+        select: { id: true },
+      });
+      satisfied = dispatched != null;
+      break;
+    }
+    case "MDR_COMPILED":
+      // No producer exists yet (Phase 5 descope) — always refuse rather than
+      // silently pass, so the gap is loud if a job is ever tagged with it.
+      satisfied = false;
+      break;
+    default:
+      satisfied = false;
+  }
+
+  if (!satisfied) {
+    throw new AppError(ERROR_CODES.EVIDENCE_NOT_SATISFIED, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      evidenceKind,
+    });
+  }
+}
+
+/**
  * B7, Phase 4 (CLAUDE.md #2's fourth gate): a component's linked `BomItem`
  * must not be recorded short before its next operation starts. SEAM, same
  * convention as `assertComponentOpsComplete`/`assertNoOpenHoldPoint`: no-op

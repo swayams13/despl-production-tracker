@@ -28,6 +28,7 @@ import {
 } from "@/lib/shared/schemas";
 import {
   assertComponentOpsComplete,
+  assertEvidenceSatisfied,
   assertNoOpenHoldPoint,
   assertNoOpenNcr,
   assertNoUnfiledDelayBlock,
@@ -220,6 +221,7 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
     assertCanComplete(edges, states);
     await assertNoOpenHoldPoint(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
     await assertNoOpenNcr(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+    await assertEvidenceSatisfied(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
 
     return audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({

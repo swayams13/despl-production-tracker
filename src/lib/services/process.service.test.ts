@@ -807,3 +807,163 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
     expect(verified.status).toBe("COMPLETE");
   });
 });
+
+describe.skipIf(!RUN_DB)("verifyProcess evidence gate (Phase 5, D4, DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startProcess, submitProcess, verifyProcess } = await import("./process.service");
+  const { createPackage, assignUnitToPackage } = await import("./packing.service");
+  const { createDispatchBatch, addUnitToBatch, approveDispatchRelease, recordDispatch } = await import(
+    "./dispatch.service"
+  );
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("gates Packing/Dispatch on real evidence; leaves an untagged (old-version-shaped) stage unaffected — invariant #9", async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-EVGATE-${Date.now()}`, name: "Evidence gate test" },
+    });
+    const tenantId = org.id;
+
+    const dept = await owner.department.create({ data: { tenantId, code: "D", name: "Dispatch" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+
+    // TemplateProcess rows carrying evidenceKind — this is what the real
+    // add-packing-dispatch-evidence-v2.ts script tags on a new published
+    // version; a plain DRAFT row here is enough for the gate, which reads
+    // evidenceKind directly and doesn't care about publish state.
+    const tpPacking = await owner.templateProcess.create({
+      data: {
+        versionId: version.id,
+        seq: 34,
+        code: "34",
+        name: "Packing & Preservation",
+        defaultDepartmentId: dept.id,
+        evidenceKind: "PACKING_DONE",
+      },
+    });
+    const tpDispatch = await owner.templateProcess.create({
+      data: {
+        versionId: version.id,
+        seq: 36,
+        code: "36",
+        name: "Dispatch",
+        defaultDepartmentId: dept.id,
+        evidenceKind: "DISPATCH_RECORDED",
+      },
+    });
+    // No evidenceKind — stands in for a JobProcess pinned to the OLD
+    // (pre-D4) template version, which never had this column populated.
+    const tpUntagged = await owner.templateProcess.create({
+      data: { versionId: version.id, seq: 1, code: "1", name: "PO Receipt", defaultDepartmentId: dept.id },
+    });
+
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-evgate-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-EVGATE-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+
+    const jpPacking = await owner.jobProcess.create({
+      data: { jobId: job.id, templateProcessId: tpPacking.id, seq: 34, code: "34", name: "Packing & Preservation", departmentId: dept.id },
+    });
+    const jpDispatch = await owner.jobProcess.create({
+      data: { jobId: job.id, templateProcessId: tpDispatch.id, seq: 36, code: "36", name: "Dispatch", departmentId: dept.id },
+    });
+    const jpUntagged = await owner.jobProcess.create({
+      data: { jobId: job.id, templateProcessId: tpUntagged.id, seq: 1, code: "1", name: "PO Receipt", departmentId: dept.id },
+    });
+
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const planPacking = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jpPacking.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+    const planDispatch = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jpDispatch.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+    const planUntagged = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jpUntagged.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    const userSup = await owner.user.create({
+      data: { tenantId, email: "evgate-sup@x", username: "evgate-sup", name: "Sup", passwordHash: "x" },
+    });
+    const userQc = await owner.user.create({
+      data: { tenantId, email: "evgate-qc@x", username: "evgate-qc", name: "Qc", passwordHash: "x" },
+    });
+    const base = { tenantId, clientId: null, mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
+    const maker: Actor = {
+      ...base,
+      userId: userSup.id,
+      name: "Sup",
+      email: "evgate-sup@x",
+      roles: [ROLES.SUPERVISOR, ROLES.QC, ROLES.PRODUCTION_HEAD],
+      departmentIds: [dept.id],
+    };
+    const checker: Actor = {
+      ...base,
+      userId: userQc.id,
+      name: "Qc",
+      email: "evgate-qc@x",
+      roles: [ROLES.QC, ROLES.PRODUCTION_HEAD],
+      departmentIds: [],
+    };
+
+    // ── Untagged stage: unaffected — same start/submit/verify path with no
+    // evidence recorded at all, and it just goes through (invariant #9). ──
+    await startProcess(maker, { processPlanId: planUntagged.id });
+    await submitProcess(maker, { processPlanId: planUntagged.id });
+    const verifiedUntagged = await verifyProcess(checker, { processPlanId: planUntagged.id });
+    expect(verifiedUntagged.status).toBe("COMPLETE");
+
+    // ── Packing: refuses until the unit has a packageId, via the real
+    // createPackage/assignUnitToPackage flow. ──
+    await startProcess(maker, { processPlanId: planPacking.id });
+    await submitProcess(maker, { processPlanId: planPacking.id });
+    const packingErr = await verifyProcess(checker, { processPlanId: planPacking.id }).catch((e) => e);
+    expect(isAppError(packingErr) && packingErr.code).toBe(ERROR_CODES.EVIDENCE_NOT_SATISFIED);
+    expect(isAppError(packingErr) && (packingErr.detail?.evidenceKind as string)).toBe("PACKING_DONE");
+
+    const pkg = await createPackage(maker, { jobId: job.id, packageNo: "PKG-1" });
+    await assignUnitToPackage(maker, { packageId: pkg.id, unitId: unit.id });
+
+    const verifiedPacking = await verifyProcess(checker, { processPlanId: planPacking.id });
+    expect(verifiedPacking.status).toBe("COMPLETE");
+
+    // ── Dispatch: refuses until the unit's batch has actualDispatchDate set,
+    // via the real createDispatchBatch/addUnitToBatch/approveDispatchRelease/
+    // recordDispatch flow. ──
+    await startProcess(maker, { processPlanId: planDispatch.id });
+    await submitProcess(maker, { processPlanId: planDispatch.id });
+    const dispatchErr = await verifyProcess(checker, { processPlanId: planDispatch.id }).catch((e) => e);
+    expect(isAppError(dispatchErr) && dispatchErr.code).toBe(ERROR_CODES.EVIDENCE_NOT_SATISFIED);
+    expect(isAppError(dispatchErr) && (dispatchErr.detail?.evidenceKind as string)).toBe("DISPATCH_RECORDED");
+
+    const batch = await createDispatchBatch(maker, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    await addUnitToBatch(maker, { dispatchBatchId: batch.id, unitId: unit.id });
+
+    // Batch not released/dispatched yet — still refuses.
+    const dispatchErr2 = await verifyProcess(checker, { processPlanId: planDispatch.id }).catch((e) => e);
+    expect(isAppError(dispatchErr2) && dispatchErr2.code).toBe(ERROR_CODES.EVIDENCE_NOT_SATISFIED);
+
+    await approveDispatchRelease(maker, { dispatchBatchId: batch.id });
+    await recordDispatch(maker, { dispatchBatchId: batch.id });
+
+    const verifiedDispatch = await verifyProcess(checker, { processPlanId: planDispatch.id });
+    expect(verifiedDispatch.status).toBe("COMPLETE");
+  });
+});
