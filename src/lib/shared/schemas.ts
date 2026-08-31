@@ -163,6 +163,23 @@ export const rejectAssemblyStepSchema = z
   .strict();
 export type RejectAssemblyStepInput = z.infer<typeof rejectAssemblyStepSchema>;
 
+/**
+ * QC dispositions an open NCR (Phase 5, N1/N2). `reworkOwnerId`/`reworkDueDate`
+ * only make sense for REWORK/REPAIR; the service does not require them even
+ * then (F-c precedent — floor-assignment details stay optional here the same
+ * way F3/F4 fields do on submit).
+ */
+export const dispositionNcrSchema = z
+  .object({
+    ncrId: id,
+    disposition: z.enum(["USE_AS_IS", "REPAIR", "REWORK", "SCRAP", "CONCESSION"]),
+    notes: z.string().trim().max(2000).optional(),
+    reworkOwnerId: id.optional(),
+    reworkDueDate: z.coerce.date().optional(),
+  })
+  .strict();
+export type DispositionNcrInput = z.infer<typeof dispositionNcrSchema>;
+
 /** Put a process plan ON_HOLD with a recorded reason. */
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
 export type HoldProcessInput = z.infer<typeof holdProcessSchema>;

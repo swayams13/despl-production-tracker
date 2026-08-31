@@ -289,6 +289,10 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     expect(ndt).toHaveLength(1);
     expect(ndt[0].result).toBe("REJECT");
 
+    // N1 (Phase 5): reject opens exactly one Ncr, linked to that rejection.
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { assemblyStepRejectionId: rejections[0].id } });
+    expect(ncr.status).toBe("OPEN");
+
     // Rejected work restarts from the SAME step — must be resubmittable.
     const resubmitted = await submitAssemblyStep(supA, { assemblyStepId: step2 });
     expect(resubmitted.status).toBe("SUBMITTED");
@@ -296,6 +300,12 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     // Unblock step3 (seq 3, gated on step2 = seq 2) for the tests below.
     const verified = await verifyAssemblyStep(qc, { assemblyStepId: step2 });
     expect(verified.status).toBe("COMPLETE");
+
+    // N1: re-verifying closes the open Ncr.
+    const closed = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(closed.status).toBe("CLOSED");
+    expect(closed.closedBy).toBe(qc.userId);
+    expect(closed.closedAt).toBeInstanceOf(Date);
   });
 
   it("reject with a testTypeId requires a bound weld joint — refused on a step with none", async () => {

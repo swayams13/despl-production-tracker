@@ -615,10 +615,25 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     expect(rejections).toHaveLength(1);
     expect(rejections[0]).toMatchObject({ categoryId: rejectCategoryId, detail: "PAUT indication", rejectedBy: qc.userId });
 
+    // N1 (Phase 5): reject opens exactly one Ncr, linked to that rejection.
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejections[0].id } });
+    expect(ncr.status).toBe("OPEN");
+
     // Rejected work restarts from the SAME step (F-e default, spec §4) — it
     // must be resubmittable, not stuck.
     const resubmitted = await submitComponentOperation(supA, { componentOperationId: componentBOpSeq1 });
     expect(resubmitted.status).toBe("SUBMITTED");
+
+    // N1: re-verifying closes the open Ncr and stamps reworkFinishedAt (the
+    // dispositionNcr(REWORK) path already stamped reworkStartedAt — covered
+    // in ncr.service.test.ts; here the Ncr is still just OPEN, so verify
+    // closes it directly with no rework interval to record).
+    const verified = await verifyComponentOperation(qc, { componentOperationId: componentBOpSeq1 });
+    expect(verified.status).toBe("COMPLETE");
+    const closed = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(closed.status).toBe("CLOSED");
+    expect(closed.closedBy).toBe(qc.userId);
+    expect(closed.closedAt).toBeInstanceOf(Date);
   });
 
   it("F5: rejecting a non-SUBMITTED op is refused (illegal transition)", async () => {

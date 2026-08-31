@@ -49,11 +49,18 @@ export interface RejectByCheckpoint {
   count: number;
 }
 
+/** N4 — rework load, tenant-wide. `openCount` covers every non-CLOSED Ncr (OPEN + DISPOSITIONED + REWORK_IN_PROGRESS); `totalReworkHours` sums reworkFinishedAt - reworkStartedAt for CLOSED NCRs whose disposition needed floor rework. */
+export interface ReworkSummary {
+  openCount: number;
+  totalReworkHours: number;
+}
+
 export interface QcCockpit {
   queue: QcQueueRow[];
   holdPoints: GlobalHoldPoint[];
   yieldTrend: WeeklyYield[];
   rejectsByCheckpoint: RejectByCheckpoint[];
+  rework: ReworkSummary;
 }
 
 interface QueueRow {
@@ -229,6 +236,43 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
       rejectsByCheckpoint.sort((a, b) => b.count - a.count);
     }
 
-    return { queue, holdPoints, yieldTrend, rejectsByCheckpoint: rejectsByCheckpoint.slice(0, 8) };
+    // ── N4: rework load — Ncr carries no tenantId of its own (same reason
+    //    qcp.service.ts anchors through unit.equipment.job), so both counts
+    //    are reached via the rejection → operation/step → component/unit →
+    //    equipment → job → tenantId chain, never RLS alone (audit C3).
+    const tenantNcrScope = {
+      OR: [
+        { componentOperationRejection: { componentOperation: { component: { equipment: { job: { tenantId: actor.tenantId } } } } } },
+        { assemblyStepRejection: { assemblyStep: { unit: { equipment: { job: { tenantId: actor.tenantId } } } } } },
+      ],
+    };
+    const openCount = await tx.ncr.count({ where: { status: { not: "CLOSED" }, ...tenantNcrScope } });
+    const closedReworkNcrs = await tx.ncr.findMany({
+      where: {
+        status: "CLOSED",
+        disposition: { in: ["REPAIR", "REWORK"] },
+        reworkStartedAt: { not: null },
+        reworkFinishedAt: { not: null },
+        ...tenantNcrScope,
+      },
+      select: { reworkStartedAt: true, reworkFinishedAt: true },
+    });
+    const totalReworkHours =
+      Math.round(
+        (closedReworkNcrs.reduce(
+          (sum, n) => sum + (n.reworkFinishedAt!.getTime() - n.reworkStartedAt!.getTime()),
+          0,
+        ) /
+          36e5) *
+          10,
+      ) / 10;
+
+    return {
+      queue,
+      holdPoints,
+      yieldTrend,
+      rejectsByCheckpoint: rejectsByCheckpoint.slice(0, 8),
+      rework: { openCount, totalReworkHours },
+    };
   });
 }

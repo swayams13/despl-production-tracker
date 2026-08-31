@@ -4,6 +4,7 @@ import { audited, recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
+import { closeNcr } from "./ncr.service";
 import {
   startAssemblyStepSchema,
   submitAssemblyStepSchema,
@@ -105,11 +106,25 @@ export async function startAssemblyStep(actor: Actor, input: StartAssemblyStepIn
       });
     }
 
+    // N3 (Phase 5): mirrors component.service.ts's startComponentOperation —
+    // defensive stamp for a reworked step that legitimately returns to
+    // NOT_STARTED, guarded so it never clobbers dispositionNcr's own stamp.
+    const openReworkNcr = await tx.ncr.findFirst({
+      where: {
+        status: "REWORK_IN_PROGRESS",
+        reworkStartedAt: null,
+        assemblyStepRejection: { assemblyStepId: step.id },
+      },
+    });
+
     return audited(tx, actor, async () => {
       const updated = await tx.assemblyStep.update({
         where: { id: step.id },
         data: { status: to, startedAt: new Date() },
       });
+      if (openReworkNcr) {
+        await tx.ncr.update({ where: { id: openReworkNcr.id }, data: { reworkStartedAt: new Date() } });
+      }
       return {
         result: updated,
         audit: {
@@ -211,11 +226,20 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
     assertMakerChecker(actor, step.submittedBy);
     const to = assertAssemblyStepTransition("verify", step.status);
 
+    // N1 (Phase 5): re-verifying a reworked step closes its open Ncr and
+    // records the elapsed rework time.
+    const openNcr = await tx.ncr.findFirst({
+      where: { status: { not: "CLOSED" }, assemblyStepRejection: { assemblyStepId: step.id } },
+    });
+
     return audited(tx, actor, async () => {
       const updated = await tx.assemblyStep.update({
         where: { id: step.id },
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
+      if (openNcr) {
+        await closeNcr(tx, actor, { ncrId: openNcr.id });
+      }
       return {
         result: updated,
         audit: {
@@ -265,9 +289,11 @@ export async function rejectAssemblyStep(actor: Actor, input: RejectAssemblyStep
         where: { id: step.id },
         data: { status: to, submittedBy: null },
       });
-      await tx.assemblyStepRejection.create({
+      const rejection = await tx.assemblyStepRejection.create({
         data: { assemblyStepId: step.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId },
       });
+      // N1 (Phase 5): every rejection opens exactly one Ncr for QC to disposition.
+      await tx.ncr.create({ data: { assemblyStepRejectionId: rejection.id } });
       if (testTypeId != null && step.weldJointId != null) {
         const ndt = await recordNdtResultTx(tx, actor, step.weldJointId, testTypeId, "REJECT");
         // recordNdtResultTx itself is bare (no audited() wrapper, shared with

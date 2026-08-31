@@ -191,6 +191,9 @@ export interface WsUnitRow {
   state: PlanState;
   reasonText: string;
   criticalPath: boolean;
+  /** N2 — open (non-CLOSED) Ncrs whose rejected ComponentOperation/AssemblyStep
+   * belongs to this unit (via Component.unitId or AssemblyStep.unitId). */
+  openNcrCount: number;
 }
 export interface WsCard {
   jobProcessId: number;
@@ -294,6 +297,32 @@ export async function loadWorkspaceView(
     const units = await tx.unit.findMany({ where: { equipment: { jobId } }, select: { id: true, serialNo: true } });
     const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
 
+    // N2 — open Ncr count per unit. ComponentOperation only attributes to a
+    // unit when its Component is serial-scoped (Component.unitId set);
+    // equipment-grain components (unitId null) have no single unit row to
+    // attach to and are skipped here, same as everywhere else per-unit rows
+    // are built from equipment-grain data. AssemblyStep is always unit-scoped.
+    const openNcrRows = await tx.ncr.findMany({
+      where: {
+        status: { not: "CLOSED" },
+        OR: [
+          { componentOperationRejection: { componentOperation: { component: { unitId: { not: null }, equipment: { jobId } } } } },
+          { assemblyStepRejection: { assemblyStep: { unit: { equipment: { jobId } } } } },
+        ],
+      },
+      select: {
+        componentOperationRejection: { select: { componentOperation: { select: { component: { select: { unitId: true } } } } } },
+        assemblyStepRejection: { select: { assemblyStep: { select: { unitId: true } } } },
+      },
+    });
+    const openNcrCountByUnit = new Map<number, number>();
+    for (const row of openNcrRows) {
+      const unitId =
+        row.componentOperationRejection?.componentOperation.component.unitId ?? row.assemblyStepRejection?.assemblyStep.unitId;
+      if (unitId == null) continue;
+      openNcrCountByUnit.set(unitId, (openNcrCountByUnit.get(unitId) ?? 0) + 1);
+    }
+
     const today = new Date();
 
     // Filter predicate over a ranked plan (dashboard deep-link narrowing).
@@ -301,6 +330,9 @@ export async function loadWorkspaceView(
     const statusFilter = filter.status?.toLowerCase();
     const matchesFilter = (r: RankedPlan, deptId: number): boolean => {
       if (deptFilterId != null && deptId !== deptFilterId) return false;
+      // "rework" reuses the same ?status= convention but isn't a PlanState —
+      // it deep-links to units carrying an open Ncr instead.
+      if (statusFilter === "rework") return (openNcrCountByUnit.get(r.plan.unitId ?? -1) ?? 0) > 0;
       if (statusFilter) return displayState(r) === statusFilter;
       return true;
     };
@@ -351,6 +383,7 @@ export async function loadWorkspaceView(
         state: r.state,
         reasonText: r.reasonText,
         criticalPath: r.criticalPath,
+        openNcrCount: openNcrCountByUnit.get(r.plan.unitId ?? -1) ?? 0,
       });
       if (r.overdue) card.overdueCount++;
       if (r.criticalPath) card.criticalPath = true;

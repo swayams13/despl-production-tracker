@@ -5,6 +5,7 @@ import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertKitReady, assertDrawingReleased } from "./_shared";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
+import { closeNcr } from "./ncr.service";
 import {
   startComponentOperationSchema,
   submitComponentOperationSchema,
@@ -194,6 +195,19 @@ export async function startComponentOperation(
     const builtToRevisionId =
       operationCode === "CUTTING" ? await assertDrawingReleased(tx, op.componentId, actor.tenantId) : null;
 
+    // N3 (Phase 5): a reworked operation that legitimately returns to
+    // NOT_STARTED (rather than staying IN_PROGRESS the way a plain F5 reject
+    // leaves it — e.g. an admin correction) stamps its open Ncr's
+    // reworkStartedAt here, guarded on it not already being set so this
+    // never clobbers the timestamp dispositionNcr already stamped.
+    const openReworkNcr = await tx.ncr.findFirst({
+      where: {
+        status: "REWORK_IN_PROGRESS",
+        reworkStartedAt: null,
+        componentOperationRejection: { componentOperationId: op.id },
+      },
+    });
+
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
@@ -203,6 +217,9 @@ export async function startComponentOperation(
       // check ran in — never a client-supplied revision id.
       if (builtToRevisionId != null) {
         await tx.component.update({ where: { id: op.componentId }, data: { builtToRevisionId } });
+      }
+      if (openReworkNcr) {
+        await tx.ncr.update({ where: { id: openReworkNcr.id }, data: { reworkStartedAt: new Date() } });
       }
       return {
         result: updated,
@@ -311,11 +328,20 @@ export async function verifyComponentOperation(
     assertMakerChecker(actor, op.submittedBy);
     const to = assertComponentOpTransition("verify", op.status);
 
+    // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr and
+    // records the elapsed rework time (closeNcr stamps reworkFinishedAt).
+    const openNcr = await tx.ncr.findFirst({
+      where: { status: { not: "CLOSED" }, componentOperationRejection: { componentOperationId: op.id } },
+    });
+
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
+      if (openNcr) {
+        await closeNcr(tx, actor, { ncrId: openNcr.id });
+      }
       return {
         result: updated,
         audit: {
@@ -357,9 +383,13 @@ export async function rejectComponentOperation(
         where: { id: op.id },
         data: { status: to, submittedBy: null },
       });
-      await tx.componentOperationRejection.create({
+      const rejection = await tx.componentOperationRejection.create({
         data: { componentOperationId: op.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId },
       });
+      // N1 (Phase 5): every rejection opens exactly one Ncr for QC to
+      // disposition — the rework/QA workflow layered on top of the
+      // immutable rejection record.
+      await tx.ncr.create({ data: { componentOperationRejectionId: rejection.id } });
       return {
         result: updated,
         audit: {
