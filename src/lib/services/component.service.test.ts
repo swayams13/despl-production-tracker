@@ -150,6 +150,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   // P1 (Phase 5) — Paint/DFT gate fixtures, wired into verifyComponentOperation's PAINTING-only gate.
   let paintOpNoRecord = 0; // SUBMITTED, no PaintRecord/DftReading at all → DFT_NOT_ACCEPTED
   let paintOpTwoCoats = 0; // SUBMITTED, coatsPlanned=2 → walked through none/unaccepted/partial/full accepted coverage
+  let paintOpDuplicateCoat = 0; // coatsPlanned=3, all accepted readings on the SAME coatNumber → must still be refused (task review Important #1)
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -455,6 +456,14 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     paintOpTwoCoats = (
       await owner.componentOperation.create({
         data: { componentId: componentPaintTwoCoats.id, seq: 1, operationId: opPainting.id },
+      })
+    ).id;
+    const componentPaintDuplicateCoat = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "PAINT-DUP-COAT", componentTypeId: componentType.id },
+    });
+    paintOpDuplicateCoat = (
+      await owner.componentOperation.create({
+        data: { componentId: componentPaintDuplicateCoat.id, seq: 1, operationId: opPainting.id },
       })
     ).id;
 
@@ -809,6 +818,25 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
 
     await recordDftReading(supA, { componentOperationId: paintOpTwoCoats, coatNumber: 2, readingMicrons: 80, accepted: true });
     const verified = await verifyComponentOperation(qc, { componentOperationId: paintOpTwoCoats });
+    expect(verified.status).toBe("COMPLETE");
+  });
+
+  it("DFT gate regression (task review Important #1): coatsPlanned=3 accepted readings all recorded against the SAME coatNumber is still refused — coverage is per DISTINCT coat, not a raw accepted-row count", async () => {
+    await startComponentOperation(supA, { componentOperationId: paintOpDuplicateCoat });
+    await submitComponentOperation(supA, { componentOperationId: paintOpDuplicateCoat });
+    await recordPaintRecord(supA, { componentOperationId: paintOpDuplicateCoat, coatingSystem: "Epoxy", coatsPlanned: 3 });
+
+    // Three accepted readings, all coatNumber: 1 — a naive COUNT(*) would
+    // wrongly satisfy coatsPlanned: 3 here.
+    await recordDftReading(supA, { componentOperationId: paintOpDuplicateCoat, coatNumber: 1, readingMicrons: 70, accepted: true });
+    await recordDftReading(supA, { componentOperationId: paintOpDuplicateCoat, coatNumber: 1, readingMicrons: 72, accepted: true });
+    await recordDftReading(supA, { componentOperationId: paintOpDuplicateCoat, coatNumber: 1, readingMicrons: 74, accepted: true });
+    await expectCode(verifyComponentOperation(qc, { componentOperationId: paintOpDuplicateCoat }), ERROR_CODES.DFT_NOT_ACCEPTED);
+
+    // Covering coats 2 and 3 too clears the gate.
+    await recordDftReading(supA, { componentOperationId: paintOpDuplicateCoat, coatNumber: 2, readingMicrons: 71, accepted: true });
+    await recordDftReading(supA, { componentOperationId: paintOpDuplicateCoat, coatNumber: 3, readingMicrons: 73, accepted: true });
+    const verified = await verifyComponentOperation(qc, { componentOperationId: paintOpDuplicateCoat });
     expect(verified.status).toBe("COMPLETE");
   });
 

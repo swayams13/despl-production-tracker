@@ -344,13 +344,23 @@ export async function verifyComponentOperation(
     // silently resolved here).
     if (operationCode === "PAINTING") {
       const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId: op.id } });
-      const acceptedCount = await tx.dftReading.count({ where: { componentOperationId: op.id, accepted: true } });
+      // Coverage is per DISTINCT coat, not a raw accepted-row count — three
+      // accepted readings all against the same coatNumber (or all with it
+      // omitted) must not satisfy coatsPlanned: 3 (task review Important #1).
+      // groupBy folds duplicate coatNumbers together, including a null
+      // coatNumber as its own single group (the "untagged" case the
+      // coatsPlanned-unset/DEFAULT_COATS_REQUIRED=1 path relies on).
+      const acceptedCoatGroups = await tx.dftReading.groupBy({
+        by: ["coatNumber"],
+        where: { componentOperationId: op.id, accepted: true },
+      });
+      const distinctAcceptedCoats = acceptedCoatGroups.length;
       const requiredCoats = paintRecord?.coatsPlanned ?? DEFAULT_COATS_REQUIRED;
-      if (!paintRecord || acceptedCount < requiredCoats) {
+      if (!paintRecord || distinctAcceptedCoats < requiredCoats) {
         throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, {
           componentOperationId: op.id,
           hasPaintRecord: !!paintRecord,
-          acceptedReadings: acceptedCount,
+          acceptedCoats: distinctAcceptedCoats,
           requiredCoats,
         });
       }
