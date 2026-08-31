@@ -317,6 +317,29 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     );
   });
 
+  it("N1 regression (task review Critical #1): reject → resubmit → reject again leaves TWO open Ncrs, and a single verify closes BOTH", async () => {
+    // step3 is SUBMITTED (submittedBy = supB) — the prior test's reject attempt failed validation.
+    await rejectAssemblyStep(qc, { assemblyStepId: step3, categoryId: rejectCategoryId, detail: "first reject" });
+    await submitAssemblyStep(supB, { assemblyStepId: step3 });
+    await rejectAssemblyStep(qc, { assemblyStepId: step3, categoryId: rejectCategoryId, detail: "second reject" });
+    await submitAssemblyStep(supB, { assemblyStepId: step3 });
+
+    const openBefore = await owner.ncr.findMany({
+      where: { status: { not: "CLOSED" }, assemblyStepRejection: { assemblyStepId: step3 } },
+    });
+    expect(openBefore).toHaveLength(2);
+
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step3 });
+    expect(verified.status).toBe("COMPLETE");
+
+    const stillOpen = await owner.ncr.findMany({
+      where: { status: { not: "CLOSED" }, assemblyStepRejection: { assemblyStepId: step3 } },
+    });
+    expect(stillOpen).toHaveLength(0);
+    const nowClosed = await owner.ncr.findMany({ where: { id: { in: openBefore.map((n) => n.id) } } });
+    expect(nowClosed.every((n) => n.status === "CLOSED")).toBe(true);
+  });
+
   it("illegal transition: verifying a NOT_STARTED step is refused", async () => {
     await expectCode(verifyAssemblyStep(qc, { assemblyStepId: unit2Step1 }), ERROR_CODES.INVALID_STATE_TRANSITION);
   });

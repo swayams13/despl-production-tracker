@@ -591,6 +591,31 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     expect(submitted.qtyRejected).toBe(0);
   });
 
+  it("N1 regression (task review Critical #1): reject → resubmit → reject again leaves TWO open Ncrs, and a single verify closes BOTH", async () => {
+    // opDetailTest is SUBMITTED (submittedBy = supA) from the F3/F4 test above.
+    await rejectComponentOperation(qc, { componentOperationId: opDetailTest, categoryId: rejectCategoryId, detail: "first reject" });
+    await submitComponentOperation(supA, { componentOperationId: opDetailTest });
+    await rejectComponentOperation(qc, { componentOperationId: opDetailTest, categoryId: rejectCategoryId, detail: "second reject" });
+    await submitComponentOperation(supA, { componentOperationId: opDetailTest });
+
+    const openBefore = await owner.ncr.findMany({
+      where: { status: { not: "CLOSED" }, componentOperationRejection: { componentOperationId: opDetailTest } },
+    });
+    expect(openBefore).toHaveLength(2);
+
+    const verified = await verifyComponentOperation(qc, { componentOperationId: opDetailTest });
+    expect(verified.status).toBe("COMPLETE");
+
+    const stillOpen = await owner.ncr.findMany({
+      where: { status: { not: "CLOSED" }, componentOperationRejection: { componentOperationId: opDetailTest } },
+    });
+    expect(stillOpen).toHaveLength(0);
+    const nowClosed = await owner.ncr.findMany({
+      where: { id: { in: openBefore.map((n) => n.id) } },
+    });
+    expect(nowClosed.every((n) => n.status === "CLOSED")).toBe(true);
+  });
+
   // F5 — reuses componentBOpSeq1, which the "client user cannot verify"
   // test above left SUBMITTED with submittedBy = supA.userId.
   it("F5 maker–checker: the submitter cannot reject their own submission", async () => {

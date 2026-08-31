@@ -328,9 +328,13 @@ export async function verifyComponentOperation(
     assertMakerChecker(actor, op.submittedBy);
     const to = assertComponentOpTransition("verify", op.status);
 
-    // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr and
-    // records the elapsed rework time (closeNcr stamps reworkFinishedAt).
-    const openNcr = await tx.ncr.findFirst({
+    // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr(s)
+    // and records the elapsed rework time (closeNcr stamps reworkFinishedAt).
+    // findMany, not findFirst: repeated reject→resubmit→reject cycles without
+    // an intervening dispositionNcr each open a NEW Ncr (one per rejection,
+    // by design), so more than one can be open at once — closing only one
+    // would strand the rest permanently non-CLOSED (task review Critical #1).
+    const openNcrs = await tx.ncr.findMany({
       where: { status: { not: "CLOSED" }, componentOperationRejection: { componentOperationId: op.id } },
     });
 
@@ -339,8 +343,8 @@ export async function verifyComponentOperation(
         where: { id: op.id },
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
-      if (openNcr) {
-        await closeNcr(tx, actor, { ncrId: openNcr.id });
+      for (const ncr of openNcrs) {
+        await closeNcr(tx, actor, { ncrId: ncr.id });
       }
       return {
         result: updated,

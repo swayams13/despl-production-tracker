@@ -121,6 +121,14 @@ export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): 
  * own (mirrors `recordNdtResultTx`'s bare-tx shape in welding.service.ts).
  * Stamps `reworkFinishedAt` in the same write when rework was in progress —
  * that pairing IS "elapsed rework time" (dashboard aggregation reads both).
+ *
+ * NOT a trust boundary — the `ncrId` lookup below carries no tenant filter of
+ * its own. Safe today because every caller (verifyComponentOperation,
+ * verifyAssemblyStep) already resolved the operation/step tenant-scoped
+ * before finding these `ncrId`s. Do not call this directly from a Server
+ * Action or route handler with a client-supplied ncrId — go through
+ * `dispositionNcr` (which does tenant-check) or add a tenant filter here
+ * first.
  */
 export async function closeNcr(tx: Tx, actor: Actor, input: { ncrId: number }): Promise<Ncr> {
   const ncr = await tx.ncr.findFirst({ where: { id: input.ncrId } });

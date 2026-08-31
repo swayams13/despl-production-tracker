@@ -226,9 +226,12 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
     assertMakerChecker(actor, step.submittedBy);
     const to = assertAssemblyStepTransition("verify", step.status);
 
-    // N1 (Phase 5): re-verifying a reworked step closes its open Ncr and
-    // records the elapsed rework time.
-    const openNcr = await tx.ncr.findFirst({
+    // N1 (Phase 5): re-verifying a reworked step closes its open Ncr(s) and
+    // records the elapsed rework time. findMany, not findFirst — see the
+    // matching comment in component.service.ts's verifyComponentOperation
+    // (task review Critical #1): repeated reject→resubmit→reject cycles can
+    // leave more than one Ncr open for the same step.
+    const openNcrs = await tx.ncr.findMany({
       where: { status: { not: "CLOSED" }, assemblyStepRejection: { assemblyStepId: step.id } },
     });
 
@@ -237,8 +240,8 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
         where: { id: step.id },
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
-      if (openNcr) {
-        await closeNcr(tx, actor, { ncrId: openNcr.id });
+      for (const ncr of openNcrs) {
+        await closeNcr(tx, actor, { ncrId: ncr.id });
       }
       return {
         result: updated,
