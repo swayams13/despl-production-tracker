@@ -96,6 +96,14 @@ export async function createDispatchBatch(actor: Actor, input: CreateDispatchBat
  * Adds a unit to a batch. Requires the unit's `packageId` to already be set
  * (a distinct, unit-grain precondition from Task 6's process-level
  * PACKING_DONE evidence gate) — refuses with UNIT_NOT_PACKED otherwise.
+ *
+ * Also refuses (packing.service.ts's `assignUnitToPackage` precedent):
+ *  - a unit whose job doesn't match the batch's job (CROSS_JOB_ASSIGNMENT)
+ *  - adding to a batch that's no longer PLANNED (RELEASED/DISPATCHED) — once
+ *    released/dispatched, the unit set is the approved/shipped set; adding a
+ *    unit after the fact would retroactively satisfy Task 6's
+ *    DISPATCH_RECORDED evidence gate for a unit that was never actually part
+ *    of it.
  */
 export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): Promise<DispatchBatchUnit> {
   const { dispatchBatchId, unitId } = addUnitToBatchSchema.parse(input);
@@ -104,11 +112,29 @@ export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): 
   return withTenant(actor.tenantId, async (tx) => {
     const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
 
+    if (deriveDispatchBatchStatus(batch) !== "PLANNED") {
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+        entity: "DispatchBatch",
+        dispatchBatchId: batch.id,
+        status: deriveDispatchBatchStatus(batch),
+        action: "addUnit",
+      });
+    }
+
     const unit = await tx.unit.findFirst({
       where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
       include: { equipment: { select: { jobId: true } } },
     });
     if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+
+    if (unit.equipment.jobId !== batch.jobId) {
+      throw new AppError(ERROR_CODES.CROSS_JOB_ASSIGNMENT, {
+        unitId,
+        unitJobId: unit.equipment.jobId,
+        dispatchBatchId: batch.id,
+        dispatchBatchJobId: batch.jobId,
+      });
+    }
 
     if (unit.packageId == null) {
       throw new AppError(ERROR_CODES.UNIT_NOT_PACKED, { unitId });

@@ -291,6 +291,59 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     );
   });
 
+  it("addUnitToBatch refuses a cross-job pairing (CROSS_JOB_ASSIGNMENT)", async () => {
+    const { tenantId, job, user, client, family } = await fixture();
+    const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+    // A SECOND job/equipment/unit in the SAME tenant, packed into its own
+    // package — isolates the same-tenant, different-job case (mirrors
+    // assignUnitToPackage's cross-job test above).
+    const otherJob = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-dispatch-b-xjob-${Date.now()}-${Math.random()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: job.templateVersionId,
+        jobNumber: `DE-DISPATCH-B-XJOB-${Date.now()}-${Math.random()}`,
+      },
+    });
+    const otherEquipment = await owner.equipment.create({ data: { jobId: otherJob.id, name: "Air Receiver" } });
+    const otherUnit = await owner.unit.create({ data: { equipmentId: otherEquipment.id, serialNo: "01" } });
+    const otherPkg = await owner.package.create({
+      data: { jobId: otherJob.id, packageNo: "PKG-B-X", createdBy: user.id },
+    });
+    await owner.unit.update({ where: { id: otherUnit.id }, data: { packageId: otherPkg.id } });
+
+    const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    await expectCode(
+      addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: otherUnit.id }),
+      ERROR_CODES.CROSS_JOB_ASSIGNMENT,
+    );
+  });
+
+  it("addUnitToBatch refuses once the batch is no longer PLANNED (RELEASED)", async () => {
+    const { tenantId, job, unit, user } = await fixture();
+    const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+
+    const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-REL" });
+    await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+
+    const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+    await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
+
+    // A second unit, packed and ready, but the batch has already moved past
+    // PLANNED — must not be retroactively addable into the approved set.
+    const equipment2 = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver 2" } });
+    const unit2 = await owner.unit.create({ data: { equipmentId: equipment2.id, serialNo: "02" } });
+    await owner.unit.update({ where: { id: unit2.id }, data: { packageId: pkg.id } });
+
+    await expectCode(
+      addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit2.id }),
+      ERROR_CODES.INVALID_STATE_TRANSITION,
+    );
+  });
+
   it("cross-tenant: addUnitToBatch refuses another tenant's dispatch batch/unit", async () => {
     const { tenantId, user } = await fixture();
     const victim = await fixture();

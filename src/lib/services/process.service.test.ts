@@ -787,12 +787,12 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
     await startProcess(maker, { processPlanId: plan.id });
     await submitProcess(maker, { processPlanId: plan.id });
 
-    // Table-driven: all three non-CLOSED statuses must refuse verify, naming
-    // the blocking operation — not just the freshly-rejected OPEN case.
-    // DISPOSITIONED/REWORK_IN_PROGRESS are the states dispositionNcr actually
-    // leaves an Ncr in mid-rework-cycle, so they're the more common real-world
-    // shape, not an edge case.
-    for (const status of ["OPEN", "DISPOSITIONED", "REWORK_IN_PROGRESS"] as const) {
+    // Table-driven: OPEN (never dispositioned) and REWORK_IN_PROGRESS (rework
+    // not yet re-verified) must refuse verify, naming the blocking operation —
+    // not just the freshly-rejected OPEN case. These are the two statuses
+    // dispositionNcr actually leaves an Ncr in on the rework path, so they're
+    // the common real-world shape, not an edge case.
+    for (const status of ["OPEN", "REWORK_IN_PROGRESS"] as const) {
       await owner.ncr.update({ where: { id: ncr.id }, data: { status } });
       const err = await verifyProcess(checker, { processPlanId: plan.id }).catch((e) => e);
       expect(isAppError(err) && err.code, `status=${status}`).toBe(ERROR_CODES.NCR_OPEN);
@@ -801,10 +801,22 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
       );
     }
 
-    await owner.ncr.update({ where: { id: ncr.id }, data: { status: "CLOSED" } });
+    // Fix wave (Important #3): a terminal disposition (USE_AS_IS/SCRAP/
+    // CONCESSION) leaves status DISPOSITIONED forever — the component is
+    // scrapped or accepted as-is, so it will never be re-verified through
+    // closeNcr. That must NOT permanently block the gate: DISPOSITIONED with
+    // one of these three dispositions is excluded from "open" and verify
+    // succeeds even though the Ncr's status never reaches CLOSED.
+    await owner.ncr.update({
+      where: { id: ncr.id },
+      data: { status: "DISPOSITIONED", disposition: "SCRAP" },
+    });
 
     const verified = await verifyProcess(checker, { processPlanId: plan.id });
     expect(verified.status).toBe("COMPLETE");
+
+    const finalNcr = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(finalNcr.status).toBe("DISPOSITIONED"); // not silently flipped to CLOSED — nothing was actually re-verified
   });
 });
 

@@ -516,18 +516,28 @@ export async function assertComponentOpsComplete(
   }
 }
 
-const OPEN_NCR_STATUSES = ["OPEN", "DISPOSITIONED", "REWORK_IN_PROGRESS"] as const;
+// Blocking: OPEN (never dispositioned) and REWORK_IN_PROGRESS (rework not yet
+// re-verified — closeNcr runs from verifyComponentOperation/verifyAssemblyStep
+// once it's back to COMPLETE). NOT DISPOSITIONED: a USE_AS_IS/SCRAP/CONCESSION
+// disposition sets status DISPOSITIONED with nothing further to wait for — the
+// component is scrapped or accepted as-is, so it will never be re-verified and
+// would otherwise block this stage's gate forever (fix wave, Important #3).
+// dispositionNcr only ever sets DISPOSITIONED for those three terminal
+// dispositions (REWORK/REPAIR go to REWORK_IN_PROGRESS instead), so this list
+// doesn't need to distinguish disposition here — status alone is enough.
+const OPEN_NCR_STATUSES = ["OPEN", "REWORK_IN_PROGRESS"] as const;
 
 /**
  * `verifyProcess` gate (Phase 5, N3): refuses when any `ComponentOperation`/
  * `AssemblyStep` mapped to `(jobProcessId, unitId)` — same
  * `leadTimeProcessSeq == JobProcess.code` join as `loadMappedOps` — has a
- * linked `Ncr` that isn't `CLOSED` yet. A narrower sibling query rather than
- * an extension of `loadMappedOps`: that helper's `MappedOp` return shape is
- * relied on by `assertComponentOpsComplete`'s existing callers/tests, and
- * this gate needs Ncr status, not operation status. No-op when `unitId` is
- * null — same SEAM convention as `assertNoOpenHoldPoint`/
- * `assertComponentOpsComplete`.
+ * linked `Ncr` that isn't `CLOSED` yet, or that's `DISPOSITIONED` toward a
+ * terminal (USE_AS_IS/SCRAP/CONCESSION) disposition — see `OPEN_NCR_STATUSES`.
+ * A narrower sibling query rather than an extension of `loadMappedOps`: that
+ * helper's `MappedOp` return shape is relied on by `assertComponentOpsComplete`'s
+ * existing callers/tests, and this gate needs Ncr status, not operation
+ * status. No-op when `unitId` is null — same SEAM convention as
+ * `assertNoOpenHoldPoint`/`assertComponentOpsComplete`.
  */
 export async function assertNoOpenNcr(
   tx: Tx,
