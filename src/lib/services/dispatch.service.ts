@@ -1,0 +1,222 @@
+import { withTenant, type Tx } from "@/lib/db";
+import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz";
+import { audited } from "@/lib/audit";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { assertStateTransition } from "./state-machine";
+import {
+  createDispatchBatchSchema,
+  addUnitToBatchSchema,
+  approveDispatchReleaseSchema,
+  recordDispatchSchema,
+  type CreateDispatchBatchInput,
+  type AddUnitToBatchInput,
+  type ApproveDispatchReleaseInput,
+  type RecordDispatchInput,
+} from "@/lib/shared/schemas";
+import type { DispatchBatch, DispatchBatchUnit } from "@/generated/prisma/client";
+
+/**
+ * D2/D3 (Phase 5) — dispatch batches and the release/dispatch workflow.
+ *
+ * Controller ruling (task-5 brief correction): `DispatchBatch` has no
+ * persisted `status` column, only nullable `releaseApprovedAt`/
+ * `actualDispatchDate`. Rather than add a redundant enum column via
+ * migration, status is DERIVED from those fields and validated through the
+ * same `assertStateTransition` every other state machine in this codebase
+ * uses (see component.service.ts's `assertComponentOpTransition`,
+ * ncr.service.ts's `assertNcrTransition`) — so an illegal transition (e.g.
+ * `recordDispatch` before `approveDispatchRelease`) still refuses with
+ * INVALID_STATE_TRANSITION, without a second source of truth to drift from
+ * the nullable fields.
+ */
+
+export type DispatchBatchStatus = "PLANNED" | "RELEASED" | "DISPATCHED";
+export type DispatchBatchAction = "approveRelease" | "recordDispatch";
+
+export const DISPATCH_BATCH_TRANSITIONS: Record<
+  DispatchBatchAction,
+  { from: DispatchBatchStatus[]; to: DispatchBatchStatus }
+> = {
+  approveRelease: { from: ["PLANNED"], to: "RELEASED" },
+  recordDispatch: { from: ["RELEASED"], to: "DISPATCHED" },
+};
+
+export function deriveDispatchBatchStatus(batch: {
+  releaseApprovedAt: Date | null;
+  actualDispatchDate: Date | null;
+}): DispatchBatchStatus {
+  if (batch.actualDispatchDate != null) return "DISPATCHED";
+  if (batch.releaseApprovedAt != null) return "RELEASED";
+  return "PLANNED";
+}
+
+export function assertDispatchBatchTransition(
+  action: DispatchBatchAction,
+  from: DispatchBatchStatus,
+): DispatchBatchStatus {
+  return assertStateTransition(DISPATCH_BATCH_TRANSITIONS, action, from, "DispatchBatch");
+}
+
+async function lockDispatchBatchForUpdate(tx: Tx, dispatchBatchId: number, tenantId: number): Promise<DispatchBatch> {
+  await tx.$queryRaw`SELECT id FROM dispatch_batches WHERE id = ${dispatchBatchId} FOR UPDATE`;
+
+  const batch = await tx.dispatchBatch.findFirst({ where: { id: dispatchBatchId, job: { tenantId } } });
+  if (!batch) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "DispatchBatch", dispatchBatchId });
+  return batch;
+}
+
+export async function createDispatchBatch(actor: Actor, input: CreateDispatchBatchInput): Promise<DispatchBatch> {
+  const { jobId, seq, plannedDate, remarks } = createDispatchBatchSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const job = await tx.job.findFirst({ where: { id: jobId, tenantId: actor.tenantId } });
+    if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
+
+    return audited(tx, actor, async () => {
+      const batch = await tx.dispatchBatch.create({
+        data: { jobId, seq, plannedDate, remarks: remarks ?? null },
+      });
+      return {
+        result: batch,
+        audit: {
+          action: "dispatchBatch.create",
+          entityType: "DispatchBatch",
+          entityId: batch.id,
+          after: { jobId: batch.jobId, seq: batch.seq, plannedDate: batch.plannedDate },
+          eventType: "DispatchBatchCreated",
+          eventPayload: { dispatchBatchId: batch.id, jobId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Adds a unit to a batch. Requires the unit's `packageId` to already be set
+ * (a distinct, unit-grain precondition from Task 6's process-level
+ * PACKING_DONE evidence gate) — refuses with UNIT_NOT_PACKED otherwise.
+ */
+export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): Promise<DispatchBatchUnit> {
+  const { dispatchBatchId, unitId } = addUnitToBatchSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
+
+    const unit = await tx.unit.findFirst({
+      where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
+      include: { equipment: { select: { jobId: true } } },
+    });
+    if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+
+    if (unit.packageId == null) {
+      throw new AppError(ERROR_CODES.UNIT_NOT_PACKED, { unitId });
+    }
+
+    return audited(tx, actor, async () => {
+      const link = await tx.dispatchBatchUnit.create({ data: { dispatchBatchId: batch.id, unitId: unit.id } });
+      return {
+        result: link,
+        audit: {
+          action: "dispatchBatch.addUnit",
+          entityType: "DispatchBatchUnit",
+          entityId: link.id,
+          after: { dispatchBatchId: batch.id, unitId: unit.id },
+          eventType: "UnitAddedToDispatchBatch",
+          eventPayload: { dispatchBatchId: batch.id, unitId: unit.id },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Production-Head-only release approval (same role gate as
+ * override.service.ts's applyDurationOverride). Requires derived status
+ * PLANNED; stamps releaseApprovedBy/releaseApprovedAt server-side.
+ */
+export async function approveDispatchRelease(
+  actor: Actor,
+  input: ApproveDispatchReleaseInput,
+): Promise<DispatchBatch> {
+  const { dispatchBatchId, dispatchNoteNo, gatePassNo, vehicleNo, lrNo } = approveDispatchReleaseSchema.parse(input);
+  requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
+    assertDispatchBatchTransition("approveRelease", deriveDispatchBatchStatus(batch));
+
+    return audited(tx, actor, async () => {
+      const now = new Date();
+      const updated = await tx.dispatchBatch.update({
+        where: { id: batch.id },
+        data: {
+          dispatchNoteNo: dispatchNoteNo ?? undefined,
+          gatePassNo: gatePassNo ?? undefined,
+          vehicleNo: vehicleNo ?? undefined,
+          lrNo: lrNo ?? undefined,
+          releaseApprovedBy: actor.userId,
+          releaseApprovedAt: now,
+        },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "dispatchBatch.approveRelease",
+          entityType: "DispatchBatch",
+          entityId: batch.id,
+          before: { releaseApprovedAt: batch.releaseApprovedAt },
+          after: {
+            releaseApprovedBy: updated.releaseApprovedBy,
+            releaseApprovedAt: updated.releaseApprovedAt,
+            dispatchNoteNo: updated.dispatchNoteNo,
+            gatePassNo: updated.gatePassNo,
+            vehicleNo: updated.vehicleNo,
+            lrNo: updated.lrNo,
+          },
+          eventType: "DispatchReleaseApproved",
+          eventPayload: { dispatchBatchId: batch.id, releaseApprovedBy: actor.userId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Requires derived status RELEASED; stamps `actualDispatchDate = now()`
+ * server-side (invariant #1 — recordDispatchSchema has no such field, so a
+ * client-supplied date can never reach here). Also satisfies Task 6's
+ * DISPATCH_RECORDED evidence kind for every unit in the batch (read side —
+ * no write needed here beyond this stamp).
+ */
+export async function recordDispatch(actor: Actor, input: RecordDispatchInput): Promise<DispatchBatch> {
+  const { dispatchBatchId } = recordDispatchSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
+    assertDispatchBatchTransition("recordDispatch", deriveDispatchBatchStatus(batch));
+
+    return audited(tx, actor, async () => {
+      const now = new Date();
+      const updated = await tx.dispatchBatch.update({
+        where: { id: batch.id },
+        data: { actualDispatchDate: now },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "dispatchBatch.recordDispatch",
+          entityType: "DispatchBatch",
+          entityId: batch.id,
+          before: { actualDispatchDate: batch.actualDispatchDate },
+          after: { actualDispatchDate: updated.actualDispatchDate },
+          eventType: "DispatchRecorded",
+          eventPayload: { dispatchBatchId: batch.id },
+        },
+      };
+    });
+  });
+}

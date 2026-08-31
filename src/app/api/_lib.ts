@@ -54,6 +54,8 @@ const STATUS: Record<ErrorCode, number> = {
   DRAWING_REVISION_NOT_INCREASING: 409,
   BOM_REVISION_NOT_INCREASING: 409,
   DFT_NOT_ACCEPTED: 409,
+  UNIT_NOT_PACKED: 409,
+  CROSS_JOB_ASSIGNMENT: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

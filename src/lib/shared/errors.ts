@@ -99,6 +99,10 @@ export const ERROR_CODES = {
   BOM_PARENT_WOULD_CYCLE: "BOM_PARENT_WOULD_CYCLE",
   /** verifyComponentOperation: a PAINTING op has no PaintRecord, or fewer accepted DftReadings than required (P1, Phase 5). */
   DFT_NOT_ACCEPTED: "DFT_NOT_ACCEPTED",
+  /** addUnitToBatch: the unit has no packageId set — it must be packed before it can be added to a dispatch batch (D2, Phase 5). */
+  UNIT_NOT_PACKED: "UNIT_NOT_PACKED",
+  /** assignUnitToPackage: the unit and package belong to different jobs (D1, Phase 5). */
+  CROSS_JOB_ASSIGNMENT: "CROSS_JOB_ASSIGNMENT",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -166,6 +170,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   BOM_PARENT_WOULD_CYCLE: "Can't set this parent: it would create a circular reference. Pick a different parent item.",
   DFT_NOT_ACCEPTED:
     "This painting operation needs an accepted DFT reading for every planned coat before it can verify.",
+  UNIT_NOT_PACKED: "This unit has not been packed yet. Assign it to a package before adding it to a dispatch batch.",
+  CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
 };
 
 /**

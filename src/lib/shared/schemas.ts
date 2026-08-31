@@ -890,3 +890,56 @@ export const createBomRevisionSchema = z
   })
   .strict();
 export type CreateBomRevisionInput = z.infer<typeof createBomRevisionSchema>;
+
+// ── Packing / dispatch (Phase 5, D1/D2/D3) ──────────────────────────────
+
+/** D1 — creates a Package a Unit can later be assigned into. */
+export const createPackageSchema = z
+  .object({
+    jobId: id,
+    packageNo: z.string().trim().min(1, "Package number is required"),
+    weightKg: z.number().positive().optional(),
+    lengthMm: z.number().int().positive().optional(),
+    widthMm: z.number().int().positive().optional(),
+    heightMm: z.number().int().positive().optional(),
+    preservationNotes: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type CreatePackageInput = z.infer<typeof createPackageSchema>;
+
+/** D1 — assigns a Unit into a Package; both must share the same job. */
+export const assignUnitToPackageSchema = z.object({ packageId: id, unitId: id }).strict();
+export type AssignUnitToPackageInput = z.infer<typeof assignUnitToPackageSchema>;
+
+/** D2 — creates a DispatchBatch (starts life PLANNED — no releaseApprovedAt yet). */
+export const createDispatchBatchSchema = z
+  .object({
+    jobId: id,
+    seq: z.number().int().positive(),
+    plannedDate: z.coerce.date(),
+    remarks: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type CreateDispatchBatchInput = z.infer<typeof createDispatchBatchSchema>;
+
+/** D2 — adds a Unit to a batch; the unit must already be packed (packageId set). */
+export const addUnitToBatchSchema = z.object({ dispatchBatchId: id, unitId: id }).strict();
+export type AddUnitToBatchInput = z.infer<typeof addUnitToBatchSchema>;
+
+/** D3 — Production-Head-only release approval. No `releaseApprovedAt` field:
+ * that timestamp is server-clock only (invariant #1). */
+export const approveDispatchReleaseSchema = z
+  .object({
+    dispatchBatchId: id,
+    dispatchNoteNo: z.string().trim().min(1).optional(),
+    gatePassNo: z.string().trim().min(1).optional(),
+    vehicleNo: z.string().trim().min(1).optional(),
+    lrNo: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type ApproveDispatchReleaseInput = z.infer<typeof approveDispatchReleaseSchema>;
+
+/** D3 — records dispatch. No `actualDispatchDate` field: server-clock only
+ * (invariant #1) — the schema structurally cannot accept a client-supplied one. */
+export const recordDispatchSchema = z.object({ dispatchBatchId: id }).strict();
+export type RecordDispatchInput = z.infer<typeof recordDispatchSchema>;
