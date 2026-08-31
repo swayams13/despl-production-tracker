@@ -97,6 +97,8 @@ export const ERROR_CODES = {
   BOM_REVISION_NOT_INCREASING: "BOM_REVISION_NOT_INCREASING",
   /** createBomItem/updateBomItem: the chosen parentBomItemId is a descendant of the item being written — a normal user refusal, not malformed data (B4, Phase 4). */
   BOM_PARENT_WOULD_CYCLE: "BOM_PARENT_WOULD_CYCLE",
+  /** verifyComponentOperation: a PAINTING op has no PaintRecord, or fewer accepted DftReadings than required (P1, Phase 5). */
+  DFT_NOT_ACCEPTED: "DFT_NOT_ACCEPTED",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -162,6 +164,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   DRAWING_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the drawing's current revision.",
   BOM_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the equipment's current BOM revision.",
   BOM_PARENT_WOULD_CYCLE: "Can't set this parent: it would create a circular reference. Pick a different parent item.",
+  DFT_NOT_ACCEPTED:
+    "This painting operation needs an accepted DFT reading for every planned coat before it can verify.",
 };
 
 /**

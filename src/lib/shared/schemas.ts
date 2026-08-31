@@ -103,6 +103,31 @@ export const rejectComponentOperationSchema = z
   .strict();
 export type RejectComponentOperationInput = z.infer<typeof rejectComponentOperationSchema>;
 
+// ── Paint / DFT (Phase 5, P1) ────────────────────────────────────────────
+
+/** Records the coating system for a PAINTING ComponentOperation (1:1, upsertable). */
+export const recordPaintRecordSchema = z
+  .object({ componentOperationId: id, coatingSystem: z.string().trim().min(1), coatsPlanned: id.optional() })
+  .strict();
+export type RecordPaintRecordInput = z.infer<typeof recordPaintRecordSchema>;
+
+/**
+ * Records a single DFT reading. `accepted` is self-attested by whoever
+ * records it — no spec'd min/max micron range exists to check against
+ * automatically (open question, plan cover note; see PaintRecord/DftReading
+ * schema comment).
+ */
+export const recordDftReadingSchema = z
+  .object({
+    componentOperationId: id,
+    coatNumber: id.optional(),
+    location: z.string().trim().optional(),
+    readingMicrons: id,
+    accepted: z.boolean(),
+  })
+  .strict();
+export type RecordDftReadingInput = z.infer<typeof recordDftReadingSchema>;
+
 // ── AssemblyStep (Phase 2 — A6) ──────────────────────────────────────────
 
 /** Start an assembly step. */

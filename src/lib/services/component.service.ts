@@ -11,12 +11,19 @@ import {
   submitComponentOperationSchema,
   verifyComponentOperationSchema,
   rejectComponentOperationSchema,
+  recordPaintRecordSchema,
+  recordDftReadingSchema,
   type StartComponentOperationInput,
   type SubmitComponentOperationInput,
   type VerifyComponentOperationInput,
   type RejectComponentOperationInput,
+  type RecordPaintRecordInput,
+  type RecordDftReadingInput,
 } from "@/lib/shared/schemas";
-import type { ComponentOperation, OperationStatus } from "@/generated/prisma/client";
+import type { ComponentOperation, DftReading, OperationStatus, PaintRecord } from "@/generated/prisma/client";
+
+/** P1 (Phase 5): a PAINTING op's coats requirement — 1 if unset. */
+const DEFAULT_COATS_REQUIRED = 1;
 
 /**
  * Wired into Server Actions (`src/app/actions/component.ts`) and the
@@ -324,9 +331,30 @@ export async function verifyComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    const { op, operationCode } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
     assertMakerChecker(actor, op.submittedBy);
     const to = assertComponentOpTransition("verify", op.status);
+
+    // P1 (Phase 5): a PAINTING op cannot verify without a recorded coating
+    // system and enough accepted DFT readings — identified by
+    // OperationRef.code, same discipline as B9's CUTTING-only drawing gate
+    // above. "Accepted" is self-attested by whoever recorded the reading;
+    // there is no spec'd min/max micron range to check against (open
+    // question noted in the schema comment and the task report — not
+    // silently resolved here).
+    if (operationCode === "PAINTING") {
+      const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId: op.id } });
+      const acceptedCount = await tx.dftReading.count({ where: { componentOperationId: op.id, accepted: true } });
+      const requiredCoats = paintRecord?.coatsPlanned ?? DEFAULT_COATS_REQUIRED;
+      if (!paintRecord || acceptedCount < requiredCoats) {
+        throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, {
+          componentOperationId: op.id,
+          hasPaintRecord: !!paintRecord,
+          acceptedReadings: acceptedCount,
+          requiredCoats,
+        });
+      }
+    }
 
     // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr(s)
     // and records the elapsed rework time (closeNcr stamps reworkFinishedAt).
@@ -410,6 +438,84 @@ export async function rejectComponentOperation(
             categoryId,
             detail,
           },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Records/updates the coating system for a PAINTING op (P1, Phase 5).
+ * PaintRecord is 1:1 with ComponentOperation — upsert so re-recording (e.g.
+ * a corrected coats-planned figure before verify) doesn't need a separate
+ * update action. Not restricted to the PAINTING op code: a component's route
+ * decides which ops exist, and there is no product reason to refuse
+ * recording a coating system against a non-PAINTING op id someone points it
+ * at — the verify-time gate only ever fires for the code that matters.
+ */
+export async function recordPaintRecord(actor: Actor, input: RecordPaintRecordInput): Promise<PaintRecord> {
+  const { componentOperationId, coatingSystem, coatsPlanned } = recordPaintRecordSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    requireOperationDepartment(actor, departmentId);
+
+    return audited(tx, actor, async () => {
+      const record = await tx.paintRecord.upsert({
+        where: { componentOperationId: op.id },
+        create: { componentOperationId: op.id, coatingSystem, coatsPlanned: coatsPlanned ?? null },
+        update: { coatingSystem, coatsPlanned: coatsPlanned ?? null },
+      });
+      return {
+        result: record,
+        audit: {
+          action: "paintRecord.record",
+          entityType: "PaintRecord",
+          entityId: record.id,
+          after: { coatingSystem: record.coatingSystem, coatsPlanned: record.coatsPlanned },
+          eventType: "PaintRecordRecorded",
+          eventPayload: { componentOperationId: op.id, coatingSystem, coatsPlanned: coatsPlanned ?? null },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Records a single DFT reading against a ComponentOperation (P1, Phase 5).
+ * `accepted` is self-attested by whoever records it — see the schema
+ * comment; there is no spec'd min/max micron range to validate against.
+ */
+export async function recordDftReading(actor: Actor, input: RecordDftReadingInput): Promise<DftReading> {
+  const { componentOperationId, coatNumber, location, readingMicrons, accepted } =
+    recordDftReadingSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    requireOperationDepartment(actor, departmentId);
+
+    return audited(tx, actor, async () => {
+      const reading = await tx.dftReading.create({
+        data: {
+          componentOperationId: op.id,
+          coatNumber: coatNumber ?? null,
+          location: location ?? null,
+          readingMicrons,
+          accepted,
+          recordedBy: actor.userId,
+        },
+      });
+      return {
+        result: reading,
+        audit: {
+          action: "dftReading.record",
+          entityType: "DftReading",
+          entityId: reading.id,
+          after: { readingMicrons: reading.readingMicrons, accepted: reading.accepted, coatNumber: reading.coatNumber },
+          eventType: "DftReadingRecorded",
+          eventPayload: { componentOperationId: op.id, readingMicrons, accepted },
         },
       };
     });

@@ -100,8 +100,14 @@ const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
 describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  const { startComponentOperation, submitComponentOperation, verifyComponentOperation, rejectComponentOperation } =
-    await import("./component.service");
+  const {
+    startComponentOperation,
+    submitComponentOperation,
+    verifyComponentOperation,
+    rejectComponentOperation,
+    recordPaintRecord,
+    recordDftReading,
+  } = await import("./component.service");
   const { issueStock } = await import("./stock.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -141,6 +147,9 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let drawingReleasedRevisionId = 0;
   let drawingSeamCuttingOp = 0; // governingDrawingId null (SEAM) → allowed, no stamp
   let drawingGatedNonCuttingOp = 0; // RECEIPT (not CUTTING) on a component whose drawing is unreleased → allowed, gate is CUTTING-specific
+  // P1 (Phase 5) — Paint/DFT gate fixtures, wired into verifyComponentOperation's PAINTING-only gate.
+  let paintOpNoRecord = 0; // SUBMITTED, no PaintRecord/DftReading at all → DFT_NOT_ACCEPTED
+  let paintOpTwoCoats = 0; // SUBMITTED, coatsPlanned=2 → walked through none/unaccepted/partial/full accepted coverage
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -425,6 +434,27 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     drawingGatedNonCuttingOp = (
       await owner.componentOperation.create({
         data: { componentId: componentDrawingGatedNonCutting.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    // P1 (Phase 5) — Paint/DFT gate fixtures.
+    const opPainting = await owner.operationRef.create({
+      data: { tenantId, code: "PAINTING", name: "Painting", defaultDepartmentId: deptA.id },
+    });
+    const componentPaintNoRecord = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "PAINT-NO-RECORD", componentTypeId: componentType.id },
+    });
+    paintOpNoRecord = (
+      await owner.componentOperation.create({
+        data: { componentId: componentPaintNoRecord.id, seq: 1, operationId: opPainting.id },
+      })
+    ).id;
+    const componentPaintTwoCoats = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "PAINT-TWO-COATS", componentTypeId: componentType.id },
+    });
+    paintOpTwoCoats = (
+      await owner.componentOperation.create({
+        data: { componentId: componentPaintTwoCoats.id, seq: 1, operationId: opPainting.id },
       })
     ).id;
 
@@ -745,5 +775,68 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   it("drawing gate is CUTTING-specific: a non-CUTTING operation (RECEIPT) on a component with an unreleased governing drawing is NOT blocked (violation case 4)", async () => {
     const started = await startComponentOperation(supA, { componentOperationId: drawingGatedNonCuttingOp });
     expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  // ── P1 (Phase 5): recordPaintRecord/recordDftReading + the PAINTING verify gate ────
+
+  it("DFT gate: verifying a PAINTING op with no PaintRecord/DftReading at all is refused (violation case 1)", async () => {
+    await startComponentOperation(supA, { componentOperationId: paintOpNoRecord });
+    await submitComponentOperation(supA, { componentOperationId: paintOpNoRecord });
+    await expectCode(verifyComponentOperation(qc, { componentOperationId: paintOpNoRecord }), ERROR_CODES.DFT_NOT_ACCEPTED);
+  });
+
+  it("DFT gate: PaintRecord + readings recorded but none accepted is still refused (violation case 2)", async () => {
+    await recordPaintRecord(supA, { componentOperationId: paintOpNoRecord, coatingSystem: "Epoxy zinc-rich" });
+    await recordDftReading(supA, { componentOperationId: paintOpNoRecord, readingMicrons: 40, accepted: false });
+    await expectCode(verifyComponentOperation(qc, { componentOperationId: paintOpNoRecord }), ERROR_CODES.DFT_NOT_ACCEPTED);
+  });
+
+  it("DFT gate: one accepted reading satisfies the default (coatsPlanned unset → 1 required) and verify succeeds", async () => {
+    await recordDftReading(supA, { componentOperationId: paintOpNoRecord, readingMicrons: 85, accepted: true });
+    const verified = await verifyComponentOperation(qc, { componentOperationId: paintOpNoRecord });
+    expect(verified.status).toBe("COMPLETE");
+  });
+
+  it("DFT gate: coatsPlanned=2 needs two accepted readings — fewer than planned is refused (violation case 3), satisfied once the second is recorded (success case)", async () => {
+    await startComponentOperation(supA, { componentOperationId: paintOpTwoCoats });
+    await submitComponentOperation(supA, { componentOperationId: paintOpTwoCoats });
+    await recordPaintRecord(supA, { componentOperationId: paintOpTwoCoats, coatingSystem: "Polyurethane topcoat", coatsPlanned: 2 });
+
+    await expectCode(verifyComponentOperation(qc, { componentOperationId: paintOpTwoCoats }), ERROR_CODES.DFT_NOT_ACCEPTED);
+
+    await recordDftReading(supA, { componentOperationId: paintOpTwoCoats, coatNumber: 1, readingMicrons: 75, accepted: true });
+    await expectCode(verifyComponentOperation(qc, { componentOperationId: paintOpTwoCoats }), ERROR_CODES.DFT_NOT_ACCEPTED);
+
+    await recordDftReading(supA, { componentOperationId: paintOpTwoCoats, coatNumber: 2, readingMicrons: 80, accepted: true });
+    const verified = await verifyComponentOperation(qc, { componentOperationId: paintOpTwoCoats });
+    expect(verified.status).toBe("COMPLETE");
+  });
+
+  it("recordDftReading is tenant-anchored: another tenant's actor cannot attach a reading to this operation by id (NOT_FOUND)", async () => {
+    const otherOrg = await owner.organization.create({
+      data: { code: `TEST-CO-PAINT-XT-${Date.now()}`, name: "Other tenant (paint)" },
+    });
+    const intruder: Actor = {
+      userId: 999_998,
+      tenantId: otherOrg.id,
+      clientId: null,
+      name: "Intruder",
+      email: "intruder-paint@other",
+      roles: [ROLES.SUPERVISOR, ROLES.QC],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+    await expectCode(
+      recordDftReading(intruder, { componentOperationId: paintOpTwoCoats, readingMicrons: 999, accepted: true }),
+      ERROR_CODES.NOT_FOUND,
+    );
+    await expectCode(
+      recordPaintRecord(intruder, { componentOperationId: paintOpTwoCoats, coatingSystem: "Should not land" }),
+      ERROR_CODES.NOT_FOUND,
+    );
+    const readingCount = await owner.dftReading.count({ where: { componentOperationId: paintOpTwoCoats } });
+    expect(readingCount).toBe(2); // only the two legitimate readings from the previous test
   });
 });
