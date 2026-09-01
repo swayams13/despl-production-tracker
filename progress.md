@@ -2,6 +2,88 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Live-verified Phases 1–5 via Claude in Chrome, fixed 3 bugs found, 1 Sep 2026
+
+**Status: 3 real, reproducible bugs found by driving the actual app in Chrome (real `/login`,
+`sj@despl.local`/`qc@despl.local`, no forged sessions), fixed via TDD, live-reverified for 2 of
+3 (the third confirmed via DB-integration test only — see below). `pnpm typecheck`/`lint`/`build`
+clean. `pnpm test`: 578/578. `pnpm test:db`: 910/910 on a freshly-reset run (the DB-state note
+below explains why a second consecutive run shows 909/910).**
+
+### What was found (browser-driven inspection, all 3 reproduced live on DESPL-320/320SR01)
+
+1. **False "COMPLETE" component status.** `bom.read.ts`'s component `displayStatus` computation
+   fell back to `ops[0].status` whenever no operation was IN_PROGRESS/SUBMITTED — so a component
+   with its first op COMPLETE and the rest still NOT_STARTED (nothing currently active) displayed
+   as fully **COMPLETE**. Reproduced on BOTTOM-HEAD (1 of 5 ops done, chip said "COMPLETE").
+2. **Two floor steps locked in lockstep.** `DISHED_END`'s route legitimately maps two distinct
+   printed steps ("Pressing/Spinning", "Trimming") onto the same canonical `FORMING` operation
+   (same physical 36-process stage, same pattern as the F6 Rolling/Forming split) — real, distinct
+   `ComponentOperation` rows exist in the DB (confirmed via direct query: ids 520/521, same
+   `operationId`). But `bom-route.ts`'s `projectComponentRoute` matched route steps to actual ops
+   via a `Map<operationId, ActualOp>`, which can only hold one entry per operationId — both route
+   steps ended up pointing at the same actual row. Starting/submitting/rejecting either one drove
+   the same underlying row, so the two steps were never independently trackable. Reproduced live:
+   Start on one visibly started both; Reject on one visibly rejected both.
+3. **QCP hold-point vs. assembly view "two truths."** The Assembly tab showed steps 1.1/1.2/2.1 as
+   **complete**, but the QCP/Hold Points tab showed the same checkpoints as **PENDING** — because
+   `verifyAssemblyStep`/`rejectAssemblyStep` never wrote a `QcpExecution` row for INSPECTION-kind
+   steps, despite `AssemblyStep.qcpItemId` existing specifically to link them (its own schema
+   comment says "links the hold/witness points `assertNoOpenHoldPoint` already enforces, no change
+   needed there" — that assumption was wrong; nothing ever wrote the execution). This is exactly
+   the "QC cockpit and assembly view stop being two truths" goal Phase 2's A4 named but didn't
+   fully close.
+
+### Fixes (TDD: failing test → minimal fix → green, per superpowers:test-driven-development)
+
+- **Bug 1**: extracted the displayStatus logic into a new `computeComponentDisplayStatus` in
+  `bom-route.ts` (pure, now unit-tested) — mixed COMPLETE+NOT_STARTED with nothing active now
+  correctly reads "progress", never "complete". `bom.read.ts` calls the shared function instead of
+  its own inline ternary.
+- **Bug 2**: `projectComponentRoute` now matches actual ops to route steps via a queue
+  (`Map<operationId, ActualOp[]>`, `.shift()` per occurrence) instead of a single-slot map — both
+  `routeSteps` and `actualOps` arrive seq-ordered from the query, so this pairs each duplicate
+  correctly without any schema or seed-data change.
+- **Bug 3**: new `recordQcpExecutionTx` bare tx-helper in `qcp.service.ts` (same bare/audited-by-
+  caller discipline as `welding.service.ts`'s `recordNdtResultTx`); `recordQcpExecution` (the
+  public QC-role-gated action) now calls it internally. `verifyAssemblyStep` records
+  `QcpExecution(ACCEPTED)` and `rejectAssemblyStep` records `QcpExecution(REJECTED)` for
+  INSPECTION-kind steps with a real `qcpItemId`, in the same transaction, each with its own
+  `recordAudit` row (invariant #5) — scoped so WORK-kind steps and INSPECTION steps with no
+  `qcpItemId` link record nothing. `assertMakerChecker` already requires QC role before verify/
+  reject reaches this code, so no separate role check was needed.
+
+New tests: `bom-route.test.ts` (+7: the duplicate-operationId matching case, 6 `computeComponent
+DisplayStatus` cases including the exact regression). `assembly.service.test.ts` (+2, DB-gated:
+reject→verify on a real `qcpItemId`-linked step records REJECTED then ACCEPTED as successive
+attempts; a WORK-kind step records nothing).
+
+### Live re-verification
+
+Bugs 1 and 2 re-confirmed live in Chrome after the fix (BOTTOM-HEAD now shows "In progress", not
+"Complete"; the two Rolling/Forming rows now show independent, correct statuses — one genuinely
+NOT_STARTED, one carrying the real IN_PROGRESS/rejected history). Bug 3 could **not** be
+live-reconfirmed the same way: the local dev DB has exactly one QC-role user
+(`qc@despl.local`), and once that user submits an INSPECTION step, maker-checker correctly refuses
+to let the same user verify it — there's no second QC account to complete the loop with (the seed
+does define one, `reviewer@despl.local`, but this local `despl` DB predates that seed addition).
+Granting a temporary QC role to another user via a direct DB write to unblock this was attempted
+and correctly refused by the harness's own permission classifier (an RBAC-role mutation outside
+the app's own admin flow) — left as-is rather than worked around. Bug 3 is instead proven by the
+two new DB-integration tests above, which exercise the exact multi-actor (submit as QC user A,
+verify as QC user B) transaction end-to-end against a real Postgres transaction.
+
+### Pre-existing, unrelated: `process.service.test.ts`'s known DB flake, re-confirmed non-regression
+
+`"verify refuses at a genuinely uncleared hold point"` mutates real seeded `ComponentOperation`
+rows to COMPLETE as part of passing and never resets them — so it passes once from a clean
+`despl_test` state and fails on every immediate re-run in the same session (self-inflicted, not
+cross-file). Confirmed via direct DB query this was already true before touching any code this
+session (unit 320SR04's leadTimeProcessSeq-10 ops were already COMPLETE from a prior session's
+run, before I changed a single line). Reset twice during this session so the suite is left green;
+whoever picks up Phase 6 should add a proper reset for this one test, same as the file's other
+tests already do via `resetPlans`.
+
 ## Session — Phase 5 (NCR, paint, packing, dispatch) — back-end/service layer, 31 Aug 2026
 
 **Status: N1–N4, P1, D1–D4 all implemented (service/schema layer only, no UI — this phase's
@@ -3642,6 +3724,7 @@ Email digests (SES/Resend, ≈₹0–1,700/mo) → WhatsApp · geo-tagged in-app
 | 23 Aug 2026 | **QC's awaiting-verification queue scoped to the current schedule run** (`0f80dd0`). Also found live, same walkthrough: `loadQcCockpit`'s raw-SQL queue query filtered only `pp.status = 'SUBMITTED'`, with no join to `schedule_runs.is_current` — every superseded schedule run's stale `SUBMITTED` plans leaked into QC's live queue alongside the real one. Surfaced by DESPL-320's real queue showing 8 duplicate "Material Receipt & Incoming Inspection" rows (7 stale, from schedule regenerations during earlier dev sessions) instead of 1. The hold-points query in the same file already scoped correctly; this brings the queue query in line with it. |
 | 24 Aug 2026 | **Recovered the 20 Aug BOM component-route projection + QCP cross-link work, which had gone missing from the working tree** (`344ccd6`). Root cause, traced via `git stash list`: a `git stash` (without `-u`) run just before the 22 Aug job-intake SDD execution had swept up this feature's tracked changes (`prisma/schema.prisma`, `prisma/seed.ts`, `globals.css`, `bom-panel.tsx`, `bom.read.ts`) plus its untracked new files (`bom-route.ts`, `bom-route.test.ts`, `bom.read.test.ts`, and two unrelated 19 Aug audit docs) into `stash@{0}`, titled "WIP: BOM panel work, pre job-intake SDD execution" — and it was never popped back. The only trace left on the working tree afterward was one orphaned untracked file, `prisma/migrations/20260820050300_operation_ref_lead_time_process_seq/`, since a migration file that already existed on disk isn't re-stashed the same way. Recovered via `git stash apply` (kept as a safety net until fully re-verified, then `git stash drop`). Re-ran the full toolchain against the restored code rather than trusting the 20 Aug session's report: `pnpm typecheck`/`pnpm lint` clean, `pnpm test` **456/456** (+10 from `bom-route.test.ts`, exactly the count the 20 Aug entry described), `bom.read.test.ts`'s 3 DB-gated tests pass in isolation (the full `pnpm test:db` run's 6 failures are the pre-existing, already-documented `portfolio.read.test.ts`/`process.service.test.ts` connection-pool contention flake — confirmed unrelated by re-running those two files in isolation, where `process.service.test.ts` passes clean), `pnpm build` clean. **Live-verified through the real `/login` form** as `admin@despl.local` (no forged session): DE0467's BASE PLATE component under BOM & Components renders its full 10-step canonical route (Receipt → MTC Verification → Cutting/Blanking → Edge Preparation → Rolling/Forming/Pressing/Dishing → Fit-up → Welding → NDT → Grinding → Dimensional/Visual Inspection), all correctly `NOT_STARTED` since nothing's begun — matching the 20 Aug session's own description exactly. The local dev DB already had the migration applied from 20 Aug (`_prisma_migrations` confirms it), so this session only needed `prisma generate` to resync the client against the restored schema, no new migration work. Committed only the BOM-work files; the two unrelated audit docs that came along in the same stash (`docs/AUDIT-architecture-and-scalability-v1.md`, `docs/AUDIT-cross-device-compatibility-v1.md`, both dated 19 Aug) were left untracked on the working tree, flagged for separate review rather than bundled in. |
 | 24 Aug 2026 | **Started, did not finish, a "what's decided-and-started-but-still-incomplete" audit — resuming next session.** Read the full Status banner, Blockers section, and cross-checked every "open"/"not yet" note against later entries (many get silently resolved a few sessions later; a few don't). Confirmed still genuinely open, not superseded by later work: **(1) Session R2 (`docs/PLAN-responsive-supervisor-v1.md` §R2) stalled after 2 of 5 tasks** — Task 1 (queue-first `/my-day`) and Task 2 (full-screen execution sheet) shipped 18 Aug, "Next: Task 3 (board tab)" was written and never picked back up; Tasks 3 (board tab phone/tablet master-detail), 4 (Wake Lock), 5 (outdoor high-contrast full shop-floor UX — today it's a plain colour swap only) never started, and the project moved on to Portfolio Dashboard/Personal Dashboards/Client Portal/Job Intake/Route Authoring instead, with no explicit decision recorded to deprioritize R2. **(2) Railway Postgres's default session timezone was never confirmed UTC** — flagged as a required human check since Phase 4 (17 Aug), repeated in the top status banner, never closed out despite several Railway deploys since. **(3) The Railway Postgres password leaked in plaintext to this session's context on 22 Aug is still not rotated** (a reminder trigger fired 23 Aug 09:00 IST — not confirmed whether it was acted on). **(4) Client portal's open policy question is unanswered**: should `ADMIN` be excluded from the verify/reject role gate (19 Aug entry, §27 of the banner) — a decision for DESPL, not a bug. **(5) Several Medium-severity 14 Aug code-review findings are still unfixed**, still latent, now that `lib/services/` is heavily used: gating keys off lag sign not edge type (`gating.ts:44`, one-liner), duration overrides desync the envelope layer from the CPM layer, no login rate-limit/lockout, and child tables (units/job_processes/bom_items/qcp_executions) still have no `tenant_id`/RLS — the same root cause resurfaced as a real, separately-fixed bug in the 16 Aug notifications work, confirming it's still only being patched query-by-query rather than at the root. **Not yet checked**: the original Sprint 3-8 roadmap checklist (BOM spreadsheet import, master BOM catalog import/curation, material-readiness view/stage-material blocking, Sentry, backup/restore drill — welder/NDT tracking and the digest/notification items are confirmed already shipped under different session names, so the checklist is stale and needs item-by-item verification, not a re-read at face value). **Also noticed, not yet investigated:** `package.json`'s `start` script and a new `.github/workflows/ci.yml` are sitting modified/untracked on the working tree, neither authored by this session — origin unconfirmed, left untouched pending the next session's look. Resume the audit here rather than restarting it. |
+| 01 Sep 2026 | **[B1][B2] docs-drift corrections — first item run off the new `docs/mos-blueprint/` build plan** (the plan itself came out of the 31 Aug forensic audit, `docs/DESPL_MOS_FORENSIC_AUDIT.md`, §36/§46 Phase B). Branch `chore/B1-docs-drift-corrections`, docs only, three verified-before-written corrections: **(1) CLAUDE.md invariant #2** claimed material-dependency gating "is not implemented" — false; `assertKitReady` (`_shared.ts:684`) is called from `startComponentOperation` (`component.service.ts:194`) and throws `MATERIAL_NOT_AVAILABLE` on a real shortfall. Rewrote the invariant to state the actual grain (component-operation, not stage/`ProcessPlan`) and both silent no-op cases (`bomItemId == null`; zero stock transactions ever logged). **(2) `docs/PHASE-PROMPTS.md` §0** claimed "Phase 0 removed" the `workspace/page.tsx:8-13` DESPL-320 literal — false; read the lines directly, the `jobNumber: "DESPL-320"` fallback in `pilotJobId` is unchanged. Corrected to mark it open, pointing at item 0.13 and work item B3 (not fixed in this session — out of scope, B3 owns it). **(3) CLAUDE.md's Phase-2-deferred list** still carried "TPI/client portal" — false; it shipped 19 Aug (`src/app/portal/page.tsx`, `client-snapshot.service.ts`/`.read.ts`, both tested, a real publish→verify/reject `ProgressSnapshot` workflow). Moved out of the deferred list with a short description, including that the portal reads only `VERIFIED` rows. Verified no-op as expected: `pnpm lint` (0 errors, 2 pre-existing unrelated warnings in `process.service.ts`), `pnpm typecheck` clean, `pnpm test` 578/578 (332 pre-existing skips). Committed `776c0f3`. **Not done this session, by design:** B3 (the literal itself), B4 (`admin.read.ts`'s `PRESSURE_VESSEL` literal), the `welding.service.ts` `"FABRICATION"` literal, and B10 (the CI literal guard) — all separate blueprint items, deliberately out of scope for a docs-only pass. **Pre-existing uncommitted working-tree changes** (`assembly.service.ts`/`.test.ts`, `bom-route.ts`/`.test.ts`, `bom.read.ts`, `qcp.service.ts`, and the untracked `docs/DESPL_MOS_FORENSIC_AUDIT.md`/`docs/mos-blueprint/`) were present before this session started, carried across the branch checkout untouched, and remain unstaged — not this session's work, not reviewed or committed here. **Also noticed, not investigated:** the branch-creation step in the blueprint's own walkthrough (`git checkout -b chore/B1-docs-drift-corrections` before launching `claude`) didn't actually land — the session opened on `demo` per the harness's initial branch snapshot; the branch was created mid-session, before the commit, once noticed. Next session should pick from the blueprint's Tue–Fri table: B10 (literal guard) or B3 (workspace fallback). |
 
 ## Blockers
 
