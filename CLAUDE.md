@@ -39,7 +39,7 @@ pnpm lint && pnpm typecheck
 ## Non-negotiable invariants (the product's whole credibility rests on these)
 
 1. **No client timestamps.** Actual dates/times are set server-side from the DB clock. No request DTO may contain `actual_*` or `*_at` fields. Ever.
-2. **Hard sequential gating.** A stage starts only when its predecessor DAG is COMPLETE (`lib/schedule/gating.ts`'s `assertCanStart`/`assertCanComplete`, called from `lib/services/process.service.ts` inside a transaction — never only in the UI). Material-dependency gating (blocking a stage start on unmet BOM/procurement/MTC status) is not implemented — do not assume it exists; it is deferred, not silently covered by the predecessor check.
+2. **Hard sequential gating.** A stage starts only when its predecessor DAG is COMPLETE (`lib/schedule/gating.ts`'s `assertCanStart`/`assertCanComplete`, called from `lib/services/process.service.ts` inside a transaction — never only in the UI). Material-dependency gating exists at the component-operation grain, not the stage grain: `assertKitReady` (`lib/services/_shared.ts:684`), called from `startComponentOperation` (`component.service.ts:194`), throws `MATERIAL_NOT_AVAILABLE` when a component's linked BOM item is short. It silently no-ops — the operation starts unchecked — for a component with no BOM link, and for a BOM item with zero stock transactions ever recorded. No equivalent gate exists at the `ProcessPlan`/stage grain.
 3. **Maker–checker.** `verify` requires the QC role AND `actor != submitted_by`. The same human never submits and verifies. No exceptions, including admins.
 4. **Hold points block.** A stage with an uncleared H-coded checkpoint cannot complete. Witness (W) waivers require Production Head approval and are audited.
 5. **Append-only audit.** Every mutation writes `audit_log` (before/after jsonb) in the same transaction; if the audit insert fails, roll back. The app DB role has no UPDATE/DELETE grant on `audit_log`. Never add one.
@@ -91,7 +91,13 @@ final review — not just the phase where the incident happened.
 
 ## Deferred to Phase 2 — do NOT build yet (but don't paint into a corner)
 
-Email/WhatsApp delivery (daily brief payload is already email-ready jsonb) · geo-tagged in-app photo proof · file uploads (MTCs, reports, MDR compilation — schema keeps `record_type`/refs as text now) · TPI/client portal (Viewer role reserved) · additional equipment templates · offline writes.
+Email/WhatsApp delivery (daily brief payload is already email-ready jsonb) · geo-tagged in-app photo proof · file uploads (MTCs, reports, MDR compilation — schema keeps `record_type`/refs as text now) · additional equipment templates · offline writes.
+
+**Built, not deferred: TPI/client portal.** Shipped 19 Aug 2026 (`src/app/portal/page.tsx`,
+`lib/services/client-snapshot.service.ts`/`client-snapshot.read.ts`, both tested). A publish →
+verify/reject workflow (`ProgressSnapshot`); the portal reads exclusively through
+`loadClientPortalView`, which only ever selects `VERIFIED` rows. See
+`docs/superpowers/specs/2026-08-19-client-portal-daily-updates-design.md`.
 
 ## Pending inputs from DESPL
 

@@ -93,8 +93,9 @@ The schema already supports this and it must stay that way:
 **The rule for every phase:**
 
 1. **No literal in `src/`.** No job number, serial, component tag, operation name, group code or
-   family code appears in application code. `workspace/page.tsx:8-13` was the one violation and
-   Phase 0 removed it. Do not add another.
+   family code appears in application code. `workspace/page.tsx:8-13` (the `pilotJobId` fallback
+   to `jobNumber: "DESPL-320"`) is a known, still-open violation — see item 0.13 and work item
+   B3. Do not add another.
 2. **Anything that varies by product family goes in a versioned template**, pinned by the job,
    materialised per unit — the same three-layer pattern `ProcessTemplate → JobProcess → ProcessPlan`
    and `RouteTemplate → RouteStep → ComponentOperation` already use. Never a per-job hand-seed with
