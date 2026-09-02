@@ -82,12 +82,17 @@ for (const path of SHELL_PAGES) {
     // adjacent pairs checked, tightest gap 15.65px. So this test is doing real
     // work on /my-day, not passing vacuously.
     //
-    // What could NOT be confirmed: that the 6px defect is fixed. "File reason…"
-    // renders only for an overdue plan (stage-sheet-launcher.tsx:619) and no
-    // reachable data state put that pair on screen, so the violation is
-    // currently unmeasurable rather than proven gone. Parked as a finding in
-    // docs/mos-execution/LEDGER.md. If the pair renders at 6px again this test
-    // fails for real, which is the behaviour we want.
+    // Removing it then proved the defect was REAL, not stale: CI failed this
+    // test on the TABLET project with the exact measurement the marker
+    // described — `{w:239,h:48}` / `{w:59,h:48}` only 6px apart, the
+    // "Assign to…" select and "Claim" button wrapping onto two lines. The
+    // phone project never reached it, which is why the local probe came back
+    // clean. Root cause fixed in src/app/(app)/my-day/_client.tsx:329
+    // (`gap: 6` → `gap: 8`), not papered over here.
+    //
+    // The marker had been hiding a live shop-floor mis-tap risk for as long as
+    // this suite went unrun in CI. Treat any `test.fail()` as a defect in
+    // hiding, not a note.
     await page.goto(path);
 
     // Scoped to what this codebase's own coarse-pointer sizing contract

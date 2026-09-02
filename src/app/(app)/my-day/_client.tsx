@@ -326,7 +326,13 @@ function PoolRowView({
       </td>
       <td className="mono">{fmtDue(row.ranked.plan.plannedFinish)}</td>
       <td className="num" style={{ minWidth: 220 }}>
-        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap" }} onClick={stop}>
+        {/* gap 8, not 6: on the tablet viewport the "Assign to…" select (239px)
+            and "Claim" (59px) wrap onto two lines, and 6px between two 48px
+            touch targets is below SPEC §8 assertion 3's 8px minimum — a real
+            mis-tap risk on a shop-floor tablet, caught by
+            e2e/supervisor-viewport.spec.ts once that test started running in
+            CI. 8px is also the design grid (CLAUDE.md § Layout). */}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }} onClick={stop}>
           {canAssign && members.length > 0 && (
             <select
               className="btn"
