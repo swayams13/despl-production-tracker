@@ -45,13 +45,26 @@ test("unknown account gives the identical message as a wrong password", async ({
 
 test("internal user signs in and sees tenant-scoped jobs", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
-  await expect(page).toHaveURL("/");
-  await expect(page.getByRole("heading", { name: "DESPL Production Tracker" })).toBeVisible();
+  // SPEC §7.1: `/` renders nothing — src/app/page.tsx is a pure role-based
+  // redirect, and a SUPERVISOR lands on /my-day. The previous assertions here
+  // (`toHaveURL("/")` plus a "DESPL Production Tracker" heading) only ever
+  // passed on a race: toHaveURL retries and could match `/` in the instant
+  // before the redirect resolved, and that heading exists solely in
+  // login/page.tsx, admin/_client.tsx and account/password/_client.tsx —
+  // never inside the authenticated shell. Pinning the real landing page is
+  // strictly stronger than accepting a URL that was never the final one.
+  await expect(page).toHaveURL(/\/my-day$/);
+  await expect(page.getByRole("heading", { name: "My Day" })).toBeVisible();
 
-  // the three seeded jobs, read under row-level security
-  await expect(page.getByRole("cell", { name: "DE0463" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "DE0467" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "DESPL-320" })).toBeVisible();
+  // The three seeded jobs, read under row-level security. `.first()` because
+  // /my-day lists one row per stage-unit, so a job legitimately appears in
+  // several rows and a bare locator trips Playwright's strict mode. This
+  // assertion had never actually executed against the app before — the stale
+  // heading check above it failed first, every time — which is how it reached
+  // CI still written for a single-row page.
+  await expect(page.getByRole("cell", { name: "DE0463" }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "DE0467" }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "DESPL-320" }).first()).toBeVisible();
 });
 
 test("D13: username alone (no email match) signs in, same as email", async ({ page }) => {

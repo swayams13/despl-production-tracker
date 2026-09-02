@@ -71,13 +71,51 @@ for (const path of SHELL_PAGES) {
       "touch-target sizing/spacing (SPEC §8 assertions 2-3) is a coarse-pointer concern; " +
         "the desktop project has no touch targets to check",
     );
-    // REAL FINDING, discovered while writing this test, out of scope to fix
-    // (test infra only, no src/ changes): /my-day's card action button pair
-    // (e.g. "File reason…" / "Submit for QC") is 6px apart, need the 8px
-    // SPEC §8 assertion-3 minimum. Affects both touch projects.
+    // A `test.fail(path === "/my-day", ...)` stood here, recording that
+    // /my-day's card action pair ("File reason…" / "Submit for QC") sat 6px
+    // apart against SPEC §8 assertion 3's 8px minimum. It was removed when e2e
+    // first ran in CI (S4) and reported `Expected to fail, but passed` — a hard
+    // failure in its own right.
+    //
+    // Measured before removing it, on the phone project against despl_test:
+    // 390x844, mobile shell, 93 targets matched, smallest exactly 48px, 8
+    // adjacent pairs checked, tightest gap 15.65px. So this test is doing real
+    // work on /my-day, not passing vacuously.
+    //
+    // Removing it proved the defect was REAL, not stale: CI failed this test
+    // on the TABLET project with the exact measurement the marker described —
+    // `{w:239,h:48}` / `{w:59,h:48}` only 6px apart, the "Assign to…" select
+    // and "Claim" button wrapping onto two lines. The phone project never
+    // reaches it, which is why a local phone probe came back clean.
+    //
+    // That one is FIXED at the source: src/app/(app)/my-day/_client.tsx:329,
+    // `gap: 6` → `gap: 8`. Not papered over.
+    //
+    // Fixing it then exposed a SECOND, distinct violation behind it, measured
+    // by CI on the same project:
+    //
+    //   {w:59,h:48} at y 594.97-642.97  /  {w:239,h:48} at y 643.97-691.97
+    //   only 1px apart
+    //
+    // Those are in CONSECUTIVE TABLE ROWS — row N's "Claim" and row N+1's
+    // "Assign to…" — so it is row/cell vertical spacing, not a wrap. Fixing it
+    // means changing /my-day's table row spacing at tablet width against
+    // CLAUDE.md § Layout's 36px row height: a visual design decision needing
+    // its own review, not a follow-on edit to a test-hygiene change.
+    //
+    // So the marker is restored — but ONLY for the tablet project, ONLY for
+    // /my-day, and citing a measurement rather than a recollection. The phone
+    // project asserts this page for real and passes.
+    //
+    // Standing lesson from the round trip: a `test.fail()` is a defect in
+    // hiding, not a note. This one concealed a live shop-floor mis-tap risk
+    // for as long as the suite went unrun in CI, and it concealed a second one
+    // behind the first. Owner and closing condition are tracked in
+    // docs/mos-execution/LEDGER.md — do not let this line rot again.
     test.fail(
-      path === "/my-day",
-      "my-day: card action buttons are 6px apart (need 8px, SPEC §8 assertion 3) — real, pre-existing, out of scope",
+      path === "/my-day" && testInfo.project.name === "tablet",
+      "my-day/tablet: row N's Claim and row N+1's Assign-to select are 1px apart " +
+        "(need 8px, SPEC §8 assertion 3) — measured in CI, tracked in LEDGER.md",
     );
     await page.goto(path);
 
