@@ -71,14 +71,23 @@ for (const path of SHELL_PAGES) {
       "touch-target sizing/spacing (SPEC §8 assertions 2-3) is a coarse-pointer concern; " +
         "the desktop project has no touch targets to check",
     );
-    // REAL FINDING, discovered while writing this test, out of scope to fix
-    // (test infra only, no src/ changes): /my-day's card action button pair
-    // (e.g. "File reason…" / "Submit for QC") is 6px apart, need the 8px
-    // SPEC §8 assertion-3 minimum. Affects both touch projects.
-    test.fail(
-      path === "/my-day",
-      "my-day: card action buttons are 6px apart (need 8px, SPEC §8 assertion 3) — real, pre-existing, out of scope",
-    );
+    // A `test.fail(path === "/my-day", ...)` stood here, recording that
+    // /my-day's card action pair ("File reason…" / "Submit for QC") sat 6px
+    // apart against SPEC §8 assertion 3's 8px minimum. It was removed when e2e
+    // first ran in CI (S4) and reported `Expected to fail, but passed` — a hard
+    // failure in its own right.
+    //
+    // Measured before removing it, on the phone project against despl_test:
+    // 390x844, mobile shell, 93 targets matched, smallest exactly 48px, 8
+    // adjacent pairs checked, tightest gap 15.65px. So this test is doing real
+    // work on /my-day, not passing vacuously.
+    //
+    // What could NOT be confirmed: that the 6px defect is fixed. "File reason…"
+    // renders only for an overdue plan (stage-sheet-launcher.tsx:619) and no
+    // reachable data state put that pair on screen, so the violation is
+    // currently unmeasurable rather than proven gone. Parked as a finding in
+    // docs/mos-execution/LEDGER.md. If the pair renders at 6px again this test
+    // fails for real, which is the behaviour we want.
     await page.goto(path);
 
     // Scoped to what this codebase's own coarse-pointer sizing contract
