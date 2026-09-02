@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES } from "@/lib/shared/errors";
-import { createJob } from "./job-intake.service";
+import { createJob, updateJobDetails } from "./job-intake.service";
 import type { CreateJobInput } from "@/lib/shared/schemas";
 
 function actor(over: Partial<Actor> = {}): Actor {
@@ -95,6 +95,48 @@ describe("job-intake.service — pure refusals", () => {
     await expect(
       // @ts-expect-error — .strict() schema; no actual_* field exists on this input
       createJob(actor(), { ...input(), actualStart: new Date() }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("job-intake.service — updateJobDetails pure refusals", () => {
+  it.each([
+    ["SUPERVISOR", ROLES.SUPERVISOR],
+    ["QC", ROLES.QC],
+    ["MANAGEMENT", ROLES.MANAGEMENT],
+  ])("refuses a %s caller (RBAC deny-by-default)", async (_label, role) => {
+    await expect(
+      updateJobDetails(actor({ roles: [role] }), { jobId: 1, clientOrderNo: null, projectName: null, poRef: null, designCode: null, priority: "NORMAL", remarks: null }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("refuses a client user before touching the DB", async () => {
+    await expect(
+      updateJobDetails(actor({ clientId: 5, roles: [ROLES.CLIENT_VIEWER] }), {
+        jobId: 1,
+        clientOrderNo: null,
+        projectName: null,
+        poRef: null,
+        designCode: null,
+        priority: "NORMAL",
+        remarks: null,
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("rejects a smuggled actual_* field via the strict schema (invariant #1)", async () => {
+    await expect(
+      updateJobDetails(actor(), {
+        jobId: 1,
+        clientOrderNo: null,
+        projectName: null,
+        poRef: null,
+        designCode: null,
+        priority: "NORMAL",
+        remarks: null,
+        // @ts-expect-error — .strict() schema; no actual_* field exists on this input
+        actualStart: new Date(),
+      }),
     ).rejects.toThrow();
   });
 });
@@ -379,11 +421,52 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
       sourceEquipment._count.bomItems,
     );
     expect(
-      await owner.procurement.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),
+      await owner.procurementEvent.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),
     ).toBe(0);
     expect(
       await owner.materialIdentification.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),
     ).toBe(0);
+  });
+
+  it("copyBom preserves a parent/child BOM hierarchy (fix wave, Important #4)", async () => {
+    const refs = await seedRefs();
+
+    // Own source equipment (not the generic seed data, which has no
+    // hierarchy) — a real job/equipment via the service itself, then a
+    // parent + child BomItem written directly, itemNo as the stable key.
+    const sourceJob = await createJob(actor(), base({ jobNumber: "TEST-BOM-HIER-SRC" }, refs));
+    created.push(sourceJob.jobId);
+    const sourceEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: sourceJob.jobId } });
+
+    const parent = await owner.bomItem.create({
+      data: { equipmentId: sourceEquipment.id, itemNo: 101, partName: "Sub-assembly", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+    });
+    const child = await owner.bomItem.create({
+      data: {
+        equipmentId: sourceEquipment.id,
+        itemNo: 102,
+        partName: "Bolt",
+        sourceQty: "4 NOS.",
+        qtyPer: 4,
+        uom: "NOS.",
+        parentBomItemId: parent.id,
+      },
+    });
+
+    const r = await createJob(
+      actor(),
+      base({ jobNumber: "TEST-BOM-HIER-DST", copyBomFromEquipmentId: sourceEquipment.id }, refs),
+    );
+    created.push(r.jobId);
+
+    const targetEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+    const copiedParent = await owner.bomItem.findFirstOrThrow({ where: { equipmentId: targetEquipment.id, itemNo: parent.itemNo } });
+    const copiedChild = await owner.bomItem.findFirstOrThrow({ where: { equipmentId: targetEquipment.id, itemNo: child.itemNo } });
+
+    expect(copiedParent.id).not.toBe(parent.id); // a real copy, not the source row
+    expect(copiedChild.parentBomItemId).toBe(copiedParent.id); // points at the COPIED parent...
+    expect(copiedChild.parentBomItemId).not.toBe(parent.id); // ...never the source's
+    expect(copiedChild.parentBomItemId).not.toBeNull();
   });
 
   it("stores only spec keys defined for the family", async () => {

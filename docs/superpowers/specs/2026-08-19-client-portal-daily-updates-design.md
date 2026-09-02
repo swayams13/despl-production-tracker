@@ -1,7 +1,7 @@
 # Client portal — daily progress updates — design spec
 
 **Date:** 19 Aug 2026
-**Status:** approved design, not yet implemented
+**Status:** shipped — see `progress.md`, "Client portal daily updates" session (19 Aug 2026)
 **Supersedes:** nothing. Completes `/portal`, which has stood as a real,
 wired placeholder since the personal-dashboards work ("The order progress
 view is in preparation and will appear here" — `src/app/portal/page.tsx`)

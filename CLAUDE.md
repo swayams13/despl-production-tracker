@@ -1,6 +1,6 @@
 # CLAUDE.md — DESPL Production Tracker
 
-Project guide for Claude Code / AI-assisted build sessions. **Read `docs/BUILD-SPEC-v2.md` first** — it supersedes the scheduling, granularity and stack sections of `docs/PRD.md` and `docs/TRD.md`. Update `progress.md` at the end of every working session.
+Project guide for Claude Code / AI-assisted build sessions. **Read `docs/BUILD-SPEC-v2.md` first** — it supersedes the scheduling, granularity and stack sections of `docs/PRD.md` and `docs/TRD.md`. Also read `docs/ADR-product-family-agnostic-platform-v1.md` — the app is a multi-project, multi-product-family platform (Pressure Vessel, Heat Exchanger, Pipe Spool, Piping System); DESPL-320 is the calibration pilot, not the product (see also `docs/PHASE-PROMPTS.md` §0). Update `progress.md` at the end of every working session.
 
 > Full cross-project context pack (status, roadmap, decisions, deployment, known issues) lives in the Obsidian vault: `/Users/sonusingh/SWAYAM OS/4_Projects/Client Work/DESPL/DESPL TRACKER/`. The repo's `progress.md` is canonical; the vault mirrors it — update `progress.md`, then sync the vault (`CURRENT_STATUS.md`, `TASKS.md`, `CHANGELOG.md`) and run `link_vault.py` if doc files were added or renamed.
 
@@ -12,13 +12,13 @@ End-to-end production tracker for DESPL (Dhruv EPC Solutions, Vedanta Group). Tr
 
 TypeScript strict everywhere. Single Next.js full-stack app.
 
-- Next.js 15 (App Router) PWA, Tailwind v4 + shadcn/ui, TanStack Query v5
-- Server Actions + Route Handlers (`/api/v1`) instead of a separate NestJS service
+- Next.js 15 (App Router), Tailwind v4 + shadcn/ui. Not a PWA — no manifest, no service worker; not currently planned.
+- Server Actions do every mutation; a handful of `/api/*` route handlers exist and are GET-only reads (health check, exports). No client-side data-fetching library — no TanStack Query or equivalent, just server components + Server Actions.
 - Prisma 6, PostgreSQL 16. Background jobs via Next.js route + cron (BullMQ/Redis only if load demands it)
 - `lib/services/` holds ALL business rules — Server Actions and Route Handlers are thin callers, never rule-holders
 - `lib/schedule/` holds the scheduling engine (envelope, CPM, forward/backward, feasibility, override)
 - `lib/shared/` — zod schemas, types, constants (roles, process/status enums, error codes)
-- Deploy: Railway (staging auto-deploys from `main`; production is manual promote). CI: GitHub Actions (lint → typecheck → test → build → migrate → deploy).
+- Deploy: Railway, one `production` environment, auto-deploying from `main` — no separate staging environment exists yet. CI: GitHub Actions runs lint → typecheck → test (pure + DB-gated) → build on every PR/push; it does not deploy (Railway's own auto-deploy does that) and does not run `prisma migrate deploy` against a real database — see `railway.json`'s `deploy.preDeployCommand` for where migrations actually run.
 
 ## Model usage
 
@@ -28,8 +28,7 @@ TypeScript strict everywhere. Single Next.js full-stack app.
 
 ```bash
 pnpm install
-pnpm dev          # web :3000, api :4000 (turbo)
-pnpm db:migrate   # prisma migrate dev (apps/api)
+pnpm dev          # single Next.js dev server, :3000 — no separate api process/port
 pnpm db:seed      # seed roles, departments, PV template, demo data
 pnpm test         # vitest unit + supertest API (pure tests only, no DB)
 pnpm test:db      # DB-gated tests against the dedicated despl_test DB — never run RUN_DB_TESTS against despl_demo
@@ -40,7 +39,7 @@ pnpm lint && pnpm typecheck
 ## Non-negotiable invariants (the product's whole credibility rests on these)
 
 1. **No client timestamps.** Actual dates/times are set server-side from the DB clock. No request DTO may contain `actual_*` or `*_at` fields. Ever.
-2. **Hard sequential gating.** A stage starts only when its predecessor DAG (`stage_predecessors`) is COMPLETE and material deps are satisfied. Enforced in `StageService` inside a transaction — never only in the UI.
+2. **Hard sequential gating.** A stage starts only when its predecessor DAG is COMPLETE (`lib/schedule/gating.ts`'s `assertCanStart`/`assertCanComplete`, called from `lib/services/process.service.ts` inside a transaction — never only in the UI). Material-dependency gating exists at the component-operation grain, not the stage grain: `assertKitReady` (`lib/services/_shared.ts:684`), called from `startComponentOperation` (`component.service.ts:194`), throws `MATERIAL_NOT_AVAILABLE` when a component's linked BOM item is short. It silently no-ops — the operation starts unchecked — for a component with no BOM link, and for a BOM item with zero stock transactions ever recorded. No equivalent gate exists at the `ProcessPlan`/stage grain.
 3. **Maker–checker.** `verify` requires the QC role AND `actor != submitted_by`. The same human never submits and verifies. No exceptions, including admins.
 4. **Hold points block.** A stage with an uncleared H-coded checkpoint cannot complete. Witness (W) waivers require Production Head approval and are audited.
 5. **Append-only audit.** Every mutation writes `audit_log` (before/after jsonb) in the same transaction; if the audit insert fails, roll back. The app DB role has no UPDATE/DELETE grant on `audit_log`. Never add one.
@@ -83,16 +82,22 @@ final review — not just the phase where the incident happened.
 
 ## Conventions
 
-- zod schema in `packages/shared` is the single source of validation truth (client + server import it).
-- NestJS: one module per PRD §6 domain (`auth, users, departments, templates, jobs, units, stages, checkpoints, bom, welding, delays, notifications, dashboards, audit`). Controllers thin; rules live in services.
+- zod schema in `src/lib/shared/schemas.ts` is the single source of validation truth (Server Actions and the few route handlers both import it — there is no separate client-side copy to drift, since there's no separate API client).
+- No NestJS, no controllers. `src/lib/services/` holds one file per domain (`job-intake`, `schedule`, `process`, `qcp`, `mtc`, `override`, `notifications`, `admin`, `template`, `welding`, …) — thin Server Actions call into them, rules live in the service. Auth itself (`login`, `changeOwnPassword`) lives in `src/app/actions/auth.ts`, not `lib/services/`.
 - Prisma: forward-only migrations, snake_case tables, enums for statuses. Never edit an applied migration.
-- Frontend: mobile-first for supervisor/QC screens; role-based landing (supervisor → "Today" priority list, MD/CEO → company dashboard). English-only strings, but ALL user-facing text goes through the i18n string table (`packages/shared/strings`) — Hindi/Gujarati arrives later as translation only.
+- Frontend: mobile-first for supervisor/QC screens; role-based landing (supervisor → "Today" priority list, MD/CEO → company dashboard). English-only strings for now — every label is a plain TSX literal today; there is no i18n string table yet, so do not import from or reference one. Hindi/Gujarati is Phase 2 and will need that infrastructure built first, not just translated.
 - Time zone: store UTC, display IST (Asia/Kolkata).
 - Tests: any change to the state machine, gating, RBAC, or audit paths requires table-driven tests for the violation cases, not just happy paths.
 
 ## Deferred to Phase 2 — do NOT build yet (but don't paint into a corner)
 
-Email/WhatsApp delivery (daily brief payload is already email-ready jsonb) · geo-tagged in-app photo proof · file uploads (MTCs, reports, MDR compilation — schema keeps `record_type`/refs as text now) · TPI/client portal (Viewer role reserved) · additional equipment templates · offline writes.
+Email/WhatsApp delivery (daily brief payload is already email-ready jsonb) · geo-tagged in-app photo proof · file uploads (MTCs, reports, MDR compilation — schema keeps `record_type`/refs as text now) · additional equipment templates · offline writes.
+
+**Built, not deferred: TPI/client portal.** Shipped 19 Aug 2026 (`src/app/portal/page.tsx`,
+`lib/services/client-snapshot.service.ts`/`client-snapshot.read.ts`, both tested). A publish →
+verify/reject workflow (`ProgressSnapshot`); the portal reads exclusively through
+`loadClientPortalView`, which only ever selects `VERIFIED` rows. See
+`docs/superpowers/specs/2026-08-19-client-portal-daily-updates-design.md`.
 
 ## Pending inputs from DESPL
 

@@ -6,7 +6,7 @@ import {
   requireDepartmentScope,
 } from "@/lib/authz";
 import { audited } from "@/lib/audit";
-import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { assertStateTransition } from "./state-machine";
 import {
   assertCanComplete,
   assertCanStart,
@@ -26,7 +26,10 @@ import {
   type VerifyProcessInput,
 } from "@/lib/shared/schemas";
 import {
+  assertComponentOpsComplete,
+  assertEvidenceSatisfied,
   assertNoOpenHoldPoint,
+  assertNoOpenNcr,
   assertNoUnfiledDelayBlock,
   jobEdgeToScheduleEdge,
   lockProcessPlanForUpdate,
@@ -75,16 +78,7 @@ export const TRANSITIONS: Record<ProcessAction, { from: ProcessPlanStatus[]; to:
 
 /** Reject an illegal source state (invariant: the state machine, not the UI). */
 export function assertTransition(action: ProcessAction, from: ProcessPlanStatus): ProcessPlanStatus {
-  const t = TRANSITIONS[action];
-  if (!t.from.includes(from)) {
-    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      action,
-      from,
-      allowedFrom: t.from,
-      to: t.to,
-    });
-  }
-  return t.to;
+  return assertStateTransition(TRANSITIONS, action, from, "ProcessPlan");
 }
 
 // ── Gating inputs ────────────────────────────────────────────────────────
@@ -164,6 +158,8 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
       unitId: plan.unitId,
     });
 
+    await assertComponentOpsComplete(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+
     const updated = await audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({
         where: { id: plan.id },
@@ -223,6 +219,8 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
     const { edges, states } = await loadGate(tx, plan);
     assertCanComplete(edges, states);
     await assertNoOpenHoldPoint(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+    await assertNoOpenNcr(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+    await assertEvidenceSatisfied(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
 
     return audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({

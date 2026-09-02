@@ -153,6 +153,7 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
       roleCodes: ["ADMIN"],
       departmentIds: [],
       password: "password123",
+      mustChangePassword: true,
     });
     expect(user.username).toBe("bob");
   });
@@ -165,6 +166,7 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
         roleCodes: ["ADMIN"],
         departmentIds: [],
         password: "password123",
+        mustChangePassword: true,
       }),
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });
@@ -179,6 +181,7 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
         roleCodes: ["ADMIN"],
         departmentIds: [],
         password: "password123",
+        mustChangePassword: true,
       }),
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });
@@ -196,6 +199,7 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
       roleCodes: ["ADMIN"],
       departmentIds: [],
       password: "password123",
+      mustChangePassword: true,
     });
     expect(user.sessionVersion).toBe(0);
     expect(user.mustChangePassword).toBe(true); // schema default for a new account
@@ -427,6 +431,7 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
         roleCodes: ["QC"],
         departmentIds: [],
         password: "password123",
+        mustChangePassword: true,
       }),
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });

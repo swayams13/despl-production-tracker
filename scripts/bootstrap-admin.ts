@@ -55,6 +55,7 @@ async function main() {
     roleCodes: [ROLES.ADMIN],
     departmentIds: [],
     password,
+    mustChangePassword: true,
   });
   console.log(`Created ADMIN user ${user.email} (id ${user.id}) in tenant ${tenantId}.`);
 }

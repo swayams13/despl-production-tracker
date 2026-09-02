@@ -1,6 +1,12 @@
 # Product Requirements Document (PRD)
 ## DESPL Production Tracker — v1
 
+> ⚠️ **Superseded, 26 Aug 2026 (audit §6 / Phase 0 item 0.15):** `docs/BUILD-SPEC-v2.md` supersedes
+> this document's scheduling, granularity, and stack sections — notably the split-monorepo stack
+> below (§6/§10), which was replaced 11 Aug 2026 by the single Next.js full-stack app described in
+> the root `CLAUDE.md`. Read `BUILD-SPEC-v2.md` first; treat everything else here as historical
+> requirements/business context, not current architecture.
+
 | | |
 |---|---|
 | **Product** | DESPL Production Tracker (working name) |

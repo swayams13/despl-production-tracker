@@ -1,7 +1,7 @@
 # Portfolio dashboard — design spec
 
 **Date:** 16 Aug 2026
-**Status:** approved design, not yet implemented
+**Status:** shipped — see `progress.md`, "Portfolio Dashboard" session (16 Aug 2026)
 **Supersedes:** nothing. Extends `DESIGN_SPEC.md` §4.2, which scoped `/dashboard` to a
 single job and left "portfolio toggle if cheap" as an option. This spec takes that option.
 

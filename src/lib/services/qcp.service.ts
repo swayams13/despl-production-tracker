@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { audited } from "@/lib/audit";
 import { requireRole, assertNotClientUser, ROLES, type Actor } from "@/lib/authz";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { recordQcpExecutionSchema, type RecordQcpExecutionInput } from "@/lib/shared/schemas";
 import type { QcpExecution } from "@/generated/prisma/client";
 
@@ -23,6 +24,15 @@ export async function recordQcpExecution(
   requireRole(actor, ROLES.QC);
 
   return withTenant(actor.tenantId, async (tx) => {
+    // Neither `units` nor `qcp_items` carry tenant_id (audit C3), so a bare
+    // id would happily accept another tenant's unit and let this actor clear
+    // its blocking hold point. Anchor through `unit.equipment.job`, which IS
+    // tenant-scoped — same pattern as `lockProcessPlanForUpdate` (_shared.ts).
+    const unit = await tx.unit.findFirst({
+      where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
+    });
+    if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+
     // Next attempt number for this (item, unit) — re-inspection after rejection.
     const prior = await tx.qcpExecution.aggregate({
       _max: { attemptNo: true },

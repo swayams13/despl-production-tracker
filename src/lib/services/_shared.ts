@@ -1,13 +1,17 @@
+import { Decimal } from "@prisma/client/runtime/library";
 import type { Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
-import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { DEFAULT_CALENDAR } from "@/lib/schedule";
+import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
+import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
+import { istCalendarDayMarker } from "@/lib/shared/business-day";
+import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
 import type {
   ScheduleProcess,
   ScheduleEdge,
   WorkCalendarInput,
   PredecessorState,
+  CpmNode,
 } from "@/lib/schedule";
 import type {
   Job,
@@ -17,6 +21,7 @@ import type {
   ScheduleRun,
   ScheduleMode,
   ScheduleFeasibility,
+  OperationStatus,
 } from "@/generated/prisma/client";
 
 /**
@@ -30,6 +35,42 @@ import type {
  * Everything here runs inside a `withTenant` transaction the caller already
  * opened — these take the `tx`, never the bare client (db.ts).
  */
+
+// ── CPM guards (audit 0.10) ─────────────────────────────────────────────
+
+/**
+ * Bare Errors from the CPM (cycle, dangling edge, an excluded node with no
+ * duration for bypassExcluded to compose through) become an explainable
+ * refusal (invariant #12); AppErrors (e.g. SCHEDULE_DATA_MISSING) pass
+ * through unchanged. Use for a single-job read/write path, where the caller
+ * already has a jobId to report the failure against — override.service.ts's
+ * original helper, promoted here so every CPM call site shares it.
+ */
+export function computeOrRefuse<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (e) {
+    if (isAppError(e)) throw e;
+    throw new AppError(ERROR_CODES.SCHEDULE_GRAPH_INVALID, {
+      cause: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/**
+ * computeCpm, but for a loop over EVERY job in the tenant (My Day, Command
+ * Center): one job with a malformed spine — a cycle, a dangling edge, an
+ * excluded provisional process with no confirmed duration — must not 500 the
+ * whole page for every other job. Returns null on any failure so the caller
+ * can skip just that job's contribution and keep going (audit H2/0.10).
+ */
+export function computeCpmSafe(processes: ScheduleProcess[], edges: ScheduleEdge[]): CpmNode[] | null {
+  try {
+    return computeCpm(processes, edges);
+  } catch {
+    return null;
+  }
+}
 
 // ── Row → engine mappers ────────────────────────────────────────────────
 
@@ -100,7 +141,13 @@ export async function loadJobSpine(tx: Tx, jobId: number): Promise<JobSpine> {
   const job = await tx.job.findUnique({ where: { id: jobId } });
   if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
 
-  const rawProcesses = await tx.jobProcess.findMany({ where: { jobId } });
+  // orderBy is load-bearing, not cosmetic: schedule.service.ts's terminal-node
+  // selection ties on envelopeFinishByMaxDays for parallel branches and
+  // tie-breaks on array order — an unordered findMany lets Postgres return rows
+  // in any order, so which tied process "wins" (and therefore which
+  // envelopeFinishByMinDays feeds checkFeasibility) becomes nondeterministic
+  // (audit 0.9).
+  const rawProcesses = await tx.jobProcess.findMany({ where: { jobId }, orderBy: { seq: "asc" } });
   const rawEdges = await tx.jobProcessEdge.findMany({ where: { process: { jobId } } });
 
   let cal =
@@ -164,6 +211,11 @@ export type ScheduleRunWithPlans = ScheduleRun & { processPlans: ProcessPlan[] }
  * and audit it — all in the caller's transaction. Never mutates a prior run's
  * rows (invariant #6): an override is a NEW version, the old baseline stays intact.
  */
+/** (jobProcessId, unitId) → the prior run's actuals for that cell, carried forward on reschedule. */
+function priorActualsKey(jobProcessId: number, unitId: number | null): string {
+  return `${jobProcessId}:${unitId ?? "null"}`;
+}
+
 export async function persistScheduleRun(
   tx: Tx,
   actor: Actor,
@@ -179,6 +231,21 @@ export async function persistScheduleRun(
   // ponytail: per-job row lock; a partial unique index on (job_id) WHERE
   // is_current is the DB-native alternative if this lock ever contends.
   await tx.$queryRaw`SELECT id FROM jobs WHERE id = ${jobId} FOR UPDATE`;
+
+  // Reschedule must not orphan in-flight actuals (audit C1): the prior current
+  // run's plans carry real floor work — actualStart/actualFinish/submittedBy/
+  // verifiedBy/status — and every read filters isCurrent, so demoting the run
+  // without carrying them forward makes that work invisible everywhere. Read
+  // the prior current run's plans BEFORE demoting it (still readable either way
+  // since demote only flips isCurrent, not the rows) and key them by the same
+  // (jobProcessId, unitId) grain the new plans are built on.
+  const priorRun = await tx.scheduleRun.findFirst({
+    where: { jobId, equipmentId, isCurrent: true },
+    include: { processPlans: true },
+  });
+  const priorByKey = new Map(
+    (priorRun?.processPlans ?? []).map((p) => [priorActualsKey(p.jobProcessId, p.unitId), p]),
+  );
 
   const prev = await tx.scheduleRun.aggregate({
     _max: { version: true },
@@ -205,16 +272,23 @@ export async function persistScheduleRun(
       overrideReason: input.overrideReason,
       createdBy: actor.userId,
       processPlans: {
-        create: input.plans.map((p) => ({
-          jobProcessId: p.jobProcessId,
-          unitId: p.unitId,
-          baselineStart: p.baselineStart,
-          baselineFinish: p.baselineFinish,
-          plannedStart: p.plannedStart,
-          plannedFinish: p.plannedFinish,
-          ownerDepartmentId: p.ownerDepartmentId,
-          status: "NOT_STARTED",
-        })),
+        create: input.plans.map((p) => {
+          const prior = priorByKey.get(priorActualsKey(p.jobProcessId, p.unitId));
+          return {
+            jobProcessId: p.jobProcessId,
+            unitId: p.unitId,
+            baselineStart: p.baselineStart,
+            baselineFinish: p.baselineFinish,
+            plannedStart: p.plannedStart,
+            plannedFinish: p.plannedFinish,
+            ownerDepartmentId: p.ownerDepartmentId,
+            status: prior?.status ?? "NOT_STARTED",
+            actualStart: prior?.actualStart ?? null,
+            actualFinish: prior?.actualFinish ?? null,
+            submittedBy: prior?.submittedBy ?? null,
+            verifiedBy: prior?.verifiedBy ?? null,
+          };
+        }),
       },
     },
     include: { processPlans: true },
@@ -271,6 +345,12 @@ export async function getCurrentScheduleRun(
  * // that turns out to belong to another tenant is wasted work inside a
  * // doomed transaction, not a data leak; the scoped read right after it is
  * // what decides whether anything is returned.
+ *
+ * Also refuses a write against a plan whose ScheduleRun has been superseded
+ * (audit C1's aggravator): a reschedule flips the prior run's isCurrent to
+ * false but never mutates its ProcessPlan rows, so a stale client tab open on
+ * an old plan id could otherwise still Start/Submit/Verify against a run
+ * nothing reads from anymore — passing gating while being invisible everywhere.
  */
 export async function lockProcessPlanForUpdate(
   tx: Tx,
@@ -282,6 +362,8 @@ export async function lockProcessPlanForUpdate(
     where: { id: processPlanId, ownerDepartment: { tenantId } },
   });
   if (!row) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessPlan", processPlanId });
+  const run = await tx.scheduleRun.findUnique({ where: { id: row.scheduleRunId }, select: { isCurrent: true } });
+  if (!run?.isCurrent) throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProcessPlan", processPlanId });
   return row;
 }
 
@@ -302,7 +384,7 @@ export async function assertNoUnfiledDelayBlock(
       ownerDepartmentId: args.ownerDepartmentId,
       unitId: args.unitId ?? null,
       status: { not: "COMPLETE" },
-      plannedFinish: { lt: new Date() },
+      plannedFinish: { lt: istCalendarDayMarker() },
       delayReasons: { none: {} },
     },
     select: { id: true, jobProcessId: true, plannedFinish: true },
@@ -365,6 +447,336 @@ export async function assertNoOpenHoldPoint(
       openQcpItemIds: open,
     });
   }
+}
+
+// ── Component/assembly rollup (Phase 3, addendum §3) ────────────────────
+
+export interface MappedOp {
+  source: "fabrication" | "assembly";
+  label: string;
+  status: OperationStatus;
+}
+
+/**
+ * Every `ComponentOperation`/`AssemblyStep` on `unitId` that rolls up into
+ * `jobProcessId`, joined by value (`OperationRef.leadTimeProcessSeq` /
+ * `AssemblyTemplateStep.leadTimeProcessSeq` == `JobProcess.code` as a
+ * number) — the same discipline `bom.read.ts`'s QCP-checkpoint lookup
+ * already uses for the fabrication half. Empty when `unitId` is null
+ * (job/equipment grain, no serial to roll up yet) or when this process has
+ * no mapped operations at all — both are SEAM cases, not errors.
+ */
+export async function loadMappedOps(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<MappedOp[]> {
+  if (args.unitId == null) return [];
+
+  const jobProcess = await tx.jobProcess.findUnique({
+    where: { id: args.jobProcessId },
+    select: { code: true },
+  });
+  if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return [];
+  const seq = Number(jobProcess.code);
+
+  const [componentOps, assemblySteps] = await Promise.all([
+    tx.componentOperation.findMany({
+      where: { component: { unitId: args.unitId }, operation: { leadTimeProcessSeq: seq } },
+      select: { status: true, operation: { select: { name: true } } },
+    }),
+    tx.assemblyStep.findMany({
+      where: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
+      select: { status: true, templateStep: { select: { activity: true } } },
+    }),
+  ]);
+
+  return [
+    ...componentOps.map((o) => ({ source: "fabrication" as const, label: o.operation.name, status: o.status })),
+    ...assemblySteps.map((s) => ({ source: "assembly" as const, label: s.templateStep.activity, status: s.status })),
+  ];
+}
+
+/**
+ * `submitProcess` gate (Phase 3, R2 / PRD FR-C2): refuses when a mapped
+ * fabrication or assembly operation on this (process, unit) is not yet
+ * COMPLETE. No-op when nothing is mapped — see `loadMappedOps`.
+ */
+export async function assertComponentOpsComplete(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<void> {
+  const ops = await loadMappedOps(tx, args);
+  const incomplete = ops.filter((o) => o.status !== "COMPLETE");
+  if (incomplete.length > 0) {
+    throw new AppError(ERROR_CODES.COMPONENT_OPS_INCOMPLETE, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      incompleteOperations: incomplete.map((o) => o.label),
+    });
+  }
+}
+
+// Blocking: OPEN (never dispositioned) and REWORK_IN_PROGRESS (rework not yet
+// re-verified — closeNcr runs from verifyComponentOperation/verifyAssemblyStep
+// once it's back to COMPLETE). NOT DISPOSITIONED: a USE_AS_IS/SCRAP/CONCESSION
+// disposition sets status DISPOSITIONED with nothing further to wait for — the
+// component is scrapped or accepted as-is, so it will never be re-verified and
+// would otherwise block this stage's gate forever (fix wave, Important #3).
+// dispositionNcr only ever sets DISPOSITIONED for those three terminal
+// dispositions (REWORK/REPAIR go to REWORK_IN_PROGRESS instead), so this list
+// doesn't need to distinguish disposition here — status alone is enough.
+const OPEN_NCR_STATUSES = ["OPEN", "REWORK_IN_PROGRESS"] as const;
+
+/**
+ * `verifyProcess` gate (Phase 5, N3): refuses when any `ComponentOperation`/
+ * `AssemblyStep` mapped to `(jobProcessId, unitId)` — same
+ * `leadTimeProcessSeq == JobProcess.code` join as `loadMappedOps` — has a
+ * linked `Ncr` that isn't `CLOSED` yet, or that's `DISPOSITIONED` toward a
+ * terminal (USE_AS_IS/SCRAP/CONCESSION) disposition — see `OPEN_NCR_STATUSES`.
+ * A narrower sibling query rather than an extension of `loadMappedOps`: that
+ * helper's `MappedOp` return shape is relied on by `assertComponentOpsComplete`'s
+ * existing callers/tests, and this gate needs Ncr status, not operation
+ * status. No-op when `unitId` is null — same SEAM convention as
+ * `assertNoOpenHoldPoint`/`assertComponentOpsComplete`.
+ */
+export async function assertNoOpenNcr(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<void> {
+  if (args.unitId == null) return;
+
+  const jobProcess = await tx.jobProcess.findUnique({
+    where: { id: args.jobProcessId },
+    select: { code: true },
+  });
+  if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return;
+  const seq = Number(jobProcess.code);
+
+  const openNcrs = await tx.ncr.findMany({
+    where: {
+      status: { in: [...OPEN_NCR_STATUSES] },
+      OR: [
+        {
+          componentOperationRejection: {
+            componentOperation: {
+              component: { unitId: args.unitId },
+              operation: { leadTimeProcessSeq: seq },
+            },
+          },
+        },
+        {
+          assemblyStepRejection: {
+            assemblyStep: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
+          },
+        },
+      ],
+    },
+    select: {
+      componentOperationRejection: {
+        select: { componentOperation: { select: { operation: { select: { name: true } } } } },
+      },
+      assemblyStepRejection: {
+        select: { assemblyStep: { select: { templateStep: { select: { activity: true } } } } },
+      },
+    },
+  });
+
+  if (openNcrs.length > 0) {
+    const blockingOperations = openNcrs.map(
+      (n) =>
+        n.componentOperationRejection?.componentOperation.operation.name ??
+        n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
+        "unknown operation",
+    );
+    throw new AppError(ERROR_CODES.NCR_OPEN, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      blockingOperations,
+    });
+  }
+}
+
+/**
+ * `verifyProcess` gate (Phase 5, D4): a stage tagged with
+ * `TemplateProcess.evidenceKind` cannot verify until the matching evidence
+ * exists for this unit. No-op when `unitId` is null (job/equipment grain —
+ * same SEAM convention as `assertNoOpenHoldPoint`/`assertNoOpenNcr`) or when
+ * the `JobProcess` wasn't materialised from a `TemplateProcess` with an
+ * `evidenceKind` set (most stages have none).
+ *
+ * PACKING_DONE / DISPATCH_RECORDED have real evidence sources wired this
+ * phase (Task 5's Package/DispatchBatch). MDR_COMPILED has no producer
+ * anywhere yet — no task adds a "compile MDR" action — so it always refuses
+ * rather than silently no-op'ing (a no-op would make the enum value
+ * meaningless) or crashing on an unhandled case. Per the controller ruling
+ * that shipped this gate, nothing is tagged `MDR_COMPILED` on a real
+ * `TemplateProcess` row this phase, so this branch is dead code in practice
+ * until a future phase adds the compile action and this message can be
+ * revisited.
+ */
+export async function assertEvidenceSatisfied(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<void> {
+  if (args.unitId == null) return;
+
+  const jobProcess = await tx.jobProcess.findUnique({
+    where: { id: args.jobProcessId },
+    select: { templateProcess: { select: { evidenceKind: true } } },
+  });
+  const evidenceKind = jobProcess?.templateProcess?.evidenceKind;
+  if (evidenceKind == null) return;
+
+  let satisfied: boolean;
+  switch (evidenceKind) {
+    case "PACKING_DONE": {
+      const unit = await tx.unit.findUnique({ where: { id: args.unitId }, select: { packageId: true } });
+      satisfied = unit?.packageId != null;
+      break;
+    }
+    case "DISPATCH_RECORDED": {
+      const dispatched = await tx.dispatchBatchUnit.findFirst({
+        where: { unitId: args.unitId, dispatchBatch: { actualDispatchDate: { not: null } } },
+        select: { id: true },
+      });
+      satisfied = dispatched != null;
+      break;
+    }
+    case "MDR_COMPILED":
+      // No producer exists yet (Phase 5 descope) — always refuse rather than
+      // silently pass, so the gap is loud if a job is ever tagged with it.
+      satisfied = false;
+      break;
+    default:
+      satisfied = false;
+  }
+
+  if (!satisfied) {
+    throw new AppError(ERROR_CODES.EVIDENCE_NOT_SATISFIED, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      evidenceKind,
+    });
+  }
+}
+
+/**
+ * B7, Phase 4 (CLAUDE.md #2's fourth gate): a component's linked `BomItem`
+ * must not be recorded short before its next operation starts. SEAM, same
+ * convention as `assertComponentOpsComplete`/`assertNoOpenHoldPoint`: no-op
+ * (nothing to check) when `Component.bomItemId` is null (untracked part), or
+ * when the `BomItem` has zero `StockLot` rows at all (never tracked, distinct
+ * from "zero available" — B6's `availableQty`/`shortage` SEAM convention).
+ *
+ * `bom.read.ts`'s exported `requiredQty`/`availableQty`/`shortage` each open
+ * their own `withTenant` transaction — calling them here would nest a
+ * transaction inside the caller's already-open one, which Prisma's
+ * interactive-transaction client doesn't support. So the required side
+ * (`explodeBomItem`) is re-walked inline against `tx`, the same way
+ * `bom.read.ts`'s `loadBomTree` already does it for the same reason (see its
+ * comment above `itemsById`) — not a divergent copy, the established pattern
+ * for "needs the same numbers but from inside a transaction." The available
+ * side is NOT re-implemented here: it calls the shared, tx-free
+ * `computeAvailableForShortage` (`bom-explosion.ts`) that `loadBomTree` and
+ * `availableQty` also call, so the SCRAP-only arithmetic (fix wave, Critical
+ * #1) lives in exactly one place.
+ */
+export async function assertKitReady(tx: Tx, componentId: number, tenantId: number): Promise<void> {
+  const component = await tx.component.findFirst({
+    where: { id: componentId, equipment: { job: { tenantId } } },
+    select: { bomItemId: true },
+  });
+  if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+  if (component.bomItemId == null) return; // SEAM: no BOM link, nothing to check
+
+  const bomItem = await tx.bomItem.findFirst({
+    where: { id: component.bomItemId, equipment: { job: { tenantId } } },
+    select: {
+      id: true,
+      partName: true,
+      equipmentId: true,
+      qtyPer: true,
+      parentBomItemId: true,
+      stockLots: { select: { qty: true, txns: { select: { type: true, qty: true } } } },
+    },
+  });
+  if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId: component.bomItemId });
+  if (bomItem.stockLots.length === 0) return; // SEAM: zero stock activity recorded at all — never tracked stays silent
+
+  const [unitCount, siblingItems] = await Promise.all([
+    tx.unit.count({ where: { equipmentId: bomItem.equipmentId } }),
+    tx.bomItem.findMany({
+      where: { equipmentId: bomItem.equipmentId },
+      select: { id: true, qtyPer: true, parentBomItemId: true },
+    }),
+  ]);
+  const itemsById = new Map<number, ExplodableBomItem>(siblingItems.map((it) => [it.id, it]));
+
+  let required: Decimal;
+  try {
+    required = explodeBomItem(itemsById.get(bomItem.id)!, unitCount, itemsById);
+  } catch {
+    return; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to check (same fallback as loadBomTree)
+  }
+
+  const available = computeAvailableForShortage(bomItem.stockLots)!; // non-null: stockLots.length === 0 already returned above
+
+  const shortfall = required.minus(available);
+  if (shortfall.gt(0)) {
+    throw new AppError(ERROR_CODES.MATERIAL_NOT_AVAILABLE, {
+      componentId,
+      bomItemId: bomItem.id,
+      partName: bomItem.partName,
+      shortage: shortfall.toNumber(),
+    });
+  }
+}
+
+/**
+ * B9, Phase 4: a CUTTING `ComponentOperation` may only start once its
+ * component's governing drawing's CURRENT revision (highest `revisionNo`) is
+ * RELEASED — invariant #9's versioning only means something if RELEASED
+ * actually gates something. SEAM, same convention as `assertKitReady`:
+ * no-op when `Component.governingDrawingId` is null (no drawing link
+ * recorded — the common case, since nothing auto-derives it, see the schema
+ * comment on `governingDrawingId`). Returns the current revision's id on
+ * success so the caller can stamp `Component.builtToRevisionId` in the same
+ * transaction the operation start succeeds in; returns null on the SEAM
+ * no-op (nothing to stamp).
+ */
+export async function assertDrawingReleased(
+  tx: Tx,
+  componentId: number,
+  tenantId: number,
+): Promise<number | null> {
+  const component = await tx.component.findFirst({
+    where: { id: componentId, equipment: { job: { tenantId } } },
+    select: { governingDrawingId: true },
+  });
+  if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+  if (component.governingDrawingId == null) return null; // SEAM: no drawing link, nothing to check
+
+  const drawing = await tx.assemblyDrawing.findFirst({
+    where: { id: component.governingDrawingId, job: { tenantId } },
+    select: {
+      drawingNo: true,
+      revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true, status: true } },
+    },
+  });
+  if (!drawing) {
+    throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId: component.governingDrawingId });
+  }
+
+  const current = drawing.revisions[0];
+  if (!current || current.status !== "RELEASED") {
+    throw new AppError(ERROR_CODES.DRAWING_NOT_RELEASED, {
+      componentId,
+      assemblyDrawingId: component.governingDrawingId,
+      drawingNo: drawing.drawingNo,
+      currentStatus: current?.status ?? "NO_REVISION_ISSUED",
+    });
+  }
+  return current.id;
 }
 
 // ── Notification context ────────────────────────────────────────────────

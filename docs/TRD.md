@@ -1,6 +1,13 @@
 # Technical Requirements Document (TRD) & System Architecture
 ## DESPL Production Tracker — v1
 
+> ⚠️ **Superseded, 26 Aug 2026 (audit §6 / Phase 0 item 0.15):** `docs/BUILD-SPEC-v2.md` supersedes
+> this document's scheduling, granularity, and stack sections. In particular: there is no NestJS, no
+> separate `api`/`worker` Railway services, no Redis/BullMQ in production, and no `packages/shared` —
+> the actual stack is a single Next.js full-stack app (Server Actions + a handful of GET-only route
+> handlers), per the root `CLAUDE.md`. Read `BUILD-SPEC-v2.md` first; treat everything else here as
+> historical requirements/business context, not current architecture.
+
 | | |
 |---|---|
 | **Document version** | 1.0 — Draft |

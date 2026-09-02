@@ -51,6 +51,23 @@ describe("classifyJobHealth", () => {
   test("is pure — the same input classifies identically twice", () => {
     expect(classifyJobHealth(base, TODAY)).toBe(classifyJobHealth(base, TODAY));
   });
+
+  // Audit H1 / Phase 0 item 0.7: a raw `< now()` compare flips a job DELAYED
+  // at 00:00 UTC = 05:30 IST on its own due date — a full working day early.
+  test("promised today is NOT yet late at 05:30 IST (00:00 UTC) on the due date", () => {
+    const job: HealthInput = { ...base, committedDeliveryDate: "2026-08-16T00:00:00.000Z", forecastDispatch: null };
+    expect(classifyJobHealth(job, new Date("2026-08-16T00:00:00Z"))).toBe("ON_TRACK");
+  });
+
+  test("still not late at 23:59 IST on the due date", () => {
+    const job: HealthInput = { ...base, committedDeliveryDate: "2026-08-16T00:00:00.000Z", forecastDispatch: null };
+    expect(classifyJobHealth(job, new Date("2026-08-16T18:29:00Z"))).toBe("ON_TRACK");
+  });
+
+  test("IS late once IST midnight rolls into the next calendar day", () => {
+    const job: HealthInput = { ...base, committedDeliveryDate: "2026-08-16T00:00:00.000Z", forecastDispatch: null };
+    expect(classifyJobHealth(job, new Date("2026-08-16T18:30:00Z"))).toBe("DELAYED");
+  });
 });
 
 // `HEALTH_ORDER` is a plain array, so — unlike HEALTH_LABEL/HEALTH_CLASS/SLUG,

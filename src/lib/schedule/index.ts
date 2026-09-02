@@ -6,6 +6,8 @@ export { computeEnvelope, type EnvelopeDates } from "./envelope";
 
 export { bypassExcluded } from "./exclude";
 
+export { selectTerminal } from "./terminal";
+
 export { analyzeGraph, type GraphDiagnostics } from "./validate";
 
 export {

@@ -102,18 +102,32 @@ enum TemplateStatus {
   ARCHIVED
 }
 
-enum ProcurementStatus {
-  NOT_STARTED
+/// BomRevision (Phase 4, B3): DRAFT is unused by anything in this dispatch —
+/// the backfill script only ever creates RELEASED rows (invariant #9: a new
+/// revision is a new row, never an edit). DRAFT exists for the later BOM
+/// authoring dispatch, which will create/edit a revision before releasing it.
+enum BomRevisionStatus {
+  DRAFT
+  RELEASED
+}
+
+/// B5, Phase 4: replaces ProcurementStatus/MaterialReceivedStatus — a
+/// ProcurementEvent's `type` IS the status; there is no separate status enum
+/// to keep in sync with the event log.
+enum ProcurementEventType {
   INDENT_RAISED
   INDENT_APPROVED
   PO_PLACED
-  IN_STOCK
+  RECEIPT
 }
 
-enum MaterialReceivedStatus {
-  NOT_RECEIVED
-  PARTIALLY_RECEIVED
-  RECEIVED
+/// B6, Phase 4: StockTxn's kind. Receipt itself is NOT a txn type — it's a
+/// `StockLot` creation (see StockLot's doc comment) — so this enum only ever
+/// covers what happens to stock AFTER it lands on a lot.
+enum StockTxnType {
+  ISSUE
+  RETURN
+  SCRAP
 }
 
 enum PmiResult {
@@ -159,12 +173,36 @@ enum DrawingStatus {
   SUBMITTED
   APPROVED
   RELEASED
+  /// B9, Phase 4: a prior RELEASED revision flips here when a new revision
+  /// is issued — never deleted, still queryable (invariant #9/#6).
+  SUPERSEDED
 }
 
 enum DelayReviewStatus {
   PENDING
   ACKNOWLEDGED
   DISPUTED
+}
+
+enum NcrDisposition {
+  USE_AS_IS
+  REPAIR
+  REWORK
+  SCRAP
+  CONCESSION
+}
+
+enum NcrStatus {
+  OPEN
+  DISPOSITIONED
+  REWORK_IN_PROGRESS
+  CLOSED
+}
+
+enum ProcessEvidenceKind {
+  MDR_COMPILED
+  PACKING_DONE
+  DISPATCH_RECORDED
 }
 
 enum SnapshotCadence {
@@ -182,25 +220,26 @@ model Organization {
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
-  clients          Client[]
-  users            User[]
-  roles            Role[]
-  departments      Department[]
-  productFamilies  ProductFamily[]
-  processTemplates ProcessTemplate[]
-  jobs             Job[]
-  componentTypes   ComponentTypeRef[]
-  equipmentTypes   EquipmentTypeRef[]
-  operations       OperationRef[]
-  testTypes        TestTypeRef[]
-  drawingTypes     DrawingTypeRef[]
-  delayCategories  DelayCategoryRef[]
-  qcpCodes         QcpCodeRef[]
-  routeTemplates   RouteTemplate[]
-  calendars        WorkCalendar[]
-  snapshots        ProgressSnapshot[]
-  notifications    Notification[]
-  welders          Welder[]
+  clients           Client[]
+  users             User[]
+  roles             Role[]
+  departments       Department[]
+  productFamilies   ProductFamily[]
+  processTemplates  ProcessTemplate[]
+  jobs              Job[]
+  componentTypes    ComponentTypeRef[]
+  equipmentTypes    EquipmentTypeRef[]
+  operations        OperationRef[]
+  testTypes         TestTypeRef[]
+  drawingTypes      DrawingTypeRef[]
+  delayCategories   DelayCategoryRef[]
+  qcpCodes          QcpCodeRef[]
+  routeTemplates    RouteTemplate[]
+  calendars         WorkCalendar[]
+  snapshots         ProgressSnapshot[]
+  notifications     Notification[]
+  welders           Welder[]
+  assemblyTemplates AssemblyTemplate[]
 
   @@map("organizations")
 }
@@ -223,10 +262,10 @@ model Client {
 }
 
 model User {
-  id                 Int      @id @default(autoincrement())
-  tenantId           Int      @map("tenant_id")
+  id                 Int             @id @default(autoincrement())
+  tenantId           Int             @map("tenant_id")
   /// Non-null => external client user. Scoped to this client, snapshots only.
-  clientId           Int?     @map("client_id")
+  clientId           Int?            @map("client_id")
   email              String
   /// Login handle distinct from email (personal dashboards v1). Backfilled
   /// from the email local-part for existing rows. Tenant-scoped, not
@@ -234,30 +273,30 @@ model User {
   /// is architected multi-tenant even though only one org exists today; see
   /// resolveTenantForLogin). A plain global @unique would be the one field
   /// on this model that can collide across tenants.
-  username           String   @map("username")
-  passwordHash       String   @map("password_hash")
+  username           String          @map("username")
+  passwordHash       String          @map("password_hash")
   name               String
   /// Tenant-scoped unique, matching Welder.employeeCode's own scoping.
   /// Nullable: Postgres allows multiple NULLs under a unique constraint, so
   /// existing rows with no employee code need no backfill.
-  employeeCode       String?  @map("employee_code")
-  active             Boolean  @default(true)
+  employeeCode       String?         @map("employee_code")
+  active             Boolean         @default(true)
   /// New accounts must change their password on first login. Existing rows
   /// are backfilled to false in the migration (they already have working
   /// passwords) — only the Prisma default is true, for rows created after.
-  mustChangePassword Boolean  @default(true) @map("must_change_password")
+  mustChangePassword Boolean         @default(true) @map("must_change_password")
   /// Bumped on every `changeOwnPassword` call. `SessionPayload.sessionVersion`
   /// is stamped into the JWT at issuance; `getActor()` compares the two on
   /// every request and treats a mismatch as "not signed in" — this is how a
   /// password change invalidates every OTHER previously-issued token without
   /// a session table (personal dashboards v1, Task 1.3).
-  sessionVersion     Int      @default(0) @map("session_version")
-  createdAt          DateTime @default(now()) @map("created_at")
+  sessionVersion     Int             @default(0) @map("session_version")
+  createdAt          DateTime        @default(now()) @map("created_at")
   /// Stamped by `login()` on every successful sign-in (server clock only,
   /// invariant #1). Null = never logged in (seeded/imported, not yet used
   /// their credentials) — the /admin Employees table (SPEC §7.3) renders
   /// that as "Never", not a fabricated date.
-  lastLoginAt        DateTime? @map("last_login_at")
+  lastLoginAt        DateTime?       @map("last_login_at")
   /// UI appearance preference (D27, session R1 task 6). Per USER, not per
   /// browser — CLAUDE.md hard-bans localStorage for app state. SYSTEM defers
   /// to the OS's prefers-color-scheme; server-side rendering resolves it to
@@ -267,13 +306,43 @@ model User {
   /// SEPARATE column from themePreference even though today's single control
   /// presents them as one four-step cycle — the data model then survives a
   /// later UI that splits them back into two controls (D25).
-  outdoorMode        Boolean  @default(false) @map("outdoor_mode")
+  outdoorMode        Boolean         @default(false) @map("outdoor_mode")
 
-  tenant        Organization     @relation(fields: [tenantId], references: [id])
-  client        Client?          @relation(fields: [clientId], references: [id])
-  roles         UserRole[]
-  departments   UserDepartment[]
-  assignedPlans ProcessPlan[]
+  tenant                       Organization                  @relation(fields: [tenantId], references: [id])
+  client                       Client?                       @relation(fields: [clientId], references: [id])
+  roles                        UserRole[]
+  departments                  UserDepartment[]
+  assignedPlans                ProcessPlan[]
+  performedComponentOperations ComponentOperation[]
+  performedAssemblySteps       AssemblyStep[]
+  procurementEvents            ProcurementEvent[]
+  stockTxns                    StockTxn[]
+  createdScheduleRuns          ScheduleRun[]
+  submittedProcessPlans        ProcessPlan[]                 @relation("ProcessPlanSubmittedBy")
+  verifiedProcessPlans         ProcessPlan[]                 @relation("ProcessPlanVerifiedBy")
+  submittedComponentOps        ComponentOperation[]          @relation("ComponentOperationSubmittedBy")
+  verifiedComponentOps         ComponentOperation[]          @relation("ComponentOperationVerifiedBy")
+  rejectedComponentOps         ComponentOperationRejection[]
+  loggedWeldJoints             WeldJoint[]
+  loggedWeldLogs               WeldLog[]
+  submittedAssemblySteps       AssemblyStep[]                @relation("AssemblyStepSubmittedBy")
+  verifiedAssemblySteps        AssemblyStep[]                @relation("AssemblyStepVerifiedBy")
+  rejectedAssemblySteps        AssemblyStepRejection[]
+  clearedQcpExecutions         QcpExecution[]                @relation("QcpExecutionClearedBy")
+  waiverApprovedQcpExecutions  QcpExecution[]                @relation("QcpExecutionWaiverApprovedBy")
+  filedDelayReasons            DelayReason[]                 @relation("DelayReasonFiledBy")
+  reviewedDelayReasons         DelayReason[]                 @relation("DelayReasonReviewedBy")
+  publishedSnapshots           ProgressSnapshot[]            @relation("ProgressSnapshotPublishedBy")
+  verifiedSnapshots            ProgressSnapshot[]            @relation("ProgressSnapshotVerifiedBy")
+  createdBomRevisions          BomRevision[]
+  recordedNdtResults           NdtResult[]
+  publishedTemplateVersions    ProcessTemplateVersion[]
+  ncrsDispositioned            Ncr[]                         @relation("NcrDispositionedBy")
+  ncrsReworkOwned              Ncr[]                         @relation("NcrReworkOwner")
+  ncrsClosed                   Ncr[]                         @relation("NcrClosedBy")
+  recordedDftReadings          DftReading[]
+  dispatchBatchesApproved      DispatchBatch[]               @relation("DispatchBatchReleaseApprovedBy")
+  createdPackages              Package[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -317,13 +386,14 @@ model Department {
   name     String
   scope    String?
 
-  tenant            Organization      @relation(fields: [tenantId], references: [id])
-  users             UserDepartment[]
-  templateProcesses TemplateProcess[]
-  jobProcesses      JobProcess[]
-  processPlans      ProcessPlan[]
-  operations        OperationRef[]
-  welders           Welder[]
+  tenant                Organization           @relation(fields: [tenantId], references: [id])
+  users                 UserDepartment[]
+  templateProcesses     TemplateProcess[]
+  jobProcesses          JobProcess[]
+  processPlans          ProcessPlan[]
+  operations            OperationRef[]
+  welders               Welder[]
+  assemblyTemplateSteps AssemblyTemplateStep[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -367,16 +437,16 @@ model ComponentTypeRef {
 /// from Equipment (one job's actual block). Carries tenant_id, so it is a
 /// tenant-root table and has its own RLS policy — see the migration.
 model EquipmentTypeRef {
-  id                Int      @id @default(autoincrement())
-  tenantId          Int      @map("tenant_id")
-  familyId          Int      @map("family_id")
+  id                Int     @id @default(autoincrement())
+  tenantId          Int     @map("tenant_id")
+  familyId          Int     @map("family_id")
   /// Stable short code, e.g. HP-AIR-RCVR-2000
   code              String
   name              String
-  defaultDesignCode String?  @map("default_design_code")
+  defaultDesignCode String? @map("default_design_code")
   /// Family-shaped design defaults, copied into Job.specs at intake.
-  defaultSpecs      Json?    @map("default_specs")
-  active            Boolean  @default(true)
+  defaultSpecs      Json?   @map("default_specs")
+  active            Boolean @default(true)
 
   tenant     Organization  @relation(fields: [tenantId], references: [id])
   family     ProductFamily @relation(fields: [familyId], references: [id])
@@ -457,8 +527,10 @@ model DelayCategoryRef {
   name     String
   active   Boolean @default(true)
 
-  tenant       Organization  @relation(fields: [tenantId], references: [id])
-  delayReasons DelayReason[]
+  tenant                       Organization                  @relation(fields: [tenantId], references: [id])
+  delayReasons                 DelayReason[]
+  componentOperationRejections ComponentOperationRejection[]
+  assemblyStepRejections       AssemblyStepRejection[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -529,11 +601,12 @@ model ProductFamily {
   name     String
   active   Boolean @default(true)
 
-  tenant         Organization       @relation(fields: [tenantId], references: [id])
-  templates      ProcessTemplate[]
-  jobs           Job[]
-  routes         RouteTemplate[]
-  equipmentTypes EquipmentTypeRef[]
+  tenant            Organization       @relation(fields: [tenantId], references: [id])
+  templates         ProcessTemplate[]
+  jobs              Job[]
+  routes            RouteTemplate[]
+  equipmentTypes    EquipmentTypeRef[]
+  assemblyTemplates AssemblyTemplate[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -572,6 +645,7 @@ model ProcessTemplateVersion {
   processes TemplateProcess[]
   edges     TemplateEdge[]
   jobs      Job[]
+  publisher User?             @relation(fields: [publishedBy], references: [id])
 
   @@unique([templateId, version])
   @@index([templateId])
@@ -581,34 +655,35 @@ model ProcessTemplateVersion {
 /// One process in a template version. For PRESSURE_VESSEL v1 these are the
 /// 36 rows of DESPL's Lead Time table.
 model TemplateProcess {
-  id                      Int     @id @default(autoincrement())
-  versionId               Int     @map("version_id")
+  id                      Int                  @id @default(autoincrement())
+  versionId               Int                  @map("version_id")
   seq                     Int
   code                    String
   name                    String
-  mainActivities          String? @map("main_activities")
+  mainActivities          String?              @map("main_activities")
   /// Nullable + `provisional` together, deliberately: a family with a process
   /// ROUTE but no confirmed durations (e.g. PIPE_SPOOL, derived from a QAP's
   /// activity sequence, not a lead-time document) can exist without inventing
   /// numbers. `lib/schedule/` MUST refuse to compute a plan — return a clear
   /// "SCHEDULE_DATA_MISSING"-style refusal, never a 0-day or guessed date —
   /// for any process where `provisional` is true or a duration is null.
-  durationMinDays         Int?    @map("duration_min_days")
-  durationMaxDays         Int?    @map("duration_max_days")
-  cumulativePrinted       String? @map("cumulative_printed")
-  defaultDepartmentId     Int     @map("default_department_id")
+  durationMinDays         Int?                 @map("duration_min_days")
+  durationMaxDays         Int?                 @map("duration_max_days")
+  cumulativePrinted       String?              @map("cumulative_printed")
+  defaultDepartmentId     Int                  @map("default_department_id")
   /// Crosswalk to the 25-stage work-order reporting view. Pressure-Vessel-
   /// specific; empty for families with no equivalent reporting view.
-  workOrderStages         Int[]   @map("work_order_stages")
-  envelopeFinishByMinDays Int?    @map("envelope_finish_by_min_days")
-  envelopeFinishByMaxDays Int?    @map("envelope_finish_by_max_days")
-  envelopeStartByMinDays  Int?    @map("envelope_start_by_min_days")
-  envelopeStartByMaxDays  Int?    @map("envelope_start_by_max_days")
+  workOrderStages         Int[]                @map("work_order_stages")
+  envelopeFinishByMinDays Int?                 @map("envelope_finish_by_min_days")
+  envelopeFinishByMaxDays Int?                 @map("envelope_finish_by_max_days")
+  envelopeStartByMinDays  Int?                 @map("envelope_start_by_min_days")
+  envelopeStartByMaxDays  Int?                 @map("envelope_start_by_max_days")
   /// Conditional processes (e.g. PWHT) can be excluded per job.
-  optional                Boolean @default(false)
+  optional                Boolean              @default(false)
   /// True = process/sequence is real (sourced from a QAP or lead-time doc),
   /// but duration is not confirmed by DESPL. Distinct from `optional`.
-  provisional             Boolean @default(false)
+  provisional             Boolean              @default(false)
+  evidenceKind            ProcessEvidenceKind? @map("evidence_kind")
 
   version            ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment  Department             @relation(fields: [defaultDepartmentId], references: [id])
@@ -648,78 +723,87 @@ model TemplateEdge {
 /// and every existing doc. `clientOrderNo` vs `jobNumber` resolves C5: both
 /// live CSVs carry Work Order DE0455-01 while the jobs are DE0463/DE0467.
 model Job {
-  id                Int         @id @default(autoincrement())
-  tenantId          Int         @map("tenant_id")
+  id                        Int         @id @default(autoincrement())
+  tenantId                  Int         @map("tenant_id")
   /// Opaque id for client-facing URLs — sequential ids leak order volume.
-  publicId          String      @unique @map("public_id")
-  clientId          Int         @map("client_id")
-  familyId          Int         @map("family_id")
-  templateVersionId Int         @map("template_version_id")
-  calendarId        Int?        @map("calendar_id")
-  jobNumber         String      @map("job_number")
+  publicId                  String      @unique @map("public_id")
+  clientId                  Int         @map("client_id")
+  familyId                  Int         @map("family_id")
+  templateVersionId         Int         @map("template_version_id")
+  /// Nullable — a family with no authored assembly sequence yet
+  /// (HEAT_EXCHANGER, PIPING_SYSTEM as of Phase 2) must still create jobs.
+  /// Pinned at intake exactly like templateVersionId once an intake UI exists
+  /// for it; for now set directly (see A2's materialisation script).
+  assemblyTemplateVersionId Int?        @map("assembly_template_version_id")
+  calendarId                Int?        @map("calendar_id")
+  jobNumber                 String      @map("job_number")
   /// The client's own order number, when it differs from ours (C5).
-  clientOrderNo     String?     @map("client_order_no")
-  projectName       String?     @map("project_name")
-  poRef             String?     @map("po_ref")
-  designCode        String?     @map("design_code")
-  orderDate         DateTime?   @map("order_date")
+  clientOrderNo             String?     @map("client_order_no")
+  projectName               String?     @map("project_name")
+  poRef                     String?     @map("po_ref")
+  designCode                String?     @map("design_code")
+  orderDate                 DateTime?   @map("order_date")
   /// The contractual date given to the client. BACKWARD scheduling anchors on
   /// this by default, and every overdue / KPI / forecast-vs-due calculation
   /// measures against it. Renamed from `deliveryDate` (22 Aug 2026): the CSV
   /// import was writing a *dispatch* date into a field the scheduler read as a
   /// *required delivery* date, conflating two different commitments.
-  committedDeliveryDate DateTime? @map("committed_delivery_date")
+  committedDeliveryDate     DateTime?   @map("committed_delivery_date")
   /// DESPL's own internal target, normally earlier than the committed date and
   /// carrying their buffer. Never shown to a client user.
-  targetDispatchDate    DateTime? @map("target_dispatch_date")
+  targetDispatchDate        DateTime?   @map("target_dispatch_date")
   /// Family-shaped design configuration (design pressure, MDMT, MOC, …).
   /// Display and reference data ONLY. Nothing in lib/schedule/ or the gating
   /// path may read it — the moment a schedule depends on a free-shaped blob,
   /// refusals stop being explainable (invariant #12).
-  specs                 Json?
-  priority          JobPriority @default(NORMAL)
-  status            JobStatus   @default(ACTIVE)
-  remarks           String?
+  specs                     Json?
+  priority                  JobPriority @default(NORMAL)
+  status                    JobStatus   @default(ACTIVE)
+  remarks                   String?
 
-  tenant          Organization           @relation(fields: [tenantId], references: [id])
-  client          Client                 @relation(fields: [clientId], references: [id])
-  family          ProductFamily          @relation(fields: [familyId], references: [id])
-  templateVersion ProcessTemplateVersion @relation(fields: [templateVersionId], references: [id])
-  calendar        WorkCalendar?          @relation(fields: [calendarId], references: [id])
-  equipments      Equipment[]
-  processes       JobProcess[]
-  scheduleRuns    ScheduleRun[]
-  qcpTemplates    QcpTemplate[]
-  drawings        AssemblyDrawing[]
-  snapshots       ProgressSnapshot[]
-  dispatchBatches DispatchBatch[]
-  weldJoints      WeldJoint[]
-  weldLogs        WeldLog[]
+  tenant                  Organization             @relation(fields: [tenantId], references: [id])
+  client                  Client                   @relation(fields: [clientId], references: [id])
+  family                  ProductFamily            @relation(fields: [familyId], references: [id])
+  templateVersion         ProcessTemplateVersion   @relation(fields: [templateVersionId], references: [id])
+  assemblyTemplateVersion AssemblyTemplateVersion? @relation(fields: [assemblyTemplateVersionId], references: [id])
+  calendar                WorkCalendar?            @relation(fields: [calendarId], references: [id])
+  equipments              Equipment[]
+  processes               JobProcess[]
+  scheduleRuns            ScheduleRun[]
+  qcpTemplates            QcpTemplate[]
+  drawings                AssemblyDrawing[]
+  snapshots               ProgressSnapshot[]
+  dispatchBatches         DispatchBatch[]
+  packages                Package[]
+  weldJoints              WeldJoint[]
+  weldLogs                WeldLog[]
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
   @@index([clientId])
   @@index([familyId])
   @@index([templateVersionId])
+  @@index([assemblyTemplateVersionId])
   @@index([calendarId])
   @@map("jobs")
 }
 
 model Equipment {
-  id      Int     @id @default(autoincrement())
-  jobId   Int     @map("job_id")
-  name    String
-  blockNo Int?    @map("block_no")
-  remarks String?
+  id              Int     @id @default(autoincrement())
+  jobId           Int     @map("job_id")
+  name            String
+  blockNo         Int?    @map("block_no")
+  remarks         String?
   /// Nullable: the seeded DE0463/DE0467 blocks came from CSV with free-text
   /// labels and no catalog entry. Backfilling them would mean inventing
   /// catalog rows, so they stay unlinked.
-  equipmentTypeId Int? @map("equipment_type_id")
+  equipmentTypeId Int?    @map("equipment_type_id")
 
   job           Job                @relation(fields: [jobId], references: [id])
   equipmentType EquipmentTypeRef?  @relation(fields: [equipmentTypeId], references: [id])
   units         Unit[]
   bomItems      BomItem[]
+  bomRevisions  BomRevision[]
   components    Component[]
   scheduleRuns  ScheduleRun[]
   snapshots     ProgressSnapshot[]
@@ -734,18 +818,48 @@ model Unit {
   id          Int      @id @default(autoincrement())
   equipmentId Int      @map("equipment_id")
   serialNo    String   @map("serial_no")
+  packageId   Int?     @map("package_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  equipment     Equipment          @relation(fields: [equipmentId], references: [id])
-  qcpExecutions QcpExecution[]
-  processPlans  ProcessPlan[]
-  components    Component[]
-  snapshots     ProgressSnapshot[]
-  weldJoints    WeldJoint[]
+  equipment          Equipment           @relation(fields: [equipmentId], references: [id])
+  package            Package?            @relation(fields: [packageId], references: [id])
+  qcpExecutions      QcpExecution[]
+  processPlans       ProcessPlan[]
+  components         Component[]
+  snapshots          ProgressSnapshot[]
+  weldJoints         WeldJoint[]
+  assemblySteps      AssemblyStep[]
+  dispatchBatchUnits DispatchBatchUnit[]
 
   @@unique([equipmentId, serialNo])
   @@index([equipmentId])
+  @@index([packageId])
   @@map("units")
+}
+
+/// D1 — a Unit belongs to at most one Package (simplest cardinality that
+/// fits "packing list of contents by serial"). D2's DispatchBatchUnit is a
+/// separate join because a dispatch batch groups units directly, not via
+/// Package.
+model Package {
+  id                Int      @id @default(autoincrement())
+  jobId             Int      @map("job_id")
+  packageNo         String   @map("package_no")
+  weightKg          Decimal? @map("weight_kg")
+  lengthMm          Int?     @map("length_mm")
+  widthMm           Int?     @map("width_mm")
+  heightMm          Int?     @map("height_mm")
+  preservationNotes String?  @map("preservation_notes")
+  createdBy         Int      @map("created_by")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  job          Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdByUser User  @relation(fields: [createdBy], references: [id])
+  units        Unit[]
+
+  @@unique([jobId, packageNo])
+  @@index([jobId])
+  @@map("packages")
 }
 
 /// The job's own copy of the process spine, materialised from the pinned
@@ -825,6 +939,7 @@ model ScheduleRun {
   job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   equipment    Equipment?    @relation(fields: [equipmentId], references: [id])
   processPlans ProcessPlan[]
+  creator      User?         @relation(fields: [createdBy], references: [id])
 
   @@unique([jobId, equipmentId, version])
   @@index([jobId])
@@ -834,6 +949,17 @@ model ScheduleRun {
 
 /// `unitId` nullable closes the schedule↔execution grain gap: equipment-level
 /// plans before Final Assembly, per-serial plans after it (BUILD-SPEC §0 #2).
+///
+/// UNIQUENESS CONSTRAINT (DDL-only, not representable in Prisma schema DSL):
+/// Enforced by raw SQL in migration 20260827170000_actor_fks_and_partial_unique.
+/// Two indexes jointly prevent duplicate rows:
+/// 1. Partial unique on (schedule_run_id, job_process_id, unit_id) WHERE unit_id IS NOT NULL
+/// 2. Partial unique on (schedule_run_id, job_process_id) WHERE unit_id IS NULL
+/// This allows per-unit schedule expansion (multiple rows same scheduleRunId/jobProcessId with different unitId)
+/// while preventing duplicate null-unitId rows (PostgreSQL treats NULL as distinct in regular indexes).
+/// Do not let a future `prisma migrate dev` drift proposal recreate a plain/full unique index
+/// under the "process_plans_schedule_run_id_job_process_id_unit_id_key" name — such a proposal
+/// should be rejected as it would recreate the original bug (null duplicate rows).
 model ProcessPlan {
   id                Int               @id @default(autoincrement())
   scheduleRunId     Int               @map("schedule_run_id")
@@ -859,9 +985,10 @@ model ProcessPlan {
   unit            Unit?         @relation(fields: [unitId], references: [id])
   ownerDepartment Department    @relation(fields: [ownerDepartmentId], references: [id])
   assignee        User?         @relation(fields: [assigneeUserId], references: [id])
+  submitter       User?         @relation("ProcessPlanSubmittedBy", fields: [submittedBy], references: [id])
+  verifier        User?         @relation("ProcessPlanVerifiedBy", fields: [verifiedBy], references: [id])
   delayReasons    DelayReason[]
 
-  @@unique([scheduleRunId, jobProcessId, unitId])
   @@index([scheduleRunId])
   @@index([jobProcessId])
   @@index([unitId])
@@ -874,64 +1001,196 @@ model ProcessPlan {
 
 // ── BOM, components and traceability ────────────────────────────────────
 
+/// One equipment can have many revisions over time (invariant #9's versioning
+/// convention — same shape as TemplateVersion/AssemblyTemplateVersion: a new
+/// revision is a new row, never an edit to a released one). Phase 4, B3: this
+/// dispatch only ever creates the one auto-backfilled "Revision 1, RELEASED"
+/// row per equipment (scripts/backfill-bom-revision.ts) — the write path for
+/// authoring a new revision belongs to a later, separately-dispatched task.
+model BomRevision {
+  id          Int               @id @default(autoincrement())
+  equipmentId Int               @map("equipment_id")
+  revisionNo  Int               @map("revision_no")
+  status      BomRevisionStatus @default(DRAFT)
+  releasedAt  DateTime?         @map("released_at")
+  createdBy   Int?              @map("created_by")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id])
+  creator   User?     @relation(fields: [createdBy], references: [id])
+  bomItems  BomItem[]
+
+  @@unique([equipmentId, revisionNo])
+  @@index([equipmentId])
+  @@map("bom_revisions")
+}
+
 model BomItem {
-  id              Int     @id @default(autoincrement())
-  equipmentId     Int     @map("equipment_id")
-  itemNo          Int     @map("item_no")
-  blockNo         Int?    @map("block_no")
-  partName        String  @map("part_name")
+  id              Int      @id @default(autoincrement())
+  equipmentId     Int      @map("equipment_id")
+  itemNo          Int      @map("item_no")
+  blockNo         Int?     @map("block_no")
+  partName        String   @map("part_name")
   description     String?
   material        String?
-  /// Raw source value — the live CSVs carry things like "40 NOS."
-  qty             String
+  /// Raw source value — the live CSVs carry things like "40 NOS." Column
+  /// stays "qty" (`@map`) — this is a Prisma-model-only rename, no data
+  /// movement. Kept verbatim for import fidelity alongside the parsed
+  /// `qtyPer`/`uom` below.
+  sourceQty       String   @map("qty")
+  /// Parsed out of `sourceQty` by `scripts/backfill-bom-item-qty-per.ts`
+  /// (regex `/^(\d+(?:\.\d+)?)\s*(.*)$/`). Nullable — free-text source
+  /// values (e.g. "As required") are left null, never guessed.
+  qtyPer          Decimal? @map("qty_per") @db.Decimal(12, 3)
+  uom             String?  @map("uom")
   unit            String?
-  componentTypeId Int?    @map("component_type_id")
+  componentTypeId Int?     @map("component_type_id")
   remarks         String?
+  /// Multi-level BOM tree (B2, Phase 4). Nullable/additive — every existing
+  /// row's parent stays null; no hierarchy inferred from the flat CSV
+  /// import, which carries no parent signal. First writer is the (later,
+  /// separately-dispatched) BOM authoring UI.
+  parentBomItemId Int?     @map("parent_bom_item_id")
+  /// B3, Phase 4: which BomRevision this row belongs to. Nullable during
+  /// migration only — scripts/backfill-bom-revision.ts sets every existing
+  /// row onto its equipment's auto-created "Revision 1, RELEASED" row
+  /// immediately after the column is added, since the seed data has always
+  /// been the de-facto released BOM. A fresh import path setting this at
+  /// write time is a later dispatch's job.
+  bomRevisionId   Int?     @map("bom_revision_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   componentType           ComponentTypeRef?        @relation(fields: [componentTypeId], references: [id])
-  procurement             Procurement?
+  bomRevision             BomRevision?             @relation(fields: [bomRevisionId], references: [id])
+  procurementEvents       ProcurementEvent[]
   materialIdentifications MaterialIdentification[]
+  stockLots               StockLot[]
   components              Component[]
   tests                   ItemTest[]
+  parent                  BomItem?                 @relation("BomItemHierarchy", fields: [parentBomItemId], references: [id])
+  children                BomItem[]                @relation("BomItemHierarchy")
 
   @@index([equipmentId])
   @@index([componentTypeId])
+  @@index([parentBomItemId])
+  @@index([bomRevisionId])
   @@map("bom_items")
 }
 
-model Procurement {
-  id             Int                     @id @default(autoincrement())
-  bomItemId      Int                     @unique @map("bom_item_id")
-  indentNo       String?                 @map("indent_no")
-  indentDate     DateTime?               @map("indent_date")
-  approvedDate   DateTime?               @map("approved_date")
-  status         ProcurementStatus       @default(NOT_STARTED)
-  poNo           String?                 @map("po_no")
-  poDate         DateTime?               @map("po_date")
-  receivedStatus MaterialReceivedStatus? @map("received_status")
-  receivedDate   DateTime?               @map("received_date")
+/// Append-only procurement ledger (B5, Phase 4) — replaces the mutable
+/// `Procurement` row-per-BomItem. "Received so far" is a sum over `RECEIPT`
+/// events, never an asserted enum. `qty` is only meaningful on `RECEIPT`
+/// (null for the other three types) and is itself nullable there: old
+/// `PARTIALLY_RECEIVED` data never recorded a number, and backfilling one
+/// would be a guess this codebase forbids — see
+/// `scripts/backfill-procurement-events.ts`.
+///
+/// No update/delete path exists anywhere in `src/` for this model by
+/// construction (service layer only ever calls `.create`) — append-only is
+/// enforced at the application layer, same spirit as `AuditLog`/
+/// `DomainEvent` (which are enforced at the DB grant layer instead, since
+/// those two are infrastructure tables the app itself never rewrites).
+model ProcurementEvent {
+  id        Int                  @id @default(autoincrement())
+  bomItemId Int                  @map("bom_item_id")
+  type      ProcurementEventType
+  qty       Decimal?             @db.Decimal(12, 3)
+  /// Indent/PO number — reuses the slot `Procurement.indentNo`/`poNo` held.
+  refNo     String?              @map("ref_no")
+  at        DateTime             @default(now())
+  /// Actor who logged this event. Not one of B10's FK-less "actor" columns —
+  /// this field is created fresh in this dispatch, so it gets the `@relation`
+  /// immediately instead of deferring it.
+  by        Int
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  actor     User       @relation(fields: [by], references: [id])
+  stockLots StockLot[]
 
-  @@index([status])
-  @@map("procurements")
+  @@index([bomItemId])
+  @@index([bomItemId, at])
+  @@map("procurement_events")
 }
 
 /// Real traceability: heat number + MTC. Replaces the misused
 /// "Material Identification" CSV column, which held a sourcing type (C8).
 model MaterialIdentification {
-  id         Int        @id @default(autoincrement())
-  bomItemId  Int        @map("bom_item_id")
-  heatNumber String     @map("heat_number")
-  mtcRef     String?    @map("mtc_ref")
-  pmiResult  PmiResult?
+  id          Int        @id @default(autoincrement())
+  bomItemId   Int        @map("bom_item_id")
+  /// B8, Phase 4: nullable during transition — equipment whose `Component.unitId`
+  /// is null (BOM-item-linked data with no per-serial fan-out) has no single
+  /// component to attach a heat record to and stays at `bomItemId` grain; a
+  /// serialised job's per-unit `Component` rows make this meaningful. Lets one
+  /// heat record trace forward to the actual serial it entered, not just the
+  /// BOM item shared across every unit of an equipment.
+  componentId Int?       @map("component_id")
+  heatNumber  String     @map("heat_number")
+  mtcRef      String?    @map("mtc_ref")
+  pmiResult   PmiResult?
+  /// B8, Phase 4: how much of this heat went into this component — a
+  /// traceability fact, distinct from `StockTxn`'s ledger-level quantity.
+  qtyIssued   Decimal?   @map("qty_issued") @db.Decimal(12, 3)
 
-  bomItem BomItem @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  component Component? @relation(fields: [componentId], references: [id], onDelete: SetNull)
 
   @@index([bomItemId])
+  @@index([componentId])
   @@index([heatNumber])
   @@map("material_identifications")
+}
+
+/// B6, Phase 4: a physical lot of stock for one BOM item — part + heat +
+/// location + qty. Receipt itself IS `StockLot` creation, not a paired
+/// "RECEIPT StockTxn" row: there is no meaningful "before" state for a lot
+/// that didn't exist yet, so a separate receipt-txn would just duplicate what
+/// the row's own existence + `qty` already says. `sourceProcurementEventId`
+/// links back to the `ProcurementEvent` that caused this receipt when there
+/// is one — nullable because a lot can be logged for stock already on hand
+/// before this system existed (no procurement history to point at).
+model StockLot {
+  id                       Int      @id @default(autoincrement())
+  bomItemId                Int      @map("bom_item_id")
+  heatNumber               String?  @map("heat_number")
+  location                 String
+  qty                      Decimal  @db.Decimal(12, 3)
+  /// SERVER CLOCK ONLY (invariant #1)
+  receivedAt               DateTime @default(now()) @map("received_at")
+  sourceProcurementEventId Int?     @map("source_procurement_event_id")
+
+  bomItem                BomItem           @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  sourceProcurementEvent ProcurementEvent? @relation(fields: [sourceProcurementEventId], references: [id])
+  txns                   StockTxn[]
+
+  @@index([bomItemId])
+  @@index([sourceProcurementEventId])
+  @@map("stock_lots")
+}
+
+/// B6, Phase 4: a movement against one `StockLot` — issued to a component,
+/// returned, or scrapped. `by` gets its `@relation` immediately (same
+/// reasoning as `ProcurementEvent.by`) rather than being left FK-less for a
+/// later dispatch to fix.
+model StockTxn {
+  id          Int          @id @default(autoincrement())
+  stockLotId  Int          @map("stock_lot_id")
+  type        StockTxnType
+  qty         Decimal      @db.Decimal(12, 3)
+  /// SERVER CLOCK ONLY (invariant #1)
+  at          DateTime     @default(now())
+  by          Int
+  /// Which component the issue went to — nullable (a RETURN/SCRAP need not
+  /// name one, and an ISSUE against general stock may not either).
+  componentId Int?         @map("component_id")
+  note        String?
+
+  stockLot  StockLot   @relation(fields: [stockLotId], references: [id], onDelete: Cascade)
+  actor     User       @relation(fields: [by], references: [id])
+  component Component? @relation(fields: [componentId], references: [id])
+
+  @@index([stockLotId])
+  @@index([componentId])
+  @@map("stock_txns")
 }
 
 // ── Component route library ─────────────────────────────────────────────
@@ -994,54 +1253,180 @@ model RouteStep {
 /// nozzles, another wants 8" representable: one BOM line spawns N tagged
 /// component instances, each with its own ordered operation route.
 model Component {
-  id              Int    @id @default(autoincrement())
-  equipmentId     Int    @map("equipment_id")
-  unitId          Int?   @map("unit_id")
-  bomItemId       Int?   @map("bom_item_id")
+  id                 Int    @id @default(autoincrement())
+  equipmentId        Int    @map("equipment_id")
+  unitId             Int?   @map("unit_id")
+  bomItemId          Int?   @map("bom_item_id")
   /// N1, N2, M1, Shell-1, Top Head…
-  tag             String
-  componentTypeId Int    @map("component_type_id")
-  routeVersionId  Int?   @map("route_version_id")
+  tag                String
+  componentTypeId    Int    @map("component_type_id")
+  routeVersionId     Int?   @map("route_version_id")
+  /// F7b (Phase 1, pulled forward from Phase 4 — see
+  /// docs/ADR-product-family-agnostic-platform-v1.md's schema-shape review,
+  /// approved 26 Aug 2026). Self-referencing, nullable: schema shape only,
+  /// no explosion/authoring logic yet. Lets a multi-piece component (e.g.
+  /// SKIRT's base ring + 24 gusset plates) be recorded as real child rows
+  /// instead of collapsed into one fabrication unit — the gap F4 names.
+  /// Added while Component still has zero real rows so this never needs a
+  /// backfill migration later.
+  parentComponentId  Int?   @map("parent_component_id")
+  /// B9, Phase 4: which `AssemblyDrawing` gates this component's CUTTING
+  /// start. Nullable, MANUALLY set by whoever authors the component's
+  /// route/BOM link — not auto-derived (the schema has no rule for e.g.
+  /// "the GA drawing always gates the shell"), same precedent as
+  /// `WeldJoint.componentId` being set by whoever logs the joint. A null
+  /// value is a no-op (SEAM): components with no drawing link are
+  /// completely unaffected by the CUTTING gate.
+  governingDrawingId Int?   @map("governing_drawing_id")
+  /// B9, Phase 4: which `DrawingRevision` this component was actually built
+  /// to. SERVER-STAMPED (invariant #1) inside the same transaction
+  /// `startComponentOperation` succeeds in for a CUTTING operation — never
+  /// client-supplied.
+  builtToRevisionId  Int?   @map("built_to_revision_id")
 
-  equipment     Equipment             @relation(fields: [equipmentId], references: [id])
-  unit          Unit?                 @relation(fields: [unitId], references: [id])
-  bomItem       BomItem?              @relation(fields: [bomItemId], references: [id])
-  componentType ComponentTypeRef      @relation(fields: [componentTypeId], references: [id])
-  routeVersion  RouteTemplateVersion? @relation(fields: [routeVersionId], references: [id])
-  operations    ComponentOperation[]
+  equipment               Equipment                @relation(fields: [equipmentId], references: [id])
+  unit                    Unit?                    @relation(fields: [unitId], references: [id])
+  bomItem                 BomItem?                 @relation(fields: [bomItemId], references: [id])
+  componentType           ComponentTypeRef         @relation(fields: [componentTypeId], references: [id])
+  routeVersion            RouteTemplateVersion?    @relation(fields: [routeVersionId], references: [id])
+  parent                  Component?               @relation("ComponentHierarchy", fields: [parentComponentId], references: [id])
+  children                Component[]              @relation("ComponentHierarchy")
+  operations              ComponentOperation[]
+  weldJoints              WeldJoint[]
+  stockTxns               StockTxn[]
+  materialIdentifications MaterialIdentification[]
+  governingDrawing        AssemblyDrawing?         @relation("ComponentGoverningDrawing", fields: [governingDrawingId], references: [id])
+  builtToRevision         DrawingRevision?         @relation("ComponentBuiltToRevision", fields: [builtToRevisionId], references: [id])
 
-  @@unique([equipmentId, tag])
+  /// Component grain follows the serial (unitId), not the equipment — a
+  /// serialised job's components carry a plain tag ("SHELL", not
+  /// "SHELL-320SR01"). Equipment-grain components (unitId null, e.g.
+  /// DE0463/DE0467's BOM-item-derived rows) are not uniqueness-checked by
+  /// this index (Postgres treats NULL as distinct per row); DB-enforced
+  /// instead by a partial unique index on (equipmentId, tag) WHERE unitId IS
+  /// NULL, added by migration 20260827050000_component_equipment_grain_tag_unique.
+  /// Not representable in Prisma's schema DSL (no filtered-index syntax), so
+  /// it has no `@@` counterpart here — do not let a future `prisma migrate
+  /// dev` diff propose dropping it as drift; that migration is authoritative.
+  @@unique([unitId, tag])
   @@index([equipmentId])
   @@index([unitId])
+  @@index([parentComponentId])
   @@index([bomItemId])
   @@index([componentTypeId])
+  @@index([governingDrawingId])
+  @@index([builtToRevisionId])
   @@map("components")
 }
 
 /// Replaces the old ItemOperation, which had no sequence column and so could
 /// not represent route order at all.
 model ComponentOperation {
-  id          Int             @id @default(autoincrement())
-  componentId Int             @map("component_id")
-  seq         Int
-  operationId Int             @map("operation_id")
-  sourcing    Sourcing?
-  status      OperationStatus @default(NOT_STARTED)
+  id                  Int             @id @default(autoincrement())
+  componentId         Int             @map("component_id")
+  seq                 Int
+  operationId         Int             @map("operation_id")
+  sourcing            Sourcing?
+  status              OperationStatus @default(NOT_STARTED)
   /// SERVER CLOCK ONLY (invariant #1)
-  startedAt   DateTime?       @map("started_at")
+  startedAt           DateTime?       @map("started_at")
   /// SERVER CLOCK ONLY (invariant #1)
-  finishedAt  DateTime?       @map("finished_at")
-  submittedBy Int?            @map("submitted_by")
-  verifiedBy  Int?            @map("verified_by")
+  finishedAt          DateTime?       @map("finished_at")
+  submittedBy         Int?            @map("submitted_by")
+  verifiedBy          Int?            @map("verified_by")
+  /// Who actually did the work (F3) — distinct from submittedBy (who
+  /// clicked). Welders don't log in (see Welder's own doc comment); a
+  /// non-welding operation (cutting, grinding, machining...) instead names
+  /// performedByUserId. Not DB-enforced as mutually exclusive — Welder has
+  /// no write path yet (F-f, blocks Phase 2's A5), so nothing can mandate
+  /// either field being set in practice today.
+  performedByWelderId Int?            @map("performed_by_welder_id")
+  performedByUserId   Int?            @map("performed_by_user_id")
+  remarks             String?
+  /// F4 — multi-piece components (e.g. SKIRT's 24 gusset plates) need a
+  /// count; done/not-done alone can't show "18 of 24 welded". Nullable,
+  /// unconstrained: F-c (is a count required for v1?) is still open with the
+  /// floor — see docs/DESPL-320-fabrication-assembly-spec.md §4.
+  qtyPlanned          Int?
+  qtyGood             Int?
+  qtyRejected         Int?
 
-  component Component    @relation(fields: [componentId], references: [id], onDelete: Cascade)
-  operation OperationRef @relation(fields: [operationId], references: [id])
+  component         Component                     @relation(fields: [componentId], references: [id], onDelete: Cascade)
+  operation         OperationRef                  @relation(fields: [operationId], references: [id])
+  performedByWelder Welder?                       @relation(fields: [performedByWelderId], references: [id])
+  performedByUser   User?                         @relation(fields: [performedByUserId], references: [id])
+  submitter         User?                         @relation("ComponentOperationSubmittedBy", fields: [submittedBy], references: [id])
+  verifier          User?                         @relation("ComponentOperationVerifiedBy", fields: [verifiedBy], references: [id])
+  rejections        ComponentOperationRejection[]
+  paintRecord       PaintRecord?
+  dftReadings       DftReading[]
 
   @@unique([componentId, seq])
   @@index([componentId])
   @@index([operationId])
   @@index([status])
+  @@index([performedByWelderId])
+  @@index([performedByUserId])
   @@map("component_operations")
+}
+
+/// F5 — a fabrication rejection reason has a durable home (previously "has
+/// nowhere durable to live yet" per component.service.ts's own comment on
+/// reject() being omitted). Reuses DelayCategoryRef, the same taxonomy
+/// DelayReason already uses for process-level delays, rather than inventing
+/// a parallel one.
+model ComponentOperationRejection {
+  id                   Int      @id @default(autoincrement())
+  componentOperationId Int      @map("component_operation_id")
+  categoryId           Int      @map("category_id")
+  detail               String?
+  rejectedBy           Int      @map("rejected_by")
+  rejectedAt           DateTime @default(now()) @map("rejected_at")
+
+  componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
+  category           DelayCategoryRef   @relation(fields: [categoryId], references: [id])
+  rejector           User               @relation(fields: [rejectedBy], references: [id])
+  ncr                Ncr?
+
+  @@index([componentOperationId])
+  @@index([categoryId])
+  @@map("component_operation_rejections")
+}
+
+/// P1 — paint tracking rides the existing PAINTING ComponentOperation grain
+/// (already a per-component RouteStep per seed/component-routes.json); no
+/// new grain needed.
+model PaintRecord {
+  id                   Int    @id @default(autoincrement())
+  componentOperationId Int    @unique @map("component_operation_id")
+  coatingSystem        String @map("coating_system")
+  coatsPlanned         Int?   @map("coats_planned")
+
+  componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
+
+  @@map("paint_records")
+}
+
+/// `accepted` is self-attested by whoever records the reading (open
+/// question flagged in the plan's cover note — no DFT spec-range table
+/// exists to check against automatically; building one is out of scope
+/// unless the floor confirms it's needed).
+model DftReading {
+  id                   Int      @id @default(autoincrement())
+  componentOperationId Int      @map("component_operation_id")
+  coatNumber           Int?     @map("coat_number")
+  location             String?
+  readingMicrons       Int      @map("reading_microns")
+  accepted             Boolean
+  recordedBy           Int      @map("recorded_by")
+  /// SERVER CLOCK ONLY (invariant #1)
+  recordedAt           DateTime @default(now()) @map("recorded_at")
+
+  componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
+  recordedByUser     User               @relation(fields: [recordedBy], references: [id])
+
+  @@index([componentOperationId])
+  @@map("dft_readings")
 }
 
 model ItemTest {
@@ -1084,10 +1469,12 @@ model Welder {
   departmentId Int?     @map("department_id")
   createdAt    DateTime @default(now()) @map("created_at")
 
-  tenant     Organization      @relation(fields: [tenantId], references: [id])
-  department Department?       @relation(fields: [departmentId], references: [id])
-  joints     WeldJointWelder[]
-  logs       WeldLog[]
+  tenant              Organization         @relation(fields: [tenantId], references: [id])
+  department          Department?          @relation(fields: [departmentId], references: [id])
+  joints              WeldJointWelder[]
+  logs                WeldLog[]
+  componentOperations ComponentOperation[]
+  assemblySteps       AssemblyStep[]
 
   @@unique([tenantId, employeeCode])
   @@index([tenantId])
@@ -1099,24 +1486,31 @@ model Welder {
 /// number is the printed weld-map id (e.g. LS-1, CS-2, N4-W1) — free text,
 /// not unique, since re-numbering across jobs is a real-world fact of life.
 model WeldJoint {
-  id        Int      @id @default(autoincrement())
-  jobId     Int      @map("job_id")
-  unitId    Int?     @map("unit_id")
-  jointNo   String   @map("joint_no")
-  jointType String   @map("joint_type")
-  weldSize  String?  @map("weld_size")
+  id          Int      @id @default(autoincrement())
+  jobId       Int      @map("job_id")
+  unitId      Int?     @map("unit_id")
+  jointNo     String   @map("joint_no")
+  jointType   String   @map("joint_type")
+  weldSize    String?  @map("weld_size")
   /// §4.7 dialog field: Welding Procedure Specification reference.
-  wpsRef    String?  @map("wps_ref")
-  loggedBy  Int      @map("logged_by")
-  createdAt DateTime @default(now()) @map("created_at")
+  wpsRef      String?  @map("wps_ref")
+  /// Set by whoever logs the joint, not auto-derived from jointNo — DESPL-320's
+  /// spec has no job-agnostic joint-number → component mapping (A3, Phase 2).
+  componentId Int?     @map("component_id")
+  loggedBy    Int      @map("logged_by")
+  createdAt   DateTime @default(now()) @map("created_at")
 
-  job        Job               @relation(fields: [jobId], references: [id])
-  unit       Unit?             @relation(fields: [unitId], references: [id])
-  welders    WeldJointWelder[]
-  ndtResults NdtResult[]
+  job           Job               @relation(fields: [jobId], references: [id])
+  unit          Unit?             @relation(fields: [unitId], references: [id])
+  component     Component?        @relation(fields: [componentId], references: [id])
+  logger        User              @relation(fields: [loggedBy], references: [id])
+  welders       WeldJointWelder[]
+  ndtResults    NdtResult[]
+  assemblySteps AssemblyStep[]
 
   @@index([jobId])
   @@index([unitId])
+  @@index([componentId])
   @@map("weld_joints")
 }
 
@@ -1148,6 +1542,7 @@ model WeldLog {
 
   welder Welder @relation(fields: [welderId], references: [id])
   job    Job    @relation(fields: [jobId], references: [id])
+  logger User   @relation(fields: [loggedBy], references: [id])
 
   @@index([welderId])
   @@index([jobId])
@@ -1172,10 +1567,200 @@ model NdtResult {
 
   weldJoint WeldJoint   @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
   testType  TestTypeRef @relation(fields: [testTypeId], references: [id])
+  recorder  User?       @relation(fields: [recordedBy], references: [id])
 
   @@index([weldJointId])
   @@index([testTypeId])
   @@map("ndt_results")
+}
+
+// ── Assembly tracking (Phase 2 — addendum §2) ────────────────────────────
+// Assembly is a third grain, distinct from the 36-process spine (JobProcess)
+// and component-level fabrication (ComponentOperation): it's the vessel's
+// whole life from document gate to MDR (groups A–Q), not a per-component
+// route. Same three-layer template/version/instance pattern as everything
+// else in this schema (ProcessTemplate→JobProcess, RouteTemplate→
+// ComponentOperation) so a second family's assembly sequence is data, not
+// code — see docs/ADR-product-family-agnostic-platform-v1.md and §0's
+// generality rule in docs/PHASE-PROMPTS.md.
+
+enum AssemblyStepKind {
+  WORK
+  INSPECTION
+}
+
+model AssemblyTemplate {
+  id       Int    @id @default(autoincrement())
+  tenantId Int    @map("tenant_id")
+  familyId Int    @map("family_id")
+  name     String
+
+  tenant   Organization              @relation(fields: [tenantId], references: [id])
+  family   ProductFamily             @relation(fields: [familyId], references: [id])
+  versions AssemblyTemplateVersion[]
+
+  @@index([tenantId])
+  @@index([familyId])
+  @@map("assembly_templates")
+}
+
+model AssemblyTemplateVersion {
+  id          Int            @id @default(autoincrement())
+  templateId  Int            @map("template_id")
+  version     Int
+  status      TemplateStatus @default(DRAFT)
+  publishedAt DateTime?      @map("published_at")
+  notes       String?
+
+  template AssemblyTemplate       @relation(fields: [templateId], references: [id])
+  steps    AssemblyTemplateStep[]
+  jobs     Job[]
+
+  @@unique([templateId, version])
+  @@index([templateId])
+  @@map("assembly_template_versions")
+}
+
+/// One row per printed A–Q checkpoint, authored once per family from the
+/// QAP (spec §2). `kind` is the QAP-conflation split (addendum §2): the same
+/// sr no often contains both work and its inspection as separate printed
+/// lines, and this schema keeps them as separate rows/steps, matching the
+/// spec document's own row-per-checkpoint layout.
+model AssemblyTemplateStep {
+  id                  Int              @id @default(autoincrement())
+  versionId           Int              @map("version_id")
+  seq                 Int
+  groupCode           String           @map("group_code")
+  groupName           String           @map("group_name")
+  /// Printed QAP reference, e.g. "4.5" — deliberately not unique (same
+  /// discipline as QcpItem.srNo: several rows share one sr no).
+  srNo                String           @map("sr_no")
+  activity            String
+  kind                AssemblyStepKind
+  defaultDepartmentId Int              @map("default_department_id")
+  /// Resolves to QcpItem.srNo at materialisation — match-by-code, never by
+  /// id, the same discipline cloneQcpTemplate already uses so it survives
+  /// QCP renumbering across template versions.
+  qcpSrNo             String?          @map("qcp_sr_no")
+  /// Printed weld-map reference ("LS-1", "CS-2", ...), set only on the six
+  /// weld groups (E/G/H/J/K/L per spec §3). Not a WeldJoint FK — the actual
+  /// joint doesn't exist until the floor logs it against this step.
+  jointRef            String?          @map("joint_ref")
+  /// Which of the 36 lead-time processes (`JobProcess.code`, as a number)
+  /// this assembly step rolls up into — same mapping OperationRef carries
+  /// for fabrication (Phase 3, addendum §3). Null where the step has no
+  /// 1:1 spine process (author it on the template, never in code).
+  leadTimeProcessSeq  Int?             @map("lead_time_process_seq")
+
+  version           AssemblyTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  defaultDepartment Department              @relation(fields: [defaultDepartmentId], references: [id])
+  steps             AssemblyStep[]
+
+  @@unique([versionId, seq])
+  @@index([versionId])
+  @@index([defaultDepartmentId])
+  @@map("assembly_template_steps")
+}
+
+/// Materialised per unit from the job's pinned AssemblyTemplateVersion, the
+/// same way ProcessPlan/ComponentOperation are — reuses OperationStatus and
+/// F8's generic assertStateTransition (see assembly.service.ts).
+model AssemblyStep {
+  id                  Int             @id @default(autoincrement())
+  unitId              Int             @map("unit_id")
+  templateStepId      Int             @map("template_step_id")
+  seq                 Int
+  status              OperationStatus @default(NOT_STARTED)
+  /// SERVER CLOCK ONLY (invariant #1)
+  startedAt           DateTime?       @map("started_at")
+  /// SERVER CLOCK ONLY (invariant #1)
+  finishedAt          DateTime?       @map("finished_at")
+  performedByWelderId Int?            @map("performed_by_welder_id")
+  performedByUserId   Int?            @map("performed_by_user_id")
+  submittedBy         Int?            @map("submitted_by")
+  verifiedBy          Int?            @map("verified_by")
+  /// Bound as the joint is logged (WORK weld steps only).
+  weldJointId         Int?            @map("weld_joint_id")
+  /// Bound at materialisation by qcpSrNo match (INSPECTION steps that map to
+  /// a real QcpItem — links the hold/witness points assertNoOpenHoldPoint
+  /// already enforces, no change needed there).
+  qcpItemId           Int?            @map("qcp_item_id")
+  remarks             String?
+
+  unit              Unit                    @relation(fields: [unitId], references: [id])
+  templateStep      AssemblyTemplateStep    @relation(fields: [templateStepId], references: [id])
+  weldJoint         WeldJoint?              @relation(fields: [weldJointId], references: [id])
+  qcpItem           QcpItem?                @relation(fields: [qcpItemId], references: [id])
+  performedByWelder Welder?                 @relation(fields: [performedByWelderId], references: [id])
+  performedByUser   User?                   @relation(fields: [performedByUserId], references: [id])
+  submitter         User?                   @relation("AssemblyStepSubmittedBy", fields: [submittedBy], references: [id])
+  verifier          User?                   @relation("AssemblyStepVerifiedBy", fields: [verifiedBy], references: [id])
+  rejections        AssemblyStepRejection[]
+
+  @@unique([unitId, seq])
+  @@index([unitId])
+  @@index([templateStepId])
+  @@index([status])
+  @@index([weldJointId])
+  @@index([qcpItemId])
+  @@index([performedByWelderId])
+  @@index([performedByUserId])
+  @@map("assembly_steps")
+}
+
+/// Mirrors ComponentOperationRejection (F5) — same durable-reason pattern,
+/// same DelayCategoryRef taxonomy, for the assembly grain's reject flow.
+model AssemblyStepRejection {
+  id             Int      @id @default(autoincrement())
+  assemblyStepId Int      @map("assembly_step_id")
+  categoryId     Int      @map("category_id")
+  detail         String?
+  rejectedBy     Int      @map("rejected_by")
+  rejectedAt     DateTime @default(now()) @map("rejected_at")
+
+  assemblyStep AssemblyStep     @relation(fields: [assemblyStepId], references: [id], onDelete: Cascade)
+  category     DelayCategoryRef @relation(fields: [categoryId], references: [id])
+  rejector     User             @relation(fields: [rejectedBy], references: [id])
+  ncr          Ncr?
+
+  @@index([assemblyStepId])
+  @@index([categoryId])
+  @@map("assembly_step_rejections")
+}
+
+/// N1 — layered on top of ComponentOperationRejection/AssemblyStepRejection,
+/// not a replacement: the rejection row is the immutable "why reopened"
+/// record (F5); Ncr is the disposition/rework workflow that follows it.
+/// Exactly one of componentOperationRejectionId/assemblyStepRejectionId is
+/// set — enforced by a raw CHECK constraint added in this task's migration
+/// (Prisma has no native XOR-column support), plus an app-level assert in
+/// ncr.service.ts (Task 2).
+model Ncr {
+  id                            Int             @id @default(autoincrement())
+  componentOperationRejectionId Int?            @unique @map("component_operation_rejection_id")
+  assemblyStepRejectionId       Int?            @unique @map("assembly_step_rejection_id")
+  status                        NcrStatus       @default(OPEN)
+  disposition                   NcrDisposition?
+  dispositionedBy               Int?            @map("dispositioned_by")
+  dispositionedAt               DateTime?       @map("dispositioned_at")
+  dispositionNotes              String?         @map("disposition_notes")
+  reworkOwnerId                 Int?            @map("rework_owner_id")
+  reworkDueDate                 DateTime?       @map("rework_due_date")
+  /// SERVER CLOCK ONLY (invariant #1) — stamped by Task 2's start/submit hooks.
+  reworkStartedAt               DateTime?       @map("rework_started_at")
+  /// SERVER CLOCK ONLY (invariant #1)
+  reworkFinishedAt              DateTime?       @map("rework_finished_at")
+  closedBy                      Int?            @map("closed_by")
+  closedAt                      DateTime?       @map("closed_at")
+
+  componentOperationRejection ComponentOperationRejection? @relation(fields: [componentOperationRejectionId], references: [id], onDelete: Cascade)
+  assemblyStepRejection       AssemblyStepRejection?       @relation(fields: [assemblyStepRejectionId], references: [id], onDelete: Cascade)
+  dispositionedByUser         User?                        @relation("NcrDispositionedBy", fields: [dispositionedBy], references: [id])
+  reworkOwner                 User?                        @relation("NcrReworkOwner", fields: [reworkOwnerId], references: [id])
+  closedByUser                User?                        @relation("NcrClosedBy", fields: [closedBy], references: [id])
+
+  @@index([status])
+  @@map("ncrs")
 }
 
 // ── QCP / ITP engine (dynamic parties, per-project code sets) ───────────
@@ -1232,10 +1817,11 @@ model QcpItem {
   record             String?
   remarks            String?
 
-  qcpTemplate  QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
-  partyCodes   QcpItemPartyCode[]
-  executions   QcpExecution[]
-  processLinks QcpItemProcess[]
+  qcpTemplate   QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
+  partyCodes    QcpItemPartyCode[]
+  executions    QcpExecution[]
+  processLinks  QcpItemProcess[]
+  assemblySteps AssemblyStep[]
 
   @@unique([qcpTemplateId, sequence])
   @@index([qcpTemplateId])
@@ -1291,6 +1877,8 @@ model QcpExecution {
 
   qcpItem QcpItem @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   unit    Unit    @relation(fields: [unitId], references: [id])
+  clearer User?   @relation("QcpExecutionClearedBy", fields: [clearedBy], references: [id])
+  waiver  User?   @relation("QcpExecutionWaiverApprovedBy", fields: [waiverApprovedBy], references: [id])
 
   @@unique([qcpItemId, unitId, attemptNo])
   @@index([qcpItemId])
@@ -1302,23 +1890,50 @@ model QcpExecution {
 // ── Drawings ────────────────────────────────────────────────────────────
 
 model AssemblyDrawing {
-  id            Int           @id @default(autoincrement())
-  jobId         Int           @map("job_id")
-  drawingTypeId Int           @map("drawing_type_id")
-  drawingNo     String?       @map("drawing_no")
-  revisionNo    String?       @map("revision_no")
-  status        DrawingStatus @default(DRAFT)
-  approvedDate  DateTime?     @map("approved_date")
-  releasedDate  DateTime?     @map("released_date")
-  revisedDate   DateTime?     @map("revised_date")
+  id            Int     @id @default(autoincrement())
+  jobId         Int     @map("job_id")
+  drawingTypeId Int     @map("drawing_type_id")
+  drawingNo     String? @map("drawing_no")
   remarks       String?
 
-  job         Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  drawingType DrawingTypeRef @relation(fields: [drawingTypeId], references: [id])
+  job                 Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  drawingType         DrawingTypeRef    @relation(fields: [drawingTypeId], references: [id])
+  revisions           DrawingRevision[]
+  governingComponents Component[]       @relation("ComponentGoverningDrawing")
 
   @@index([jobId])
   @@index([drawingTypeId])
   @@map("assembly_drawings")
+}
+
+/// B9, Phase 4: revisionNo/status/dates used to be flat, overwritten fields
+/// on `AssemblyDrawing` — mutating them in place destroyed the prior
+/// revision, violating invariant #9 (versioned things are never edited in
+/// place). Each revision is now its own row; issuing Rev B flips a prior
+/// RELEASED revision to SUPERSEDED (drawing.service.ts's
+/// `createDrawingRevision`) rather than overwriting it. The current
+/// revision for a drawing is the one with the highest `revisionNo`.
+model DrawingRevision {
+  id                Int           @id @default(autoincrement())
+  assemblyDrawingId Int           @map("assembly_drawing_id")
+  revisionNo        Int           @map("revision_no")
+  status            DrawingStatus @default(DRAFT)
+  /// Task review Important: AssemblyDrawing's old approved_date/revised_date
+  /// moved here rather than being dropped — the brief's own wording ("moved
+  /// onto the revision rows") plus real seed data (e.g. DE0463-001) carrying
+  /// both. Set at seed/authoring time; not stamped by the CUTTING gate the
+  /// way releasedAt effectively is via createDrawingRevision.
+  approvedAt        DateTime?     @map("approved_at")
+  revisedAt         DateTime?     @map("revised_at")
+  releasedAt        DateTime?     @map("released_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  assemblyDrawing   AssemblyDrawing @relation(fields: [assemblyDrawingId], references: [id], onDelete: Cascade)
+  builtByComponents Component[]     @relation("ComponentBuiltToRevision")
+
+  @@unique([assemblyDrawingId, revisionNo])
+  @@index([assemblyDrawingId])
+  @@map("drawing_revisions")
 }
 
 /// Staged/partial dispatch dates for a single job. Found on DE0463 (QTY-40
@@ -1328,18 +1943,41 @@ model AssemblyDrawing {
 /// still holds the tracker's own "Dispatch Date" field (the first batch);
 /// this table is purely additive.
 model DispatchBatch {
-  id          Int      @id @default(autoincrement())
-  jobId       Int      @map("job_id")
-  seq         Int
-  plannedDate DateTime @map("planned_date")
-  qty         Int?
-  remarks     String?
+  id                 Int       @id @default(autoincrement())
+  jobId              Int       @map("job_id")
+  seq                Int
+  plannedDate        DateTime  @map("planned_date")
+  qty                Int?
+  remarks            String?
+  dispatchNoteNo     String?   @map("dispatch_note_no")
+  gatePassNo         String?   @map("gate_pass_no")
+  vehicleNo          String?   @map("vehicle_no")
+  lrNo               String?   @map("lr_no")
+  releaseApprovedBy  Int?      @map("release_approved_by")
+  releaseApprovedAt  DateTime? @map("release_approved_at")
+  /// SERVER CLOCK ONLY (invariant #1)
+  actualDispatchDate DateTime? @map("actual_dispatch_date")
 
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job                   Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  releaseApprovedByUser User?               @relation("DispatchBatchReleaseApprovedBy", fields: [releaseApprovedBy], references: [id])
+  dispatchBatchUnits    DispatchBatchUnit[]
 
   @@unique([jobId, seq])
   @@index([jobId])
   @@map("dispatch_batches")
+}
+
+model DispatchBatchUnit {
+  id              Int @id @default(autoincrement())
+  dispatchBatchId Int @map("dispatch_batch_id")
+  unitId          Int @map("unit_id")
+
+  dispatchBatch DispatchBatch @relation(fields: [dispatchBatchId], references: [id], onDelete: Cascade)
+  unit          Unit          @relation(fields: [unitId], references: [id])
+
+  @@unique([dispatchBatchId, unitId])
+  @@index([dispatchBatchId])
+  @@map("dispatch_batch_units")
 }
 
 // ── Delay, notifications ────────────────────────────────────────────────
@@ -1356,6 +1994,8 @@ model DelayReason {
 
   processPlan ProcessPlan      @relation(fields: [processPlanId], references: [id], onDelete: Cascade)
   category    DelayCategoryRef @relation(fields: [categoryId], references: [id])
+  filer       User             @relation("DelayReasonFiledBy", fields: [filedBy], references: [id])
+  reviewer    User?            @relation("DelayReasonReviewedBy", fields: [reviewedBy], references: [id])
 
   @@index([processPlanId])
   @@index([categoryId])
@@ -1437,6 +2077,8 @@ model ProgressSnapshot {
   job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
   equipment Equipment?   @relation(fields: [equipmentId], references: [id])
   unit      Unit?        @relation(fields: [unitId], references: [id])
+  publisher User?        @relation("ProgressSnapshotPublishedBy", fields: [publishedBy], references: [id])
+  verifier  User?        @relation("ProgressSnapshotVerifiedBy", fields: [verifiedBy], references: [id])
 
   // Postgres treats NULL as distinct in a unique index, so this constraint gives no
   // duplicate protection when unitId is null (equipment/job-grain rollups) — not

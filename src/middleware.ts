@@ -13,17 +13,33 @@ import { jwtVerify } from "jose";
  */
 const PUBLIC_PATHS = ["/login", "/api/health"];
 
+// A failure is only findable in logs "by request id" (Phase 0 acceptance) if
+// every request has one before it reaches a route handler — stamped here,
+// once, rather than each handler generating its own (or, worse, none).
+function withRequestId(request: NextRequest): { headers: Headers; requestId: string } {
+  const requestId = request.headers.get("x-request-id") ?? crypto.randomUUID();
+  const headers = new Headers(request.headers);
+  headers.set("x-request-id", requestId);
+  return { headers, requestId };
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const { headers, requestId } = withRequestId(request);
+
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-    return NextResponse.next();
+    const res = NextResponse.next({ request: { headers } });
+    res.headers.set("x-request-id", requestId);
+    return res;
   }
 
   const token = request.cookies.get("despl_session")?.value;
   if (token) {
     try {
       await jwtVerify(token, new TextEncoder().encode(process.env.AUTH_SECRET));
-      return NextResponse.next();
+      const res = NextResponse.next({ request: { headers } });
+      res.headers.set("x-request-id", requestId);
+      return res;
     } catch {
       // fall through to redirect
     }
@@ -33,7 +49,7 @@ export async function middleware(request: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(
       { error: { code: "UNAUTHENTICATED", message: "Please sign in." } },
-      { status: 401 },
+      { status: 401, headers: { "x-request-id": requestId } },
     );
   }
 

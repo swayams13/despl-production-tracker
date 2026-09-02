@@ -433,15 +433,9 @@ export function AppShell({
           </div>
 
           <div className="right">
-            <button className="kbd" onClick={() => toast("Command palette (⌘K) wires up in a later session")}>
-              ⌘K&nbsp;&nbsp;Search
-            </button>
-            {/* One button, two of the three positions: the phone top bar
-                (48×48 touch target, Task 4) and — new here — the desktop
-                topbar, sized like .kbd next to it. A literal second element
-                would just be two theme buttons in the same bar; CSS decides
-                which sizing applies, and the tablet band hides it in favour
-                of the rail's copy. */}
+            {/* Phase 6 (U7) is where a real ⌘K command palette lands — until
+                then no control renders here rather than one that does nothing
+                (CLAUDE.md "no dead controls", audit §8 item 6). */}
             <button
               type="button"
               className="topbar-theme"

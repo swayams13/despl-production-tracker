@@ -70,13 +70,140 @@ export type VerifyProcessInput = z.infer<typeof verifyProcessSchema>;
 export const startComponentOperationSchema = z.object({ componentOperationId: id }).strict();
 export type StartComponentOperationInput = z.infer<typeof startComponentOperationSchema>;
 
-/** Submit a component operation for QC verification (maker step). */
-export const submitComponentOperationSchema = z.object({ componentOperationId: id }).strict();
+/**
+ * Submit a component operation for QC verification (maker step). Optionally
+ * records who performed the work (F3) and quantities (F4) — both are open
+ * questions with the floor (F-d/F-c, spec §4), so every field here stays
+ * optional; submit still succeeds with none of them set.
+ */
+export const submitComponentOperationSchema = z
+  .object({
+    componentOperationId: id,
+    performedByWelderId: id.nullish(),
+    performedByUserId: id.nullish(),
+    remarks: z.string().trim().max(2000).optional(),
+    qtyPlanned: z.number().int().nonnegative().nullish(),
+    qtyGood: z.number().int().nonnegative().nullish(),
+    qtyRejected: z.number().int().nonnegative().nullish(),
+  })
+  .strict();
 export type SubmitComponentOperationInput = z.infer<typeof submitComponentOperationSchema>;
 
 /** Verify a submitted component operation (checker step, maker-checker enforced in the service). */
 export const verifyComponentOperationSchema = z.object({ componentOperationId: id }).strict();
 export type VerifyComponentOperationInput = z.infer<typeof verifyComponentOperationSchema>;
+
+/**
+ * F5 — QC rejects a submitted component operation back to the maker. Same
+ * shape as `fileDelayReasonSchema`'s categorised reason: `ComponentOperationRejection`
+ * reuses `DelayCategoryRef` rather than a parallel taxonomy.
+ */
+export const rejectComponentOperationSchema = z
+  .object({ componentOperationId: id, categoryId: id, detail: z.string().trim().optional() })
+  .strict();
+export type RejectComponentOperationInput = z.infer<typeof rejectComponentOperationSchema>;
+
+// ── Paint / DFT (Phase 5, P1) ────────────────────────────────────────────
+
+/** Records the coating system for a PAINTING ComponentOperation (1:1, upsertable). */
+export const recordPaintRecordSchema = z
+  .object({ componentOperationId: id, coatingSystem: z.string().trim().min(1), coatsPlanned: id.optional() })
+  .strict();
+export type RecordPaintRecordInput = z.infer<typeof recordPaintRecordSchema>;
+
+/**
+ * Records a single DFT reading. `accepted` is self-attested by whoever
+ * records it — no spec'd min/max micron range exists to check against
+ * automatically (open question, plan cover note; see PaintRecord/DftReading
+ * schema comment).
+ */
+export const recordDftReadingSchema = z
+  .object({
+    componentOperationId: id,
+    coatNumber: id.optional(),
+    location: z.string().trim().optional(),
+    readingMicrons: id,
+    accepted: z.boolean(),
+  })
+  .strict();
+export type RecordDftReadingInput = z.infer<typeof recordDftReadingSchema>;
+
+// ── AssemblyStep (Phase 2 — A6) ──────────────────────────────────────────
+
+/** Start an assembly step. */
+export const startAssemblyStepSchema = z.object({ assemblyStepId: id }).strict();
+export type StartAssemblyStepInput = z.infer<typeof startAssemblyStepSchema>;
+
+/**
+ * Submit an assembly step for QC verification (maker step). For a WORK step
+ * whose template step carries a `jointRef` (the three single-joint weld
+ * groups — LS-1/CS-2/CS-1), submission must bind a WeldJoint: either an
+ * already-logged one (`weldJointId`) or inline fields to create one now
+ * (`newJoint`) — never both, and the service refuses a jointRef step
+ * submitted with neither. Steps with no `jointRef` ignore both fields.
+ */
+export const submitAssemblyStepSchema = z
+  .object({
+    assemblyStepId: id,
+    performedByWelderId: id.nullish(),
+    performedByUserId: id.nullish(),
+    remarks: z.string().trim().max(2000).optional(),
+    weldJointId: id.optional(),
+    newJoint: z
+      .object({
+        jointNo: z.string().trim().min(1, "Joint number is required"),
+        jointType: z.string().trim().min(1, "Joint type is required"),
+        weldSize: z.string().trim().optional(),
+        wpsRef: z.string().trim().optional(),
+        welderIds: z.array(id).min(1, "At least one welder is required"),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine((v) => !(v.weldJointId != null && v.newJoint != null), {
+    message: "Provide either an existing weldJointId or newJoint fields, not both.",
+  });
+export type SubmitAssemblyStepInput = z.infer<typeof submitAssemblyStepSchema>;
+
+/** Verify a submitted assembly step (checker step, maker-checker enforced in the service). */
+export const verifyAssemblyStepSchema = z.object({ assemblyStepId: id }).strict();
+export type VerifyAssemblyStepInput = z.infer<typeof verifyAssemblyStepSchema>;
+
+/**
+ * QC rejects a submitted assembly step back to the maker. Mirrors
+ * rejectComponentOperationSchema's categorised-reason shape. `testTypeId` is
+ * optional and only meaningful when the step has a bound `weldJointId` — the
+ * service then also records an NdtResult(result: REJECT) against that
+ * joint's welder(s), so the reject shows in welding.read.ts's repair-rate
+ * calc in the same action, not a second one.
+ */
+export const rejectAssemblyStepSchema = z
+  .object({
+    assemblyStepId: id,
+    categoryId: id,
+    detail: z.string().trim().optional(),
+    testTypeId: id.optional(),
+  })
+  .strict();
+export type RejectAssemblyStepInput = z.infer<typeof rejectAssemblyStepSchema>;
+
+/**
+ * QC dispositions an open NCR (Phase 5, N1/N2). `reworkOwnerId`/`reworkDueDate`
+ * only make sense for REWORK/REPAIR; the service does not require them even
+ * then (F-c precedent — floor-assignment details stay optional here the same
+ * way F3/F4 fields do on submit).
+ */
+export const dispositionNcrSchema = z
+  .object({
+    ncrId: id,
+    disposition: z.enum(["USE_AS_IS", "REPAIR", "REWORK", "SCRAP", "CONCESSION"]),
+    notes: z.string().trim().max(2000).optional(),
+    reworkOwnerId: id.optional(),
+    reworkDueDate: z.coerce.date().optional(),
+  })
+  .strict();
+export type DispositionNcrInput = z.infer<typeof dispositionNcrSchema>;
 
 /** Put a process plan ON_HOLD with a recorded reason. */
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
@@ -101,12 +228,81 @@ export type RecordQcpExecutionInput = z.infer<typeof recordQcpExecutionSchema>;
 export const recordMtcSchema = z
   .object({
     bomItemId: id,
+    /** B8, Phase 4: which serial this heat entered — optional, since
+     * equipment with no per-unit `Component` fan-out has none to attach to. */
+    componentId: id.optional(),
     heatNumber: z.string().trim().min(1, "Heat number is required"),
     mtcRef: z.string().trim().optional(),
     pmiResult: z.enum(["NA", "PENDING", "ACCEPT", "REJECT"]),
+    /** B8, Phase 4: how much of this heat went into this component. */
+    qtyIssued: z.number().positive().optional(),
   })
   .strict();
 export type RecordMtcInput = z.infer<typeof recordMtcSchema>;
+
+/**
+ * Log a procurement event (indent/PO/receipt) against a BOM item (B5, Phase
+ * 4). `qty` is required on RECEIPT (how much arrived) and forbidden on the
+ * other three types (they don't carry a quantity) — `.refine()` for the
+ * cross-field rule, same style as `submitAssemblyStepSchema`'s
+ * weldJointId/newJoint mutual-exclusion check above.
+ */
+export const recordProcurementEventSchema = z
+  .object({
+    bomItemId: id,
+    type: z.enum(["INDENT_RAISED", "INDENT_APPROVED", "PO_PLACED", "RECEIPT"]),
+    qty: z.number().positive().optional(),
+    refNo: z.string().trim().min(1).optional(),
+  })
+  .strict()
+  .refine((v) => (v.type === "RECEIPT" ? v.qty != null : v.qty == null), {
+    message: "qty is required on a RECEIPT event, and not allowed on any other event type.",
+  });
+export type RecordProcurementEventInput = z.infer<typeof recordProcurementEventSchema>;
+
+/**
+ * Issue a new `DrawingRevision` for an `AssemblyDrawing` (B9, Phase 4).
+ * `revisionNo` is a plain increasing integer (Rev 1, Rev 2, ...), same shape
+ * as `BomRevision.revisionNo`. `status` is caller-supplied rather than
+ * always RELEASED — a revision can be issued as DRAFT (still being checked)
+ * without gating anything yet; only a RELEASED current revision clears the
+ * CUTTING gate. SUPERSEDED is not accepted here — that transition happens
+ * only as a side effect of a later revision's own creation
+ * (drawing.service.ts's `createDrawingRevision`), never chosen directly.
+ */
+export const createDrawingRevisionSchema = z
+  .object({
+    assemblyDrawingId: id,
+    revisionNo: z.number().int().positive(),
+    status: z.enum(["DRAFT", "RELEASED"]),
+  })
+  .strict();
+export type CreateDrawingRevisionInput = z.infer<typeof createDrawingRevisionSchema>;
+
+/** Receive a lot of stock against a BOM item (B6, Phase 4) — creates a `StockLot`. */
+export const receiveStockSchema = z
+  .object({
+    bomItemId: id,
+    heatNumber: z.string().trim().min(1).optional(),
+    location: z.string().trim().min(1, "Location is required"),
+    qty: z.number().positive(),
+    sourceProcurementEventId: id.optional(),
+  })
+  .strict();
+export type ReceiveStockInput = z.infer<typeof receiveStockSchema>;
+
+/** Move stock against an existing `StockLot` — issue to a component, return, or scrap.
+ * One shared shape for all three (same near-identical-mutation-family convention as
+ * `recordProcurementEventSchema`); `type` is supplied by the thin service function, not the caller. */
+export const issueStockSchema = z
+  .object({
+    stockLotId: id,
+    qty: z.number().positive(),
+    componentId: id.optional(),
+    note: z.string().trim().optional(),
+  })
+  .strict();
+export type IssueStockInput = z.infer<typeof issueStockSchema>;
 
 /** File the categorised delay reason invariant #7 requires to unblock a dept. */
 export const fileDelayReasonSchema = z
@@ -119,6 +315,8 @@ export const logWeldJointSchema = z
   .object({
     jobId: id,
     unitId: id.nullish(),
+    /** A3 (Phase 2): set by whoever logs the joint, not auto-derived. */
+    componentId: id.nullish(),
     jointNo: z.string().trim().min(1, "Joint number is required"),
     jointType: z.string().trim().min(1, "Joint type is required"),
     weldSize: z.string().trim().optional(),
@@ -148,6 +346,9 @@ export const createUserSchema = z
       .min(1, "At least one role is required"),
     departmentIds: z.array(id).default([]),
     password: z.string().min(8, "Password must be at least 8 characters"),
+    // Defaults true (force a change on first login). Only an admin creating
+    // a deliberately shared/interim credential should ever pass false.
+    mustChangePassword: z.boolean().default(true),
   })
   .strict();
 export type CreateUserInput = z.infer<typeof createUserSchema>;
@@ -425,6 +626,29 @@ export const updateEquipmentTypeSchema = z
   .strict();
 export type UpdateEquipmentTypeInput = z.infer<typeof updateEquipmentTypeSchema>;
 
+// ── Welder registry (Phase 2 — A5) ──────────────────────────────────────
+
+export const createWelderSchema = z
+  .object({
+    name: z.string().trim().min(1, "A name is required"),
+    employeeCode: z.string().trim().min(1, "An employee code is required"),
+    departmentId: id.nullable().default(null),
+  })
+  .strict();
+export type CreateWelderInput = z.infer<typeof createWelderSchema>;
+
+/** Deactivate rather than delete — set active: false (Component/Assembly rows reference welders, invariant #6). */
+export const updateWelderSchema = z
+  .object({
+    id,
+    name: z.string().trim().min(1).optional(),
+    employeeCode: z.string().trim().min(1).optional(),
+    departmentId: id.nullable().optional(),
+    active: z.boolean().optional(),
+  })
+  .strict();
+export type UpdateWelderInput = z.infer<typeof updateWelderSchema>;
+
 /** Inline client creation from the intake wizard. Name + optional code only. */
 export const createClientSchema = z
   .object({
@@ -525,3 +749,197 @@ export const updateJobDatesSchema = z
     },
   );
 export type UpdateJobDatesInput = z.infer<typeof updateJobDatesSchema>;
+
+/**
+ * Revise a job's own descriptive/reference fields after creation (client PO
+ * changed, project renamed, priority bumped, …). Deliberately excludes
+ * clientId/familyId/templateVersionId/equipments — those are structural and
+ * ripple through the route, BOM and unit graph createJob() builds; changing
+ * them isn't a "revision," it's a different job. Same `.strict()` +
+ * no-actual_* rule as every other request schema here.
+ */
+export const updateJobDetailsSchema = z
+  .object({
+    jobId: id,
+    clientOrderNo: z.string().trim().min(1).nullable().default(null),
+    projectName: z.string().trim().min(1).nullable().default(null),
+    poRef: z.string().trim().min(1).nullable().default(null),
+    designCode: z.string().trim().min(1).nullable().default(null),
+    priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]),
+    remarks: z.string().trim().min(1).nullable().default(null),
+  })
+  .strict();
+export type UpdateJobDetailsInput = z.infer<typeof updateJobDetailsSchema>;
+
+/**
+ * Manual BOM authoring (B4, Phase 4) — first direct writer of `BomItem`
+ * besides `copyBom`. `parentBomItemId`'s cycle check needs a DB read (walking
+ * the equipment's existing parent chain) and so lives in `bom.service.ts`,
+ * not here — this schema only validates shape.
+ */
+export const createBomItemSchema = z
+  .object({
+    equipmentId: id,
+    itemNo: z.number().int().positive(),
+    blockNo: z.number().int().positive().optional(),
+    partName: z.string().trim().min(1, "Part name is required"),
+    description: z.string().trim().min(1).optional(),
+    material: z.string().trim().min(1).optional(),
+    /** Raw source value, e.g. "40 NOS." — kept verbatim, same as the CSV import path (`BomItem.sourceQty`). */
+    sourceQty: z.string().trim().min(1, "Quantity is required"),
+    qtyPer: z.number().positive().optional(),
+    uom: z.string().trim().min(1).optional(),
+    unit: z.string().trim().min(1).optional(),
+    componentTypeId: id.optional(),
+    remarks: z.string().trim().min(1).optional(),
+    parentBomItemId: id.optional(),
+    bomRevisionId: id.optional(),
+  })
+  .strict();
+export type CreateBomItemInput = z.infer<typeof createBomItemSchema>;
+
+/**
+ * Edit an existing `BomItem` — every field optional; `equipmentId` is not
+ * editable here (moving a row to a different equipment isn't "editing," see
+ * `updateJobDetailsSchema`'s equivalent exclusion of structural fields).
+ *
+ * Task review Important #2: every nullable-in-the-DB field is `.nullable()`
+ * here too, not just `.optional()` — `undefined` (key omitted) means "leave
+ * this field alone," `null` (key present, value null) means "clear it."
+ * Collapsing those to one `optional()` made clearing `parentBomItemId` (or
+ * any other nullable field) silently no-op: the UI's "no parent" choice sent
+ * `undefined`, Prisma's `update` omits an undefined key entirely, and the
+ * row came back unchanged while the caller still saw success. `itemNo`/
+ * `partName`/`sourceQty` stay non-nullable — they're `NOT NULL` columns, so
+ * "clear" isn't a valid state for them; only "leave alone" (omit) or "set to
+ * a new value" apply.
+ */
+export const updateBomItemSchema = z
+  .object({
+    itemNo: z.number().int().positive().optional(),
+    blockNo: z.number().int().positive().nullable().optional(),
+    partName: z.string().trim().min(1, "Part name is required").optional(),
+    description: z.string().trim().min(1).nullable().optional(),
+    material: z.string().trim().min(1).nullable().optional(),
+    sourceQty: z.string().trim().min(1, "Quantity is required").optional(),
+    qtyPer: z.number().positive().nullable().optional(),
+    uom: z.string().trim().min(1).nullable().optional(),
+    unit: z.string().trim().min(1).nullable().optional(),
+    componentTypeId: id.nullable().optional(),
+    remarks: z.string().trim().min(1).nullable().optional(),
+    parentBomItemId: id.nullable().optional(),
+    bomRevisionId: id.nullable().optional(),
+  })
+  .strict();
+export type UpdateBomItemInput = z.infer<typeof updateBomItemSchema>;
+
+/**
+ * One row of a bulk BOM import (CSV/XLSX). Validated per-row in
+ * `bom.service.ts`'s `importBomItems` so one malformed row is reported by
+ * name rather than aborting or silently dropping the whole batch.
+ * `z.coerce` on the numeric fields — spreadsheet cells commonly arrive as
+ * strings even when they read as numbers.
+ *
+ * Task review Important #1: NOT `.strict()`. The real BOM data this app
+ * seeds from (`seed/despl-320-bom-items.json`, read by
+ * `scripts/seed-despl320-bom.ts`) is shaped `{itemNo, partName, description,
+ * material, qty, unit, remarks}` — note `qty`, not `sourceQty` — and a real
+ * workbook export routinely carries extra columns (a serial/notes column, a
+ * drawing ref) this schema doesn't model at all. `bom.service.ts`'s
+ * `importBomItems` normalizes each row's keys (case/space-insensitive,
+ * aliasing `qty`/`quantity` → `sourceQty` etc.) before this schema ever sees
+ * it; staying non-strict here means a column that survives normalization
+ * unrecognized is quietly dropped rather than failing the whole row.
+ */
+export const bomImportRowSchema = z.object({
+  itemNo: z.coerce.number().int().positive(),
+  blockNo: z.coerce.number().int().positive().optional(),
+  partName: z.string().trim().min(1, "Part name is required"),
+  description: z.string().trim().min(1).optional(),
+  material: z.string().trim().min(1).optional(),
+  sourceQty: z.coerce.string().trim().min(1, "Quantity is required"),
+  qtyPer: z.coerce.number().positive().optional(),
+  uom: z.string().trim().min(1).optional(),
+  unit: z.string().trim().min(1).optional(),
+  remarks: z.string().trim().min(1).optional(),
+  parentBomItemId: z.coerce.number().int().positive().optional(),
+});
+export type BomImportRow = z.infer<typeof bomImportRowSchema>;
+
+export const importBomItemsSchema = z
+  .object({
+    equipmentId: id,
+    bomRevisionId: id.optional(),
+    /** Raw, per-row validation happens in the service (`bomImportRowSchema.safeParse`
+     * per row) — kept as `z.unknown()` here so one malformed row doesn't fail this
+     * top-level parse and silently discard every other (valid) row in the batch. */
+    rows: z.array(z.unknown()).min(1, "At least one row is required"),
+  })
+  .strict();
+export type ImportBomItemsInput = z.infer<typeof importBomItemsSchema>;
+
+/** Issue a new `BomRevision` for an equipment (B4, Phase 4 — the create-path
+ * B3 deferred). `BomRevisionStatus` is DRAFT/RELEASED only — no SUPERSEDED
+ * concept — see `bom.service.ts`'s `createBomRevision` for how supersession
+ * is handled with that narrower enum. */
+export const createBomRevisionSchema = z
+  .object({
+    equipmentId: id,
+    revisionNo: z.number().int().positive(),
+    status: z.enum(["DRAFT", "RELEASED"]),
+  })
+  .strict();
+export type CreateBomRevisionInput = z.infer<typeof createBomRevisionSchema>;
+
+// ── Packing / dispatch (Phase 5, D1/D2/D3) ──────────────────────────────
+
+/** D1 — creates a Package a Unit can later be assigned into. */
+export const createPackageSchema = z
+  .object({
+    jobId: id,
+    packageNo: z.string().trim().min(1, "Package number is required"),
+    weightKg: z.number().positive().optional(),
+    lengthMm: z.number().int().positive().optional(),
+    widthMm: z.number().int().positive().optional(),
+    heightMm: z.number().int().positive().optional(),
+    preservationNotes: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type CreatePackageInput = z.infer<typeof createPackageSchema>;
+
+/** D1 — assigns a Unit into a Package; both must share the same job. */
+export const assignUnitToPackageSchema = z.object({ packageId: id, unitId: id }).strict();
+export type AssignUnitToPackageInput = z.infer<typeof assignUnitToPackageSchema>;
+
+/** D2 — creates a DispatchBatch (starts life PLANNED — no releaseApprovedAt yet). */
+export const createDispatchBatchSchema = z
+  .object({
+    jobId: id,
+    seq: z.number().int().positive(),
+    plannedDate: z.coerce.date(),
+    remarks: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type CreateDispatchBatchInput = z.infer<typeof createDispatchBatchSchema>;
+
+/** D2 — adds a Unit to a batch; the unit must already be packed (packageId set). */
+export const addUnitToBatchSchema = z.object({ dispatchBatchId: id, unitId: id }).strict();
+export type AddUnitToBatchInput = z.infer<typeof addUnitToBatchSchema>;
+
+/** D3 — Production-Head-only release approval. No `releaseApprovedAt` field:
+ * that timestamp is server-clock only (invariant #1). */
+export const approveDispatchReleaseSchema = z
+  .object({
+    dispatchBatchId: id,
+    dispatchNoteNo: z.string().trim().min(1).optional(),
+    gatePassNo: z.string().trim().min(1).optional(),
+    vehicleNo: z.string().trim().min(1).optional(),
+    lrNo: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type ApproveDispatchReleaseInput = z.infer<typeof approveDispatchReleaseSchema>;
+
+/** D3 — records dispatch. No `actualDispatchDate` field: server-clock only
+ * (invariant #1) — the schema structurally cannot accept a client-supplied one. */
+export const recordDispatchSchema = z.object({ dispatchBatchId: id }).strict();
+export type RecordDispatchInput = z.infer<typeof recordDispatchSchema>;

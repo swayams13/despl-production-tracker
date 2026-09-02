@@ -1,9 +1,10 @@
 import { withTenant } from "@/lib/db";
 import { assertClientScope, hasRole, ROLES, type Actor } from "@/lib/authz";
 import { computeCpm, workingDaysBetween } from "@/lib/schedule";
-import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
+import { loadJobSpine, getCurrentScheduleRun, computeOrRefuse } from "./_shared";
 import { prioritize, type PlanState, type RankedPlan } from "./prioritizer";
 import type { Department, DelayCategoryRef, ProcessPlan } from "@/generated/prisma/client";
+import { isOnTime, istCalendarDayMarker } from "@/lib/shared/business-day";
 
 /**
  * The current run's per-department prioritized view — the shared read behind
@@ -30,7 +31,9 @@ export async function loadPrioritizedJob(actor: Actor, jobId: number): Promise<P
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
-    const cpm = computeCpm(spine.processes, spine.edges);
+    // Single-job read: a malformed spine surfaces as an explainable refusal
+    // rather than a bare-Error 500 (audit 0.10).
+    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
     const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
 
@@ -188,6 +191,9 @@ export interface WsUnitRow {
   state: PlanState;
   reasonText: string;
   criticalPath: boolean;
+  /** N2 — open (non-CLOSED) Ncrs whose rejected ComponentOperation/AssemblyStep
+   * belongs to this unit (via Component.unitId or AssemblyStep.unitId). */
+  openNcrCount: number;
 }
 export interface WsCard {
   jobProcessId: number;
@@ -265,7 +271,9 @@ export async function loadWorkspaceView(
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
-    const cpm = computeCpm(spine.processes, spine.edges);
+    // Single-job read: a malformed spine surfaces as an explainable refusal
+    // rather than a bare-Error 500 (audit 0.10).
+    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
     const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
     const procMeta = new Map(
@@ -289,6 +297,32 @@ export async function loadWorkspaceView(
     const units = await tx.unit.findMany({ where: { equipment: { jobId } }, select: { id: true, serialNo: true } });
     const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
 
+    // N2 — open Ncr count per unit. ComponentOperation only attributes to a
+    // unit when its Component is serial-scoped (Component.unitId set);
+    // equipment-grain components (unitId null) have no single unit row to
+    // attach to and are skipped here, same as everywhere else per-unit rows
+    // are built from equipment-grain data. AssemblyStep is always unit-scoped.
+    const openNcrRows = await tx.ncr.findMany({
+      where: {
+        status: { not: "CLOSED" },
+        OR: [
+          { componentOperationRejection: { componentOperation: { component: { unitId: { not: null }, equipment: { jobId } } } } },
+          { assemblyStepRejection: { assemblyStep: { unit: { equipment: { jobId } } } } },
+        ],
+      },
+      select: {
+        componentOperationRejection: { select: { componentOperation: { select: { component: { select: { unitId: true } } } } } },
+        assemblyStepRejection: { select: { assemblyStep: { select: { unitId: true } } } },
+      },
+    });
+    const openNcrCountByUnit = new Map<number, number>();
+    for (const row of openNcrRows) {
+      const unitId =
+        row.componentOperationRejection?.componentOperation.component.unitId ?? row.assemblyStepRejection?.assemblyStep.unitId;
+      if (unitId == null) continue;
+      openNcrCountByUnit.set(unitId, (openNcrCountByUnit.get(unitId) ?? 0) + 1);
+    }
+
     const today = new Date();
 
     // Filter predicate over a ranked plan (dashboard deep-link narrowing).
@@ -296,6 +330,9 @@ export async function loadWorkspaceView(
     const statusFilter = filter.status?.toLowerCase();
     const matchesFilter = (r: RankedPlan, deptId: number): boolean => {
       if (deptFilterId != null && deptId !== deptFilterId) return false;
+      // "rework" reuses the same ?status= convention but isn't a PlanState —
+      // it deep-links to units carrying an open Ncr instead.
+      if (statusFilter === "rework") return (openNcrCountByUnit.get(r.plan.unitId ?? -1) ?? 0) > 0;
       if (statusFilter) return displayState(r) === statusFilter;
       return true;
     };
@@ -346,6 +383,7 @@ export async function loadWorkspaceView(
         state: r.state,
         reasonText: r.reasonText,
         criticalPath: r.criticalPath,
+        openNcrCount: openNcrCountByUnit.get(r.plan.unitId ?? -1) ?? 0,
       });
       if (r.overdue) card.overdueCount++;
       if (r.criticalPath) card.criticalPath = true;
@@ -558,7 +596,9 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
-    const cpm = computeCpm(spine.processes, spine.edges);
+    // Single-job read: a malformed spine surfaces as an explainable refusal
+    // rather than a bare-Error 500 (audit 0.10).
+    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
     const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
     const durationMaxById = new Map(spine.rawProcesses.map((p) => [p.id, p.durationMaxDays]));
@@ -582,7 +622,17 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
 
     const totalPlans = run.processPlans.length;
     const completeCount = run.processPlans.filter((p) => p.status === "COMPLETE").length;
-    const percentComplete = totalPlans > 0 ? Math.round((completeCount / totalPlans) * 100) : 0;
+    // Phase 3, R1/R3: same duration-weighted, mapped-ops-aware view every
+    // percent-complete surface reads — never re-derived from completeCount.
+    const percentPlanIds = run.processPlans.map((p) => p.id);
+    const percentRows = percentPlanIds.length
+      ? await tx.$queryRaw<{ percent: string | number }[]>`
+          SELECT sum(percent * weight) / sum(weight) AS percent
+          FROM v_process_plan_percent
+          WHERE process_plan_id = ANY(${percentPlanIds}::int[])
+        `
+      : [];
+    const percentComplete = Math.round(Number(percentRows[0]?.percent ?? 0));
 
     const departments = await tx.department.findMany();
     const deptNameById = new Map(departments.map((d) => [d.id, d.name]));
@@ -595,7 +645,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
       if (p.status === "COMPLETE" && p.actualFinish && p.plannedFinish) {
         const bucket = onTimeByDept.get(p.ownerDepartmentId) ?? { onTime: 0, total: 0 };
         bucket.total++;
-        if (p.actualFinish <= p.plannedFinish) bucket.onTime++;
+        if (isOnTime(p.actualFinish, p.plannedFinish)) bucket.onTime++;
         onTimeByDept.set(p.ownerDepartmentId, bucket);
       }
     }
@@ -796,7 +846,7 @@ export async function loadMyOverdueCount(actor: Actor): Promise<number> {
     return tx.processPlan.count({
       where: {
         status: { not: "COMPLETE" },
-        plannedFinish: { lt: new Date() },
+        plannedFinish: { lt: istCalendarDayMarker() },
         scheduleRun: { isCurrent: true },
         ...(scoped ? { ownerDepartmentId: { in: actor.departmentIds } } : {}),
       },

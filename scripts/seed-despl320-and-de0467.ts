@@ -19,8 +19,6 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import {
   ProcessEdgeType,
-  ProcurementStatus,
-  MaterialReceivedStatus,
   Sourcing,
   OperationStatus,
   QcpItemKind,
@@ -193,27 +191,50 @@ function buildJobRemarks(issues: DataIssue[], jobNumber: string, rawOrder: strin
   lines.push(`NO_OWNER: ${noOwner.note}`);
   return lines.join("\n");
 }
-const PROCUREMENT_STATUS_MAP: Record<string, ProcurementStatus> = {
-  "Indent Approved": ProcurementStatus.INDENT_APPROVED,
-  "PO Placed": ProcurementStatus.PO_PLACED,
-  "In Stock": ProcurementStatus.IN_STOCK,
+type ReceivedStatus = "NOT_RECEIVED" | "PARTIALLY_RECEIVED" | "RECEIVED";
+const RECEIVED_STATUS_MAP: Record<string, ReceivedStatus> = {
+  Received: "RECEIVED",
+  "Not Received": "NOT_RECEIVED",
+  "Partially Received": "PARTIALLY_RECEIVED",
 };
-function mapProcurementStatus(raw: string | null): ProcurementStatus {
-  if (!raw) return ProcurementStatus.NOT_STARTED;
-  const m = PROCUREMENT_STATUS_MAP[raw];
-  if (!m) throw new Error(`unknown Procurement.status "${raw}"`);
-  return m;
-}
-const RECEIVED_STATUS_MAP: Record<string, MaterialReceivedStatus> = {
-  Received: MaterialReceivedStatus.RECEIVED,
-  "Not Received": MaterialReceivedStatus.NOT_RECEIVED,
-  "Partially Received": MaterialReceivedStatus.PARTIALLY_RECEIVED,
-};
-function mapReceivedStatus(raw: string | null): MaterialReceivedStatus | null {
+function mapReceivedStatus(raw: string | null): ReceivedStatus | null {
   if (!raw) return null;
   const m = RECEIVED_STATUS_MAP[raw];
-  if (!m) throw new Error(`unknown Procurement.receivedStatus "${raw}"`);
+  if (!m) throw new Error(`unknown procurement.materialReceivedStatus "${raw}"`);
   return m;
+}
+
+// ponytail: duplicated (not imported) from scripts/backfill-bom-item-qty-per.ts
+// / prisma/seed.ts — same reasoning as prisma/seed.ts's copy: that script's
+// `main()` runs unconditionally at module scope.
+const QTY_RE = /^(\d+(?:\.\d+)?)\s*(.*)$/;
+function parseSourceQty(sourceQty: string): { qtyPer: number; uom: string | null } | null {
+  const m = QTY_RE.exec(sourceQty.trim());
+  if (!m) return null;
+  return { qtyPer: Number(m[1]), uom: m[2].trim() || null };
+}
+
+/** B5, Phase 4 — see prisma/seed.ts's buildProcurementEventRows for the full
+ * rationale; identical logic, kept in sync by hand since this script is
+ * itself a hand-copied (not imported) subset of seed.ts's §10/§11. */
+function buildProcurementEventRows(
+  p: LiveBomItem["procurement"],
+  sourceQty: string,
+): { type: "INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT"; qty: number | null; refNo: string | null; at: Date }[] {
+  const rows: ReturnType<typeof buildProcurementEventRows> = [];
+  const indentDate = isoDate(p.indentGenerateDate);
+  if (indentDate) rows.push({ type: "INDENT_RAISED", qty: null, refNo: p.indentNo || null, at: indentDate });
+  const approvedDate = isoDate(p.indentApprovedDate);
+  if (approvedDate) rows.push({ type: "INDENT_APPROVED", qty: null, refNo: null, at: approvedDate });
+  const poDate = isoDate(p.poDate);
+  if (poDate) rows.push({ type: "PO_PLACED", qty: null, refNo: p.poNo || null, at: poDate });
+  const receivedDate = isoDate(p.materialReceivedDate);
+  if (receivedDate) {
+    const receivedStatus = mapReceivedStatus(p.materialReceivedStatus);
+    const qty = receivedStatus === "RECEIVED" ? (parseSourceQty(sourceQty)?.qtyPer ?? null) : null;
+    rows.push({ type: "RECEIPT", qty, refNo: null, at: receivedDate });
+  }
+  return rows;
 }
 const SOURCING_MAP: Record<string, Sourcing> = {
   "In-house": Sourcing.IN_HOUSE,
@@ -415,6 +436,22 @@ async function main() {
       const refs = await loadRefIds(tx, org.id);
       const existingDe0467 = await tx.job.findFirst({ where: { tenantId: org.id, jobNumber: "DE0467" } });
 
+      // B5, Phase 4: ProcurementEvent.by needs a real actor. This script
+      // (unlike prisma/seed.ts) deliberately creates no users of its own —
+      // it runs against an already-bootstrapped production DB (`pnpm
+      // db:seed:reference` + `pnpm db:bootstrap-admin`), so the first ADMIN
+      // account already exists under whatever email the operator chose.
+      // Looked up by role, not a hardcoded dev-seed email.
+      const procurementActor = await tx.user.findFirst({
+        where: { tenantId: org.id, roles: { some: { role: { code: "ADMIN" } } } },
+        orderBy: { id: "asc" },
+      });
+      if (!procurementActor) {
+        throw new Error(
+          "No ADMIN user found for this tenant — run `pnpm db:bootstrap-admin` before this script (ProcurementEvent.by needs a real actor).",
+        );
+      }
+
       const csvColumnToOperation = new Map<string, string>();
       for (const [opCode, meta] of Object.entries(routesFile.canonicalOperations)) {
         if (meta.csvColumn && !meta.csvColumn.includes("|")) csvColumnToOperation.set(meta.csvColumn, opCode);
@@ -495,19 +532,45 @@ async function main() {
           ),
         });
 
+        // B9, Phase 4: revision_no/status/dates moved off AssemblyDrawing
+        // onto DrawingRevision child rows, grouped by drawingNo where shared
+        // across entries (the same physical drawing at different revisions)
+        // — see prisma/seed.ts's matching comment for the full rationale.
+        // DE0467's own source data carries no drawingNo at all today, so
+        // this is a no-op grouping here (one group per entry); kept
+        // identical to prisma/seed.ts so the two seed paths don't diverge.
+        const drawingGroups = new Map<string, typeof de0467Source.assemblyDrawings>();
+        let ungroupedDrawingIdx = 0;
         for (const d of de0467Source.assemblyDrawings) {
-          await tx.assemblyDrawing.create({
+          const key = d.drawingNo ?? `__no-drawing-no-${ungroupedDrawingIdx++}`;
+          const list = drawingGroups.get(key) ?? [];
+          list.push(d);
+          drawingGroups.set(key, list);
+        }
+        let multiRevisionDrawingId: number | null = null;
+        for (const group of drawingGroups.values()) {
+          const first = group[0];
+          const created = await tx.assemblyDrawing.create({
             data: {
               jobId: jobRow.id,
-              drawingTypeId: refs.drawingTypeIdByName.get(d.name)!,
-              drawingNo: d.drawingNo,
-              revisionNo: d.revNo ?? null,
-              approvedDate: isoDate(d.approvalDate ?? null),
-              releasedDate: isoDate(d.releasedDate ?? null),
-              revisedDate: isoDate(d.revisedDate ?? null),
-              remarks: d.remarks ?? null,
+              drawingTypeId: refs.drawingTypeIdByName.get(first.name)!,
+              drawingNo: first.drawingNo,
+              remarks: group.map((d) => d.remarks).filter(Boolean).join(" / ") || null,
+              revisions: {
+                create: group.map((d, i) => {
+                  const revisionNo = Number(d.revNo);
+                  return {
+                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : i + 1,
+                    status: d.releasedDate ? "RELEASED" : "DRAFT",
+                    approvedAt: isoDate(d.approvalDate ?? null),
+                    revisedAt: isoDate(d.revisedDate ?? null),
+                    releasedAt: isoDate(d.releasedDate ?? null),
+                  };
+                }),
+              },
             },
           });
+          if (group.length > 1) multiRevisionDrawingId = created.id;
         }
 
         for (const block of de0467Source.equipmentBlocks) {
@@ -531,7 +594,7 @@ async function main() {
                 partName: item.partName,
                 description: item.description || null,
                 material: item.material || null,
-                qty: item.qty,
+                sourceQty: item.qty,
                 unit: item.unit,
                 componentTypeId: suggestedType
                   ? refs.componentTypeIdByCode.get(suggestedType)!
@@ -539,20 +602,17 @@ async function main() {
                 remarks: ambiguous ? ambiguous.note : item.remarks,
               },
             });
-            await tx.procurement.create({
-              data: {
-                bomItemId: bomItem.id,
-                indentNo: item.procurement.indentNo,
-                indentDate: isoDate(item.procurement.indentGenerateDate),
-                approvedDate: isoDate(item.procurement.indentApprovedDate),
-                status: mapProcurementStatus(item.procurement.status),
-                poNo: item.procurement.poNo,
-                poDate: isoDate(item.procurement.poDate),
-                receivedStatus: mapReceivedStatus(item.procurement.materialReceivedStatus),
-                receivedDate: isoDate(item.procurement.materialReceivedDate),
-              },
-            });
+            const procurementEventRows = buildProcurementEventRows(item.procurement, item.qty);
+            if (procurementEventRows.length) {
+              await tx.procurementEvent.createMany({
+                data: procurementEventRows.map((r) => ({ ...r, bomItemId: bomItem.id, by: procurementActor.id })),
+              });
+            }
             const typeCode = suggestedType ?? "OTHER";
+            // B9, Phase 4: the job's multi-revision drawing (if any) governs
+            // its FIRST component only — see prisma/seed.ts's matching comment.
+            const governingDrawingIdForThisComponent = multiRevisionDrawingId;
+            multiRevisionDrawingId = null;
             const component = await tx.component.create({
               data: {
                 equipmentId: equipment.id,
@@ -560,6 +620,7 @@ async function main() {
                 tag: `B${block.blockNo}-I${item.itemNo}`,
                 componentTypeId: refs.componentTypeIdByCode.get(typeCode)!,
                 routeVersionId: refs.routeVersionIdByType.get(typeCode) ?? null,
+                governingDrawingId: governingDrawingIdForThisComponent ?? undefined,
               },
             });
             let seq = 0;

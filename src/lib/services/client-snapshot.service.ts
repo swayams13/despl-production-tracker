@@ -36,10 +36,20 @@ function currentStage(spine: UnitSpine): { stageNo: number; stageName: string; s
   return { stageNo: segment.stageNo, stageName: segment.stageName, status: segment.status };
 }
 
-/** A unit's % complete: completed segments over the full 25-stage spine. */
-function unitPercentComplete(spine: UnitSpine): number {
-  const done = spine.segments.filter((s) => s.status === "complete").length;
-  return Math.round((done / spine.segments.length) * 100);
+/**
+ * A unit's % complete — the same duration-weighted, mapped-ops-aware figure
+ * `v_process_plan_percent` gives every other percent-complete surface
+ * (Phase 3, R1/R3). Previously averaged the 25-stage segment rollup, which
+ * is what made the client portal systematically disagree with — always
+ * lower than — the internal dashboard's 36-process-plan number.
+ */
+async function unitPercentComplete(tx: Tx, unitId: number): Promise<number> {
+  const rows = await tx.$queryRaw<{ percent: string | number }[]>`
+    SELECT sum(percent * weight) / sum(weight) AS percent
+    FROM v_process_plan_percent
+    WHERE unit_id = ${unitId}
+  `;
+  return Math.round(Number(rows[0]?.percent ?? 0));
 }
 
 async function loadTodayBatch(tx: Tx, jobId: number, asOf: Date): Promise<ProgressSnapshot[]> {
@@ -88,7 +98,7 @@ export async function publishSnapshot(actor: Actor, input: PublishSnapshotInput)
       }));
       for (const spine of spines) {
         const stage = currentStage(spine);
-        const percentComplete = unitPercentComplete(spine);
+        const percentComplete = await unitPercentComplete(tx, spine.unitId);
         await tx.progressSnapshot.upsert({
           where: { jobId_unitId_asOf: { jobId, unitId: spine.unitId, asOf } },
           create: {
@@ -164,10 +174,20 @@ export async function verifySnapshot(actor: Actor, input: VerifySnapshotInput): 
     const asOf = pending[0].asOf;
 
     return audited(tx, actor, async () => {
-      await tx.progressSnapshot.updateMany({
+      // Count check (audit 0.11): the batch was PUBLISHED as of the earlier
+      // `pending` read, but nothing holds a lock between that read and this
+      // write — a concurrent verify/reject on the same batch could already
+      // have flipped these rows' status. An unchecked updateMany would then
+      // silently affect 0 rows while this call still reports success with
+      // pending.length, double-verifying (or verifying-after-reject) without
+      // either caller ever seeing a conflict.
+      const { count } = await tx.progressSnapshot.updateMany({
         where: { jobId, asOf, status: "PUBLISHED" },
         data: { status: "VERIFIED", verifiedBy: actor.userId, verifiedAt: new Date() },
       });
+      if (count !== pending.length) {
+        throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProgressSnapshot", jobId, asOf });
+      }
 
       return {
         result: { jobId, asOf, unitCount: pending.length },
@@ -202,10 +222,14 @@ export async function rejectSnapshot(actor: Actor, input: RejectSnapshotInput): 
     const asOf = pending[0].asOf;
 
     const result = await audited(tx, actor, async () => {
-      await tx.progressSnapshot.updateMany({
+      // Count check (audit 0.11) — see verifySnapshot's identical comment.
+      const { count } = await tx.progressSnapshot.updateMany({
         where: { jobId, asOf, status: "PUBLISHED" },
         data: { status: "REJECTED", rejectionReason: reason },
       });
+      if (count !== pending.length) {
+        throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProgressSnapshot", jobId, asOf });
+      }
 
       return {
         result: { jobId, asOf, unitCount: pending.length },

@@ -1,7 +1,7 @@
 # Process route authoring — design spec
 
 **Date:** 22 Aug 2026
-**Status:** approved design, not yet implemented
+**Status:** shipped — see `progress.md`'s 23 Aug 2026 session-log row (route-authoring plan executed end to end, 12 tasks)
 **Companion spec:** `2026-08-22-job-intake-design.md`. That spec builds the
 "new project" wizard; this one removes the reason the wizard can only offer
 one product family. They are independent builds — route authoring has no

@@ -15,6 +15,7 @@
  * #4) so it reaches AT_RISK through overduePlans anyway. See spec §4.1 for the
  * upgrade path if SJ asks for it.
  */
+import { isOverdue } from "@/lib/shared/business-day";
 
 export type JobHealth =
   | "ON_TRACK"
@@ -59,12 +60,6 @@ export const HEALTH_ORDER: JobHealth[] = [
   "COMPLETED",
 ];
 
-/** UTC calendar day, so a same-day comparison ignores the time of day. */
-function toUtcDay(iso: string | Date): number {
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
-
 export function classifyJobHealth(job: HealthInput, today: Date): JobHealthRaw {
   // Structural states outrank health: a cancelled, finished or deliberately
   // paused project is not "late", whatever its plans say.
@@ -76,13 +71,18 @@ export function classifyJobHealth(job: HealthInput, today: Date): JobHealthRaw {
   if (job.totalPlans === 0) return "NOT_PLANNED";
 
   if (job.committedDeliveryDate !== null) {
-    // Date-vs-date, never timestamp: the promised day itself is not yet late.
-    // `committedDeliveryDate < now()` would flip a job red at 00:00 on the very day it
-    // was promised — a full day early, and a number SJ would rightly dispute.
-    if (toUtcDay(job.committedDeliveryDate) < toUtcDay(today)) return "DELAYED";
+    const committedDeliveryDate = new Date(job.committedDeliveryDate);
+    // Date-vs-date, never timestamp, and IN IST (lib/shared/business-day.ts,
+    // audit H1): a raw `committedDeliveryDate < now()` would flip a job red
+    // at 00:00 UTC = 05:30 IST on the very day it was promised — a full
+    // working day early, and a number SJ would rightly dispute.
+    if (isOverdue(committedDeliveryDate, today)) return "DELAYED";
 
     // Strictly greater: landing exactly on the promised date is on time.
-    if (job.forecastDispatch !== null && toUtcDay(job.forecastDispatch) > toUtcDay(job.committedDeliveryDate)) {
+    // Both sides are calendar-day markers already (forecastDispatch is a
+    // scheduled date, not a real instant) — a plain Date compare, no IST
+    // shift needed on either side.
+    if (job.forecastDispatch !== null && new Date(job.forecastDispatch) > committedDeliveryDate) {
       return "DELAYED";
     }
   }

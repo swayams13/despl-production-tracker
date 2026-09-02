@@ -440,23 +440,40 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
     }
   }
 
+  // Reschedule now carries real work forward instead of resetting it (audit
+  // C1 fix) — this file's own DB-gated tests, and siblings sharing this
+  // no-cleanup seed DB (qcp.service.test.ts), advance real ProcessPlan rows
+  // via startProcess/submitProcess/verifyProcess. A test that assumes a
+  // NOT_STARTED baseline for the exact (jobProcess, unit) pairs it drives must
+  // reset those specific rows itself first, same spirit as clearHold above
+  // resetting its own precondition — reset on the CURRENT run so the carried-
+  // forward state generateSchedule reads is clean.
+  async function resetPlans(jobId: number, jobProcessIds: number[], unitIds: number[]): Promise<void> {
+    await owner.processPlan.updateMany({
+      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: { in: jobProcessIds }, unitId: { in: unitIds } },
+      data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
+    });
+  }
+
   const future = new Date(Date.now() + 30 * 864e5);
 
   it("per-unit gating isolation: unit A's completion never gates unit B open", async () => {
     const { jobId, tenantId } = await despl320();
     const a = planner(tenantId);
-    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
 
     const units = await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } });
     const [unitA, unitB] = units;
-    const planId = (jobProcessId: number, unitId: number) =>
-      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unitId)!.id;
 
     // P = seq 1 (PO Receipt & Order Review, root — no predecessors of its
     // own), S = seq 2 (Kick-Off / Pre-Inspection Meeting): a real
     // FINISH_TO_START edge in the seeded spine.
     const pId = await procId(jobId, 1);
     const sId = await procId(jobId, 2);
+    await resetPlans(jobId, [pId, sId], [unitA.id, unitB.id]);
+
+    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
+    const planId = (jobProcessId: number, unitId: number) =>
+      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unitId)!.id;
 
     // P carries a real blocking checkpoint (seeded QcpItem 4); clear it for
     // unit A only so P can legitimately reach COMPLETE there.
@@ -485,11 +502,30 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
   it("verify refuses at a genuinely uncleared hold point", async () => {
     const { jobId, tenantId } = await despl320();
     const a = planner(tenantId);
-    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
 
+    // skip: 3 — the prior test in this file completes/starts real work on
+    // units[0]/units[1] (unitA/unitB), and qcp.service.test.ts's DB block
+    // reserves units[2] for the same reason (see its own comment) — this same
+    // shared DESPL-320 job, and persistScheduleRun now correctly carries real
+    // work forward across a reschedule (audit C1 fix) instead of silently
+    // resetting it. Pick a unit no known sibling file touches rather than
+    // relying on a fresh-slate reset that would itself be the bug being fixed.
+    // ponytail: unit-index reservation by convention/comment, not enforced —
+    // fine for the ~3 files that currently touch DESPL-320 unit-scoped state;
+    // a shared per-file-unit allocator (or per-test job/equipment fixtures)
+    // is the upgrade path if this keeps growing.
     const unit = (
-      await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" }, take: 1 })
+      await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" }, skip: 3, take: 1 })
     )[0];
+
+    // Reset every plan this test's own dependency chain drives, so a rerun
+    // against the same no-cleanup seed DB starts from NOT_STARTED again (same
+    // reasoning as resetPlans above the first test).
+    const chainSeqs = [1, 2, 3, 4, 7, 8, 9, 10];
+    const chainIds = await Promise.all(chainSeqs.map((seq) => procId(jobId, seq)));
+    await resetPlans(jobId, chainIds, [unit.id]);
+
+    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
     const planId = (jobProcessId: number) =>
       run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unit.id)!.id;
 
@@ -526,11 +562,420 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
     expect(blocking.length).toBeGreaterThan(0); // sanity: a real blocking checkpoint IS linked here
 
     await startProcess(maker, { processPlanId: planId(seq10Id) });
+
+    // Phase 3, R2: seq 10 (RECEIPT, leadTimeProcessSeq 10) has real seeded
+    // ComponentOperations for this unit, still NOT_STARTED — submit is
+    // refused until they're complete, same discipline as this test already
+    // uses to clear a QCP hold point before proceeding.
+    const blockedSubmit = await submitProcess(maker, { processPlanId: planId(seq10Id) }).catch((e) => e);
+    expect(isAppError(blockedSubmit) && blockedSubmit.code).toBe(ERROR_CODES.COMPONENT_OPS_INCOMPLETE);
+    await owner.componentOperation.updateMany({
+      where: { component: { unitId: unit.id }, operation: { leadTimeProcessSeq: 10 } },
+      data: { status: "COMPLETE" },
+    });
+
     await submitProcess(maker, { processPlanId: planId(seq10Id) });
 
     // ...but its OWN checkpoint (a different QcpItem than seq 1's) has no
     // QcpExecution recorded for this unit — verify must refuse.
     const err = await verifyProcess(checker, { processPlanId: planId(seq10Id) }).catch((e) => e);
     expect(isAppError(err) && err.code).toBe(ERROR_CODES.HOLD_POINT_OPEN);
+  });
+});
+
+/**
+ * Phase 3, R2: `submitProcess` refuses when a mapped `ComponentOperation` on
+ * this (process, unit) is not COMPLETE. Own minimal fixture (mirrors the
+ * first describe block above) — a single JobProcess with no predecessors, so
+ * `startProcess`/gating never enter the picture and the test isolates the
+ * new gate only.
+ */
+describe.skipIf(!RUN_DB)("submitProcess component-ops gate (Phase 3, R2, DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startProcess, submitProcess } = await import("./process.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("refuses submit while a mapped ComponentOperation is incomplete, naming it, then allows it once complete", async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-COMPOPS-${Date.now()}`, name: "Component-ops gate test" },
+    });
+    const tenantId = org.id;
+
+    const dept = await owner.department.create({ data: { tenantId, code: "F", name: "Fabrication" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-compops-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-COMPOPS-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+
+    // seq 12 mirrors the real spine's CUTTING slot — arbitrary here, just a
+    // code the mapped OperationRef can point at.
+    const jobProcess = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 12, code: "12", name: "Cutting", departmentId: dept.id },
+    });
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+    const operation = await owner.operationRef.create({
+      data: { tenantId, code: "CUTTING", name: "Cutting / Blanking", leadTimeProcessSeq: 12 },
+    });
+    const component = await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    const componentOp = await owner.componentOperation.create({
+      data: { componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
+    });
+
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const plan = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    const user = await owner.user.create({
+      data: { tenantId, email: "fab@x", username: "fab", name: "Fab", passwordHash: "x" },
+    });
+    const base = { tenantId, clientId: null, mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
+    const actor: Actor = { ...base, userId: user.id, name: "Fab", email: "fab@x", roles: [ROLES.SUPERVISOR], departmentIds: [dept.id] };
+
+    await startProcess(actor, { processPlanId: plan.id });
+
+    const err = await submitProcess(actor, { processPlanId: plan.id }).catch((e) => e);
+    expect(isAppError(err) && err.code).toBe(ERROR_CODES.COMPONENT_OPS_INCOMPLETE);
+    expect(isAppError(err) && (err.detail?.incompleteOperations as string[])).toContain("Cutting / Blanking");
+
+    await owner.componentOperation.update({ where: { id: componentOp.id }, data: { status: "COMPLETE" } });
+
+    const submitted = await submitProcess(actor, { processPlanId: plan.id });
+    expect(submitted.status).toBe("SUBMITTED");
+  });
+});
+
+/**
+ * Phase 5, N3: `verifyProcess` refuses when a mapped ComponentOperation on
+ * this (process, unit) has an open Ncr — created here the real way, via
+ * component.service's start/submit/reject flow (Task 2), not a hand-inserted
+ * row. Own minimal fixture, same shape as the component-ops gate above:
+ * a single JobProcess with no predecessors, so gating/hold-point checks never
+ * enter the picture and the test isolates the new NCR gate only.
+ */
+describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startProcess, submitProcess, verifyProcess } = await import("./process.service");
+  const { startComponentOperation, submitComponentOperation, rejectComponentOperation } = await import(
+    "./component.service"
+  );
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("refuses verify while a mapped operation has an open Ncr, naming it, then allows it once the Ncr is closed", async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-NCRGATE-${Date.now()}`, name: "Ncr gate test" },
+    });
+    const tenantId = org.id;
+
+    const dept = await owner.department.create({ data: { tenantId, code: "F", name: "Fabrication" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-ncrgate-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-NCRGATE-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+
+    // seq 13 is arbitrary here — just a code the mapped OperationRef can point at.
+    const jobProcess = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 13, code: "13", name: "Welding", departmentId: dept.id },
+    });
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+    const operation = await owner.operationRef.create({
+      data: { tenantId, code: "WELDING", name: "Shell Welding", leadTimeProcessSeq: 13, defaultDepartmentId: dept.id },
+    });
+    const component = await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    const componentOp = await owner.componentOperation.create({
+      data: { componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
+    });
+    const rejectCategoryId = (
+      await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })
+    ).id;
+
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const plan = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    const userSup = await owner.user.create({
+      data: { tenantId, email: "ncrgate-sup@x", username: "ncrgate-sup", name: "Sup", passwordHash: "x" },
+    });
+    const userQc = await owner.user.create({
+      data: { tenantId, email: "ncrgate-qc@x", username: "ncrgate-qc", name: "Qc", passwordHash: "x" },
+    });
+    const base = { tenantId, clientId: null, mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
+    const maker: Actor = {
+      ...base,
+      userId: userSup.id,
+      name: "Sup",
+      email: "ncrgate-sup@x",
+      roles: [ROLES.SUPERVISOR, ROLES.QC],
+      departmentIds: [dept.id],
+    };
+    const checker: Actor = {
+      ...base,
+      userId: userQc.id,
+      name: "Qc",
+      email: "ncrgate-qc@x",
+      roles: [ROLES.QC],
+      departmentIds: [],
+    };
+
+    // Real reject flow (Task 2), not a hand-inserted Ncr row: this is what
+    // produces the OPEN Ncr the gate must see.
+    await startComponentOperation(maker, { componentOperationId: componentOp.id });
+    await submitComponentOperation(maker, { componentOperationId: componentOp.id });
+    await rejectComponentOperation(checker, {
+      componentOperationId: componentOp.id,
+      categoryId: rejectCategoryId,
+      detail: "porosity",
+    });
+
+    const rejection = await owner.componentOperationRejection.findFirstOrThrow({
+      where: { componentOperationId: componentOp.id },
+    });
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejection.id } });
+    expect(ncr.status).toBe("OPEN");
+
+    // Isolate the NCR gate from the (already-covered, Phase 3 R2) component-ops
+    // gate on submitProcess: reject leaves the ComponentOperation IN_PROGRESS,
+    // not COMPLETE, which would otherwise trip COMPONENT_OPS_INCOMPLETE before
+    // verify is even reached. Force it COMPLETE directly — real rework would
+    // do this via startComponentOperation/submitComponentOperation, tested
+    // elsewhere; the Ncr staying OPEN independent of the op's own status is
+    // exactly the scenario this gate exists for (rework done, disposition/close
+    // still pending).
+    await owner.componentOperation.update({ where: { id: componentOp.id }, data: { status: "COMPLETE" } });
+
+    await startProcess(maker, { processPlanId: plan.id });
+    await submitProcess(maker, { processPlanId: plan.id });
+
+    // Table-driven: OPEN (never dispositioned) and REWORK_IN_PROGRESS (rework
+    // not yet re-verified) must refuse verify, naming the blocking operation —
+    // not just the freshly-rejected OPEN case. These are the two statuses
+    // dispositionNcr actually leaves an Ncr in on the rework path, so they're
+    // the common real-world shape, not an edge case.
+    for (const status of ["OPEN", "REWORK_IN_PROGRESS"] as const) {
+      await owner.ncr.update({ where: { id: ncr.id }, data: { status } });
+      const err = await verifyProcess(checker, { processPlanId: plan.id }).catch((e) => e);
+      expect(isAppError(err) && err.code, `status=${status}`).toBe(ERROR_CODES.NCR_OPEN);
+      expect(isAppError(err) && (err.detail?.blockingOperations as string[]), `status=${status}`).toContain(
+        "Shell Welding",
+      );
+    }
+
+    // Fix wave (Important #3): a terminal disposition (USE_AS_IS/SCRAP/
+    // CONCESSION) leaves status DISPOSITIONED forever — the component is
+    // scrapped or accepted as-is, so it will never be re-verified through
+    // closeNcr. That must NOT permanently block the gate: DISPOSITIONED with
+    // one of these three dispositions is excluded from "open" and verify
+    // succeeds even though the Ncr's status never reaches CLOSED.
+    await owner.ncr.update({
+      where: { id: ncr.id },
+      data: { status: "DISPOSITIONED", disposition: "SCRAP" },
+    });
+
+    const verified = await verifyProcess(checker, { processPlanId: plan.id });
+    expect(verified.status).toBe("COMPLETE");
+
+    const finalNcr = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(finalNcr.status).toBe("DISPOSITIONED"); // not silently flipped to CLOSED — nothing was actually re-verified
+  });
+});
+
+describe.skipIf(!RUN_DB)("verifyProcess evidence gate (Phase 5, D4, DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startProcess, submitProcess, verifyProcess } = await import("./process.service");
+  const { createPackage, assignUnitToPackage } = await import("./packing.service");
+  const { createDispatchBatch, addUnitToBatch, approveDispatchRelease, recordDispatch } = await import(
+    "./dispatch.service"
+  );
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("gates Packing/Dispatch on real evidence; leaves an untagged (old-version-shaped) stage unaffected — invariant #9", async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-EVGATE-${Date.now()}`, name: "Evidence gate test" },
+    });
+    const tenantId = org.id;
+
+    const dept = await owner.department.create({ data: { tenantId, code: "D", name: "Dispatch" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+
+    // TemplateProcess rows carrying evidenceKind — this is what the real
+    // add-packing-dispatch-evidence-v2.ts script tags on a new published
+    // version; a plain DRAFT row here is enough for the gate, which reads
+    // evidenceKind directly and doesn't care about publish state.
+    const tpPacking = await owner.templateProcess.create({
+      data: {
+        versionId: version.id,
+        seq: 34,
+        code: "34",
+        name: "Packing & Preservation",
+        defaultDepartmentId: dept.id,
+        evidenceKind: "PACKING_DONE",
+      },
+    });
+    const tpDispatch = await owner.templateProcess.create({
+      data: {
+        versionId: version.id,
+        seq: 36,
+        code: "36",
+        name: "Dispatch",
+        defaultDepartmentId: dept.id,
+        evidenceKind: "DISPATCH_RECORDED",
+      },
+    });
+    // No evidenceKind — stands in for a JobProcess pinned to the OLD
+    // (pre-D4) template version, which never had this column populated.
+    const tpUntagged = await owner.templateProcess.create({
+      data: { versionId: version.id, seq: 1, code: "1", name: "PO Receipt", defaultDepartmentId: dept.id },
+    });
+
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-evgate-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-EVGATE-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+
+    const jpPacking = await owner.jobProcess.create({
+      data: { jobId: job.id, templateProcessId: tpPacking.id, seq: 34, code: "34", name: "Packing & Preservation", departmentId: dept.id },
+    });
+    const jpDispatch = await owner.jobProcess.create({
+      data: { jobId: job.id, templateProcessId: tpDispatch.id, seq: 36, code: "36", name: "Dispatch", departmentId: dept.id },
+    });
+    const jpUntagged = await owner.jobProcess.create({
+      data: { jobId: job.id, templateProcessId: tpUntagged.id, seq: 1, code: "1", name: "PO Receipt", departmentId: dept.id },
+    });
+
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const planPacking = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jpPacking.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+    const planDispatch = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jpDispatch.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+    const planUntagged = await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jpUntagged.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    const userSup = await owner.user.create({
+      data: { tenantId, email: "evgate-sup@x", username: "evgate-sup", name: "Sup", passwordHash: "x" },
+    });
+    const userQc = await owner.user.create({
+      data: { tenantId, email: "evgate-qc@x", username: "evgate-qc", name: "Qc", passwordHash: "x" },
+    });
+    const base = { tenantId, clientId: null, mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false };
+    const maker: Actor = {
+      ...base,
+      userId: userSup.id,
+      name: "Sup",
+      email: "evgate-sup@x",
+      roles: [ROLES.SUPERVISOR, ROLES.QC, ROLES.PRODUCTION_HEAD],
+      departmentIds: [dept.id],
+    };
+    const checker: Actor = {
+      ...base,
+      userId: userQc.id,
+      name: "Qc",
+      email: "evgate-qc@x",
+      roles: [ROLES.QC, ROLES.PRODUCTION_HEAD],
+      departmentIds: [],
+    };
+
+    // ── Untagged stage: unaffected — same start/submit/verify path with no
+    // evidence recorded at all, and it just goes through (invariant #9). ──
+    await startProcess(maker, { processPlanId: planUntagged.id });
+    await submitProcess(maker, { processPlanId: planUntagged.id });
+    const verifiedUntagged = await verifyProcess(checker, { processPlanId: planUntagged.id });
+    expect(verifiedUntagged.status).toBe("COMPLETE");
+
+    // ── Packing: refuses until the unit has a packageId, via the real
+    // createPackage/assignUnitToPackage flow. ──
+    await startProcess(maker, { processPlanId: planPacking.id });
+    await submitProcess(maker, { processPlanId: planPacking.id });
+    const packingErr = await verifyProcess(checker, { processPlanId: planPacking.id }).catch((e) => e);
+    expect(isAppError(packingErr) && packingErr.code).toBe(ERROR_CODES.EVIDENCE_NOT_SATISFIED);
+    expect(isAppError(packingErr) && (packingErr.detail?.evidenceKind as string)).toBe("PACKING_DONE");
+
+    const pkg = await createPackage(maker, { jobId: job.id, packageNo: "PKG-1" });
+    await assignUnitToPackage(maker, { packageId: pkg.id, unitId: unit.id });
+
+    const verifiedPacking = await verifyProcess(checker, { processPlanId: planPacking.id });
+    expect(verifiedPacking.status).toBe("COMPLETE");
+
+    // ── Dispatch: refuses until the unit's batch has actualDispatchDate set,
+    // via the real createDispatchBatch/addUnitToBatch/approveDispatchRelease/
+    // recordDispatch flow. ──
+    await startProcess(maker, { processPlanId: planDispatch.id });
+    await submitProcess(maker, { processPlanId: planDispatch.id });
+    const dispatchErr = await verifyProcess(checker, { processPlanId: planDispatch.id }).catch((e) => e);
+    expect(isAppError(dispatchErr) && dispatchErr.code).toBe(ERROR_CODES.EVIDENCE_NOT_SATISFIED);
+    expect(isAppError(dispatchErr) && (dispatchErr.detail?.evidenceKind as string)).toBe("DISPATCH_RECORDED");
+
+    const batch = await createDispatchBatch(maker, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    await addUnitToBatch(maker, { dispatchBatchId: batch.id, unitId: unit.id });
+
+    // Batch not released/dispatched yet — still refuses.
+    const dispatchErr2 = await verifyProcess(checker, { processPlanId: planDispatch.id }).catch((e) => e);
+    expect(isAppError(dispatchErr2) && dispatchErr2.code).toBe(ERROR_CODES.EVIDENCE_NOT_SATISFIED);
+
+    await approveDispatchRelease(maker, { dispatchBatchId: batch.id });
+    await recordDispatch(maker, { dispatchBatchId: batch.id });
+
+    const verifiedDispatch = await verifyProcess(checker, { processPlanId: planDispatch.id });
+    expect(verifiedDispatch.status).toBe("COMPLETE");
   });
 });

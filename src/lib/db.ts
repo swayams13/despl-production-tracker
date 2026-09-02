@@ -53,13 +53,32 @@ export type Tx = Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0];
  * (see provision-db-role.sql's comment for the exact naive-timestamp bug
  * this closes).
  */
-export async function withTenant<T>(tenantId: number, fn: (tx: Tx) => Promise<T>): Promise<T> {
+/**
+ * `timeoutMs` — task review Important #4 (B4, Phase 4): the client-wide
+ * `transactionOptions.timeout` above (20s) is already generous for a normal
+ * mutation, but `bom.service.ts`'s `importBomItems` does ~2 round-trips per
+ * row (create + audit insert) inside one transaction, and a real BOM
+ * workbook runs to hundreds of rows — plausible to exceed 20s over real
+ * network latency, which would throw a raw Prisma `P2028` (not an
+ * `AppError`) and roll back the WHOLE batch silently, exactly the
+ * whole-batch-abort failure mode per-row error reporting was built to avoid.
+ * Optional and rarely needed — only a caller doing unusually many writes in
+ * one transaction should pass it.
+ */
+export async function withTenant<T>(
+  tenantId: number,
+  fn: (tx: Tx) => Promise<T>,
+  opts?: { timeoutMs?: number },
+): Promise<T> {
   if (!Number.isInteger(tenantId) || tenantId <= 0) {
     throw new Error(`withTenant: invalid tenantId ${tenantId}`);
   }
-  return prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${String(tenantId)}, true)`;
-    await tx.$executeRaw`SELECT set_config('TimeZone', 'UTC', true)`;
-    return fn(tx);
-  });
+  return prisma.$transaction(
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant_id', ${String(tenantId)}, true)`;
+      await tx.$executeRaw`SELECT set_config('TimeZone', 'UTC', true)`;
+      return fn(tx);
+    },
+    opts?.timeoutMs ? { timeout: opts.timeoutMs } : undefined,
+  );
 }

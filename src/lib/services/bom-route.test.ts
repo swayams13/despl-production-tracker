@@ -7,7 +7,22 @@ function step(seq: number, operationId: number, operationName: string, leadTimeP
 }
 
 function op(operationId: number, operationName: string, status: string, leadTimeProcessSeq: number | null = null, id: number = operationId): ActualOp {
-  return { id, operationId, operationName, status, startedAt: null, finishedAt: null, leadTimeProcessSeq };
+  return {
+    id,
+    operationId,
+    operationName,
+    status,
+    startedAt: null,
+    finishedAt: null,
+    leadTimeProcessSeq,
+    performedByWelderName: null,
+    performedByUserName: null,
+    remarks: null,
+    qtyPlanned: null,
+    qtyGood: null,
+    qtyRejected: null,
+    rejection: null,
+  };
 }
 
 test("no route, no actual ops -> empty", () => {

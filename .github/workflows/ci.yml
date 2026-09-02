@@ -90,6 +90,20 @@ jobs:
       - run: pnpm db:seed
       - run: pnpm db:bootstrap
 
+      # DESPL-320's Component/ComponentOperation, BomItem, and AssemblyStep
+      # rows are deliberately NOT part of db:seed (see prisma/seed.ts's own
+      # comment on why) — they're separate, idempotent scripts a local dev
+      # runs once by hand and forgets about, since despl_test stays populated
+      # between runs. CI's despl_ci database is thrown away every run, so
+      # these three must run here too or any DB-gated test that expects a
+      # seeded Component (e.g. welding.service.test.ts's fixture()) fails
+      # with P2025 against an empty table. No ordering dependency between
+      # the three — each only needs the Job/Equipment/Unit/
+      # AssemblyTemplateVersion rows db:seed already created above.
+      - run: pnpm db:seed:despl320-components
+      - run: pnpm db:seed:despl320-bom
+      - run: pnpm db:seed:despl320-assembly-steps
+
       - run: pnpm test
       - name: DB-gated tests
         run: pnpm exec vitest run

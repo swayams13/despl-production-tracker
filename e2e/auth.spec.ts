@@ -77,6 +77,22 @@ test("client user lands in the portal and cannot reach the internal app", async 
   await expect(page).toHaveURL("/portal");
 });
 
+// Audit H3: `assertClientScope` checks WHICH client, not WHICH surface — a
+// client user could `curl` internal read APIs directly and get planned-vs-
+// actual variance, internal delay-reason history and submitter identities.
+// api/_lib.ts's route() wrapper now defaults every route to
+// assertNotClientUser(); this proves it with a real logged-in client session
+// hitting the real endpoint, not a unit test of the wrapper in isolation.
+test("client user gets 403 from internal read APIs, not internal data (audit H3)", async ({ page }) => {
+  await signIn(page, "client@example.local");
+  await expect(page).toHaveURL("/portal");
+
+  const res = await page.request.get("/api/jobs");
+  expect(res.status()).toBe(403);
+  const body = await res.json();
+  expect(body.error.code).toBe("FORBIDDEN");
+});
+
 test("signing out clears the session and re-protects the app", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
   await expect(page).toHaveURL("/");

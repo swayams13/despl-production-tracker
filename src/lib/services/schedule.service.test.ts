@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { generateSchedule, getSchedule } from "./schedule.service";
+import { startProcess, submitProcess } from "./process.service";
+import { fileDelayReason } from "./delay.service";
 import { isAppError, ERROR_CODES } from "@/lib/shared/errors";
 import { ROLES, type Actor } from "@/lib/authz";
 
@@ -137,7 +139,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
   // DESPL-320 seeds 9 units (320SR01–09) on its one equipment. Its order date
   // is NULL by design (test above), so pass projectStartDate explicitly to
   // clear the SCHEDULE_DATA_MISSING refusal and actually exercise persistence.
-  it("expands DESPL-320 into 36 processes × 9 units, all NOT_STARTED", async () => {
+  it("expands DESPL-320 into 36 processes × 9 units, one plan per unit", async () => {
     const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
     if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
     const a = actor({ tenantId: job.tenantId, clientId: null });
@@ -157,8 +159,13 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
 
     expect(run.processPlans.length).toBe(includedProcessCount * unitCount);
     expect(run.processPlans.length).toBe(36 * 9);
+    // Status is NOT asserted NOT_STARTED here: this file shares DESPL-320 with
+    // other DB-gated test files, and persistScheduleRun now correctly carries
+    // real work forward across a reschedule (audit C1 fix) instead of silently
+    // resetting it — asserting a blanket clean slate would just be re-relying
+    // on the bug this phase fixes. The per-unit expansion grain (P0.2) this
+    // test exists to pin is the plan count and unitId assignment below.
     for (const p of run.processPlans) {
-      expect(p.status).toBe("NOT_STARTED");
       expect(p.unitId).not.toBeNull();
     }
     const distinctUnitIds = new Set(run.processPlans.map((p) => p.unitId));
@@ -171,4 +178,92 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
   // PRESSURE_VESSEL job with no units, so the "versions up, flips isCurrent…"
   // test above already exercises the fallback branch and now asserts on it
   // (unitId null, plan count == included process count).
+
+  // Regression for audit C1: the only pre-existing reschedule test (above)
+  // runs on a job with no actuals, so it could not have caught the bug —
+  // rescheduling silently reset every in-flight plan to NOT_STARTED with its
+  // signature detached. This one records real actuals first.
+  it("carries actualStart/status/submittedBy forward across a reschedule", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+    if (!job) throw new Error("seed missing DE0463 — run pnpm db:seed");
+    const a = actor({ tenantId: job.tenantId, clientId: null });
+
+    // The process with no incoming edge is the only one startable from
+    // NOT_STARTED with an empty predecessor state — pick it rather than
+    // assuming seq order matches the dependency graph. Job-level property
+    // (independent of any particular ScheduleRun), so it's found before run1.
+    const edges = await owner.jobProcessEdge.findMany({
+      where: { process: { jobId: job.id } },
+      select: { processId: true },
+    });
+    const hasPredecessor = new Set(edges.map((e) => e.processId));
+    const startableJobProcess = await owner.jobProcess.findFirst({
+      where: { jobId: job.id, id: { notIn: [...hasPredecessor] } },
+    });
+    if (!startableJobProcess) throw new Error("no predecessor-free process on DE0463's spine");
+
+    // Reset this test's own target plan on whatever run is currently current,
+    // so a rerun against this no-cleanup seed DB starts from NOT_STARTED again
+    // — persistScheduleRun now carries real work forward across a reschedule
+    // (audit C1 fix, the very thing under test) instead of resetting it.
+    await owner.processPlan.updateMany({
+      where: { scheduleRun: { jobId: job.id, isCurrent: true }, jobProcessId: startableJobProcess.id, unitId: null },
+      data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
+    });
+
+    const run1 = await generateSchedule(a, { jobId: job.id, mode: "FORWARD" });
+    const startable = run1.processPlans.find((p) => p.jobProcessId === startableJobProcess.id);
+    if (!startable) throw new Error("startable process missing from run1's plans");
+
+    // DE0463 is a real seed job — its FORWARD envelope can land plannedFinish
+    // dates in the past relative to "now", tripping invariant #7's department
+    // block on unrelated overdue plans in the same department/unit. Clear it
+    // the real way (file a reason) rather than picking around it, since that's
+    // the actual unblock path a supervisor would use.
+    const category = await owner.delayCategoryRef.findFirst({ where: { tenantId: job.tenantId } });
+    if (!category) throw new Error("seed missing delay categories");
+    const overdueSiblings = await owner.processPlan.findMany({
+      where: {
+        scheduleRunId: run1.id,
+        ownerDepartmentId: startable.ownerDepartmentId,
+        unitId: startable.unitId,
+        status: { not: "COMPLETE" },
+        plannedFinish: { lt: new Date() },
+      },
+      select: { id: true },
+    });
+    for (const p of overdueSiblings) {
+      await fileDelayReason(a, { processPlanId: p.id, categoryId: category.id });
+    }
+
+    await startProcess(a, { processPlanId: startable.id });
+    await submitProcess(a, { processPlanId: startable.id });
+
+    const run2 = await generateSchedule(a, { jobId: job.id, mode: "FORWARD" });
+    expect(run2.version).toBe(run1.version + 1);
+
+    const carried = run2.processPlans.find((p) => p.jobProcessId === startable.jobProcessId && p.unitId === startable.unitId);
+    expect(carried?.status).toBe("SUBMITTED");
+    expect(carried?.actualStart).not.toBeNull();
+    expect(carried?.submittedBy).toBe(a.userId);
+
+    // Every other plan (never touched) still starts clean.
+    const untouched = run2.processPlans.find((p) => p.jobProcessId !== startable.jobProcessId);
+    expect(untouched?.status).toBe("NOT_STARTED");
+    expect(untouched?.actualStart).toBeNull();
+  });
+
+  // Aggravator half of C1: a stale tab holding a plan id from a run that has
+  // since been superseded must not be able to write against it.
+  it("refuses a write against a plan whose run has been superseded", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+    if (!job) throw new Error("seed missing DE0463 — run pnpm db:seed");
+    const a = actor({ tenantId: job.tenantId, clientId: null });
+
+    const staleRun = await generateSchedule(a, { jobId: job.id, mode: "FORWARD" });
+    await generateSchedule(a, { jobId: job.id, mode: "FORWARD" }); // supersedes staleRun
+
+    const err = await startProcess(a, { processPlanId: staleRun.processPlans[0].id }).catch((e) => e);
+    expect(isAppError(err) && err.code).toBe(ERROR_CODES.STALE_WRITE);
+  });
 });

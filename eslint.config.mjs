@@ -28,6 +28,8 @@ const eslintConfig = [
       "build/**",
       "next-env.d.ts",
       "design/**",
+      ".worktrees/**",
+      "worktrees/**",
     ],
   },
 ];

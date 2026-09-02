@@ -1,7 +1,7 @@
 # Job intake — new project creation — design spec
 
 **Date:** 22 Aug 2026
-**Status:** approved design, not yet implemented
+**Status:** shipped — see `progress.md`'s 22 Aug 2026 session-log row (job-intake plan executed end to end, 11 tasks)
 **Companion spec:** `2026-08-22-route-authoring-design.md`. Route authoring
 removes the constraint that only pressure vessels have a usable process
 route. This spec can be built and demoed against pressure vessels before

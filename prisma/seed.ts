@@ -28,8 +28,6 @@ import { hash } from "@node-rs/argon2";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import {
   ProcessEdgeType,
-  ProcurementStatus,
-  MaterialReceivedStatus,
   Sourcing,
   OperationStatus,
   QcpItemKind,
@@ -200,6 +198,28 @@ interface ProvisionalTemplateFile {
   processes: { seq: number; code: string; name: string; department: string; derivedFrom: string }[];
 }
 
+/// Phase 2 (A2) — the A–Q assembly & weld sequence, transcribed from
+/// docs/DESPL-320-fabrication-assembly-spec.md §2. See
+/// seed/assembly-template-pressure-vessel-v1.json's own `$schema` note for
+/// what's floor-confirmed (WORK/INSPECTION split, sequence content) vs.
+/// judgment-called (defaultDepartment).
+interface AssemblyTemplateFile {
+  family: string;
+  name: string;
+  notes: string;
+  steps: {
+    seq: number;
+    groupCode: string;
+    groupName: string;
+    srNo: string;
+    activity: string;
+    kind: "WORK" | "INSPECTION";
+    defaultDepartment: string;
+    jointRef?: string;
+    leadTimeProcessSeq?: number;
+  }[];
+}
+
 interface QcpTemplatesFile {
   model: { codes: Record<string, QcpCodeMeta> };
   template: {
@@ -269,28 +289,64 @@ function buildJobRemarks(
   return lines.join("\n");
 }
 
-const PROCUREMENT_STATUS_MAP: Record<string, ProcurementStatus> = {
-  "Indent Approved": ProcurementStatus.INDENT_APPROVED,
-  "PO Placed": ProcurementStatus.PO_PLACED,
-  "In Stock": ProcurementStatus.IN_STOCK,
+// ponytail: duplicated from scripts/backfill-bom-item-qty-per.ts's
+// `parseSourceQty` (same regex) rather than imported — that file's `main()`
+// runs unconditionally at module scope (no `require.main` guard), so
+// importing it here would fire a second, unwanted DB pass as a side effect
+// of loading this file. Promote to a shared lib module if a third caller
+// ever needs it.
+const QTY_RE = /^(\d+(?:\.\d+)?)\s*(.*)$/;
+function parseSourceQty(sourceQty: string): { qtyPer: number; uom: string | null } | null {
+  const m = QTY_RE.exec(sourceQty.trim());
+  if (!m) return null;
+  return { qtyPer: Number(m[1]), uom: m[2].trim() || null };
+}
+
+type ReceivedStatus = "NOT_RECEIVED" | "PARTIALLY_RECEIVED" | "RECEIVED";
+const RECEIVED_STATUS_MAP: Record<string, ReceivedStatus> = {
+  Received: "RECEIVED",
+  "Not Received": "NOT_RECEIVED",
+  "Partially Received": "PARTIALLY_RECEIVED",
 };
-function mapProcurementStatus(raw: string | null): ProcurementStatus {
-  if (!raw) return ProcurementStatus.NOT_STARTED;
-  const m = PROCUREMENT_STATUS_MAP[raw];
-  if (!m) throw new Error(`unknown Procurement.status "${raw}"`);
+function mapReceivedStatus(raw: string | null): ReceivedStatus | null {
+  if (!raw) return null;
+  const m = RECEIVED_STATUS_MAP[raw];
+  if (!m) throw new Error(`unknown procurement.materialReceivedStatus "${raw}"`);
   return m;
 }
 
-const RECEIVED_STATUS_MAP: Record<string, MaterialReceivedStatus> = {
-  Received: MaterialReceivedStatus.RECEIVED,
-  "Not Received": MaterialReceivedStatus.NOT_RECEIVED,
-  "Partially Received": MaterialReceivedStatus.PARTIALLY_RECEIVED,
-};
-function mapReceivedStatus(raw: string | null): MaterialReceivedStatus | null {
-  if (!raw) return null;
-  const m = RECEIVED_STATUS_MAP[raw];
-  if (!m) throw new Error(`unknown Procurement.receivedStatus "${raw}"`);
-  return m;
+/**
+ * B5, Phase 4: one `ProcurementEvent` row per non-null date field on the
+ * source CSV's procurement block — same shape
+ * `scripts/backfill-procurement-events.ts` synthesizes for pre-existing
+ * `procurements` rows, applied here at first-import time instead of as a
+ * later backfill. RECEIPT's `qty` uses `parseSourceQty` (B1's parser,
+ * reused rather than re-implemented) on the BOM line's own raw qty string —
+ * `BomItem.qtyPer` isn't populated yet at this point in the seed run (that's
+ * `scripts/backfill-bom-item-qty-per.ts`, a separate manual step), and only
+ * when `receivedStatus === "RECEIVED"`; a PARTIALLY_RECEIVED row still gets
+ * a RECEIPT event, with `qty` left null — the source data never recorded a
+ * partial-receipt number, and inventing one would be a guess (CLAUDE.md:
+ * flag, don't fabricate).
+ */
+function buildProcurementEventRows(
+  p: LiveBomItem["procurement"],
+  sourceQty: string,
+): { type: "INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT"; qty: number | null; refNo: string | null; at: Date }[] {
+  const rows: ReturnType<typeof buildProcurementEventRows> = [];
+  const indentDate = isoDate(p.indentGenerateDate);
+  if (indentDate) rows.push({ type: "INDENT_RAISED", qty: null, refNo: p.indentNo || null, at: indentDate });
+  const approvedDate = isoDate(p.indentApprovedDate);
+  if (approvedDate) rows.push({ type: "INDENT_APPROVED", qty: null, refNo: null, at: approvedDate });
+  const poDate = isoDate(p.poDate);
+  if (poDate) rows.push({ type: "PO_PLACED", qty: null, refNo: p.poNo || null, at: poDate });
+  const receivedDate = isoDate(p.materialReceivedDate);
+  if (receivedDate) {
+    const receivedStatus = mapReceivedStatus(p.materialReceivedStatus);
+    const qty = receivedStatus === "RECEIVED" ? (parseSourceQty(sourceQty)?.qtyPer ?? null) : null;
+    rows.push({ type: "RECEIPT", qty, refNo: null, at: receivedDate });
+  }
+  return rows;
 }
 
 const SOURCING_MAP: Record<string, Sourcing> = {
@@ -351,6 +407,7 @@ interface Sources {
   qcpFile: QcpTemplatesFile;
   qcpBatch2: QcpBatchFile;
   pipeSpoolTemplate: ProvisionalTemplateFile;
+  assemblyTemplate: AssemblyTemplateFile;
   issues: DataIssue[];
 }
 
@@ -425,7 +482,7 @@ async function loadRefIds(tx: Tx, tenantId: number): Promise<RefIds> {
 /// of times. Reference/template *changes* propagate via a migration or a
 /// dedicated update path, never by piling on another copy here.
 async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>): Promise<RefIds> {
-  const { leadTime, liveJobs, routesFile, qcpFile, pipeSpoolTemplate } = src;
+  const { leadTime, liveJobs, routesFile, qcpFile, pipeSpoolTemplate, assemblyTemplate } = src;
 
   // ── 1. Tenant (idempotency sentinel) ─────────────────────────────
   const existing = await tx.organization.findUnique({ where: { code: "DESPL" } });
@@ -709,6 +766,47 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
       stats.pipeSpoolTemplateProcesses = psProcesses.length;
       stats.pipeSpoolTemplateEdges = await tx.templateEdge.count({ where: { versionId: psV1.id } });
 
+      // ── 7c. PRESSURE_VESSEL assembly template v1 (Phase 2, A2) — the A–Q
+      // assembly & weld sequence, distinct from the 36-process spine above.
+      // Seeded from seed/assembly-template-pressure-vessel-v1.json (transcribed
+      // from docs/DESPL-320-fabrication-assembly-spec.md §2). Materialising it
+      // per unit for DESPL-320's already-existing units is a SEPARATE step —
+      // scripts/seed-despl320-assembly-steps.ts — mirroring how
+      // scripts/seed-despl320-components.ts materialises ComponentOperation
+      // rows outside this main seed run.
+      const asmTemplate = await tx.assemblyTemplate.create({
+        data: {
+          tenantId,
+          familyId: familyIdByCode.get(assemblyTemplate.family)!,
+          name: assemblyTemplate.name,
+        },
+      });
+      const asmV1 = await tx.assemblyTemplateVersion.create({
+        data: {
+          templateId: asmTemplate.id,
+          version: 1,
+          status: TemplateStatus.PUBLISHED,
+          publishedAt: new Date(),
+          notes: assemblyTemplate.notes,
+        },
+      });
+      await tx.assemblyTemplateStep.createMany({
+        data: assemblyTemplate.steps.map((s) => ({
+          versionId: asmV1.id,
+          seq: s.seq,
+          groupCode: s.groupCode,
+          groupName: s.groupName,
+          srNo: s.srNo,
+          activity: s.activity,
+          kind: s.kind,
+          defaultDepartmentId: deptIdByCode.get(s.defaultDepartment)!,
+          qcpSrNo: s.srNo,
+          jointRef: s.jointRef ?? null,
+          leadTimeProcessSeq: s.leadTimeProcessSeq ?? null,
+        })),
+      });
+      stats.assemblyTemplateSteps = await tx.assemblyTemplateStep.count({ where: { versionId: asmV1.id } });
+
       // ── 8. Component route library (25 routes) ───────────────────────
       // Previously present in seed/component-routes.json but modelled nowhere.
       let routeStepCount = 0;
@@ -799,6 +897,43 @@ async function seedDemo(
         data: { clientId: client.id, cadence: SnapshotCadence.DAILY, requiresApproval: true },
       });
 
+      // Hoisted ahead of §10/§11 (was §12 "Users", below): ProcurementEvent.by
+      // (B5, Phase 4) is a required actor FK, and the BOM/procurement import
+      // loop that needs it runs before the rest of the demo users would
+      // otherwise be created. mkUser is reused unchanged at §12 for the rest
+      // of the roster; this is the one call moved up, not duplicated —
+      // adminUser is passed down to buildProcurementEventRows below.
+      const mkUser = async (
+        email: string,
+        name: string,
+        roleCodes: string[],
+        deptCodes: string[] = [],
+        clientIdForUser: number | null = null,
+      ) => {
+        const user = await tx.user.create({
+          data: {
+            tenantId,
+            clientId: clientIdForUser,
+            email,
+            username: email.split("@")[0],
+            name,
+            passwordHash,
+            mustChangePassword: false,
+            themePreference: "DARK",
+          },
+        });
+        await tx.userRole.createMany({
+          data: roleCodes.map((c) => ({ userId: user.id, roleId: roleIdByCode.get(c)! })),
+        });
+        if (deptCodes.length) {
+          await tx.userDepartment.createMany({
+            data: deptCodes.map((c) => ({ userId: user.id, departmentId: deptIdByCode.get(c)! })),
+          });
+        }
+        return user;
+      };
+      const adminUser = await mkUser("admin@despl.local", "Administrator", ["ADMIN"]);
+
       const csvColumnToOperation = new Map<string, string>();
       for (const [opCode, meta] of Object.entries(routesFile.canonicalOperations)) {
         if (meta.csvColumn && !meta.csvColumn.includes("|")) {
@@ -877,20 +1012,62 @@ async function seedDemo(
           ),
         });
 
+        // B9, Phase 4 (task review Important): revision_no/status/dates moved
+        // off AssemblyDrawing onto DrawingRevision child rows. Entries that
+        // share a real drawingNo (e.g. DE0463-001's "GA Drawing" rev "1" and
+        // "Fabrication Drawing" rev "2", both stamped drawingNo "DE0463-001"
+        // in the source tracker) are the SAME physical drawing at different
+        // revisions, not two drawings — group by drawingNo so this collapses
+        // into one AssemblyDrawing with two DrawingRevision rows, exactly
+        // the case this task exists to model. Entries with no drawingNo
+        // can't be told apart this way and stay one-drawing-per-entry
+        // (unchanged from before this fix).
+        const drawingGroups = new Map<string, typeof job.assemblyDrawings>();
+        let ungroupedDrawingIdx = 0;
         for (const d of job.assemblyDrawings) {
-          await tx.assemblyDrawing.create({
+          const key = d.drawingNo ?? `__no-drawing-no-${ungroupedDrawingIdx++}`;
+          const list = drawingGroups.get(key) ?? [];
+          list.push(d);
+          drawingGroups.set(key, list);
+        }
+
+        // Demo-reachability (task review Important): point the job's FIRST
+        // seeded Component at whichever drawing ended up with 2+ revisions
+        // (if any), via governingDrawingId, further down where components
+        // are created — otherwise the CUTTING gate and the new UI section
+        // are provable only in tests, never in a running instance.
+        let multiRevisionDrawingId: number | null = null;
+        for (const group of drawingGroups.values()) {
+          const first = group[0];
+          const created = await tx.assemblyDrawing.create({
             data: {
               jobId: jobRow.id,
-              drawingTypeId: drawingTypeIdByName.get(d.name)!,
-              drawingNo: d.drawingNo,
-              revisionNo: d.revNo ?? null,
-              approvedDate: isoDate(d.approvalDate ?? null),
-              releasedDate: isoDate(d.releasedDate ?? null),
-              revisedDate: isoDate(d.revisedDate ?? null),
-              remarks: d.remarks ?? null,
+              drawingTypeId: drawingTypeIdByName.get(first.name)!,
+              drawingNo: first.drawingNo,
+              remarks: group.map((d) => d.remarks).filter(Boolean).join(" / ") || null,
+              revisions: {
+                create: group.map((d, i) => {
+                  const revisionNo = Number(d.revNo);
+                  return {
+                    // Fallback is the group's own 1-based position, not a
+                    // blanket 1 — two entries in the same group both falling
+                    // back to 1 would collide on the (assemblyDrawingId,
+                    // revisionNo) unique index.
+                    revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : i + 1,
+                    status: d.releasedDate ? "RELEASED" : "DRAFT",
+                    approvedAt: isoDate(d.approvalDate ?? null),
+                    revisedAt: isoDate(d.revisedDate ?? null),
+                    releasedAt: isoDate(d.releasedDate ?? null),
+                  };
+                }),
+              },
             },
           });
+          if (group.length > 1) multiRevisionDrawingId = created.id;
         }
+        // Counts DrawingRevision rows (one per source entry) that will carry
+        // approvedAt — a source-JSON stat, not a DB read, so unaffected by
+        // AssemblyDrawing's flat approved_date column being dropped.
         drawingsWithDatesCount += job.assemblyDrawings.filter((d) => d.approvalDate).length;
 
         // staged/partial dispatch dates — DE0463 only, see interface comment
@@ -929,7 +1106,7 @@ async function seedDemo(
                 partName: item.partName,
                 description: item.description || null,
                 material: item.material || null,
-                qty: item.qty,
+                sourceQty: item.qty,
                 unit: item.unit,
                 componentTypeId: suggestedType
                   ? componentTypeIdByCode.get(suggestedType)!
@@ -939,25 +1116,24 @@ async function seedDemo(
             });
             bomCount++;
 
-            await tx.procurement.create({
-              data: {
-                bomItemId: bomItem.id,
-                indentNo: item.procurement.indentNo,
-                indentDate: isoDate(item.procurement.indentGenerateDate),
-                approvedDate: isoDate(item.procurement.indentApprovedDate),
-                status: mapProcurementStatus(item.procurement.status),
-                poNo: item.procurement.poNo,
-                poDate: isoDate(item.procurement.poDate),
-                receivedStatus: mapReceivedStatus(item.procurement.materialReceivedStatus),
-                receivedDate: isoDate(item.procurement.materialReceivedDate),
-              },
-            });
+            const procurementEventRows = buildProcurementEventRows(item.procurement, item.qty);
+            if (procurementEventRows.length) {
+              await tx.procurementEvent.createMany({
+                data: procurementEventRows.map((r) => ({ ...r, bomItemId: bomItem.id, by: adminUser.id })),
+              });
+            }
 
             // One component instance per BOM line for the live data. Where a
             // client orders N of something (5 vs 8 nozzles), the UI creates N
             // tagged components against the same BOM line — which is exactly
             // what the old ItemOperation shape could not express.
             const typeCode = suggestedType ?? "OTHER";
+            // B9, Phase 4 (task review Important, demo-reachability): the
+            // job's multi-revision drawing (if any) governs its FIRST
+            // component only — consumed here so no other component on this
+            // job also claims it.
+            const governingDrawingIdForThisComponent = multiRevisionDrawingId;
+            multiRevisionDrawingId = null;
             const component = await tx.component.create({
               data: {
                 equipmentId: equipment.id,
@@ -965,6 +1141,7 @@ async function seedDemo(
                 tag: `B${block.blockNo}-I${item.itemNo}`,
                 componentTypeId: componentTypeIdByCode.get(typeCode)!,
                 routeVersionId: routeVersionIdByType.get(typeCode) ?? null,
+                governingDrawingId: governingDrawingIdForThisComponent ?? undefined,
               },
             });
             componentCount++;
@@ -1226,47 +1403,9 @@ async function seedDemo(
 
       // ── 12. Users ────────────────────────────────────────────────────
       // One per role, plus a supervisor per department, plus one client user.
-      const mkUser = async (
-        email: string,
-        name: string,
-        roleCodes: string[],
-        deptCodes: string[] = [],
-        clientId: number | null = null,
-      ) => {
-        const user = await tx.user.create({
-          // Demo/dev seed accounts ship with a known, documented password
-          // (see the SEED_PASSWORD warning above) — same reasoning as Task
-          // 1.1's migration backfill for pre-existing rows: they already have
-          // a working password and must not be locked out behind the
-          // first-login interstitial.
-          data: {
-            tenantId,
-            clientId,
-            email,
-            username: email.split("@")[0],
-            name,
-            passwordHash,
-            mustChangePassword: false,
-            // Same reasoning as the theme_preference_dark_backfill migration:
-            // seeded accounts existed before the theme feature and must not
-            // silently land on SYSTEM (which resolves to the untested light
-            // palette on any factory-default OS) — a re-seed before a demo
-            // must not reintroduce that bug for these accounts.
-            themePreference: "DARK",
-          },
-        });
-        await tx.userRole.createMany({
-          data: roleCodes.map((c) => ({ userId: user.id, roleId: roleIdByCode.get(c)! })),
-        });
-        if (deptCodes.length) {
-          await tx.userDepartment.createMany({
-            data: deptCodes.map((c) => ({ userId: user.id, departmentId: deptIdByCode.get(c)! })),
-          });
-        }
-        return user;
-      };
-
-      await mkUser("admin@despl.local", "Administrator", ["ADMIN"]);
+      // `mkUser` itself and the admin account were hoisted above §10 (see the
+      // comment there) — B5's ProcurementEvent.by needed an actor to exist
+      // before the BOM/procurement import loop runs.
       await mkUser("md@despl.local", "MD", ["MANAGEMENT"]);
       await mkUser("ceo@despl.local", "CEO", ["MANAGEMENT"]);
       await mkUser("sj@despl.local", "SJ — Production Head", ["PRODUCTION_HEAD"]);
@@ -1335,6 +1474,7 @@ async function main() {
       qcpFile: readJson<QcpTemplatesFile>("qcp-templates.json"),
       qcpBatch2: readJson<QcpBatchFile>("qcp-templates-batch2.json"),
       pipeSpoolTemplate: readJson<ProvisionalTemplateFile>("pipe-spool-template.json"),
+      assemblyTemplate: readJson<AssemblyTemplateFile>("assembly-template-pressure-vessel-v1.json"),
       issues: readJson<DataIssuesFile>("data-issues.json").issues,
     };
   })();

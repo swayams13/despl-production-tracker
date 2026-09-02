@@ -2,6 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { workingDaysBetween, DEFAULT_CALENDAR } from "@/lib/schedule";
 import type { WorkCalendarInput } from "@/lib/schedule";
+import { isOverdue, isOnTime } from "@/lib/shared/business-day";
 
 /**
  * `/departments` + `/departments/[id]` (§4.6) — cross-job, like `/qc`.
@@ -23,6 +24,83 @@ export interface DeptCard {
   openCount: number;
   overdueCount: number;
   onTimePct: number | null;
+  /** N4 — non-CLOSED Ncrs whose rejected operation/step is owned by this department. */
+  openReworkCount: number;
+}
+
+/**
+ * N2 — open-rework items for a department's detail page, scoped to the
+ * department owning the rejected ComponentOperation/AssemblyStep (via
+ * OperationRef.defaultDepartmentId or AssemblyTemplateStep.defaultDepartmentId
+ * respectively). Separate grain from `DeptOpenItem` (ProcessPlan/JobProcess) —
+ * a sibling list, not an extension, since Ncr's owning entity isn't a plan.
+ */
+export interface DeptReworkItem {
+  ncrId: number;
+  kind: "COMPONENT_OPERATION" | "ASSEMBLY_STEP";
+  entityId: number;
+  status: string;
+  disposition: string | null;
+  reworkOwnerId: number | null;
+  reworkDueDate: string | null;
+}
+
+interface DeptNcrRow {
+  id: number;
+  status: string;
+  disposition: string | null;
+  reworkOwnerId: number | null;
+  reworkDueDate: Date | null;
+  componentOperationRejection: {
+    componentOperation: { id: number; operation: { defaultDepartmentId: number | null } };
+  } | null;
+  assemblyStepRejection: {
+    assemblyStep: { id: number; templateStep: { defaultDepartmentId: number } };
+  } | null;
+}
+
+/** Open (non-CLOSED) Ncrs tenant-wide, with enough of the rejection→operation/step
+ * chain resolved to attribute each to its owning department in JS. */
+async function loadOpenNcrs(tx: Tx, tenantId: number): Promise<DeptNcrRow[]> {
+  return tx.ncr.findMany({
+    where: {
+      status: { not: "CLOSED" },
+      OR: [
+        { componentOperationRejection: { componentOperation: { component: { equipment: { job: { tenantId } } } } } },
+        { assemblyStepRejection: { assemblyStep: { unit: { equipment: { job: { tenantId } } } } } },
+      ],
+    },
+    select: {
+      id: true,
+      status: true,
+      disposition: true,
+      reworkOwnerId: true,
+      reworkDueDate: true,
+      componentOperationRejection: {
+        select: { componentOperation: { select: { id: true, operation: { select: { defaultDepartmentId: true } } } } },
+      },
+      assemblyStepRejection: {
+        select: { assemblyStep: { select: { id: true, templateStep: { select: { defaultDepartmentId: true } } } } },
+      },
+    },
+  });
+}
+
+function reworkDeptId(row: DeptNcrRow): number | null {
+  return row.componentOperationRejection?.componentOperation.operation.defaultDepartmentId ?? row.assemblyStepRejection?.assemblyStep.templateStep.defaultDepartmentId ?? null;
+}
+
+function toReworkItem(row: DeptNcrRow): DeptReworkItem {
+  const isComponent = row.componentOperationRejection != null;
+  return {
+    ncrId: row.id,
+    kind: isComponent ? "COMPONENT_OPERATION" : "ASSEMBLY_STEP",
+    entityId: isComponent ? row.componentOperationRejection!.componentOperation.id : row.assemblyStepRejection!.assemblyStep.id,
+    status: row.status,
+    disposition: row.disposition,
+    reworkOwnerId: row.reworkOwnerId,
+    reworkDueDate: row.reworkDueDate ? row.reworkDueDate.toISOString() : null,
+  };
 }
 
 async function resolveCalendar(tx: Tx): Promise<WorkCalendarInput> {
@@ -45,18 +123,25 @@ export async function loadDepartmentCards(actor: Actor): Promise<DeptCard[]> {
       select: { ownerDepartmentId: true, status: true, plannedFinish: true, actualFinish: true },
     });
 
-    const now = new Date();
     const byDept = new Map<number, { open: number; overdue: number; onTime: number; onTimeTotal: number }>();
     for (const p of plans) {
       const b = byDept.get(p.ownerDepartmentId) ?? { open: 0, overdue: 0, onTime: 0, onTimeTotal: 0 };
       if (p.status !== "COMPLETE") {
         b.open++;
-        if (p.plannedFinish != null && p.plannedFinish < now) b.overdue++;
+        if (isOverdue(p.plannedFinish)) b.overdue++;
       } else if (p.actualFinish && p.plannedFinish) {
         b.onTimeTotal++;
-        if (p.actualFinish <= p.plannedFinish) b.onTime++;
+        if (isOnTime(p.actualFinish, p.plannedFinish)) b.onTime++;
       }
       byDept.set(p.ownerDepartmentId, b);
+    }
+
+    const openNcrs = await loadOpenNcrs(tx, actor.tenantId);
+    const reworkCountByDept = new Map<number, number>();
+    for (const row of openNcrs) {
+      const deptId = reworkDeptId(row);
+      if (deptId == null) continue;
+      reworkCountByDept.set(deptId, (reworkCountByDept.get(deptId) ?? 0) + 1);
     }
 
     return departments.map((d) => {
@@ -69,6 +154,7 @@ export async function loadDepartmentCards(actor: Actor): Promise<DeptCard[]> {
         openCount: b.open,
         overdueCount: b.overdue,
         onTimePct: b.onTimeTotal > 0 ? Math.round((b.onTime / b.onTimeTotal) * 100) : null,
+        openReworkCount: reworkCountByDept.get(d.id) ?? 0,
       };
     });
   });
@@ -107,6 +193,8 @@ export interface DeptDetail {
   openItems: DeptOpenItem[];
   cycleTime: DeptCycleTimeRow[];
   reasonBreakdown: DeptReasonBreakdown[];
+  /** N2 — open rework items owned by this department. */
+  openReworkItems: DeptReworkItem[];
 }
 
 export async function loadDepartmentDetail(actor: Actor, deptId: number): Promise<DeptDetail | null> {
@@ -132,7 +220,6 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
       },
     });
 
-    const now = new Date();
     const openItems: DeptOpenItem[] = plans
       .filter((p) => p.status !== "COMPLETE" && p.unit != null)
       .map((p) => ({
@@ -145,7 +232,7 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
         processName: p.jobProcess.name,
         status: p.status,
         plannedFinish: p.plannedFinish ? p.plannedFinish.toISOString() : null,
-        overdue: p.plannedFinish != null && p.plannedFinish < now,
+        overdue: isOverdue(p.plannedFinish),
       }))
       .sort((a, b) => (a.plannedFinish ?? "").localeCompare(b.plannedFinish ?? ""));
 
@@ -182,6 +269,10 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
       (a, b) => b.count - a.count,
     );
 
+    const openReworkItems = (await loadOpenNcrs(tx, actor.tenantId))
+      .filter((row) => reworkDeptId(row) === deptId)
+      .map(toReworkItem);
+
     return {
       id: dept.id,
       code: dept.code,
@@ -190,6 +281,7 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
       openItems,
       cycleTime,
       reasonBreakdown,
+      openReworkItems,
     };
   });
 }

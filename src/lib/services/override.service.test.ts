@@ -78,6 +78,30 @@ describe("applyDurationOverride refusals (pre-transaction, no DB)", () => {
  * per-job version counter would otherwise race. (The pilot DESPL-320 has NULL
  * dates by design and is unschedulable — see schedule.service.test.)
  */
+describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride refuses jobs with units (DB)", async () => {
+  it("throws OVERRIDE_NOT_SUPPORTED_WITH_UNITS for a job with units (audit H7)", async () => {
+    const { PrismaClient } = await import("@/generated/prisma/client");
+    const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+    try {
+      const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+      if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
+      const proc = await owner.jobProcess.findFirst({ where: { jobId: job.id }, orderBy: { seq: "asc" } });
+      if (!proc) throw new Error("seed job has no process");
+      const a = actor({ tenantId: job.tenantId, clientId: null });
+
+      const err = await applyDurationOverride(a, {
+        jobId: job.id,
+        jobProcessId: proc.id,
+        durationOverrideDays: 5,
+        reason: "should be refused before any CPM work",
+      }).catch((e) => e);
+      expect(isAppError(err) && err.code).toBe(ERROR_CODES.OVERRIDE_NOT_SUPPORTED_WITH_UNITS);
+    } finally {
+      await owner.$disconnect();
+    }
+  });
+});
+
 describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + desync fix (DB)", async () => {
   // Owner (DIRECT_URL) client for direct verification reads — bypasses RLS so a
   // bare read finds the seed row. Service calls scope themselves via withTenant.
@@ -101,6 +125,18 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + d
       orderBy: { seq: "asc" },
     });
     if (!proc) throw new Error("seed job has no schedulable process");
+
+    // Snapshot every process's MIN envelope offsets before the override, so we
+    // can assert they're untouched after — the corrupting min-space CPM restamp
+    // audit C2 flagged (terminal ≈36 days instead of ≈119, defeating
+    // checkFeasibility's INFEASIBLE path forever after one override) must stay
+    // removed, not just the plans.
+    const minBefore = new Map(
+      (await owner.jobProcess.findMany({ where: { jobId: job.id } })).map((p) => [
+        p.id,
+        { min: p.envelopeStartByMinDays, minFinish: p.envelopeFinishByMinDays },
+      ]),
+    );
 
     const run2 = await applyDurationOverride(a, {
       jobId: job.id,
@@ -131,6 +167,15 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + d
       if (!src) continue;
       expect(pp.baselineFinish?.getTime()).toBe(src.baselineFinish?.getTime());
       expect(pp.baselineStart?.getTime()).toBe(src.baselineStart?.getTime());
+    }
+
+    // MIN envelope offsets are byte-for-byte unchanged (audit C2 fix): the
+    // override must not run a min-space CPM pass over lags fitted for MAX only.
+    const afterProcesses = await owner.jobProcess.findMany({ where: { jobId: job.id } });
+    for (const p of afterProcesses) {
+      const before = minBefore.get(p.id);
+      expect(p.envelopeStartByMinDays).toBe(before?.min);
+      expect(p.envelopeFinishByMinDays).toBe(before?.minFinish);
     }
 
     // Layer 1 (envelope from the restamped offsets) == Layer 2 (CPM planned).

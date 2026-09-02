@@ -15,6 +15,10 @@ export const ERROR_CODES = {
   MAKER_CHECKER_VIOLATION: "MAKER_CHECKER_VIOLATION",
   /** An uncleared hold-point checkpoint blocks completion. */
   HOLD_POINT_OPEN: "HOLD_POINT_OPEN",
+  /** verifyProcess: a mapped ComponentOperation/AssemblyStep has a non-CLOSED Ncr (Phase 5, N3). */
+  NCR_OPEN: "NCR_OPEN",
+  /** verifyProcess: the stage's TemplateProcess.evidenceKind requires proof (packaged/dispatched/MDR compiled) that isn't recorded yet (Phase 5, D4). */
+  EVIDENCE_NOT_SATISFIED: "EVIDENCE_NOT_SATISFIED",
   /** Department has an overdue process and owes a categorised delay reason. */
   REASON_REQUIRED: "REASON_REQUIRED",
   /** Caller lacks the role, or is outside their department scope. */
@@ -77,6 +81,30 @@ export const ERROR_CODES = {
   TEMPLATE_INCOMPLETE: "TEMPLATE_INCOMPLETE",
   /** The row changed under the caller since it was loaded; the write was refused. */
   STALE_WRITE: "STALE_WRITE",
+  /** applyDurationOverride: job/equipment-grain override refused because the job already has units — it would write unitId:null plans that supersede the per-unit run and brick gating (audit H7). */
+  OVERRIDE_NOT_SUPPORTED_WITH_UNITS: "OVERRIDE_NOT_SUPPORTED_WITH_UNITS",
+  /** submitProcess: a mapped ComponentOperation or AssemblyStep on this (process, unit) is not yet COMPLETE (Phase 3, R2). */
+  COMPONENT_OPS_INCOMPLETE: "COMPONENT_OPS_INCOMPLETE",
+  /** explodeBomItem: a malformed parentBomItemId chain cycles back on itself — a defensive guard against a bad direct DB write, not a normal user-facing refusal. */
+  BOM_CYCLE_DETECTED: "BOM_CYCLE_DETECTED",
+  /** issueStock/scrapStock: this would drive the lot's available quantity below zero. */
+  INSUFFICIENT_STOCK: "INSUFFICIENT_STOCK",
+  /** startComponentOperation: the component's linked BomItem is recorded short (B7, Phase 4). */
+  MATERIAL_NOT_AVAILABLE: "MATERIAL_NOT_AVAILABLE",
+  /** startComponentOperation: a CUTTING op's governing drawing's current revision isn't RELEASED (B9, Phase 4). */
+  DRAWING_NOT_RELEASED: "DRAWING_NOT_RELEASED",
+  /** createDrawingRevision: revisionNo must be strictly greater than the drawing's current highest (B9, Phase 4). */
+  DRAWING_REVISION_NOT_INCREASING: "DRAWING_REVISION_NOT_INCREASING",
+  /** createBomRevision: revisionNo must be strictly greater than the equipment's current highest (B4, Phase 4). */
+  BOM_REVISION_NOT_INCREASING: "BOM_REVISION_NOT_INCREASING",
+  /** createBomItem/updateBomItem: the chosen parentBomItemId is a descendant of the item being written — a normal user refusal, not malformed data (B4, Phase 4). */
+  BOM_PARENT_WOULD_CYCLE: "BOM_PARENT_WOULD_CYCLE",
+  /** verifyComponentOperation: a PAINTING op has no PaintRecord, or fewer accepted DftReadings than required (P1, Phase 5). */
+  DFT_NOT_ACCEPTED: "DFT_NOT_ACCEPTED",
+  /** addUnitToBatch: the unit has no packageId set — it must be packed before it can be added to a dispatch batch (D2, Phase 5). */
+  UNIT_NOT_PACKED: "UNIT_NOT_PACKED",
+  /** assignUnitToPackage: the unit and package belong to different jobs (D1, Phase 5). */
+  CROSS_JOB_ASSIGNMENT: "CROSS_JOB_ASSIGNMENT",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -89,6 +117,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "The person who submitted an entry cannot also verify it. A different QC user must verify.",
   HOLD_POINT_OPEN:
     "An inspection hold point on this item is still open. It must be cleared before completion.",
+  NCR_OPEN:
+    "An operation feeding this stage has an open non-conformance report. It must be closed before this stage can verify.",
+  EVIDENCE_NOT_SATISFIED:
+    "This stage requires evidence that hasn't been recorded yet. Complete the required action first, then verify.",
   REASON_REQUIRED:
     "This department has an overdue process on this unit. File a categorised delay reason to continue.",
   FORBIDDEN: "You do not have permission to do this.",
@@ -129,6 +161,21 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This process route is missing information it needs before it can be published.",
   STALE_WRITE:
     "Someone else changed this while you were editing. Reload the page and reapply your changes.",
+  OVERRIDE_NOT_SUPPORTED_WITH_UNITS:
+    "This job already has per-unit schedules. A duration override at job level would replace them and cannot be applied here.",
+  COMPONENT_OPS_INCOMPLETE:
+    "One or more fabrication or assembly operations backing this process are not yet complete on this unit.",
+  BOM_CYCLE_DETECTED: "This BOM item's parent chain is malformed (a cycle). Contact an administrator.",
+  INSUFFICIENT_STOCK: "This would take the lot's available quantity below zero.",
+  MATERIAL_NOT_AVAILABLE: "This part is recorded short. Resolve the shortage before starting this operation.",
+  DRAWING_NOT_RELEASED: "This component's governing drawing is not released yet. Cutting cannot start until it is.",
+  DRAWING_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the drawing's current revision.",
+  BOM_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the equipment's current BOM revision.",
+  BOM_PARENT_WOULD_CYCLE: "Can't set this parent: it would create a circular reference. Pick a different parent item.",
+  DFT_NOT_ACCEPTED:
+    "This painting operation needs an accepted DFT reading for every planned coat before it can verify.",
+  UNIT_NOT_PACKED: "This unit has not been packed yet. Assign it to a package before adding it to a dispatch batch.",
+  CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
 };
 
 /**

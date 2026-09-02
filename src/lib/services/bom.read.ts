@@ -1,8 +1,11 @@
+import { Decimal } from "@prisma/client/runtime/library";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
 import { projectComponentRoute, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
+import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
 
 /**
  * Job detail — BOM & Components tab (§4.3, §9.6).
@@ -17,13 +20,13 @@ import { projectComponentRoute, type ActualOp, type ProjectedOp, type RouteStepD
  * is honest to what's actually in the DB rather than inventing a bucket map
  * the data doesn't support (functional rule #2: real data only).
  *
- * **Equipment-, not unit-, scoped (also a real-data finding):** `Component`
- * rows in the current seed all have `unitId = null` — BOM/component data
- * exists at the equipment grain only, components are not yet fanned out per
- * serial. The mockup's "Unit 1" selector would show identical data for every
- * unit, so this tab uses an equipment selector instead (a job can have
- * multiple equipments — e.g. DE0463 has 2). Per-serial component fan-out is
- * the same deferred concern already logged for schedule stagger.
+ * **Equipment selector, plus a unit selector where components are fanned out
+ * per serial:** `Component.unitId` is null for DE0463/DE0467 (BOM-item-linked
+ * data still lives at equipment grain only there) but real for DESPL-320's
+ * seeded sub-assembly register (`scripts/seed-despl320-components.ts`) — 11
+ * rows per unit, 99 across the job. `subAssemblyComponents` is filtered to
+ * one unit at a time once an equipment has any; `groups` (the BomItem-linked
+ * path) stays equipment-scoped, unchanged.
  */
 export interface BomQcpCheckpoint {
   qcpItemId: number;
@@ -36,6 +39,21 @@ export interface BomComponentOp extends ProjectedOp {
   qcpCheckpoints: BomQcpCheckpoint[];
 }
 
+/** B9, Phase 4: one issued revision of a component's governing drawing. */
+export interface BomDrawingRevision {
+  id: number;
+  revisionNo: number;
+  status: string;
+  releasedAt: string | null;
+}
+
+/** B9, Phase 4: the drawing gating this component's CUTTING start, when `governingDrawingId` is set. */
+export interface BomGoverningDrawing {
+  id: number;
+  drawingNo: string | null;
+  revisions: BomDrawingRevision[];
+}
+
 export interface BomComponentSummary {
   id: number;
   tag: string;
@@ -43,6 +61,8 @@ export interface BomComponentSummary {
   componentTypeName?: string;
   displayStatus: StageDisplayStatus;
   operations: BomComponentOp[];
+  /** B9, Phase 4 — null (SEAM) when no `governingDrawingId` is recorded on this component (the common case). */
+  governingDrawing: BomGoverningDrawing | null;
 }
 
 export interface BomMtc {
@@ -50,6 +70,50 @@ export interface BomMtc {
   heatNumber: string;
   mtcRef: string | null;
   pmiResult: PmiResult;
+  componentId: number | null;
+}
+
+/** B8, Phase 4: one row of a heat/component trace — either direction. */
+export interface MtcTraceRow {
+  id: number;
+  heatNumber: string;
+  mtcRef: string | null;
+  pmiResult: PmiResult;
+  qtyIssued: number | null;
+  componentId: number | null;
+  componentTag: string | null;
+}
+
+/**
+ * Derived from `ProcurementEvent` rows (B5, Phase 4) — replaces the old
+ * mutable `Procurement` row. `status` is the type of the most recent event
+ * (by `at`, ties broken by `id` descending); `receivedQty` is the sum of
+ * `qty` across RECEIPT events that HAVE a known quantity — `null` when there
+ * have been no RECEIPT events at all, or every RECEIPT so far has an unknown
+ * quantity (kept distinct from `0`). `hasUnknownReceipt` is true whenever AT
+ * LEAST ONE RECEIPT event has `qty: null`, even if others don't — task
+ * review I1: a mixed known+unknown case (e.g. a backfilled
+ * PARTIALLY_RECEIVED plus a later real receipt of 8) must not render as a
+ * confident "8 received" with the unknown portion silently dropped from the
+ * sum.
+ */
+export type ProcurementDisplayStatus = "NOT_STARTED" | "INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT";
+
+export interface BomProcurementSummary {
+  status: ProcurementDisplayStatus;
+  receivedQty: number | null;
+  hasUnknownReceipt: boolean;
+  events: { id: number; type: Exclude<ProcurementDisplayStatus, "NOT_STARTED">; qty: number | null; refNo: string | null; at: string }[];
+}
+
+/** B6, Phase 4 — one received lot, exposed so the UI can target Issue/Return/Scrap
+ * at a specific lot (those mutations take a `stockLotId`, not a `bomItemId`). */
+export interface BomStockLot {
+  id: number;
+  heatNumber: string | null;
+  location: string;
+  qty: number;
+  receivedAt: string;
 }
 
 export interface BomItemRow {
@@ -58,9 +122,57 @@ export interface BomItemRow {
   partName: string;
   description: string | null;
   material: string | null;
-  qty: string;
+  /** Raw source value (e.g. "40 NOS.") — kept for import fidelity and as the fallback display when `qtyPer` couldn't be parsed. */
+  sourceQty: string;
+  /** Parsed numeric quantity (B1); null when `sourceQty` didn't match the "N UOM" shape. */
+  qtyPer: number | null;
+  uom: string | null;
+  /** B2/B4, Phase 4 — multi-level BOM tree parent; null for a top-level row. */
+  parentBomItemId: number | null;
   mtc: BomMtc[];
+  procurement: BomProcurementSummary;
   components: BomComponentSummary[];
+  /** B6, Phase 4 — required quantity across the equipment's units (`explodeBomItem`).
+   * `null` when this item's own chain has an unparsed `qtyPer` (nothing display-worthy to explode). */
+  requiredQty: number | null;
+  /** B6, Phase 4 — on-hand quantity from `StockLot`/`StockTxn`. `null` (never `0`) when this
+   * item has zero stock activity at all — the SEAM principle: never tracked stays silent. */
+  availableQty: number | null;
+  /** B6, Phase 4 — `requiredQty - availableQty`; negative is surplus, shown as such, never clamped
+   * here (the panel clamps for display). `null` whenever `availableQty` is `null`. */
+  shortage: number | null;
+  /** B6, Phase 4 — every received lot for this item, oldest first; empty array (not null) when
+   * nothing has ever been received — distinct from `availableQty === null`'s "never tracked" SEAM,
+   * this is just "no lots yet," a normal empty-list case for the receive/issue UI. */
+  stockLots: BomStockLot[];
+}
+
+/** No events yet → "NOT_STARTED", a status no `ProcurementEvent.type` value
+ * carries — nothing has been logged for this item at all. Otherwise the
+ * most recent event's type IS the status; there's no separate status field
+ * to derive from a heuristic. */
+function summarizeProcurement(
+  events: { id: number; type: Exclude<ProcurementDisplayStatus, "NOT_STARTED">; qty: Decimal | null; refNo: string | null; at: Date }[],
+): BomProcurementSummary {
+  const sorted = [...events].sort((a, b) => b.at.getTime() - a.at.getTime() || b.id - a.id);
+  const allReceipts = events.filter((e) => e.type === "RECEIPT");
+  const knownReceipts = allReceipts.filter((e) => e.qty != null);
+  const receivedQty = knownReceipts.length
+    ? knownReceipts.reduce((sum, e) => sum + e.qty!.toNumber(), 0)
+    : null;
+  const hasUnknownReceipt = allReceipts.some((e) => e.qty == null);
+  return {
+    status: sorted[0]?.type ?? "NOT_STARTED",
+    receivedQty,
+    hasUnknownReceipt,
+    events: sorted.map((e) => ({
+      id: e.id,
+      type: e.type,
+      qty: e.qty != null ? e.qty.toNumber() : null,
+      refNo: e.refNo,
+      at: e.at.toISOString(),
+    })),
+  };
 }
 
 export interface BomGroup {
@@ -69,6 +181,21 @@ export interface BomGroup {
 }
 
 export interface EquipmentOption {
+  id: number;
+  name: string;
+}
+
+export interface UnitOption {
+  id: number;
+  serialNo: string;
+}
+
+export interface WelderOption {
+  id: number;
+  name: string;
+}
+
+export interface DelayCategoryOption {
   id: number;
   name: string;
 }
@@ -85,8 +212,20 @@ export interface BomTree {
    * `scripts/seed-despl320-components.ts`). Fabricating a fake `BomItem` to
    * hang these off would violate the "real data only" rule, so they get their
    * own section instead of being folded into `groups`.
+   *
+   * Filtered to one unit (`unitId`) when the equipment has any units with
+   * their own bomless components — otherwise (DE0463/DE0467 today) this is
+   * equipment-scoped, same as before per-serial fan-out existed.
    */
   subAssemblyComponents: BomComponentSummary[];
+  /** Units for the current equipment — non-empty only when `subAssemblyComponents` is unit-fanned. */
+  units: UnitOption[];
+  /** The unit `subAssemblyComponents` is filtered to; null when there's nothing to filter by. */
+  unitId: number | null;
+  /** F3's Operator/Welder picker — active welders, tenant-wide (no per-operation department filter; keeps the picker simple). */
+  welders: WelderOption[];
+  /** F5's reject reason picker — same taxonomy `fileDelayReasonSchema` uses at process grain. */
+  delayCategories: DelayCategoryOption[];
 }
 
 function opDisplayStatus(status: string): StageDisplayStatus {
@@ -100,6 +239,11 @@ interface RawComponentForSummary {
   id: number;
   tag: string;
   componentType?: { name: string } | null;
+  governingDrawing: {
+    id: number;
+    drawingNo: string | null;
+    revisions: { id: number; revisionNo: number; status: string; releasedAt: Date | null }[];
+  } | null;
   routeVersion: {
     steps: { seq: number; operation: { id: number; name: string; leadTimeProcessSeq: number | null } }[];
   } | null;
@@ -108,6 +252,13 @@ interface RawComponentForSummary {
     status: string;
     startedAt: Date | null;
     finishedAt: Date | null;
+    remarks: string | null;
+    qtyPlanned: number | null;
+    qtyGood: number | null;
+    qtyRejected: number | null;
+    performedByWelder: { name: string } | null;
+    performedByUser: { name: string } | null;
+    rejections: { detail: string | null; category: { name: string } }[];
     operation: { id: number; name: string; leadTimeProcessSeq: number | null };
   }[];
 }
@@ -133,6 +284,13 @@ function buildComponentSummary(
     startedAt: o.startedAt?.toISOString() ?? null,
     finishedAt: o.finishedAt?.toISOString() ?? null,
     leadTimeProcessSeq: o.operation.leadTimeProcessSeq,
+    performedByWelderName: o.performedByWelder?.name ?? null,
+    performedByUserName: o.performedByUser?.name ?? null,
+    remarks: o.remarks,
+    qtyPlanned: o.qtyPlanned,
+    qtyGood: o.qtyGood,
+    qtyRejected: o.qtyRejected,
+    rejection: o.rejections[0] ? { categoryName: o.rejections[0].category.name, detail: o.rejections[0].detail } : null,
   }));
   const ops: BomComponentOp[] = projectComponentRoute(routeSteps, actualOps).map((p) => ({
     ...p,
@@ -144,10 +302,24 @@ function buildComponentSummary(
       : ops.every((o) => o.status === "COMPLETE")
         ? "complete"
         : opDisplayStatus(ops.find((o) => o.status !== "COMPLETE" && o.status !== "NOT_STARTED")?.status ?? ops[0].status);
-  return { id: c.id, tag: c.tag, componentTypeName: c.componentType?.name, displayStatus, operations: ops };
+  const governingDrawing: BomGoverningDrawing | null = c.governingDrawing
+    ? {
+        id: c.governingDrawing.id,
+        drawingNo: c.governingDrawing.drawingNo,
+        revisions: [...c.governingDrawing.revisions]
+          .sort((a, b) => b.revisionNo - a.revisionNo)
+          .map((r) => ({ id: r.id, revisionNo: r.revisionNo, status: r.status, releasedAt: r.releasedAt?.toISOString() ?? null })),
+      }
+    : null;
+  return { id: c.id, tag: c.tag, componentTypeName: c.componentType?.name, displayStatus, operations: ops, governingDrawing };
 }
 
-export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: number): Promise<BomTree | null> {
+export async function loadBomTree(
+  actor: Actor,
+  jobId: number,
+  equipmentId?: number,
+  unitId?: number,
+): Promise<BomTree | null> {
   return withTenant(actor.tenantId, async (tx) => {
     const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
     if (!job) return null;
@@ -158,10 +330,30 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
       select: { id: true, name: true },
       orderBy: { id: "asc" },
     });
-    if (equipments.length === 0) return { equipmentId: 0, equipmentName: "", equipments: [], groups: [], subAssemblyComponents: [] };
+    if (equipments.length === 0) {
+      return {
+        equipmentId: 0,
+        equipmentName: "",
+        equipments: [],
+        groups: [],
+        subAssemblyComponents: [],
+        units: [],
+        unitId: null,
+        welders: [],
+        delayCategories: [],
+      };
+    }
 
     const targetId = equipmentId != null && equipments.some((e) => e.id === equipmentId) ? equipmentId : equipments[0].id;
     const equipment = equipments.find((e) => e.id === targetId)!;
+
+    const units = await tx.unit.findMany({
+      where: { equipmentId: targetId },
+      select: { id: true, serialNo: true },
+      orderBy: { serialNo: "asc" },
+    });
+    const targetUnitId =
+      units.length === 0 ? null : unitId != null && units.some((u) => u.id === unitId) ? unitId : units[0].id;
 
     const items = await tx.bomItem.findMany({
       where: { equipmentId: targetId },
@@ -172,14 +364,30 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
         partName: true,
         description: true,
         material: true,
-        qty: true,
+        sourceQty: true,
+        qtyPer: true,
+        uom: true,
+        parentBomItemId: true,
         componentType: { select: { name: true } },
-        materialIdentifications: { select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true } },
+        materialIdentifications: { select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true, componentId: true } },
+        procurementEvents: {
+          select: { id: true, type: true, qty: true, refNo: true, at: true },
+        },
+        stockLots: {
+          select: { id: true, heatNumber: true, location: true, qty: true, receivedAt: true, txns: { select: { type: true, qty: true } } },
+        },
         components: {
           select: {
             id: true,
             tag: true,
             componentType: { select: { name: true } },
+            governingDrawing: {
+              select: {
+                id: true,
+                drawingNo: true,
+                revisions: { select: { id: true, revisionNo: true, status: true, releasedAt: true } },
+              },
+            },
             routeVersion: {
               select: {
                 steps: {
@@ -195,6 +403,17 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
                 status: true,
                 startedAt: true,
                 finishedAt: true,
+                remarks: true,
+                qtyPlanned: true,
+                qtyGood: true,
+                qtyRejected: true,
+                performedByWelder: { select: { name: true } },
+                performedByUser: { select: { name: true } },
+                rejections: {
+                  orderBy: { rejectedAt: "desc" },
+                  take: 1,
+                  select: { detail: true, category: { select: { name: true } } },
+                },
                 operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
               },
             },
@@ -206,13 +425,22 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
     // Component rows for this equipment with no BomItem (bomItemId: null) —
     // e.g. DESPL-320's seeded sub-assembly register, unreachable via
     // `items[].components` above since that path only walks BomItem.components.
+    // Scoped to one unit once the equipment has any (targetUnitId) — without
+    // this, DESPL-320's 99 rows across 9 units would render as one flat list.
     const bomlessComponents = await tx.component.findMany({
-      where: { equipmentId: targetId, bomItemId: null },
+      where: { equipmentId: targetId, bomItemId: null, ...(targetUnitId != null ? { unitId: targetUnitId } : {}) },
       orderBy: { tag: "asc" },
       select: {
         id: true,
         tag: true,
         componentType: { select: { name: true } },
+        governingDrawing: {
+          select: {
+            id: true,
+            drawingNo: true,
+            revisions: { select: { id: true, revisionNo: true, status: true, releasedAt: true } },
+          },
+        },
         routeVersion: {
           select: {
             steps: {
@@ -228,6 +456,17 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
             status: true,
             startedAt: true,
             finishedAt: true,
+            remarks: true,
+            qtyPlanned: true,
+            qtyGood: true,
+            qtyRejected: true,
+            performedByWelder: { select: { name: true } },
+            performedByUser: { select: { name: true } },
+            rejections: {
+              orderBy: { rejectedAt: "desc" },
+              take: 1,
+              select: { detail: true, category: { select: { name: true } } },
+            },
             operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
           },
         },
@@ -253,18 +492,54 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
 
     const subAssemblyComponents = bomlessComponents.map((c) => buildComponentSummary(c, checkpointsByProcessCode));
 
+    // B6, Phase 4: required/available/shortage, computed inline (same
+    // transaction, already-loaded data) rather than by calling the separate
+    // exported `requiredQty`/`availableQty`/`shortage` — those each open
+    // their own `withTenant` transaction, which would nest awkwardly if
+    // called from inside this one. `itemsById` mirrors what `requiredQty`
+    // builds itself; `unitCount` is this equipment's `Unit` row count, same
+    // derivation.
+    const itemsById = new Map<number, ExplodableBomItem>(
+      items.map((it) => [it.id, { id: it.id, qtyPer: it.qtyPer, parentBomItemId: it.parentBomItemId }]),
+    );
+    const unitCount = units.length;
+
     const byGroup = new Map<string, BomItemRow[]>();
     for (const it of items) {
       const groupName = it.componentType?.name ?? "Uncategorized";
+
+      let required: Decimal | null;
+      try {
+        required = explodeBomItem(itemsById.get(it.id)!, unitCount, itemsById);
+      } catch {
+        required = null; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to explode
+      }
+
+      // Fix wave, Critical #1: shared with `availableQty`/`assertKitReady` —
+      // SEAM: zero StockLot rows for this item → null, never 0. ISSUE/RETURN
+      // do not move this number (only SCRAP does) — see `computeAvailableForShortage`.
+      const available = computeAvailableForShortage(it.stockLots);
+      const shortageVal = available != null && required != null ? required.minus(available) : null;
+
       const row: BomItemRow = {
         id: it.id,
         itemNo: it.itemNo,
         partName: it.partName,
         description: it.description,
         material: it.material,
-        qty: it.qty,
-        mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING" })),
+        sourceQty: it.sourceQty,
+        qtyPer: it.qtyPer?.toNumber() ?? null,
+        uom: it.uom,
+        parentBomItemId: it.parentBomItemId,
+        mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING", componentId: m.componentId })),
+        procurement: summarizeProcurement(it.procurementEvents),
         components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),
+        requiredQty: required?.toNumber() ?? null,
+        availableQty: available?.toNumber() ?? null,
+        shortage: shortageVal?.toNumber() ?? null,
+        stockLots: [...it.stockLots]
+          .sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime())
+          .map((lot) => ({ id: lot.id, heatNumber: lot.heatNumber, location: lot.location, qty: lot.qty.toNumber(), receivedAt: lot.receivedAt.toISOString() })),
       };
       const list = byGroup.get(groupName) ?? [];
       list.push(row);
@@ -275,6 +550,174 @@ export async function loadBomTree(actor: Actor, jobId: number, equipmentId?: num
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, groupItems]) => ({ name, items: groupItems }));
 
-    return { equipmentId: targetId, equipmentName: equipment.name, equipments, groups, subAssemblyComponents };
+    const [welders, delayCategories] = await Promise.all([
+      tx.welder.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      tx.delayCategoryRef.findMany({ where: { active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    ]);
+
+    return {
+      equipmentId: targetId,
+      equipmentName: equipment.name,
+      equipments,
+      groups,
+      subAssemblyComponents,
+      units,
+      unitId: targetUnitId,
+      welders,
+      delayCategories,
+    };
+  });
+}
+
+/**
+ * B3, Phase 4: the required-quantity wrapper — loads the target `BomItem`'s
+ * whole equipment tree once (thin DB call), then hands off to the pure
+ * `explodeBomItem` for the actual walk-and-multiply. Nothing calls this yet;
+ * a later dispatch (stock/shortage) is the first real caller.
+ *
+ * `unitCount` is the equipment's `Unit` row count (invariant: never a typed
+ * literal) — e.g. 9 for DESPL-320's serials, derived from the DB, not passed
+ * in.
+ */
+export async function requiredQty(actor: Actor, bomItemId: number): Promise<Decimal> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const bomItem = await tx.bomItem.findFirst({
+      where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
+      select: { equipmentId: true, equipment: { select: { job: { select: { clientId: true } } } } },
+    });
+    if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { bomItemId });
+    assertClientScope(actor, bomItem.equipment.job.clientId);
+
+    const [unitCount, siblingItems] = await Promise.all([
+      tx.unit.count({ where: { equipmentId: bomItem.equipmentId } }),
+      tx.bomItem.findMany({
+        where: { equipmentId: bomItem.equipmentId },
+        select: { id: true, qtyPer: true, parentBomItemId: true },
+      }),
+    ]);
+
+    const itemsById = new Map<number, ExplodableBomItem>(siblingItems.map((it) => [it.id, it]));
+    const target = itemsById.get(bomItemId);
+    if (!target) throw new AppError(ERROR_CODES.NOT_FOUND, { bomItemId });
+
+    return explodeBomItem(target, unitCount, itemsById);
+  });
+}
+
+/**
+ * B6, Phase 4 (arithmetic fixed in the Phase-4 fix wave, Critical #1):
+ * shortage-relevant on-hand quantity for a BOM item — `sum(StockLot.qty) -
+ * sum(StockTxn.qty where SCRAP)` via the shared `computeAvailableForShortage`
+ * (`bom-explosion.ts`), also used by `loadBomTree` and `assertKitReady`.
+ * `ISSUE` and `RETURN` do NOT move this number: issuing material into the
+ * product is consumption as intended, not loss (the original formula
+ * subtracted `ISSUE`, which meant issuing material to production
+ * manufactured a false shortage against the very component it was issued
+ * to). Same tenant-anchoring shape as `requiredQty` (through `equipment.job`,
+ * since `bom_items` carries no tenant_id of its own).
+ *
+ * Returns `null` — not `0` — when this BOM item has zero `StockLot` rows.
+ * This is the SEAM principle: "never tracked" must stay silent, not render
+ * as "0 available".
+ */
+export async function availableQty(actor: Actor, bomItemId: number): Promise<Decimal | null> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const bomItem = await tx.bomItem.findFirst({
+      where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
+      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+    });
+    if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { bomItemId });
+    assertClientScope(actor, bomItem.equipment.job.clientId);
+
+    const lots = await tx.stockLot.findMany({
+      where: { bomItemId },
+      select: { qty: true, txns: { select: { type: true, qty: true } } },
+    });
+    return computeAvailableForShortage(lots);
+  });
+}
+
+/**
+ * B6, Phase 4: `requiredQty - availableQty` — a negative result is surplus,
+ * not hidden as 0 (display layer clamps for the "shortage" label, this
+ * helper does not). Returns `null` whenever `availableQty` does — a BOM item
+ * with no stock activity at all must never render a fabricated "fully
+ * short" number.
+ */
+export async function shortage(actor: Actor, bomItemId: number): Promise<Decimal | null> {
+  const [required, available] = await Promise.all([requiredQty(actor, bomItemId), availableQty(actor, bomItemId)]);
+  if (available == null) return null;
+  return required.minus(available);
+}
+
+function toMtcTraceRow(m: {
+  id: number;
+  heatNumber: string;
+  mtcRef: string | null;
+  pmiResult: PmiResult | null;
+  qtyIssued: Decimal | null;
+  componentId: number | null;
+  component: { tag: string } | null;
+}): MtcTraceRow {
+  return {
+    id: m.id,
+    heatNumber: m.heatNumber,
+    mtcRef: m.mtcRef,
+    pmiResult: m.pmiResult ?? "PENDING",
+    qtyIssued: m.qtyIssued?.toNumber() ?? null,
+    componentId: m.componentId,
+    componentTag: m.component?.tag ?? null,
+  };
+}
+
+/**
+ * B8, Phase 4 — forward trace: "one heat traces forward to every serial it
+ * entered" = every `MaterialIdentification` row sharing `heatNumber`, tenant
+ * -scoped through `bomItem.equipment.job.tenantId` (every row here always
+ * carries a `bomItemId`, so that anchor alone is enough — no need to touch
+ * the optional `componentId` chain for scoping).
+ */
+export async function heatTrace(actor: Actor, heatNumber: string): Promise<MtcTraceRow[]> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const rows = await tx.materialIdentification.findMany({
+      where: { heatNumber, bomItem: { equipment: { job: { tenantId: actor.tenantId } } } },
+      select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true, qtyIssued: true, componentId: true, component: { select: { tag: true } } },
+      orderBy: { id: "asc" },
+    });
+    return rows.map(toMtcTraceRow);
+  });
+}
+
+/**
+ * B8, Phase 4 — backward trace: "one serial traces back to every heat in
+ * it" = every `MaterialIdentification` row for a given `componentId`, PLUS
+ * (fix wave, Minor #b — the plan's §B8-specified fallback, previously
+ * missing) every legacy `bomItemId`-only row (recorded before `componentId`
+ * existed on the model, so `componentId` is null) for the component's own
+ * `bomItemId` — those rows don't say which component they went to, so they
+ * trace back to EVERY component under that `bomItemId`, this one included.
+ * Tenant-anchored via the component's own chain (`equipment.job.tenantId`),
+ * same pattern as `recordMtc`'s componentId path.
+ */
+export async function componentHeats(actor: Actor, componentId: number): Promise<MtcTraceRow[]> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const component = await tx.component.findFirst({
+      where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
+      select: { bomItemId: true, equipment: { select: { job: { select: { clientId: true } } } } },
+    });
+    if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+    assertClientScope(actor, component.equipment.job.clientId);
+
+    const rows = await tx.materialIdentification.findMany({
+      where: {
+        OR: [
+          { componentId },
+          ...(component.bomItemId != null ? [{ componentId: null, bomItemId: component.bomItemId }] : []),
+        ],
+      },
+      select: { id: true, heatNumber: true, mtcRef: true, pmiResult: true, qtyIssued: true, componentId: true, component: { select: { tag: true } } },
+      orderBy: { id: "asc" },
+    });
+    return rows.map(toMtcTraceRow);
   });
 }

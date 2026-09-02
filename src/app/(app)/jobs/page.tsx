@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { loadJobs } from "@/lib/services/jobs.read";
 import { StageSpine } from "@/components/industrial/stage-spine";
+import { JobRow } from "./_row";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -59,11 +60,9 @@ export default async function JobsList() {
             </thead>
             <tbody>
               {jobs.map((j) => (
-                <tr key={j.id} className="row">
+                <JobRow key={j.id} jobId={j.id}>
                   <td>
-                    <Link href={`/jobs/${j.id}`} className="mono" style={{ color: "var(--text)", fontWeight: 500 }}>
-                      {j.jobNumber}
-                    </Link>
+                    <span className="mono" style={{ color: "var(--text)", fontWeight: 500 }}>{j.jobNumber}</span>
                   </td>
                   <td style={{ color: "var(--muted)" }}>{j.familyName}</td>
                   <td>{j.projectName ?? "—"}</td>
@@ -102,7 +101,7 @@ export default async function JobsList() {
                     {j.openHoldPoints}
                   </td>
                   <td style={{ color: "var(--muted)", fontSize: 12 }}>{fmtWhen(j.lastActivityAt)}</td>
-                </tr>
+                </JobRow>
               ))}
             </tbody>
           </table>

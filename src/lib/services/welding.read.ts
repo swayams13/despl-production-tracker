@@ -37,6 +37,15 @@ export interface NdtRow {
   recordedAt: string | null;
 }
 
+export interface WelderRegistryRow {
+  id: number;
+  name: string;
+  employeeCode: string;
+  active: boolean;
+  departmentId: number | null;
+  departmentName: string | null;
+}
+
 export interface WeldingView {
   teamAvgJoints: number;
   teamRepairRatePct: number | null;
@@ -44,6 +53,9 @@ export interface WeldingView {
   openJointsByWelder: OpenJointsRow[];
   recentNdt: NdtRow[];
   testTypes: { id: number; code: string; name: string }[];
+  /** A5 (Phase 2) — every welder (active and inactive), for the registry CRUD panel. */
+  welderRegistry: WelderRegistryRow[];
+  departments: { id: number; name: string }[];
 }
 
 /** Pure — unit-tested directly (repair rate + the config threshold flag). */
@@ -194,6 +206,22 @@ export async function loadWeldingView(actor: Actor): Promise<WeldingView> {
       orderBy: { code: "asc" },
     });
 
+    const [allWelders, departments] = await Promise.all([
+      tx.welder.findMany({
+        include: { department: { select: { name: true } } },
+        orderBy: [{ active: "desc" }, { name: "asc" }],
+      }),
+      tx.department.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    ]);
+    const welderRegistry: WelderRegistryRow[] = allWelders.map((w) => ({
+      id: w.id,
+      name: w.name,
+      employeeCode: w.employeeCode,
+      active: w.active,
+      departmentId: w.departmentId,
+      departmentName: w.department?.name ?? null,
+    }));
+
     return {
       teamAvgJoints,
       teamRepairRatePct,
@@ -201,6 +229,8 @@ export async function loadWeldingView(actor: Actor): Promise<WeldingView> {
       openJointsByWelder,
       recentNdt,
       testTypes,
+      welderRegistry,
+      departments,
     };
   });
 }
@@ -215,8 +245,12 @@ export interface WeldJointOption {
 /** Feeds the "record result" picker — joints logged for a job (any unit). */
 export async function loadWeldJointOptions(actor: Actor, jobId: number): Promise<WeldJointOption[]> {
   return withTenant(actor.tenantId, async (tx) => {
+    // `weld_joints` carries no tenant_id (audit H4): a bare `jobId` filter let
+    // any authenticated user enumerate every weld joint, WPS ref and unit
+    // serial in the DB by guessing/incrementing job ids. Anchor through `job`,
+    // which IS tenant-scoped.
     const joints = await tx.weldJoint.findMany({
-      where: { jobId },
+      where: { jobId, job: { tenantId: actor.tenantId } },
       orderBy: { createdAt: "desc" },
       include: { job: { select: { jobNumber: true } }, unit: { select: { serialNo: true } } },
     });

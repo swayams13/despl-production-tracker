@@ -2,15 +2,28 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { assertKitReady, assertDrawingReleased } from "./_shared";
+import { assertStateTransition } from "./state-machine";
+import { assertPerformedByValid } from "./welding.service";
+import { closeNcr } from "./ncr.service";
 import {
   startComponentOperationSchema,
   submitComponentOperationSchema,
   verifyComponentOperationSchema,
+  rejectComponentOperationSchema,
+  recordPaintRecordSchema,
+  recordDftReadingSchema,
   type StartComponentOperationInput,
   type SubmitComponentOperationInput,
   type VerifyComponentOperationInput,
+  type RejectComponentOperationInput,
+  type RecordPaintRecordInput,
+  type RecordDftReadingInput,
 } from "@/lib/shared/schemas";
-import type { ComponentOperation, OperationStatus } from "@/generated/prisma/client";
+import type { ComponentOperation, DftReading, OperationStatus, PaintRecord } from "@/generated/prisma/client";
+
+/** P1 (Phase 5): a PAINTING op's coats requirement — 1 if unset. */
+const DEFAULT_COATS_REQUIRED = 1;
 
 /**
  * Wired into Server Actions (`src/app/actions/component.ts`) and the
@@ -24,12 +37,14 @@ import type { ComponentOperation, OperationStatus } from "@/generated/prisma/cli
  * machine: no HOLD/resume, and no cross-component DAG — a component's own
  * route is a flat ordered sequence (RouteStep.seq), so the only ordering
  * gate is "the previous seq on THIS component must be COMPLETE", not a full
- * predecessor graph. reject() is left out of this draft on purpose: a
- * rejection reason has nowhere durable to live yet (DelayReason is keyed to
- * processPlanId only) — see the plan doc for the two ways to close that gap.
+ * predecessor graph. F5 (Phase 1): reject() returns a SUBMITTED op to
+ * IN_PROGRESS with the rejection retained in `ComponentOperationRejection`
+ * (reuses `DelayCategoryRef`, the same taxonomy `DelayReason` uses at process
+ * grain) — the durable home the earlier draft of this file said didn't exist
+ * yet.
  */
 
-export type ComponentOperationAction = "start" | "submit" | "verify";
+export type ComponentOperationAction = "start" | "submit" | "verify" | "reject";
 
 export const COMPONENT_OP_TRANSITIONS: Record<
   ComponentOperationAction,
@@ -38,23 +53,18 @@ export const COMPONENT_OP_TRANSITIONS: Record<
   start: { from: ["NOT_STARTED"], to: "IN_PROGRESS" },
   submit: { from: ["IN_PROGRESS"], to: "SUBMITTED" },
   verify: { from: ["SUBMITTED"], to: "COMPLETE" },
+  // F5 / F-e (spec §4): rejected work restarts from the SAME step, not an
+  // earlier one — the floor has not been asked to confirm otherwise, and
+  // this is the addendum's own stated default ("returning the op to
+  // IN_PROGRESS with the rejection retained").
+  reject: { from: ["SUBMITTED"], to: "IN_PROGRESS" },
 };
 
 export function assertComponentOpTransition(
   action: ComponentOperationAction,
   from: OperationStatus,
 ): OperationStatus {
-  const t = COMPONENT_OP_TRANSITIONS[action];
-  if (!t.from.includes(from)) {
-    throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-      entity: "ComponentOperation",
-      action,
-      from,
-      allowedFrom: t.from,
-      to: t.to,
-    });
-  }
-  return t.to;
+  return assertStateTransition(COMPONENT_OP_TRANSITIONS, action, from, "ComponentOperation");
 }
 
 /**
@@ -115,6 +125,8 @@ async function lockComponentOperationForUpdate(
 ): Promise<{
   op: ComponentOperation;
   departmentId: number | null;
+  /** OperationRef.code (e.g. "CUTTING") — B9's drawing gate is CUTTING-specific, identified by code, never a hardcoded id. */
+  operationCode: string;
   previousOp: { seq: number; status: OperationStatus } | null;
 }> {
   await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ${componentOperationId} FOR UPDATE`;
@@ -129,7 +141,7 @@ async function lockComponentOperationForUpdate(
 
   const previousOp = await findPreviousComponentOperation(tx, op, op.component.routeVersionId);
 
-  return { op, departmentId: op.operation.defaultDepartmentId, previousOp };
+  return { op, departmentId: op.operation.defaultDepartmentId, operationCode: op.operation.code, previousOp };
 }
 
 function requireOperationDepartment(actor: Actor, departmentId: number | null): void {
@@ -160,7 +172,7 @@ export async function startComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op, departmentId, previousOp } = await lockComponentOperationForUpdate(
+    const { op, departmentId, operationCode, previousOp } = await lockComponentOperationForUpdate(
       tx,
       componentOperationId,
       actor.tenantId,
@@ -176,11 +188,46 @@ export async function startComponentOperation(
       });
     }
 
+    // B7, Phase 4 (CLAUDE.md #2's fourth gate): the component's linked
+    // BomItem must not be recorded short. SEAM no-op for untracked/never-
+    // stocked parts — see _shared.ts's assertKitReady.
+    await assertKitReady(tx, op.componentId, actor.tenantId);
+
+    // B9, Phase 4: CUTTING is the one operation gated on the component's
+    // governing drawing being RELEASED — identified by OperationRef.code,
+    // never a hardcoded id, and never applied to any other operation (scope
+    // boundary per the plan). SEAM no-op (returns null) when the component
+    // has no governingDrawingId; non-null return is the current revision's
+    // id, stamped onto Component.builtToRevisionId below.
+    const builtToRevisionId =
+      operationCode === "CUTTING" ? await assertDrawingReleased(tx, op.componentId, actor.tenantId) : null;
+
+    // N3 (Phase 5): a reworked operation that legitimately returns to
+    // NOT_STARTED (rather than staying IN_PROGRESS the way a plain F5 reject
+    // leaves it — e.g. an admin correction) stamps its open Ncr's
+    // reworkStartedAt here, guarded on it not already being set so this
+    // never clobbers the timestamp dispositionNcr already stamped.
+    const openReworkNcr = await tx.ncr.findFirst({
+      where: {
+        status: "REWORK_IN_PROGRESS",
+        reworkStartedAt: null,
+        componentOperationRejection: { componentOperationId: op.id },
+      },
+    });
+
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
         data: { status: to, startedAt: new Date() },
       });
+      // Server-derived stamp (invariant #1), same transaction the gate
+      // check ran in — never a client-supplied revision id.
+      if (builtToRevisionId != null) {
+        await tx.component.update({ where: { id: op.componentId }, data: { builtToRevisionId } });
+      }
+      if (openReworkNcr) {
+        await tx.ncr.update({ where: { id: openReworkNcr.id }, data: { reworkStartedAt: new Date() } });
+      }
       return {
         result: updated,
         audit: {
@@ -188,7 +235,11 @@ export async function startComponentOperation(
           entityType: "ComponentOperation",
           entityId: op.id,
           before: { status: op.status },
-          after: { status: updated.status, startedAt: updated.startedAt },
+          after: {
+            status: updated.status,
+            startedAt: updated.startedAt,
+            ...(builtToRevisionId != null ? { builtToRevisionId } : {}),
+          },
           eventType: "ComponentOperationStarted",
           eventPayload: { componentOperationId: op.id, componentId: op.componentId },
         },
@@ -210,18 +261,32 @@ export async function submitComponentOperation(
   actor: Actor,
   input: SubmitComponentOperationInput,
 ): Promise<ComponentOperation> {
-  const { componentOperationId } = submitComponentOperationSchema.parse(input);
+  const { componentOperationId, performedByWelderId, performedByUserId, remarks, qtyPlanned, qtyGood, qtyRejected } =
+    submitComponentOperationSchema.parse(input);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
     const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
     requireOperationDepartment(actor, departmentId);
     const to = assertComponentOpTransition("submit", op.status);
+    await assertPerformedByValid(tx, actor, performedByWelderId, performedByUserId);
 
+    // F3/F4 fields are all optional (schema) — `undefined` here (rather than
+    // `null`) leaves an already-recorded value untouched instead of wiping it
+    // on a resubmit that doesn't repeat it.
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
-        data: { status: to, submittedBy: actor.userId },
+        data: {
+          status: to,
+          submittedBy: actor.userId,
+          performedByWelderId: performedByWelderId ?? undefined,
+          performedByUserId: performedByUserId ?? undefined,
+          remarks: remarks ?? undefined,
+          qtyPlanned: qtyPlanned ?? undefined,
+          qtyGood: qtyGood ?? undefined,
+          qtyRejected: qtyRejected ?? undefined,
+        },
       });
       return {
         result: updated,
@@ -230,7 +295,16 @@ export async function submitComponentOperation(
           entityType: "ComponentOperation",
           entityId: op.id,
           before: { status: op.status, submittedBy: op.submittedBy },
-          after: { status: updated.status, submittedBy: updated.submittedBy },
+          after: {
+            status: updated.status,
+            submittedBy: updated.submittedBy,
+            performedByWelderId: updated.performedByWelderId,
+            performedByUserId: updated.performedByUserId,
+            remarks: updated.remarks,
+            qtyPlanned: updated.qtyPlanned,
+            qtyGood: updated.qtyGood,
+            qtyRejected: updated.qtyRejected,
+          },
           eventType: "ComponentOperationSubmitted",
           eventPayload: { componentOperationId: op.id, submittedBy: actor.userId },
         },
@@ -257,15 +331,59 @@ export async function verifyComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    const { op, operationCode } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
     assertMakerChecker(actor, op.submittedBy);
     const to = assertComponentOpTransition("verify", op.status);
+
+    // P1 (Phase 5): a PAINTING op cannot verify without a recorded coating
+    // system and enough accepted DFT readings — identified by
+    // OperationRef.code, same discipline as B9's CUTTING-only drawing gate
+    // above. "Accepted" is self-attested by whoever recorded the reading;
+    // there is no spec'd min/max micron range to check against (open
+    // question noted in the schema comment and the task report — not
+    // silently resolved here).
+    if (operationCode === "PAINTING") {
+      const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId: op.id } });
+      // Coverage is per DISTINCT coat, not a raw accepted-row count — three
+      // accepted readings all against the same coatNumber (or all with it
+      // omitted) must not satisfy coatsPlanned: 3 (task review Important #1).
+      // groupBy folds duplicate coatNumbers together, including a null
+      // coatNumber as its own single group (the "untagged" case the
+      // coatsPlanned-unset/DEFAULT_COATS_REQUIRED=1 path relies on).
+      const acceptedCoatGroups = await tx.dftReading.groupBy({
+        by: ["coatNumber"],
+        where: { componentOperationId: op.id, accepted: true },
+      });
+      const distinctAcceptedCoats = acceptedCoatGroups.length;
+      const requiredCoats = paintRecord?.coatsPlanned ?? DEFAULT_COATS_REQUIRED;
+      if (!paintRecord || distinctAcceptedCoats < requiredCoats) {
+        throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, {
+          componentOperationId: op.id,
+          hasPaintRecord: !!paintRecord,
+          acceptedCoats: distinctAcceptedCoats,
+          requiredCoats,
+        });
+      }
+    }
+
+    // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr(s)
+    // and records the elapsed rework time (closeNcr stamps reworkFinishedAt).
+    // findMany, not findFirst: repeated reject→resubmit→reject cycles without
+    // an intervening dispositionNcr each open a NEW Ncr (one per rejection,
+    // by design), so more than one can be open at once — closing only one
+    // would strand the rest permanently non-CLOSED (task review Critical #1).
+    const openNcrs = await tx.ncr.findMany({
+      where: { status: { not: "CLOSED" }, componentOperationRejection: { componentOperationId: op.id } },
+    });
 
     return audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
+      for (const ncr of openNcrs) {
+        await closeNcr(tx, actor, { ncrId: ncr.id });
+      }
       return {
         result: updated,
         audit: {
@@ -276,6 +394,138 @@ export async function verifyComponentOperation(
           after: { status: updated.status, verifiedBy: updated.verifiedBy, finishedAt: updated.finishedAt },
           eventType: "ComponentOperationVerified",
           eventPayload: { componentOperationId: op.id, submittedBy: op.submittedBy, verifiedBy: actor.userId },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * F5 — SUBMITTED -> IN_PROGRESS (checker rejects the maker's submission).
+ * Same maker-checker gate as verify (#3): QC role AND actor != submittedBy —
+ * the submitter cannot reject their own work. A category is mandatory
+ * (schema); the rejection is recorded in `ComponentOperationRejection`
+ * (durable, unlike the earlier draft's "nowhere to live yet") and
+ * `submittedBy` is cleared so the maker must re-submit after rework.
+ */
+export async function rejectComponentOperation(
+  actor: Actor,
+  input: RejectComponentOperationInput,
+): Promise<ComponentOperation> {
+  const { componentOperationId, categoryId, detail } = rejectComponentOperationSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const { op } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    assertMakerChecker(actor, op.submittedBy);
+    const to = assertComponentOpTransition("reject", op.status);
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.componentOperation.update({
+        where: { id: op.id },
+        data: { status: to, submittedBy: null },
+      });
+      const rejection = await tx.componentOperationRejection.create({
+        data: { componentOperationId: op.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId },
+      });
+      // N1 (Phase 5): every rejection opens exactly one Ncr for QC to
+      // disposition — the rework/QA workflow layered on top of the
+      // immutable rejection record.
+      await tx.ncr.create({ data: { componentOperationRejectionId: rejection.id } });
+      return {
+        result: updated,
+        audit: {
+          action: "componentOperation.reject",
+          entityType: "ComponentOperation",
+          entityId: op.id,
+          before: { status: op.status, submittedBy: op.submittedBy },
+          after: { status: updated.status, submittedBy: updated.submittedBy, categoryId, detail },
+          eventType: "ComponentOperationRejected",
+          eventPayload: {
+            componentOperationId: op.id,
+            submittedBy: op.submittedBy,
+            rejectedBy: actor.userId,
+            categoryId,
+            detail,
+          },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Records/updates the coating system for a PAINTING op (P1, Phase 5).
+ * PaintRecord is 1:1 with ComponentOperation — upsert so re-recording (e.g.
+ * a corrected coats-planned figure before verify) doesn't need a separate
+ * update action. Not restricted to the PAINTING op code: a component's route
+ * decides which ops exist, and there is no product reason to refuse
+ * recording a coating system against a non-PAINTING op id someone points it
+ * at — the verify-time gate only ever fires for the code that matters.
+ */
+export async function recordPaintRecord(actor: Actor, input: RecordPaintRecordInput): Promise<PaintRecord> {
+  const { componentOperationId, coatingSystem, coatsPlanned } = recordPaintRecordSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    requireOperationDepartment(actor, departmentId);
+
+    return audited(tx, actor, async () => {
+      const record = await tx.paintRecord.upsert({
+        where: { componentOperationId: op.id },
+        create: { componentOperationId: op.id, coatingSystem, coatsPlanned: coatsPlanned ?? null },
+        update: { coatingSystem, coatsPlanned: coatsPlanned ?? null },
+      });
+      return {
+        result: record,
+        audit: {
+          action: "paintRecord.record",
+          entityType: "PaintRecord",
+          entityId: record.id,
+          after: { coatingSystem: record.coatingSystem, coatsPlanned: record.coatsPlanned },
+          eventType: "PaintRecordRecorded",
+          eventPayload: { componentOperationId: op.id, coatingSystem, coatsPlanned: coatsPlanned ?? null },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * Records a single DFT reading against a ComponentOperation (P1, Phase 5).
+ * `accepted` is self-attested by whoever records it — see the schema
+ * comment; there is no spec'd min/max micron range to validate against.
+ */
+export async function recordDftReading(actor: Actor, input: RecordDftReadingInput): Promise<DftReading> {
+  const { componentOperationId, coatNumber, location, readingMicrons, accepted } =
+    recordDftReadingSchema.parse(input);
+  assertNotClientUser(actor);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    requireOperationDepartment(actor, departmentId);
+
+    return audited(tx, actor, async () => {
+      const reading = await tx.dftReading.create({
+        data: {
+          componentOperationId: op.id,
+          coatNumber: coatNumber ?? null,
+          location: location ?? null,
+          readingMicrons,
+          accepted,
+          recordedBy: actor.userId,
+        },
+      });
+      return {
+        result: reading,
+        audit: {
+          action: "dftReading.record",
+          entityType: "DftReading",
+          entityId: reading.id,
+          after: { readingMicrons: reading.readingMicrons, accepted: reading.accepted, coatNumber: reading.coatNumber },
+          eventType: "DftReadingRecorded",
+          eventPayload: { componentOperationId: op.id, readingMicrons, accepted },
         },
       };
     });

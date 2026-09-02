@@ -21,11 +21,11 @@ function scheduleMessage(schedule: Awaited<ReturnType<typeof updateJobDatesActio
 }
 
 /**
- * Lets ADMIN/PRODUCTION_HEAD set or change the committed delivery date on a
- * job that has none yet (or correct one) — the field scheduleNewJobAction
- * needs as requiredDeliveryDate to run the BACKWARD scheduler. orderDate and
- * targetDispatchDate ride along unchanged so this save can't silently wipe
- * them (updateJobDatesSchema overwrites whatever it's given).
+ * Lets ADMIN/PRODUCTION_HEAD set or change a job's start date (orderDate) and
+ * committed delivery date — the latter is the field scheduleNewJobAction
+ * needs as requiredDeliveryDate to run the BACKWARD scheduler. targetDispatchDate
+ * rides along unchanged so this save can't silently wipe it
+ * (updateJobDatesSchema overwrites whatever it's given).
  */
 export function JobDateEditor({
   jobId,
@@ -39,13 +39,14 @@ export function JobDateEditor({
   targetDispatchDate: string | null;
 }) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(toInputValue(committedDeliveryDate));
+  const [start, setStart] = useState(toInputValue(orderDate));
+  const [due, setDue] = useState(toInputValue(committedDeliveryDate));
   const [pending, startTransition] = useTransition();
 
   if (!editing) {
     return (
       <button className="btn" style={{ marginLeft: 10 }} onClick={() => setEditing(true)}>
-        {committedDeliveryDate ? "Edit date" : "Set dispatch date…"}
+        {committedDeliveryDate ? "Edit dates" : "Set dates…"}
       </button>
     );
   }
@@ -54,8 +55,8 @@ export function JobDateEditor({
     startTransition(async () => {
       const result = await updateJobDatesAction({
         jobId,
-        orderDate: orderDate ? new Date(orderDate) : null,
-        committedDeliveryDate: value ? new Date(value) : null,
+        orderDate: start ? new Date(start) : null,
+        committedDeliveryDate: due ? new Date(due) : null,
         targetDispatchDate: targetDispatchDate ? new Date(targetDispatchDate) : null,
       });
       if (result.ok) {
@@ -69,12 +70,21 @@ export function JobDateEditor({
 
   return (
     <span style={{ marginLeft: 10, display: "inline-flex", gap: 6, alignItems: "center" }}>
+      <label className="emp-hint">Start</label>
       <input
         className="ws-detail"
         type="date"
-        value={value}
+        value={start}
         disabled={pending}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => setStart(e.target.value)}
+      />
+      <label className="emp-hint">Due</label>
+      <input
+        className="ws-detail"
+        type="date"
+        value={due}
+        disabled={pending}
+        onChange={(e) => setDue(e.target.value)}
       />
       <button className="btn btn-accent" disabled={pending} onClick={save}>Save</button>
       <button className="btn" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
