@@ -2,6 +2,86 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — [S5] Merge runbook — and the finding that the merge already happened, 2 Sep 2026
+
+**Status: S5 delivered, but re-scoped mid-session. The `demo` → `main` merge S5 was written to
+plan had already happened on 2 Sep — unrehearsed, carried by a documentation PR, deployed
+unwatched. Nothing was run against any database this session; the deliverable is a document
+plus the finding. Branch `docs/S5-merge-runbook`, not pushed.**
+
+### The finding
+
+S5's brief said `main` was 79 commits and 21 migrations behind. It is not. **Local `main` was 99
+commits stale** — that is the whole source of the error, and my own first draft of the runbook
+repeated it before I fetched. Against `origin/main`:
+
+- `git rev-list --count origin/main..demo` → **0**. `demo` adds nothing.
+- `git ls-tree -d --name-only origin/main prisma/migrations/ | wc -l` → **40**, not 19.
+- `git diff --name-only origin/main...demo -- prisma/migrations` → **empty**. Zero pending.
+
+The carrier was **PR #6, `chore/B1-docs-drift-corrections`** — a docs PR branched off `demo`, so
+merging it pulled all 77 `demo` commits and all 21 migrations onto `main`:
+
+```
+$ git log --first-parent --oneline -1 origin/main \
+    -- prisma/migrations/20260827120001_procurement_event_drop_procurements/
+f5a499f 2026-09-02 Merge pull request #6 from swayams13/chore/B1-docs-drift-corrections
+```
+
+Every 2 Sep merge after it already shows 40 migration dirs. Railway deploys from `main`
+(D1 confirmed this session) and runs `prisma migrate deploy` unattended as `preDeployCommand`.
+So `20260827120001` — which `DROP`s `procurements` after backfilling it inline, and whose own
+header calls itself "the actual point of no return" — ran against production with no rehearsal,
+no watched log, and LEDGER D2 (backups) still open.
+
+### Two hypotheses, neither yet distinguished
+
+Nothing in the repo or the ledger separates them. S3's "demonstrated on" is a local `:3100`
+build against `despl_test`, not production.
+
+- **(A) The deploy succeeded.** `procurements` is gone. The inline backfill is unverifiable —
+  the source table no longer exists and no pre-drop dump was taken.
+- **(B) `preDeployCommand` failed.** Production has been serving pre-2-Sep code against a
+  partly-migrated schema since, every later deploy wedged on the same failed migration row, and
+  **S1–S4 are not actually live despite being merged.** Silent by construction: no outage, and
+  the healthcheck stays green on the old container.
+
+(B) is not the far-fetched branch — §6.2 (missing `despl_web`, already hit once on this project)
+and §6.6 (constraints validated against real rows) are exactly the failures a fresh-DB test
+never surfaces.
+
+### Delivered
+
+`docs/mos-execution/MERGE-RUNBOOK.md`, re-scoped from prospective to forensic: §3 the single
+read-only `_prisma_migrations` query that decides A vs B; §4 the verification owed under A
+(schema diff, `to_regclass('public.procurements')`, grant/RLS assertions incl. invariant #5,
+real-browser pass, plus an S2-headers check that doubles as a cheap detector for B); §5 the
+incident procedure under B (notably: **do not push a commit to "trigger a redeploy"** — the
+wedge is a database row, and never `migrate resolve --applied`, which skips the SQL); §6 the
+failure-mode reference; §8 five prevention items; **Appendix A** preserves the unused rehearsal
+procedure for the next merge.
+
+Two technical corrections I made to my own draft along the way: the `pg_dump` must **not** use
+`--no-acl` (grants and RLS policies are the thing under test — a `--no-acl` copy gives
+`despl_web` a schema it cannot read a row from), which forces roles-before-`pg_restore`; and
+`--exit-on-error` on the restore, since the default logs errors and continues, yielding a
+silently incomplete copy that makes every later "pass" meaningless.
+
+One risk the brief did not name, now §6.6: `20260827170000` adds ~20 immediately-validated
+actor FKs to `users(id)` with no `NOT VALID`, and `20260826140000`/`20260827050000` rebuild
+unique indexes on `components`. All three pass trivially on an empty DB and fail on real rows.
+
+Checksum risk (the brief's concern) is currently **nil**: `git log --since=2026-09-01 --
+prisma/migrations/` is empty, so the files on disk are byte-identical to what was applied.
+
+### Next
+
+1. **Run `MERGE-RUNBOOK.md` §3 against production, read-only.** It is one query and it settles
+   A vs B. Nothing else in Gate 0 should move first.
+2. Locate a pre-2-Sep backup, or confirm none exists (D2). Every recovery path depends on it and
+   the retention window is closing.
+3. Then §4 (A) or §5 (B). Gate 0 cannot exit on "the merge happened" — only on §4 passing.
+
 ## Session — [S4 + S4a] CI/env hygiene; e2e in CI finds two real bugs, 2 Sep 2026
 
 **Status: S3 merged to `main` (PR #11), then S4 + S4a merged to `main` (PR #12), both with

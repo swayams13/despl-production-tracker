@@ -10,7 +10,7 @@ Update at the end of every session, before `/clear`.
 
 | # | Item | Status | Date | Notes |
 |---|---|---|---|---|
-| D1 | Railway production deploy branch identified | ☐ | | write the answer in this file |
+| D1 | Railway production deploy branch identified | ☑ | 2 Sep | **`main`.** Confirmed by user, 2 Sep 2026. Every push to `main` auto-deploys and runs `prisma migrate deploy` unattended as `railway.json`'s `preDeployCommand`. Corollary: production is 21 migrations behind (19 applied of `demo`'s 40) and has never applied any of them — so the checksum-mismatch risk on the two edited migrations does **not** apply to production. See `MERGE-RUNBOOK.md` §6.1. |
 | D2 | PITR / backups enabled — 4-week clock started | ☐ | | most time-sensitive item in the plan |
 | D3 | Four shared department accounts rotated | ☐ | | `despl123@` removed from source |
 | D4 | `SEED_PASSWORD` confirmed set in Railway env | ☐ | | default is `despl-dev-only` |
@@ -31,9 +31,11 @@ Update at the end of every session, before `/clear`.
 | S2 | Security headers | `chore/S2-security-headers` | ☐ | | response headers from a prod build |
 | S3 | Server Action logging + P2002 mapping | `fix/S3-action-boundary-logging` (planned: `feat/S3-action-observability`) | ☑ | 2 Sep: prod build on :3100 vs `despl_test`, real `/login` as SJ, stale-tab `Start` → `[action] refused {requestId, actionId, path:'/workspace', userId:4, tenantId:1, code:'INVALID_STATE_TRANSITION'}` on stdout. Also: 6 real P2002s from real duplicate inserts, each mapped correctly by the real `toActionError`. | Uncommitted. P2002 keyed on **`modelName` alone** — RLS makes Postgres withhold the constraint detail from `despl_web`, so `jobs`/`users`/`clients`/`welders` all arrive `target: null`; a field-keyed table (the original proposal) silently degraded on exactly those four. Zero new error codes; unmapped → `STALE_WRITE`. Unobserved rows: `Client`, `BomRevision` (no provokable seeded rows). |
 | S4 | CI gates deploy; `.env.test.example`; commit untracked docs | `chore/S4-ci-and-env-hygiene` | ☐ | PR #12 — parts 1+3 done; part 2 wired and red (see below); part 4 closed by decision | branch protection **not** set — see the decision row below |
-| S5 | Merge runbook written | `docs/S5-merge-runbook` | ☐ | | document, not executed |
-| — | Merge rehearsed against a restored copy | — | ☐ | | 21 migrations · provision `despl_web` first |
-| — | **Merged and deployed** | — | ☐ | | **GATE 0 EXIT** |
+| S5 | ~~Merge runbook~~ → **post-mortem verification runbook** (re-scoped) | `docs/S5-merge-runbook` | ☑ | 2 Sep: `docs/mos-execution/MERGE-RUNBOOK.md`. Written, **not executed** — zero prisma/psql commands run this session. | **S5's premise was false and the finding is the deliverable.** The `demo` → `main` merge already happened, unrehearsed: `origin/main` has all 40 migration dirs and `git rev-list --count origin/main..demo` = **0**. Local `main` was 99 commits stale, which is what made the brief (and my first draft) believe 21 were pending. Carrier was **PR #6, `chore/B1-docs-drift-corrections`** — a *docs* PR branched off `demo`, so it silently carried 77 commits and 21 migrations onto `main` on 2 Sep; Railway auto-deployed it unwatched. Doc re-scoped to: §3 the one read-only query that decides what production is, §4 verification if it applied, §5 incident procedure if it wedged, §6 failure-mode reference, §8 prevention, Appendix A the unused rehearsal procedure preserved for the next merge. |
+| — | **Determine production's actual migration state** (was: "merge rehearsed against a restored copy") | — | ☐ | | **DO THIS FIRST — `MERGE-RUNBOOK.md` §3.** Read-only. Two hypotheses, neither yet distinguished: **(A)** all 21 applied → `procurements` was dropped in production on 2 Sep with no rehearsal, no watched log, no confirmed backup; the backfill is unverifiable because the source table is gone. **(B)** `preDeployCommand` failed → production has served *pre-2-Sep code against a partly-migrated schema* ever since, and **S1–S4 are not actually live** despite being merged (§6.4 — silent: healthcheck green on the old container). |
+| — | Pre-2-Sep backup located, or its absence confirmed | — | ☐ | | Gates every recovery path in §7. Retention window is closing. Ties to **D2**. |
+| — | Prevention items applied (§8) | — | ☐ | | Never branch a PR off `demo`; label+review any PR touching `prisma/migrations/`; watch migration-carrying deploys; branch protection on `main` (S4 records it as *not* set). |
+| — | **Merged and deployed** | — | ⚠ | 2 Sep, unrehearsed and unwatched — see above | **Cannot be ticked as GATE 0 EXIT until §4 passes.** The merge happened; that it *worked* is unevidenced. |
 
 ---
 
