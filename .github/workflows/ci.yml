@@ -111,3 +111,40 @@ jobs:
           RUN_DB_TESTS: "1"
 
       - run: pnpm build
+
+      # e2e (S4). All 21 Playwright tests were local-only until now, including
+      # e2e/auth.spec.ts's RBAC and client-scoping violation pins — so nothing
+      # stopped a PR from breaking client scoping. They gate merges now.
+      #
+      # No server orchestration here on purpose: playwright.config.ts's
+      # `webServer` block already runs `pnpm build && pnpm start` itself
+      # (reuseExistingServer is false when CI is set), against the database
+      # the steps above seeded. e2e/auth.setup.ts logs in through the real
+      # /login form with the seeded SEED_PASSWORD default — never a forged
+      # session (CLAUDE.md, Agent conduct). DATABASE_URL and AUTH_SECRET are
+      # already set at job level, so no extra env is needed.
+      #
+      # The cache is worth its complexity: the browser download is ~45-90s
+      # uncached versus ~10s on a hit, and it changes only when the
+      # @playwright/test version does.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - run: pnpm e2e
+
+      # Traces and the HTML report are the only way to diagnose a failure that
+      # does not reproduce locally; without this a red e2e run is a dead end.
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
