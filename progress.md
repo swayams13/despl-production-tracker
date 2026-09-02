@@ -2,12 +2,16 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-## Session — [S5] Merge runbook — and the finding that the merge already happened, 2 Sep 2026
+## Session — [S5] Migration runbook — production is running new code on the 24 Aug schema, 2 Sep 2026
 
-**Status: S5 delivered, but re-scoped mid-session. The `demo` → `main` merge S5 was written to
-plan had already happened on 2 Sep — unrehearsed, carried by a documentation PR, deployed
-unwatched. Nothing was run against any database this session; the deliverable is a document
-plus the finding. Branch `docs/S5-merge-runbook`, not pushed.**
+**Status: S5 delivered. Two findings, the second of them a live production incident.
+(1) The `demo` → `main` merge S5 was written to plan had already happened, carried by a
+documentation PR. (2) The migrations it was supposed to bring have **never run** — `railway.json`
+is not honored by the Railway service, so `prisma migrate deploy` has never executed
+automatically on this project. Production serves the full Phase 4 + Phase 5 + S1–S4 code against
+the 24 August schema. `procurements` is intact with 34 rows; nothing is corrupted; the migration
+is still ahead of us. Only read-only `SELECT`s were run against production — no migration, no
+write. Branch `docs/S5-merge-runbook`, PR #13.**
 
 ### The finding
 
@@ -34,32 +38,90 @@ So `20260827120001` — which `DROP`s `procurements` after backfilling it inline
 header calls itself "the actual point of no return" — ran against production with no rehearsal,
 no watched log, and LEDGER D2 (backups) still open.
 
-### Two hypotheses, neither yet distinguished
+### Then the query was run against production — and it is neither hypothesis
 
-Nothing in the repo or the ledger separates them. S3's "demonstrated on" is a local `:3100`
-build against `despl_test`, not production.
+I had framed two: (A) the migrations applied and `procurements` is gone; (B) `preDeployCommand`
+failed and production serves old code on a partly-migrated schema. **The truth is a third
+state.** Run read-only over the Railway proxy (`railway run --service Postgres`, so no
+credential was printed or read from `.env`):
 
-- **(A) The deploy succeeded.** `procurements` is gone. The inline backfill is unverifiable —
-  the source table no longer exists and no pre-drop dump was taken.
-- **(B) `preDeployCommand` failed.** Production has been serving pre-2-Sep code against a
-  partly-migrated schema since, every later deploy wedged on the same failed migration row, and
-  **S1–S4 are not actually live despite being merged.** Silent by construction: no outage, and
-  the healthcheck stays green on the old container.
+```
+ applied | unfinished | rolled_back
+---------+------------+-------------
+      20 |          1 |           1
+```
 
-(B) is not the far-fetched branch — §6.2 (missing `despl_web`, already hit once on this project)
-and §6.6 (constraints validated against real rows) are exactly the failures a fresh-DB test
-never surfaces.
+The unfinished/rolled-back pair is **one healed historical row** — `20260815120000_v_unit_stage_status`,
+started 16 Aug 10:59, rolled back 11:09, re-applied 11:10. That is the documented first-deploy
+incident, not a wedge. Last applied migration: **`20260822130000_template_version_updated_at`,
+2026-08-24 09:54.** The 20 migrations from the 2 Sep merge have **no rows at all** — never
+started, never failed, never attempted.
+
+```
+ procurements | procurement_events | ncrs | components      procurement_rows
+--------------+--------------------+------+------------     ----------------
+ procurements |                    |      | components                    34
+```
+
+Meanwhile the deployment is `SUCCESS` at commit `7597a3c` and the new code **is** live — S2's
+security headers came back on the wire from the public URL. So:
+
+**Production is running the full Phase 4 + Phase 5 + S1–S4 code against the 24 August schema.**
+New code, old schema — the inversion of the hazard the runbook was written around.
+
+### Root cause: `railway.json` has never been honored
+
+```
+2026-09-02T16:19 SUCCESS 7597a3c | preDeploy: None | builder: RAILPACK | Merge PR #12
+2026-09-02T03:07 REMOVED f5a499f | preDeploy: None | builder: RAILPACK | Merge PR #6
+2026-08-25T17:04 REMOVED e4d0348 | preDeploy: None | builder: RAILPACK | Merge PR #5
+```
+
+`preDeployCommand: None` on **every deployment ever recorded**, and `builder: RAILPACK` where
+`railway.json` specifies `NIXPACKS`. `healthcheckPath` is `null` too. **`prisma migrate deploy`
+has never run automatically on this project** — August's 20 migrations were applied by hand.
+Every document asserting otherwise (`CLAUDE.md`'s stack section, S4's CI reasoning, this
+runbook's own first two drafts) is wrong and needs correcting.
+
+### The good news
+
+**`procurements` is intact with 34 rows. `20260827120001` never ran.** The "point of no return"
+has not been crossed, nothing is corrupted, and every recovery option is still open — a far
+better position than either hypothesis. The new code writes procurement history to
+`procurement_events`, which does not exist, so those writes fail outright rather than silently
+diverging; there is no half-written state to reconcile.
+
+### The bad news
+
+Every Phase 4/5 surface has been failing since 2 Sep: BOM/procurement, stock lots and txns, NCR,
+assembly tracking, drawing revisions, material identification, and the new `components` columns
+all query tables that do not exist. `/api/health` and `/login` return 200 because neither touches
+a new table, which is exactly why nobody noticed. **The team clicks through this build for the
+demo.**
 
 ### Delivered
 
-`docs/mos-execution/MERGE-RUNBOOK.md`, re-scoped from prospective to forensic: §3 the single
-read-only `_prisma_migrations` query that decides A vs B; §4 the verification owed under A
-(schema diff, `to_regclass('public.procurements')`, grant/RLS assertions incl. invariant #5,
-real-browser pass, plus an S2-headers check that doubles as a cheap detector for B); §5 the
-incident procedure under B (notably: **do not push a commit to "trigger a redeploy"** — the
-wedge is a database row, and never `migrate resolve --applied`, which skips the SQL); §6 the
-failure-mode reference; §8 five prevention items; **Appendix A** preserves the unused rehearsal
-procedure for the next merge.
+`docs/mos-execution/MERGE-RUNBOOK.md` — rewritten a third time to match what was found, and now
+genuinely prospective: the migration it describes is still pending. §1 the evidence above; §2 the
+`railway.json` root cause and the **A-or-B decision** (arm `preDeployCommand`, or keep migrations
+manual and delete the misleading config — recommend the latter until Gate 0 exits); §3 the
+current-state table; §4 prerequisites plus the **20** pending migrations in apply order (not 21 —
+`20260820050300` went in on 24 Aug); §5 the procedure — dump, roles-before-restore, rehearse,
+**abort point**, apply watched, restart the container; §6 failure modes; §7 post-migration
+verification; §9 prevention.
+
+The load-bearing step is **§5.5**: the rehearsal on the restored copy is the *only* opportunity
+to verify the inline backfill against its source, because §5.7 drops `procurements` permanently.
+The migration's own guards test for presence, not correctness — "it didn't error" is not the check.
+
+Two technical corrections carried over from earlier drafts: `pg_dump` must **not** use `--no-acl`
+(grants and RLS policies are the thing under test — a `--no-acl` copy gives `despl_web` a schema
+it cannot read a row from), which forces roles-before-`pg_restore`; and `--exit-on-error` on the
+restore, since the default logs errors and continues.
+
+Checksum risk is **nil**: the two migrations edited after being applied elsewhere
+(`20260827120001`, `20260831064422_phase5`) have never been applied to production, so there is no
+stored checksum to mismatch.
 
 Two technical corrections I made to my own draft along the way: the `pg_dump` must **not** use
 `--no-acl` (grants and RLS policies are the thing under test — a `--no-acl` copy gives
@@ -76,11 +138,19 @@ prisma/migrations/` is empty, so the files on disk are byte-identical to what wa
 
 ### Next
 
-1. **Run `MERGE-RUNBOOK.md` §3 against production, read-only.** It is one query and it settles
-   A vs B. Nothing else in Gate 0 should move first.
-2. Locate a pre-2-Sep backup, or confirm none exists (D2). Every recovery path depends on it and
-   the retention window is closing.
-3. Then §4 (A) or §5 (B). Gate 0 cannot exit on "the merge happened" — only on §4 passing.
+1. **Decide §2's A or B** and make `railway.json` + `CLAUDE.md` tell the truth. Until this is
+   settled, nobody knows whether the next push to `main` migrates production or not — and that
+   ambiguity is the actual defect.
+2. **Confirm D2** — the next action against this database drops a table holding 34 real rows.
+   Blocking, and now concrete rather than procedural.
+3. **Rehearse the 20 migrations on a restored copy (§5)**, with the §5.5 backfill comparison
+   done properly.
+4. **Apply to production, watched (§5.7)**, restart the container (§5.8), then §7.
+5. Gate 0 cannot exit on "the merge happened". It exits when §7 passes.
+
+Also worth doing regardless: `MERGE-RUNBOOK.md` §6.6's two read-only queries against production
+now (dangling actor ids, `components` tag collisions). They are the cheapest possible early
+warning for the three data-dependent constraints, and they cost nothing to run today.
 
 ## Session — [S4 + S4a] CI/env hygiene; e2e in CI finds two real bugs, 2 Sep 2026
 
