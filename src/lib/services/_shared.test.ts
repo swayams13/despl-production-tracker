@@ -251,8 +251,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPredecessorStates — per-unit i
         },
       });
 
-      const statesA = await loadPredecessorStates(tx, run.id, edge.processId, unitA.id);
-      const statesB = await loadPredecessorStates(tx, run.id, edge.processId, unitB.id);
+      const statesA = await loadPredecessorStates(tx, run.id, [edge.predecessorId], unitA.id);
+      const statesB = await loadPredecessorStates(tx, run.id, [edge.predecessorId], unitB.id);
 
       expect(statesA.find((s) => s.predecessorId === edge.predecessorId)?.status).toBe("COMPLETE");
       expect(statesB.find((s) => s.predecessorId === edge.predecessorId)?.status).toBe("NOT_STARTED");

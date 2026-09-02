@@ -2,6 +2,199 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — [S1] Gating splice for excluded processes, 2 Sep 2026
+
+**Status: fixed on `fix/S1-gating-splice-excluded-processes`, TDD red→green, `pnpm lint`/
+`typecheck`/`test` clean, `RUN_DB_TESTS=1 pnpm test:db` 910/911 (the 1 failure is the
+pre-existing, unrelated hold-point flake already documented in the 1 Sep entry below — confirmed
+still present on unmodified `HEAD` before touching any code). Not committed, not pushed, no PR.**
+
+### [S1] `fix/S1-gating-splice-excluded-processes`
+
+**Bug:** an excluded (`JobProcess.included = false`) mid-chain process never gets a
+`ProcessPlan` row (`envelope.ts` filters it out), but `loadGate`
+(`process.service.ts:87-94`, called by both `startProcess` and `verifyProcess`) read RAW
+`JobProcessEdge` rows and `loadPredecessorStates` (`_shared.ts:822`) defaulted the excluded
+process's missing plan to `NOT_STARTED` — so its direct successor was refused
+(`GATING_BLOCKED`) forever, with no way to ever clear it since the excluded process has no
+plan to complete. `bypassExcluded` (`lib/schedule/exclude.ts`) already exists and is already
+used correctly by `computeCpm` and `selectTerminal` — only the gating read path had never been
+wired to it.
+
+**Fix, both inside the gating read path only** (`bypassExcluded`/`cpm.ts`/`envelope.ts`/
+`terminal.ts`/intake's exclusion-write path untouched, per the stop condition):
+- `src/lib/services/process.service.ts` — `loadGate` now resolves the plan's `jobId`, loads
+  the full spine via `loadJobSpine` (the existing, tested, 8-call-site helper — reused rather
+  than duplicated), runs `bypassExcluded` on it, and takes the plan's incoming edges from the
+  *spliced* graph instead of raw `JobProcessEdge` rows.
+- `src/lib/services/_shared.ts` — `loadPredecessorStates` signature changed: takes an explicit
+  `predecessorIds: number[]` instead of deriving them itself from raw edges. Necessary, not
+  optional — leaving it on raw edges while `loadGate`'s `edges` were spliced would have
+  produced a hard crash instead of a fix (`gating.ts:46`'s bare, non-`AppError` `Error` on any
+  predecessor id with no matching status — proved this by reasoning through the code, not by
+  triggering it, since the correct fix never leaves that state reachable).
+- `src/lib/services/_shared.test.ts` — updated its one other caller of
+  `loadPredecessorStates` to the new signature (same assertions).
+- `src/lib/services/process.service.test.ts` — new DB-gated test: spine `A -> B(excluded,
+  planless) -> C`; asserts `startProcess` on C succeeds once A is `COMPLETE`.
+
+**Acceptance criterion (from the work item's "DONE WHEN"):**
+`pnpm lint && pnpm typecheck && pnpm test` clean, and `RUN_DB_TESTS=1 pnpm test:db`'s new case
+goes red → green. Literal output:
+
+RED, before the fix (new test only, run against the unmodified code):
+```
+FAIL src/lib/services/process.service.test.ts > S1: excluded process does not deadlock its successor (DB) > C starts once A is COMPLETE, even though excluded B between them has no plan row
+AppError: This process cannot start yet — one or more predecessors are not complete.
+ ❯ assertCanStart src/lib/schedule/gating.ts:61:11
+ ❯ src/lib/services/process.service.ts:119:5
+```
+
+GREEN, after the fix (`pnpm lint` / `pnpm typecheck`: no output, exit 0):
+```
+> pnpm test
+ Test Files  45 passed | 25 skipped (70)
+      Tests  578 passed | 333 skipped (911)
+
+> RUN_DB_TESTS=1 pnpm test:db
+ ❯ src/lib/services/process.service.test.ts (51 tests | 1 failed) 2086ms
+     × verify refuses at a genuinely uncleared hold point 718ms
+ Test Files  1 failed | 69 passed (70)
+      Tests  1 failed | 910 passed (911)
+```
+(the S1 test is not in the failure list — it passed; the one failure is the pre-existing flake
+below, reproduced identically with `git stash` on unmodified `HEAD` before restoring the fix)
+
+### Out of scope, found but not fixed
+
+- **Pre-existing DB test flake, re-confirmed non-regression**: `"verify refuses at a genuinely
+  uncleared hold point"` (`process.service.test.ts`'s DESPL-320 P0.3 block) — asserts
+  `COMPONENT_OPS_INCOMPLETE`, gets `false`. Already documented in the 1 Sep entry below as
+  self-inflicted (mutates real `ComponentOperation` rows to `COMPLETE` and never resets, so it
+  only passes once per clean `despl_test` state). Confirmed via `git stash` that it fails
+  identically on unmodified `HEAD` — not caused by this session's change. Not fixed, per the
+  "known state" rule and the stop condition against opportunistic side-fixes.
+- **LEDGER.md/CLAUDE.md branch-name mismatch**: `docs/mos-execution/LEDGER.md`'s S1 row lists
+  branch `fix/W3-gating-splice-excluded-processes`; CLAUDE.md's own known-state list calls this
+  item S1, not W3, and no "W3" appears anywhere else in `PROMPTS-v4.md` or the gate docs. Used
+  `fix/S1-gating-splice-excluded-processes` instead (matches the item ID everywhere else). The
+  LEDGER.md branch column below needs correcting — didn't correct it myself since it's a
+  planning doc, not code, and the discrepancy might mean something to whoever wrote "W3".
+
+### What a future session would get wrong without knowing this
+
+- `loadPredecessorStates`'s signature changed (`_shared.ts:822`): it now takes explicit
+  `predecessorIds: number[]` instead of deriving them from raw `JobProcessEdge` rows. Any new
+  caller MUST pass predecessor ids taken from `bypassExcluded`'s spliced output, never raw
+  edge-derived ids — passing raw ids silently reintroduces this exact bug (or, if `edges` is
+  spliced elsewhere but `states` isn't, the bare-`Error` crash described above).
+- `loadGate` now does a whole-job-spine read (`loadJobSpine`: `Job` + every `JobProcess` +
+  every `JobProcessEdge` for the job, plus a `WorkCalendar`+holidays lookup gating never uses)
+  on every single `start`/`submit`/`verify` transition, instead of one narrow ~1-3-row query.
+  Absolute cost is still small (tens of rows, PK/FK-indexed) but it's a real per-call increase
+  on the app's hottest write path — flagged deliberately, not silently absorbed. If this ever
+  shows up in a profiling pass, the fix is a narrower dedicated spine-read helper that skips the
+  calendar query, not reverting the splice.
+- Nothing was committed. `fix/S1-gating-splice-excluded-processes` carries only the S1 diff;
+  the 6 pre-existing dirty files from before this session (`assembly.service.ts`/`.test.ts`,
+  `bom-route.ts`/`.test.ts`, `bom.read.ts`, `qcp.service.ts`) and untracked docs were left
+  exactly as found, per the branch-creation note above.
+
+### Not verified — UNVERIFIED
+
+- UNVERIFIED: not exercised through the UI/browser — no real `/login` click-through
+  start/submit/verify on an actual excluded-process job. This is a pure service-layer change
+  with no UI touched, so browser verification wasn't attempted; only the DB-integration test and
+  the pure `gating.ts` unit tests demonstrate it.
+- UNVERIFIED: whether any caller of `loadPredecessorStates` exists outside `src/lib` (e.g. a
+  script under `scripts/`) — grep covered `src/lib` only.
+- UNVERIFIED: Railway/production behavior — this branch is unmerged, tested only against
+  `despl_test`.
+
+## Session — `chore/B1-docs-drift-corrections` merged to main (PR #6); PR #7 found obsolete, held open, 2 Sep 2026
+
+**Status: `main` now carries all 56 commits (Phases 1–5: fabrication, assembly, BOM/materials,
+NCR/paint/packing/dispatch, plus the GitHub Actions CI pipeline itself) that were sitting
+unpushed on `chore/B1-docs-drift-corrections`. CI is green on the merged result. A second
+branch, `claude/codebase-review-standards-mtqeqp`, was found unmerged and given a PR (#7) but
+turned out to be stale/superseded — left open, unmerged, pending the user's explicit close.**
+
+### `chore/B1-docs-drift-corrections` → `main` (PR #6)
+
+The branch had never been pushed to GitHub — no remote copy, no PR, no CI history — despite
+carrying 56 commits ahead of `origin/main`. Pushed it, opened PR #6, and let the (also-new, this
+branch's own) `.github/workflows/ci.yml` run for the first time. It failed on 3 fronts; root-caused
+each with `superpowers:systematic-debugging` (read errors → check recent changes → single
+hypothesis → minimal fix → verify) rather than patching symptoms:
+
+1. **CI seeding gap** — `welding.service.test.ts`'s fixture (`owner.component.findFirstOrThrow`)
+   and a `process.service.test.ts` gate both failed with Prisma `P2025` against the fresh
+   `despl_ci` database. Root cause: `prisma/seed.ts` deliberately does *not* create DESPL-320's
+   `Component`/`ComponentOperation`/`BomItem`/`AssemblyStep` rows (its own comment says so) —
+   that's left to three separate idempotent scripts (`db:seed:despl320-components`, `-bom`,
+   `-assembly-steps`) a local dev runs once by hand against a *persistent* `despl_test` DB. CI's
+   database is thrown away every run, and `ci.yml` (added in this same branch, `700e0a8`) only
+   ever called `db:seed`/`db:bootstrap` — never those three. Fixed by adding all three to the
+   workflow, between `db:bootstrap` and the test steps; confirmed no ordering dependency between
+   them (each only needs `prisma/seed.ts`'s own output).
+2. **`client-snapshot.service.test.ts` FK violation** — a self-check test hardcoded
+   `publishedBy: 99` to simulate an orphaned publisher, assuming a `User` with that id already
+   existed. It only worked locally because `despl_test` is long-lived and has accumulated user
+   rows across months of prior runs; a fresh CI database seeds far fewer users, so `99` violated
+   `progress_snapshots_published_by_fkey`. Fixed by creating a real throwaway user in the test
+   (matching the existing pattern in `mtc.service.test.ts`/`dispatch.service.test.ts`) and using
+   its actual id instead of a magic literal.
+3. **Lint** — two now-dead imports (`AppError`, `ERROR_CODES`) in `process.service.ts`, removed.
+
+Verified locally against `despl_test` before repushing (`pnpm lint`/`typecheck` clean, the 3
+previously-failing files: 72/72 passing), then pushed and watched CI go green for real — **CI
+went from 3 failures down to 900/901 DB-gated tests passing on the first fix, then 901/901 clean
+after the second.** Merged PR #6 into `main` with a regular merge commit (`f5a499f`, matching how
+PRs #2–#5 were merged previously) on the user's explicit "merge it." Per this file's Stack
+section, pushing to `main` auto-deploys to Railway production — **the deploy itself was not
+independently watched/confirmed this session**, only the code-level CI result.
+
+### PR #7 (`claude/codebase-review-standards-mtqeqp`) — investigated, left unmerged
+
+Asked to check for other branches with commits not yet in `main` besides the one above. Found
+`demo` (fully an ancestor of `chore/B1...` — a no-op, not separate work) and
+`claude/codebase-review-standards-mtqeqp` (2 docs-only commits, no PR, last touched 12 Aug 2026:
+`docs/ARCHITECTURE.md` + a backup/DR budget resolution). Opened PR #7 for it. `git merge-tree`
+showed it clean at that point (before PR #6 landed); after PR #6 merged, GitHub reported it
+`CONFLICTING` against 4 files (`CLAUDE.md`, `docs/BUILD-SPEC-v2.md`,
+`docs/IMPLEMENTATION-GUIDE.md`, `docs/TRD.md`), including a factual disagreement — this branch's
+version of `docs/IMPLEMENTATION-GUIDE.md` says the DE0467 regression test should read "short by
+approximately 26 working days," where `main`'s current text says exactly 22.
+
+Rather than resolving those conflicts blindly, did the rebase in an isolated `git worktree`
+(`/tmp/despl-pr7-rebase`, not the checked-out working tree, to avoid disturbing this session's
+own pre-existing uncommitted files) and read what actually collided. That surfaced the real
+answer: **`main` already has everything this branch is worth** — commit `21eb103` (14 Aug 2026,
+"docs: recover ARCHITECTURE.md onto demo," logged in this file's 14 Aug entry) had already
+cherry-picked `docs/ARCHITECTURE.md` out of this exact orphaned branch, with the backup/DR
+section pre-resolved to match this branch's second commit, and its own message explicitly says
+the branch's edits to `CLAUDE.md`/`BUILD-SPEC-v2.md`/etc. were deliberately left behind as
+"forked from a pre-schema state (`fa8255b`)." The 22-vs-26 conflict is exactly that staleness
+surfacing. **Recommended not merging PR #7** — doing so would silently reintroduce content a
+prior session already reviewed and rejected. Aborted the rebase, deleted the temporary worktree
+and local branch it created; **PR #7 is still open on GitHub, unmerged, awaiting the user's
+explicit decision to close it** (or override and merge anyway, if they want to re-litigate that
+14 Aug call).
+
+### Incidental
+
+Hit a stale `.git/index.lock` mid-session (0 bytes, no owning process running — confirmed via
+`ps aux` before removing) that blocked one commit; removed it, re-ran the commit cleanly, no
+data lost. Also note: this session's pre-existing uncommitted working-tree files
+(`assembly.service.ts`/`.test.ts`, `bom-route.ts`/`.test.ts`, `bom.read.ts`, `qcp.service.ts`,
+plus untracked `docs/DESPL_MOS_FORENSIC_AUDIT.md`, `docs/mos-blueprint/`,
+`docs/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`, `_to_delete/`) were left untouched
+throughout — not this session's work, not staged or committed.
+
+**Next steps:** user decides PR #7's fate (close vs. force-merge over the 14 Aug decision);
+confirm the Railway production deploy from the PR #6 merge came up healthy; resume the B10/B3
+blueprint items the 1 Sep docs-drift session queued up next.
+
 ## Session — Live-verified Phases 1–5 via Claude in Chrome, fixed 3 bugs found, 1 Sep 2026
 
 **Status: 3 real, reproducible bugs found by driving the actual app in Chrome (real `/login`,

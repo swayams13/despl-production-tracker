@@ -10,6 +10,7 @@ import { assertStateTransition } from "./state-machine";
 import {
   assertCanComplete,
   assertCanStart,
+  bypassExcluded,
   type PredecessorState,
   type ScheduleEdge,
 } from "@/lib/schedule";
@@ -31,7 +32,7 @@ import {
   assertNoOpenHoldPoint,
   assertNoOpenNcr,
   assertNoUnfiledDelayBlock,
-  jobEdgeToScheduleEdge,
+  loadJobSpine,
   lockProcessPlanForUpdate,
   loadPredecessorStates,
   loadPlanNotifyContext,
@@ -83,14 +84,30 @@ export function assertTransition(action: ProcessAction, from: ProcessPlanStatus)
 
 // ── Gating inputs ────────────────────────────────────────────────────────
 
-/** The process's incoming edges (mapped for the engine) + its predecessor states. */
+/**
+ * The process's incoming edges (mapped for the engine) + its predecessor
+ * states. Reads the WHOLE job spine and runs bypassExcluded (S1) before
+ * taking this process's incoming edges: a raw JobProcessEdge can point at an
+ * `included: false` predecessor that never gets a ProcessPlan row, so gating
+ * must see the same spliced graph cpm.ts/terminal.ts already use, not the
+ * raw edges — otherwise an excluded process permanently deadlocks its
+ * successor (its missing plan defaults to NOT_STARTED, forever).
+ */
 async function loadGate(
   tx: Tx,
   plan: ProcessPlan,
 ): Promise<{ edges: ScheduleEdge[]; states: PredecessorState[] }> {
-  const rawEdges = await tx.jobProcessEdge.findMany({ where: { processId: plan.jobProcessId } });
-  const states = await loadPredecessorStates(tx, plan.scheduleRunId, plan.jobProcessId, plan.unitId);
-  return { edges: rawEdges.map(jobEdgeToScheduleEdge), states };
+  const { jobId } = await tx.jobProcess.findUniqueOrThrow({
+    where: { id: plan.jobProcessId },
+    select: { jobId: true },
+  });
+  const { processes, edges: allEdges } = await loadJobSpine(tx, jobId);
+  const spliced = bypassExcluded(processes, allEdges);
+  const edges = spliced.edges.filter((e) => e.processId === plan.jobProcessId);
+
+  const predecessorIds = edges.map((e) => e.predecessorId);
+  const states = await loadPredecessorStates(tx, plan.scheduleRunId, predecessorIds, plan.unitId);
+  return { edges, states };
 }
 
 // ── Transitions ──────────────────────────────────────────────────────────

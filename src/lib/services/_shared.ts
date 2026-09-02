@@ -813,32 +813,34 @@ export async function loadPlanNotifyContext(tx: Tx, plan: ProcessPlan): Promise<
 }
 
 /**
- * The engine's PredecessorState[] for a process's incoming edges, read from
- * source ProcessPlan rows in this run for the given unit (unitId null =
- * job/equipment grain). A predecessor with no plan row yet counts as
- * NOT_STARTED (blocks, never throws). Feed straight into
+ * The engine's PredecessorState[] for an explicit set of predecessor
+ * JobProcess ids, read from source ProcessPlan rows in this run for the
+ * given unit (unitId null = job/equipment grain). A predecessor with no plan
+ * row yet counts as NOT_STARTED (blocks, never throws). Feed straight into
  * assertCanStart/assertCanComplete.
+ *
+ * Takes `predecessorIds` explicitly rather than deriving them from raw
+ * JobProcessEdge rows itself (S1): the caller must resolve them from the
+ * bypassExcluded-spliced graph, since a raw edge can point at an
+ * `included: false` process that never gets a ProcessPlan row at all — this
+ * function has no way to tell "genuinely not started" apart from "excluded,
+ * doesn't exist" on its own.
  */
 export async function loadPredecessorStates(
   tx: Tx,
   scheduleRunId: number,
-  jobProcessId: number,
+  predecessorIds: number[],
   unitId: number | null,
 ): Promise<PredecessorState[]> {
-  const edges = await tx.jobProcessEdge.findMany({
-    where: { processId: jobProcessId },
-    select: { predecessorId: true },
-  });
-  if (edges.length === 0) return [];
+  if (predecessorIds.length === 0) return [];
 
-  const predIds = edges.map((e) => e.predecessorId);
   const plans = await tx.processPlan.findMany({
-    where: { scheduleRunId, jobProcessId: { in: predIds }, unitId: unitId ?? null },
+    where: { scheduleRunId, jobProcessId: { in: predecessorIds }, unitId: unitId ?? null },
     select: { jobProcessId: true, status: true },
   });
   const statusByProc = new Map(plans.map((p) => [p.jobProcessId, p.status]));
 
-  return predIds.map((predecessorId) => ({
+  return predecessorIds.map((predecessorId) => ({
     predecessorId,
     status: statusByProc.get(predecessorId) ?? "NOT_STARTED",
   }));
