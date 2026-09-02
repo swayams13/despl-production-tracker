@@ -2,6 +2,291 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — [S3] Action-boundary logging + P2002 mapping, 2 Sep 2026
+
+**Status: [S3] shipped on `fix/S3-action-boundary-logging` (branched from the S2 HEAD, not
+`main`, because S1/S2 working-tree changes were still uncommitted). Not committed, not pushed,
+no PR. Pure suite / typecheck / lint / build all green, and the refusal log line was watched on
+a real production build against `despl_test`, reached through the real `/login` form — see
+"Live verification" below.**
+
+### The gap
+
+`src/app/actions/_action.ts` is the error funnel all 20 Server Action modules use — every
+mutation in the product — and it logged nothing. All 4 `console.*` calls in non-test `src/`
+were on the 7 `/api` routes. During an incident the operator had raw Railway stdout and a
+binary `/api/health`, with no trace of the primary write path.
+
+Second half of the same gap: `toActionError` rethrew anything that wasn't an `AppError`. Every
+duplicate guard in this codebase is check-then-insert (`findFirst`, then `create`) against a
+real unique index, so each has a losing-race path. Grep confirmed **zero P2002 handling
+anywhere in `src/`** — every one of those races surfaced as an unexplained 500 with no error
+code for the UI to explain (invariant #12).
+
+### Fix — one file, +118/−3, plus a new test file
+
+`log(level, tag, payload)` emits one structured line per refusal and per unexpected error,
+carrying `{requestId, actionId, path, userId, tenantId, code}`. Same shape as
+`api/_lib.ts:98,105` so `/api` and Server Actions correlate on a single grep of
+`x-request-id` (stamped by `middleware.ts:18`).
+
+Two deliberate constraints, both marked `ponytail:` in the source:
+
+- **Fire-and-forget.** `toActionError` must stay synchronous — `headers()` and `readSession()`
+  are async in Next 15, and `process.ts`'s `startBulkAction` consumes the result synchronously.
+  The log runs in a `void (async () => …)()` invoked synchronously, so it captures the
+  request's AsyncLocalStorage scope. A logging failure is swallowed and never changes the
+  caller's result (tested).
+- **`actionId` is Next's `next-action` header** — a stable per-action hash, not a readable
+  name. A readable name would mean threading a string literal through all 20 action modules;
+  hash + referer pathname answers "which action, which screen" at zero diff outside this file.
+  Upgrade path if the hash proves unreadable in practice: add an optional `action` param and
+  pass a literal from each module's local `run()` helper.
+
+Actor identity comes from `readSession()` (JWT verify, no DB round-trip), **not** `getActor()`
+— an error path must not add a query.
+
+### P2002 → domain code
+
+**Two wrong designs died here, both killed by probing instead of assuming.** Every probe ran
+inside a rolled-back interactive transaction against `despl_test` (`despl_web`), leaving zero
+rows behind.
+
+*First:* the mapping was proposed keyed on Postgres constraint names
+(`jobs_tenant_id_job_number_key`). Probe says no — `meta.target` carries field/column names:
+
+```
+name : PrismaClientKnownRequestError
+code : P2002
+meta : {"modelName":"Organization","target":["code"]}
+```
+
+*Second, and the one that matters:* keying on the fields **also** fails. A second probe forced
+real duplicate inserts on each mapped model (clone a seeded row, let the real index reject it)
+and fed the real errors through the real `toActionError`. Three of seven came back wrong:
+
+```
+WRONG  Job    meta={"modelName":"Job","target":null}     → STALE_WRITE (expected DUPLICATE_JOB_NUMBER)
+WRONG  User   meta={"modelName":"User","target":null}    → STALE_WRITE (expected VALIDATION_FAILED)
+WRONG  Welder meta={"modelName":"Welder","target":null}  → STALE_WRITE (expected VALIDATION_FAILED)
+OK     DrawingRevision  target=["assembly_drawing_id","revision_no"]
+OK     TemplateProcess  target=["version_id","code"]
+OK     QcpExecution     target=["qcp_item_id","unit_id","attempt_no"]
+```
+
+**Cause: RLS.** On an RLS-protected table Postgres withholds the constraint detail from
+`despl_web` — a non-owner role that cannot see the conflicting row — so the message degrades to
+"Unique constraint failed on the (not available)" and Prisma reports `target: null`. The split
+is exactly the RLS table list in migration `20260813051500`: `jobs`, `users`, `clients`,
+`welders` are in it and all report null; `drawing_revisions`, `template_processes`,
+`qcp_executions` are not and disclose their columns. A field-keyed table would have silently
+degraded to the fallback on precisely the four models that matter most — and every unit test
+would still have passed, because a hand-built fake error has whatever target you give it.
+
+**Final design: keyed on `modelName` alone.**
+
+| Prisma model | Guard that can lose the race | → code |
+|---|---|---|
+| `Job` | `job-intake.service.ts:52` | `DUPLICATE_JOB_NUMBER` |
+| `User` | `admin.service.ts:69,83,96` | `VALIDATION_FAILED` |
+| `Welder` | `welder.service.ts:39` | `VALIDATION_FAILED` |
+| `Client` | `admin.service.ts:771` | `VALIDATION_FAILED` |
+| `DrawingRevision` | `drawing.service.ts:49` | `DRAWING_REVISION_NOT_INCREASING` |
+| `BomRevision` | `bom.service.ts:341` | `BOM_REVISION_NOT_INCREASING` |
+| `TemplateProcess` | `template.service.ts:177` | `TEMPLATE_INCOMPLETE` |
+| anything else | — | `STALE_WRITE` |
+
+Cost of model-grain: a model with two unique constraints gets one code for both. Only `Job` is
+affected (`publicId`), where a collision is vanishingly rare and "retry" is the right user
+response either way. `target` is still logged when the DB discloses it — it is just never keyed
+on. Re-run after the fix: **6 OK, 0 wrong**; `Client` and `BomRevision` could not be provoked
+on this database (no seeded client with a non-null `code` — NULL is distinct in a Postgres
+unique index — and no `BomRevision` rows at all), so those two rows remain reasoned, not
+observed.
+
+**Zero new error codes.** `STALE_WRITE`'s message ("Someone else changed this while you were
+editing. Reload the page and reapply your changes.") is exactly right for a losing race and
+merely imprecise — never misleading — for a duplicate nobody guarded; the constraint that
+actually fired is always in the log line. The known unguarded races it now catches cleanly:
+`qcp.service.ts:25` (`max(attemptNo)+1` then create), the `progress_snapshots` upsert, and
+concurrent `ProcessTemplateVersion` draft creation.
+
+Deliberately **unmapped**, still a 500: `Job.publicId` (a generated-id collision is not a user
+error), and every constraint on `Component` / `ComponentOperation` / `AssemblyStep` / `Package`
+/ `DispatchBatch` — none of which have a producer in `src/` at all (Gate 1/2, named not fixed).
+
+### Evidence
+
+New `src/app/actions/_action.test.ts` (19 tests, table-driven over the mapping plus the
+logging assertions). Written first and shown failing — `15 failed | 4 passed (19)` — before the
+implementation; `19 passed (19)` after. Full pure suite `597 passed | 333 skipped (930)`.
+`pnpm typecheck`, `pnpm lint`, `pnpm build` all clean. `next/headers` in `_action.ts` does not
+leak into the client bundle: all six consumers use `import type`.
+
+### Live verification — the log line, watched
+
+Ran the production build on **:3100** (port 3000 was already occupied by someone else's server;
+it was left alone) with `.env.test` sourced, so `DATABASE_URL` pointed at `despl_test`. Proved
+that from the server side rather than trusting `@next/env`'s override semantics — queried
+`pg_stat_activity` and saw `despl_test user=despl_web` and **no `despl_demo` connection at
+all**, before and after the run.
+
+Logged in through the real `/login` form via browser automation as `sj@despl.local` (seed
+default password; no secret read, no session forged). Provoked a genuine refusal the way a real
+user hits one — two tabs open on `/workspace`, started stage 2 for 320SR01 in the first, then
+clicked the now-stale `Start` in the second:
+
+```
+[action] refused {
+  requestId: 'f76c0dc4-b3a9-4131-b3c5-534430f28583',
+  actionId: '4073c93089e9a8172dc7e246d402b57fc225ea6b59',
+  path: '/workspace',
+  userId: 4,
+  tenantId: 1,
+  code: 'INVALID_STATE_TRANSITION',
+  detail: { entity: 'ProcessPlan', action: 'start', from: 'IN_PROGRESS',
+            allowedFrom: [ 'NOT_STARTED' ], to: 'IN_PROGRESS' }
+}
+```
+
+That single line settles the three things the unit tests mock and therefore cannot prove:
+`headers()` **does** resolve inside the fire-and-forget closure (real `requestId`); Next **does**
+send a `next-action` header (real `actionId`); and `readSession()` resolves the actor without a
+DB hit (`userId: 4` = SJ). Side effects on `despl_test`: three stages genuinely started
+(320SR04 stage 6, 320SR01 stage 2, and one via `Start all`). Server stopped, tabs closed, both
+throwaway probe scripts deleted.
+
+No service behaviour changed — this is the action boundary only.
+
+## Session — [S2] HTTP security headers; S1+S2 merged to `main` via PR #8/#10, 2 Sep 2026
+
+**Status: [S2] shipped on `fix/S2-security-headers`, response headers confirmed against a
+production build. Both S1 (PR #8) and S2 (PR #10) merged to `main` on the user's explicit
+"merge both PRs" / "merge to main." CI green on both. Railway production deploy from these
+merges not independently watched this session.**
+
+### [S2] `fix/S2-security-headers` (branched from the S1 commit, before it was pushed)
+
+**Gap:** `next.config.ts` was the default scaffold — no `headers()` block at all. `middleware.ts`
+only ever set `x-request-id`. Result: no HSTS, no clickjacking protection, no CSP.
+
+**Fix, `next.config.ts` only** (`middleware.ts`'s request-id logic untouched, per the work
+item's stop condition):
+- Added `poweredByHeader: false`.
+- Added a `headers()` block applying to `/:path*`: `Strict-Transport-Security`,
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, and a
+  `Content-Security-Policy-Report-Only` starting policy.
+
+**CSP policy chosen and why report-only, not enforced:** `default-src 'self'; script-src 'self'
+'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';
+connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src
+'none'`. `script-src`/`style-src` both need `'unsafe-inline'` as things stand: Next 15's App
+Router streams hydration data via a per-request inline `<script>` (`self.__next_f.push(...)`)
+that can't be hashed and would need a middleware-generated nonce to drop `'unsafe-inline'`; ~40
+files use inline `style={{}}` (grep count, includes Radix Dialog and sonner), and the `style`
+attribute has no nonce/hash exemption in the CSP spec at all — unlike `<script>`/`<style>`
+elements, there is no tightening path for it short of ripping out inline styles app-wide. Given
+both directives already need `'unsafe-inline'`, enforcing the policy today would block
+essentially nothing beyond what `X-Frame-Options: DENY` and `frame-ancestors 'none'` themselves
+would, since `frame-ancestors` isn't a `script-src`/`style-src` concern — but chose report-only
+anyway because the enforced header is one directive string; a mistake in any part of it (e.g.
+`connect-src 'self'` missing something used at runtime) would silently break the whole app on the
+active demo build, and report-only carries zero functional risk while still surfacing violations
+for a future tightening pass.
+
+**Acceptance criterion (from the work item's "DONE WHEN"):** verify response headers from a
+production-mode build. Literal output, `pnpm build && pnpm start -p 3771` then `curl -s -D -
+-o /dev/null http://localhost:3771/login`:
+```
+Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+Referrer-Policy: strict-origin-when-cross-origin
+Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+x-request-id: 1fa73212-dce0-48c7-907a-f872d12f6070
+```
+Same headers confirmed on `/dashboard` (a redirect-gated route) and `/api/health` (a JSON route),
+`x-request-id` present and unchanged on all three, no `X-Powered-By` anywhere. `pnpm lint` /
+`pnpm typecheck`: no output, exit 0. Server stopped after verification.
+
+### Merging S1 + S2 to `main` (PR #8, #9, #10)
+
+S1 had been sitting fixed-but-uncommitted on `fix/S1-gating-splice-excluded-processes` since the
+1 Sep session (see that entry below). Before starting S2, committed S1 as its own commit
+(`3ef21f5`) — staged only the 4 files + this doc that S1's own session notes describe as its
+diff, explicitly leaving the 6 pre-existing unrelated dirty files and untracked docs alone (see
+"Incidental" below). Branched `fix/S2-security-headers` from that commit, confirmed first that
+the branch was really just `origin/main` + the one S1 commit (`git merge-base --is-ancestor
+origin/main HEAD`) rather than trusting the stale local `main` ref, which was 26 commits behind
+`origin/main` and would have given a false divergence reading.
+
+On explicit user instruction, pushed both branches and opened PR #8 (S1 → `main`) and PR #9 (S2
+→ `fix/S1-...`, stacked so it only diffed `next.config.ts`). On the user's explicit "merge both
+prs," merged PR #8 first (`gh pr merge 8 --merge --delete-branch`) — CI had passed
+(`33607743269`). GitHub's `--delete-branch` step deleted `fix/S1-...` on the remote, which
+**auto-closed PR #9** (its base branch no longer existed) and left it un-reopenable —
+`gh pr reopen 9` failed with "Could not open the pull request," and `gh pr edit 9 --base main`
+failed with "Cannot change the base branch of a closed pull request." Worked around it by opening
+a fresh PR #10 from the still-live `fix/S2-security-headers` branch straight to `main` (now
+already ahead by S1's commit, so #10 diffed only `next.config.ts`, same as #9 would have), with a
+note in its body pointing back to #9. Waited for CI (`33608336862`, ~4 min) to go green before
+merging. `gh pr merge 10 --merge --delete-branch`'s remote-side merge succeeded (confirmed via
+`gh pr view 10 --json state,mergedAt`), but its local cleanup half failed — `gh` tried to switch
+the local checkout off `fix/S2-security-headers` and hit the same 6 pre-existing dirty files,
+refusing rather than overwrite them. Deleted the now-merged remote branch by hand
+(`git push origin --delete fix/S2-security-headers`) instead of retrying the local switch.
+
+### Out of scope, found but not fixed
+
+- **LEDGER.md branch-name mismatches, both items**: `docs/mos-execution/LEDGER.md` lists S1's
+  branch as `fix/W3-gating-splice-excluded-processes` (already flagged in the 2 Sep S1 entry
+  below) and S2's as `chore/S2-security-headers`; the branch actually used and merged was
+  `fix/S2-security-headers` (item ID prefix, `fix` not `chore`, matching the convention every
+  other branch in this session's history uses). Not corrected in LEDGER.md — planning doc, not
+  code, left for whoever is reconciling item IDs against branch names.
+- **6 pre-existing unrelated dirty files, still uncommitted**: `assembly.service.ts`/`.test.ts`,
+  `bom-route.ts`/`.test.ts`, `bom.read.ts`, `qcp.service.ts`, plus the modified `CLAUDE.md`
+  ("Active execution plan" section) and untracked `docs/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`,
+  `docs/DESPL_MOS_FORENSIC_AUDIT.md`, `docs/DESPL_MOS_TRANSFORMATION_PLAN.md`, `docs/mos-blueprint/`,
+  `docs/mos-execution/`, `_to_delete/`. Predate this session (and the 1 Sep session before it);
+  left exactly as found on every branch touched this session, per the same reasoning as the 1 Sep
+  entry. They also blocked `gh`'s local branch cleanup twice (see above) — not fixed as a
+  side-effect of that either.
+
+### What a future session would get wrong without knowing this
+
+- The CSP is **report-only**. `Content-Security-Policy-Report-Only` does not block anything —
+  it only lets a browser report what *would* have been blocked. Anyone reading the response
+  headers and assuming clickjacking/XSS defenses are enforced would be wrong about the CSP part
+  specifically; `X-Frame-Options: DENY` is the header actually doing clickjacking protection
+  right now, not `frame-ancestors 'none'`.
+- Tightening `script-src` off `'unsafe-inline'` requires a per-request nonce generated in
+  `middleware.ts` and threaded through to every inline `<script>` Next itself emits — this is
+  Next's own documented pattern for App Router CSP, not something `next.config.ts`'s static
+  `headers()` can do alone. `style-src` has no equivalent tightening path at all while inline
+  `style={{}}` remains this widespread — that's an app-wide refactor, not a config change.
+- PR #9 (https://github.com/swayams13/despl-production-tracker/pull/9) is **closed, unmerged,
+  and permanently un-reopenable** (its base branch is gone). Its content shipped via PR #10
+  instead. Leave #9 closed — don't try to resurrect it.
+- Local branch `fix/S2-security-headers` still exists on the local machine (remote copy deleted)
+  because switching off it to let `gh` finish cleanup would have overwritten the 6 pre-existing
+  dirty files above. Safe to delete once someone decides what to do with those files, not before.
+
+### Not verified — UNVERIFIED
+
+- UNVERIFIED: no browser was used to actually load the app and check DevTools/console for CSP
+  violation reports. Verification here was response headers via `curl` only. Report-only mode
+  means nothing would break even if the policy is wrong, but "the policy correctly matches what
+  the app actually loads" was never observed directly — only reasoned from a source grep (no
+  external script/style/img/font/connect targets found in `src/`).
+- UNVERIFIED: the Railway production deploy triggered by the PR #8/#10 merges to `main` — not
+  watched or confirmed healthy this session, same caveat as the 2 Sep PR #6 merge below.
+- UNVERIFIED: whether `HSTS`'s `preload` directive matters for this app's actual deploy domain
+  (submission to the HSTS preload list is a manual, separate step); included the directive
+  as-is per the work item's ask, didn't check if Railway's domain is already preloaded or would
+  need submission.
+
 ## Session — [S1] Gating splice for excluded processes, 2 Sep 2026
 
 **Status: fixed on `fix/S1-gating-splice-excluded-processes`, TDD red→green, `pnpm lint`/
