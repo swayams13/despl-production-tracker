@@ -2,6 +2,141 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — [S4 + S4a] CI/env hygiene; e2e in CI finds two real bugs, 2 Sep 2026
+
+**Status: S3 merged to `main` (PR #11), then S4 + S4a merged to `main` (PR #12), both with
+CI green before the merge. Gate 0's code items S1-S4 are now all on `main`. Railway
+auto-deployed from both merges; neither deploy was watched. Gate 0 has NOT exited — S5
+(merge runbook) and the merge rehearsal remain, and every Day-1 item is still open.**
+
+### S4 part 1 — `.env.test.example`
+
+`.env.test` is gitignored and had no template, yet `pnpm test:db` hard-requires it and 8 test
+files reference its contents by name (`connection_limit=10`). A new engineer could not run the
+DB-gated ~60% of the suite. Reconstructed from `.github/workflows/ci.yml`'s `env:` block —
+placeholders only — with the never-point-this-at-`despl_demo` warning and the first-time setup
+sequence.
+
+### S4 part 3 — 34 untracked documents
+
+`docs/mos-blueprint/` (24), `docs/mos-execution/` (3) and the three audit/roadmap/transformation
+files were all untracked: the entire evidence base and execution sequence for the MOS work, one
+`git clean` from gone. Now in git. `_to_delete/` deliberately left out — it holds a binary
+tarball, which CLAUDE.md bans.
+
+Scanned before committing: the `despl123@` strings in those documents are audit findings
+*describing* a credential already committed at `scripts/create-department-accounts.ts:21`. No new
+secret introduced — but note this merge published 34 more descriptions of it, which raises D3's
+priority.
+
+### S4 part 4 — branch protection: CLOSED BY DECISION, not implemented
+
+The item asked for a click path so red CI blocks a deploy. **Neither the click path nor the API
+works: the repo is private on a free GitHub plan, where protected branches do not exist.** Both
+`POST /repos/.../rulesets` and `/branches/main/protection` return
+`403 Upgrade to GitHub Pro or make this repository public`, and the Settings screens the prompt
+describes are absent. Making the repo public is barred while that shared credential is in it.
+
+**Decision (Swayam): accept it — merge to `main` only after CI passes on the PR, Railway deploys
+from `main`.** Residual risks, accepted and recorded in `LEDGER.md`: a direct `git push origin
+main` still bypasses CI entirely, and CI green on a branch is not green on the merge result if
+`main` moved (re-run CI on the branch when it has). Revisit only if a second developer joins or
+Pro is bought.
+
+### S4 part 2 — e2e in CI, and what it immediately caught
+
+All 21 Playwright specs were local-only, including `e2e/auth.spec.ts`'s RBAC and client-scoping
+pins — nothing stopped a PR from breaking client scoping. Appended to the existing `ci` job
+rather than a second job: that job has already provisioned the two-role database, applied every
+migration and run all five seed steps, which is exactly what e2e needs; a separate job would
+duplicate ~4 minutes of setup. No server orchestration added — `playwright.config.ts`'s
+`webServer` block already runs `pnpm build && pnpm start`, and `auth.setup.ts` logs in through
+the real `/login` form.
+
+Cost measured, not estimated: **4m09s → 6m38s**, i.e. +2m29s, at the low end of the +3-5 min
+predicted, with a cold browser cache on the first run.
+
+Correction to the plan's wording: it says "21 Playwright tests". The real figure is **134
+executions, 79 skipped**.
+
+**The first CI run went red on two pre-existing failures — which was the entire point.**
+
+### S4a — the two failures, and the two real bugs behind them
+
+**1. `auth.spec.ts:46` — a test asserting an app that no longer exists.** It expected
+`toHaveURL("/")` then a "DESPL Production Tracker" heading. `src/app/page.tsx` is a pure
+role-based redirect that renders nothing; a supervisor lands on `/my-day` (SPEC §7.1); that
+heading lives only in `login/page.tsx`, `admin/_client.tsx` and `account/password/_client.tsx`.
+`toHaveURL("/")` had been passing on a race — it retries, and could match `/` in the instant
+before the redirect resolved. Now pins `/my-day` and its real `<h1>`, which is strictly
+stronger.
+
+Fixing that exposed a second problem in the same test: the RLS assertion below it had **never
+once executed against the app**, because the stale heading check always failed first. On first
+execution it hit Playwright strict mode — 8 matching cells, since `/my-day` lists one row per
+stage-unit. Scoped with `.first()`; it still asserts all three seeded jobs are visible under RLS.
+
+**2. `supervisor-viewport.spec.ts:68` — a `test.fail()` marker hiding a live defect.** It
+reported `Expected to fail, but passed`. The marker recorded `/my-day`'s card action pair as 6px
+apart against SPEC §8 assertion 3's 8px minimum, annotated "out of scope to fix".
+
+A local probe on the **phone** project came back clean (390x844, mobile shell, 93 targets,
+smallest exactly 48px, 8 adjacent pairs, tightest 15.65px) — real measurement, not a vacuous
+pass — so the finding was first logged as *unverified*. **CI then disproved that**, failing on
+the **tablet** project with the exact measurement:
+
+```
+adjacent targets {w:239,h:48} / {w:59,h:48} only 6px apart
+```
+
+That is the "Assign to…" select and "Claim" button wrapping onto two lines at tablet width. The
+marker had been concealing a **real shop-floor mis-tap risk** — on the very device this screen
+exists for — for as long as the suite went unrun. **Fixed at the source**:
+`src/app/(app)/my-day/_client.tsx:329`, `gap: 6` → `gap: 8` (also the CLAUDE.md § Layout grid).
+
+**Fixing it exposed a second, distinct violation behind the first**, again measured by CI:
+
+```
+{w:59,h:48} at y 594.97-642.97 / {w:239,h:48} at y 643.97-691.97 only 1px apart
+```
+
+Consecutive table rows — row N's "Claim" against row N+1's "Assign to…". That is row/cell
+vertical spacing, not a wrap, and fixing it means changing `/my-day`'s table row spacing at
+tablet width against CLAUDE.md § Layout's 36px row height: a visual design decision needing its
+own review. Not guessed at inside a test-hygiene change.
+
+Resolution (Swayam's call): the marker returns **narrowed to tablet + `/my-day` only**, quoting
+the CI measurement rather than a recollection, with an explicit closing condition in
+`LEDGER.md` — fix the row spacing, delete the `test.fail()`, confirm tablet passes in CI. The
+phone project asserts this page for real and passes; every other page asserts for real on both
+touch projects.
+
+**Standing lesson, written into the test file itself: a `test.fail()` is a defect in hiding, not
+a note.** This one hid a live defect for months, and a second one behind it.
+
+### Findings logged in `LEDGER.md` this session
+
+- **OPEN:** `/my-day` tablet row spacing, 1px, with a closing condition and a live `test.fail()`
+  holding it.
+- **Systemic:** ~19 other `gap: 6` flex containers across `src/app`/`src/components`, all below
+  the 8px grid. None violates today because none currently wraps two 48px targets at a tested
+  viewport, but `/workspace` (5) and `/my-day` (6) sit inside the pages this suite sweeps, so
+  they are latent. Not swept — 20 gap changes is an app-wide visual change needing review.
+- **Gotcha:** running e2e locally more than twice in 15 minutes locks you out. `auth.spec.ts`
+  submits two deliberately-wrong passwords per run and `auth.ts:17-18` rate-limits at 5 failures
+  / 15 min, so the third run fails in `auth.setup.ts` and cascades — looking like a broken suite
+  when it is the rate limiter working correctly. CI never sees it (one run, fresh DB).
+- Ledger branch names drift from the branches actually cut.
+- S1/S2 were ticked in `progress.md` as merged but left ☐ in the ledger.
+
+### Verification discipline note
+
+Local e2e must never run while port 3000 is occupied by another server: `reuseExistingServer:
+!process.env.CI` would aim the whole suite — including its mutations — at whatever database that
+server uses, which during this session was not `despl_test`. Every local run this session went
+through a throwaway config pointing at a `:3100` server started from `.env.test`, deleted
+afterwards.
+
 ## Session — [S3] Action-boundary logging + P2002 mapping, 2 Sep 2026
 
 **Status: [S3] shipped on `fix/S3-action-boundary-logging` (branched from the S2 HEAD, not
