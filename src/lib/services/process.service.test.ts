@@ -351,6 +351,125 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
 });
 
 /**
+ * [S1] An excluded mid-chain process must not permanently deadlock its
+ * direct successor. Spine: A -> B(excluded) -> C. generateSchedule's real
+ * behaviour never creates a ProcessPlan for an `included: false` JobProcess
+ * (envelope.ts filters it out) — reproduced here by simply not creating one
+ * for B, exactly like the real pipeline leaves it planless. Before the fix,
+ * loadGate reads B's raw edges, loadPredecessorStates defaults B's missing
+ * plan to NOT_STARTED, and C's start is refused forever (GATING_BLOCKED)
+ * with no way to ever clear it, because B has no plan to complete.
+ */
+describe.skipIf(!RUN_DB)("S1: excluded process does not deadlock its successor (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { startProcess } = await import("./process.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  let sup: Actor;
+  let planC = 0;
+
+  beforeAll(async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-S1-${Date.now()}`, name: "S1 excluded splice test" },
+    });
+    const tenantId = org.id;
+    const dept = await owner.department.create({ data: { tenantId, code: "D", name: "Dept" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+    const family = await owner.productFamily.create({
+      data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" },
+    });
+    const template = await owner.processTemplate.create({
+      data: { tenantId, familyId: family.id, name: "PV template" },
+    });
+    const version = await owner.processTemplateVersion.create({
+      data: { templateId: template.id, version: 1 },
+    });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-s1-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-S1-${Date.now()}`,
+      },
+    });
+
+    const jpA = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 10, code: "10", name: "A", departmentId: dept.id },
+    });
+    const jpB = await owner.jobProcess.create({
+      data: {
+        jobId: job.id,
+        seq: 20,
+        code: "20",
+        name: "B-excluded",
+        departmentId: dept.id,
+        included: false,
+        durationMinDays: 5,
+        durationMaxDays: 5,
+      },
+    });
+    const jpC = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 30, code: "30", name: "C", departmentId: dept.id },
+    });
+    await owner.jobProcessEdge.create({
+      data: { processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 },
+    });
+    await owner.jobProcessEdge.create({
+      data: { processId: jpC.id, predecessorId: jpB.id, type: "FINISH_TO_START", lagDays: 0 },
+    });
+
+    const run = await owner.scheduleRun.create({
+      data: {
+        jobId: job.id,
+        equipmentId: null,
+        version: 1,
+        mode: "FORWARD",
+        projectStartDate: new Date(),
+        isCurrent: true,
+      },
+    });
+
+    // No ProcessPlan is created for jpB — mirrors generateSchedule, which
+    // never materialises a plan for an included:false JobProcess.
+    await owner.processPlan.create({
+      data: { scheduleRunId: run.id, jobProcessId: jpA.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
+    });
+    planC = (
+      await owner.processPlan.create({
+        data: { scheduleRunId: run.id, jobProcessId: jpC.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      })
+    ).id;
+
+    const user = await owner.user.create({
+      data: { tenantId, email: "sup-s1@x", username: "sup-s1", name: "Sup", passwordHash: "x" },
+    });
+    sup = {
+      tenantId,
+      clientId: null,
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+      userId: user.id,
+      name: "Sup",
+      email: "sup-s1@x",
+      roles: [ROLES.SUPERVISOR],
+      departmentIds: [dept.id],
+    };
+  });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("C starts once A is COMPLETE, even though excluded B between them has no plan row", async () => {
+    const started = await startProcess(sup, { processPlanId: planC });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+});
+
+/**
  * Grain P0.3: loadGate now threads plan.unitId into loadPredecessorStates, so
  * a unit waits on its OWN predecessors, and assertNoOpenHoldPoint (already
  * unitId-aware) stops being a no-op. Runs against the real DESPL-320 seed
