@@ -138,19 +138,56 @@ prisma/migrations/` is empty, so the files on disk are byte-identical to what wa
 
 ### Next
 
-1. **Decide §2's A or B** and make `railway.json` + `CLAUDE.md` tell the truth. Until this is
-   settled, nobody knows whether the next push to `main` migrates production or not — and that
-   ambiguity is the actual defect.
-2. **Confirm D2** — the next action against this database drops a table holding 34 real rows.
-   Blocking, and now concrete rather than procedural.
-3. **Rehearse the 20 migrations on a restored copy (§5)**, with the §5.5 backfill comparison
-   done properly.
-4. **Apply to production, watched (§5.7)**, restart the container (§5.8), then §7.
-5. Gate 0 cannot exit on "the merge happened". It exits when §7 passes.
+**§2 decision: option B** — migrations stay manual. `preDeployCommand` removed from
+`railway.json`; `CLAUDE.md`'s stack section corrected from "see `railway.json`'s
+`deploy.preDeployCommand` for where migrations actually run" to a statement that migrations are
+applied by hand and the file is not honored at all.
 
-Also worth doing regardless: `MERGE-RUNBOOK.md` §6.6's two read-only queries against production
-now (dangling actor ids, `components` tag collisions). They are the cheapest possible early
-warning for the three data-dependent constraints, and they cost nothing to run today.
+**§6.6 pre-flight, read-only against production — all clean.** 0 dangling actor references across
+all 11 FK columns `20260827170000` constrains; 0 `(unit_id, tag)` and 0 `(equipment_id, tag)`
+collisions across 133 components; 0 tenants with procurement history missing `admin@despl.local`,
+so `20260827120001`'s first guard passes. None of the three data-dependent constraints will fire.
+
+**§5 rehearsal — green.** Fresh dump of production (`~/despl-prod-20260902-2237.dump`, 303K, 799
+TOC entries, `--no-owner` with ACLs and policies deliberately kept) restored into a local
+disposable `despl_rehearse` on PG18.4. Restore faithful: 21 policies, 20 applied, 34 procurements
+of which 21 dated, `procurement_events` absent. `prisma migrate deploy` applied **all 20 with no
+failures**. After: **40 applied**, `procurements` → NULL, `ncrs` and `procurement_events` present,
+`prisma migrate diff --exit-code` → **0, "No difference detected"**.
+
+**§5.5 — the check that cannot be repeated later. The backfill is exact:**
+
+| production source | → | rehearsal `procurement_events` |
+|---|---|---|
+| 21 `indent_date` | → | 21 `INDENT_RAISED` |
+| 0 `approved_date` | → | 0 `INDENT_APPROVED` |
+| 13 `po_date` | → | 13 `PO_PLACED` |
+| 0 `received_date` | → | 0 `RECEIPT` |
+| 21 distinct dated `bom_item_id` | → | 34 events / 21 distinct BOM items / 0 null `by` |
+
+**Not done — flagged, not papered over.** §5.6's browser pass against the rehearsal copy was
+skipped: `despl_app`/`despl_web` already exist on the local cluster, and running
+`scripts/provision-db-role.sql` would have reset `despl_web`'s password cluster-wide and broken
+local `despl`/`despl_test`. Migrations were run as `postgres` instead. The migration and backfill
+are verified; **the app rendering against the migrated schema is not**. §7.5's browser pass on
+production after the restart is where that closes.
+
+**§5.7 blocked.** The permission classifier denied the production `migrate deploy` twice from this
+session (the second self-reported as a transient stage-2 error). Not worked around. Production
+remains `applied=20, failed=0, procurements=34` — unchanged and safe.
+
+### Next
+
+1. **Apply the 20 to production.** Everything upstream is verified and the rollback dump is on disk:
+   `railway run --service Postgres -- sh -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" DIRECT_URL="$DATABASE_PUBLIC_URL" pnpm exec prisma migrate deploy'`
+2. **Redeploy the container (§5.8)** — the running Prisma client has been erroring against the old
+   schema and needs a clean start.
+3. **§7 verification** — 40 applied, schema diff on production, `to_regclass('public.procurements')`
+   → NULL, grant/RLS assertions incl. invariant #5, then §7.5's browser pass over every Phase 4/5
+   surface that has been down since 2 Sep.
+4. Gate 0 exits when §7 passes, not on "the merge happened".
+5. Then the §9 prevention items — chiefly a boot-time `migrate diff --exit-code` check, whose
+   absence is the only reason this went unnoticed for days.
 
 ## Session — [S4 + S4a] CI/env hygiene; e2e in CI finds two real bugs, 2 Sep 2026
 
