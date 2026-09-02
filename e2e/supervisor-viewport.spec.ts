@@ -82,17 +82,41 @@ for (const path of SHELL_PAGES) {
     // adjacent pairs checked, tightest gap 15.65px. So this test is doing real
     // work on /my-day, not passing vacuously.
     //
-    // Removing it then proved the defect was REAL, not stale: CI failed this
-    // test on the TABLET project with the exact measurement the marker
-    // described — `{w:239,h:48}` / `{w:59,h:48}` only 6px apart, the
-    // "Assign to…" select and "Claim" button wrapping onto two lines. The
-    // phone project never reached it, which is why the local probe came back
-    // clean. Root cause fixed in src/app/(app)/my-day/_client.tsx:329
-    // (`gap: 6` → `gap: 8`), not papered over here.
+    // Removing it proved the defect was REAL, not stale: CI failed this test
+    // on the TABLET project with the exact measurement the marker described —
+    // `{w:239,h:48}` / `{w:59,h:48}` only 6px apart, the "Assign to…" select
+    // and "Claim" button wrapping onto two lines. The phone project never
+    // reaches it, which is why a local phone probe came back clean.
     //
-    // The marker had been hiding a live shop-floor mis-tap risk for as long as
-    // this suite went unrun in CI. Treat any `test.fail()` as a defect in
-    // hiding, not a note.
+    // That one is FIXED at the source: src/app/(app)/my-day/_client.tsx:329,
+    // `gap: 6` → `gap: 8`. Not papered over.
+    //
+    // Fixing it then exposed a SECOND, distinct violation behind it, measured
+    // by CI on the same project:
+    //
+    //   {w:59,h:48} at y 594.97-642.97  /  {w:239,h:48} at y 643.97-691.97
+    //   only 1px apart
+    //
+    // Those are in CONSECUTIVE TABLE ROWS — row N's "Claim" and row N+1's
+    // "Assign to…" — so it is row/cell vertical spacing, not a wrap. Fixing it
+    // means changing /my-day's table row spacing at tablet width against
+    // CLAUDE.md § Layout's 36px row height: a visual design decision needing
+    // its own review, not a follow-on edit to a test-hygiene change.
+    //
+    // So the marker is restored — but ONLY for the tablet project, ONLY for
+    // /my-day, and citing a measurement rather than a recollection. The phone
+    // project asserts this page for real and passes.
+    //
+    // Standing lesson from the round trip: a `test.fail()` is a defect in
+    // hiding, not a note. This one concealed a live shop-floor mis-tap risk
+    // for as long as the suite went unrun in CI, and it concealed a second one
+    // behind the first. Owner and closing condition are tracked in
+    // docs/mos-execution/LEDGER.md — do not let this line rot again.
+    test.fail(
+      path === "/my-day" && testInfo.project.name === "tablet",
+      "my-day/tablet: row N's Claim and row N+1's Assign-to select are 1px apart " +
+        "(need 8px, SPEC §8 assertion 3) — measured in CI, tracked in LEDGER.md",
+    );
     await page.goto(path);
 
     // Scoped to what this codebase's own coarse-pointer sizing contract
