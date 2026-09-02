@@ -6,7 +6,6 @@ import {
   requireDepartmentScope,
 } from "@/lib/authz";
 import { audited } from "@/lib/audit";
-import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
 import {
   assertCanComplete,

@@ -203,10 +203,22 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
     await cleanup(job.id);
     await publishSnapshot(ph(job.tenantId), { jobId: job.id }); // all rows publishedBy: 4
     const rows = await owner.progressSnapshot.findMany({ where: { jobId: job.id, status: "PUBLISHED" } });
-    // Give exactly one row a different publisher (id 99), simulating the orphan.
-    await owner.progressSnapshot.update({ where: { id: rows[0].id }, data: { publishedBy: 99 } });
+    // Give exactly one row a different publisher — a real throwaway user, since
+    // publishedBy is FK'd to User.id and a bare literal id isn't guaranteed to
+    // exist (fresh CI databases only seed a handful of users).
+    const otherPublisher = await owner.user.create({
+      data: {
+        tenantId: job.tenantId,
+        email: `orphan-publisher-${Date.now()}@test.local`,
+        username: `orphan-publisher-${Date.now()}`,
+        passwordHash: "x",
+        name: "Orphan Publisher",
+        themePreference: "SYSTEM",
+      },
+    });
+    await owner.progressSnapshot.update({ where: { id: rows[0].id }, data: { publishedBy: otherPublisher.id } });
 
-    const orphanPublisher: Actor = { ...md(job.tenantId), userId: 99 };
+    const orphanPublisher: Actor = { ...md(job.tenantId), userId: otherPublisher.id };
     await expectCode(verifySnapshot(orphanPublisher, { jobId: job.id }), ERROR_CODES.MAKER_CHECKER_VIOLATION);
   });
 
