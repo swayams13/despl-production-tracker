@@ -2,6 +2,328 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — [S5] Migration runbook — production is running new code on the 24 Aug schema, 2 Sep 2026
+
+**Status: S5 delivered. Two findings, the second of them a live production incident.
+(1) The `demo` → `main` merge S5 was written to plan had already happened, carried by a
+documentation PR. (2) The migrations it was supposed to bring have **never run** — `railway.json`
+is not honored by the Railway service, so `prisma migrate deploy` has never executed
+automatically on this project. Production serves the full Phase 4 + Phase 5 + S1–S4 code against
+the 24 August schema. `procurements` is intact with 34 rows; nothing is corrupted; the migration
+is still ahead of us. Only read-only `SELECT`s were run against production — no migration, no
+write. Branch `docs/S5-merge-runbook`, PR #13.**
+
+### The finding
+
+S5's brief said `main` was 79 commits and 21 migrations behind. It is not. **Local `main` was 99
+commits stale** — that is the whole source of the error, and my own first draft of the runbook
+repeated it before I fetched. Against `origin/main`:
+
+- `git rev-list --count origin/main..demo` → **0**. `demo` adds nothing.
+- `git ls-tree -d --name-only origin/main prisma/migrations/ | wc -l` → **40**, not 19.
+- `git diff --name-only origin/main...demo -- prisma/migrations` → **empty**. Zero pending.
+
+The carrier was **PR #6, `chore/B1-docs-drift-corrections`** — a docs PR branched off `demo`, so
+merging it pulled all 77 `demo` commits and all 21 migrations onto `main`:
+
+```
+$ git log --first-parent --oneline -1 origin/main \
+    -- prisma/migrations/20260827120001_procurement_event_drop_procurements/
+f5a499f 2026-09-02 Merge pull request #6 from swayams13/chore/B1-docs-drift-corrections
+```
+
+Every 2 Sep merge after it already shows 40 migration dirs. Railway deploys from `main`
+(D1 confirmed this session) and runs `prisma migrate deploy` unattended as `preDeployCommand`.
+So `20260827120001` — which `DROP`s `procurements` after backfilling it inline, and whose own
+header calls itself "the actual point of no return" — ran against production with no rehearsal,
+no watched log, and LEDGER D2 (backups) still open.
+
+### Then the query was run against production — and it is neither hypothesis
+
+I had framed two: (A) the migrations applied and `procurements` is gone; (B) `preDeployCommand`
+failed and production serves old code on a partly-migrated schema. **The truth is a third
+state.** Run read-only over the Railway proxy (`railway run --service Postgres`, so no
+credential was printed or read from `.env`):
+
+```
+ applied | unfinished | rolled_back
+---------+------------+-------------
+      20 |          1 |           1
+```
+
+The unfinished/rolled-back pair is **one healed historical row** — `20260815120000_v_unit_stage_status`,
+started 16 Aug 10:59, rolled back 11:09, re-applied 11:10. That is the documented first-deploy
+incident, not a wedge. Last applied migration: **`20260822130000_template_version_updated_at`,
+2026-08-24 09:54.** The 20 migrations from the 2 Sep merge have **no rows at all** — never
+started, never failed, never attempted.
+
+```
+ procurements | procurement_events | ncrs | components      procurement_rows
+--------------+--------------------+------+------------     ----------------
+ procurements |                    |      | components                    34
+```
+
+Meanwhile the deployment is `SUCCESS` at commit `7597a3c` and the new code **is** live — S2's
+security headers came back on the wire from the public URL. So:
+
+**Production is running the full Phase 4 + Phase 5 + S1–S4 code against the 24 August schema.**
+New code, old schema — the inversion of the hazard the runbook was written around.
+
+### Root cause: `railway.json` has never been honored
+
+```
+2026-09-02T16:19 SUCCESS 7597a3c | preDeploy: None | builder: RAILPACK | Merge PR #12
+2026-09-02T03:07 REMOVED f5a499f | preDeploy: None | builder: RAILPACK | Merge PR #6
+2026-08-25T17:04 REMOVED e4d0348 | preDeploy: None | builder: RAILPACK | Merge PR #5
+```
+
+`preDeployCommand: None` on **every deployment ever recorded**, and `builder: RAILPACK` where
+`railway.json` specifies `NIXPACKS`. `healthcheckPath` is `null` too. **`prisma migrate deploy`
+has never run automatically on this project** — August's 20 migrations were applied by hand.
+Every document asserting otherwise (`CLAUDE.md`'s stack section, S4's CI reasoning, this
+runbook's own first two drafts) is wrong and needs correcting.
+
+### The good news
+
+**`procurements` is intact with 34 rows. `20260827120001` never ran.** The "point of no return"
+has not been crossed, nothing is corrupted, and every recovery option is still open — a far
+better position than either hypothesis. The new code writes procurement history to
+`procurement_events`, which does not exist, so those writes fail outright rather than silently
+diverging; there is no half-written state to reconcile.
+
+### The bad news
+
+Every Phase 4/5 surface has been failing since 2 Sep: BOM/procurement, stock lots and txns, NCR,
+assembly tracking, drawing revisions, material identification, and the new `components` columns
+all query tables that do not exist. `/api/health` and `/login` return 200 because neither touches
+a new table, which is exactly why nobody noticed. **The team clicks through this build for the
+demo.**
+
+### Delivered
+
+`docs/mos-execution/MERGE-RUNBOOK.md` — rewritten a third time to match what was found, and now
+genuinely prospective: the migration it describes is still pending. §1 the evidence above; §2 the
+`railway.json` root cause and the **A-or-B decision** (arm `preDeployCommand`, or keep migrations
+manual and delete the misleading config — recommend the latter until Gate 0 exits); §3 the
+current-state table; §4 prerequisites plus the **20** pending migrations in apply order (not 21 —
+`20260820050300` went in on 24 Aug); §5 the procedure — dump, roles-before-restore, rehearse,
+**abort point**, apply watched, restart the container; §6 failure modes; §7 post-migration
+verification; §9 prevention.
+
+The load-bearing step is **§5.5**: the rehearsal on the restored copy is the *only* opportunity
+to verify the inline backfill against its source, because §5.7 drops `procurements` permanently.
+The migration's own guards test for presence, not correctness — "it didn't error" is not the check.
+
+Two technical corrections carried over from earlier drafts: `pg_dump` must **not** use `--no-acl`
+(grants and RLS policies are the thing under test — a `--no-acl` copy gives `despl_web` a schema
+it cannot read a row from), which forces roles-before-`pg_restore`; and `--exit-on-error` on the
+restore, since the default logs errors and continues.
+
+Checksum risk is **nil**: the two migrations edited after being applied elsewhere
+(`20260827120001`, `20260831064422_phase5`) have never been applied to production, so there is no
+stored checksum to mismatch.
+
+Two technical corrections I made to my own draft along the way: the `pg_dump` must **not** use
+`--no-acl` (grants and RLS policies are the thing under test — a `--no-acl` copy gives
+`despl_web` a schema it cannot read a row from), which forces roles-before-`pg_restore`; and
+`--exit-on-error` on the restore, since the default logs errors and continues, yielding a
+silently incomplete copy that makes every later "pass" meaningless.
+
+One risk the brief did not name, now §6.6: `20260827170000` adds ~20 immediately-validated
+actor FKs to `users(id)` with no `NOT VALID`, and `20260826140000`/`20260827050000` rebuild
+unique indexes on `components`. All three pass trivially on an empty DB and fail on real rows.
+
+Checksum risk (the brief's concern) is currently **nil**: `git log --since=2026-09-01 --
+prisma/migrations/` is empty, so the files on disk are byte-identical to what was applied.
+
+### Next
+
+**§2 decision: option B** — migrations stay manual. `preDeployCommand` removed from
+`railway.json`; `CLAUDE.md`'s stack section corrected from "see `railway.json`'s
+`deploy.preDeployCommand` for where migrations actually run" to a statement that migrations are
+applied by hand and the file is not honored at all.
+
+**§6.6 pre-flight, read-only against production — all clean.** 0 dangling actor references across
+all 11 FK columns `20260827170000` constrains; 0 `(unit_id, tag)` and 0 `(equipment_id, tag)`
+collisions across 133 components; 0 tenants with procurement history missing `admin@despl.local`,
+so `20260827120001`'s first guard passes. None of the three data-dependent constraints will fire.
+
+**§5 rehearsal — green.** Fresh dump of production (`~/despl-prod-20260902-2237.dump`, 303K, 799
+TOC entries, `--no-owner` with ACLs and policies deliberately kept) restored into a local
+disposable `despl_rehearse` on PG18.4. Restore faithful: 21 policies, 20 applied, 34 procurements
+of which 21 dated, `procurement_events` absent. `prisma migrate deploy` applied **all 20 with no
+failures**. After: **40 applied**, `procurements` → NULL, `ncrs` and `procurement_events` present,
+`prisma migrate diff --exit-code` → **0, "No difference detected"**.
+
+**§5.5 — the check that cannot be repeated later. The backfill is exact:**
+
+| production source | → | rehearsal `procurement_events` |
+|---|---|---|
+| 21 `indent_date` | → | 21 `INDENT_RAISED` |
+| 0 `approved_date` | → | 0 `INDENT_APPROVED` |
+| 13 `po_date` | → | 13 `PO_PLACED` |
+| 0 `received_date` | → | 0 `RECEIPT` |
+| 21 distinct dated `bom_item_id` | → | 34 events / 21 distinct BOM items / 0 null `by` |
+
+**Not done — flagged, not papered over.** §5.6's browser pass against the rehearsal copy was
+skipped: `despl_app`/`despl_web` already exist on the local cluster, and running
+`scripts/provision-db-role.sql` would have reset `despl_web`'s password cluster-wide and broken
+local `despl`/`despl_test`. Migrations were run as `postgres` instead. The migration and backfill
+are verified; **the app rendering against the migrated schema is not**. §7.5's browser pass on
+production after the restart is where that closes.
+
+**§5.7 blocked.** The permission classifier denied the production `migrate deploy` twice from this
+session (the second self-reported as a transient stage-2 error). Not worked around. Production
+remains `applied=20, failed=0, procurements=34` — unchanged and safe.
+
+### Next
+
+1. **Apply the 20 to production.** Everything upstream is verified and the rollback dump is on disk:
+   `railway run --service Postgres -- sh -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" DIRECT_URL="$DATABASE_PUBLIC_URL" pnpm exec prisma migrate deploy'`
+2. **Redeploy the container (§5.8)** — the running Prisma client has been erroring against the old
+   schema and needs a clean start.
+3. **§7 verification** — 40 applied, schema diff on production, `to_regclass('public.procurements')`
+   → NULL, grant/RLS assertions incl. invariant #5, then §7.5's browser pass over every Phase 4/5
+   surface that has been down since 2 Sep.
+4. Gate 0 exits when §7 passes, not on "the merge happened".
+5. Then the §9 prevention items — chiefly a boot-time `migrate diff --exit-code` check, whose
+   absence is the only reason this went unnoticed for days.
+
+## Session — [S4 + S4a] CI/env hygiene; e2e in CI finds two real bugs, 2 Sep 2026
+
+**Status: S3 merged to `main` (PR #11), then S4 + S4a merged to `main` (PR #12), both with
+CI green before the merge. Gate 0's code items S1-S4 are now all on `main`. Railway
+auto-deployed from both merges; neither deploy was watched. Gate 0 has NOT exited — S5
+(merge runbook) and the merge rehearsal remain, and every Day-1 item is still open.**
+
+### S4 part 1 — `.env.test.example`
+
+`.env.test` is gitignored and had no template, yet `pnpm test:db` hard-requires it and 8 test
+files reference its contents by name (`connection_limit=10`). A new engineer could not run the
+DB-gated ~60% of the suite. Reconstructed from `.github/workflows/ci.yml`'s `env:` block —
+placeholders only — with the never-point-this-at-`despl_demo` warning and the first-time setup
+sequence.
+
+### S4 part 3 — 34 untracked documents
+
+`docs/mos-blueprint/` (24), `docs/mos-execution/` (3) and the three audit/roadmap/transformation
+files were all untracked: the entire evidence base and execution sequence for the MOS work, one
+`git clean` from gone. Now in git. `_to_delete/` deliberately left out — it holds a binary
+tarball, which CLAUDE.md bans.
+
+Scanned before committing: the `despl123@` strings in those documents are audit findings
+*describing* a credential already committed at `scripts/create-department-accounts.ts:21`. No new
+secret introduced — but note this merge published 34 more descriptions of it, which raises D3's
+priority.
+
+### S4 part 4 — branch protection: CLOSED BY DECISION, not implemented
+
+The item asked for a click path so red CI blocks a deploy. **Neither the click path nor the API
+works: the repo is private on a free GitHub plan, where protected branches do not exist.** Both
+`POST /repos/.../rulesets` and `/branches/main/protection` return
+`403 Upgrade to GitHub Pro or make this repository public`, and the Settings screens the prompt
+describes are absent. Making the repo public is barred while that shared credential is in it.
+
+**Decision (Swayam): accept it — merge to `main` only after CI passes on the PR, Railway deploys
+from `main`.** Residual risks, accepted and recorded in `LEDGER.md`: a direct `git push origin
+main` still bypasses CI entirely, and CI green on a branch is not green on the merge result if
+`main` moved (re-run CI on the branch when it has). Revisit only if a second developer joins or
+Pro is bought.
+
+### S4 part 2 — e2e in CI, and what it immediately caught
+
+All 21 Playwright specs were local-only, including `e2e/auth.spec.ts`'s RBAC and client-scoping
+pins — nothing stopped a PR from breaking client scoping. Appended to the existing `ci` job
+rather than a second job: that job has already provisioned the two-role database, applied every
+migration and run all five seed steps, which is exactly what e2e needs; a separate job would
+duplicate ~4 minutes of setup. No server orchestration added — `playwright.config.ts`'s
+`webServer` block already runs `pnpm build && pnpm start`, and `auth.setup.ts` logs in through
+the real `/login` form.
+
+Cost measured, not estimated: **4m09s → 6m38s**, i.e. +2m29s, at the low end of the +3-5 min
+predicted, with a cold browser cache on the first run.
+
+Correction to the plan's wording: it says "21 Playwright tests". The real figure is **134
+executions, 79 skipped**.
+
+**The first CI run went red on two pre-existing failures — which was the entire point.**
+
+### S4a — the two failures, and the two real bugs behind them
+
+**1. `auth.spec.ts:46` — a test asserting an app that no longer exists.** It expected
+`toHaveURL("/")` then a "DESPL Production Tracker" heading. `src/app/page.tsx` is a pure
+role-based redirect that renders nothing; a supervisor lands on `/my-day` (SPEC §7.1); that
+heading lives only in `login/page.tsx`, `admin/_client.tsx` and `account/password/_client.tsx`.
+`toHaveURL("/")` had been passing on a race — it retries, and could match `/` in the instant
+before the redirect resolved. Now pins `/my-day` and its real `<h1>`, which is strictly
+stronger.
+
+Fixing that exposed a second problem in the same test: the RLS assertion below it had **never
+once executed against the app**, because the stale heading check always failed first. On first
+execution it hit Playwright strict mode — 8 matching cells, since `/my-day` lists one row per
+stage-unit. Scoped with `.first()`; it still asserts all three seeded jobs are visible under RLS.
+
+**2. `supervisor-viewport.spec.ts:68` — a `test.fail()` marker hiding a live defect.** It
+reported `Expected to fail, but passed`. The marker recorded `/my-day`'s card action pair as 6px
+apart against SPEC §8 assertion 3's 8px minimum, annotated "out of scope to fix".
+
+A local probe on the **phone** project came back clean (390x844, mobile shell, 93 targets,
+smallest exactly 48px, 8 adjacent pairs, tightest 15.65px) — real measurement, not a vacuous
+pass — so the finding was first logged as *unverified*. **CI then disproved that**, failing on
+the **tablet** project with the exact measurement:
+
+```
+adjacent targets {w:239,h:48} / {w:59,h:48} only 6px apart
+```
+
+That is the "Assign to…" select and "Claim" button wrapping onto two lines at tablet width. The
+marker had been concealing a **real shop-floor mis-tap risk** — on the very device this screen
+exists for — for as long as the suite went unrun. **Fixed at the source**:
+`src/app/(app)/my-day/_client.tsx:329`, `gap: 6` → `gap: 8` (also the CLAUDE.md § Layout grid).
+
+**Fixing it exposed a second, distinct violation behind the first**, again measured by CI:
+
+```
+{w:59,h:48} at y 594.97-642.97 / {w:239,h:48} at y 643.97-691.97 only 1px apart
+```
+
+Consecutive table rows — row N's "Claim" against row N+1's "Assign to…". That is row/cell
+vertical spacing, not a wrap, and fixing it means changing `/my-day`'s table row spacing at
+tablet width against CLAUDE.md § Layout's 36px row height: a visual design decision needing its
+own review. Not guessed at inside a test-hygiene change.
+
+Resolution (Swayam's call): the marker returns **narrowed to tablet + `/my-day` only**, quoting
+the CI measurement rather than a recollection, with an explicit closing condition in
+`LEDGER.md` — fix the row spacing, delete the `test.fail()`, confirm tablet passes in CI. The
+phone project asserts this page for real and passes; every other page asserts for real on both
+touch projects.
+
+**Standing lesson, written into the test file itself: a `test.fail()` is a defect in hiding, not
+a note.** This one hid a live defect for months, and a second one behind it.
+
+### Findings logged in `LEDGER.md` this session
+
+- **OPEN:** `/my-day` tablet row spacing, 1px, with a closing condition and a live `test.fail()`
+  holding it.
+- **Systemic:** ~19 other `gap: 6` flex containers across `src/app`/`src/components`, all below
+  the 8px grid. None violates today because none currently wraps two 48px targets at a tested
+  viewport, but `/workspace` (5) and `/my-day` (6) sit inside the pages this suite sweeps, so
+  they are latent. Not swept — 20 gap changes is an app-wide visual change needing review.
+- **Gotcha:** running e2e locally more than twice in 15 minutes locks you out. `auth.spec.ts`
+  submits two deliberately-wrong passwords per run and `auth.ts:17-18` rate-limits at 5 failures
+  / 15 min, so the third run fails in `auth.setup.ts` and cascades — looking like a broken suite
+  when it is the rate limiter working correctly. CI never sees it (one run, fresh DB).
+- Ledger branch names drift from the branches actually cut.
+- S1/S2 were ticked in `progress.md` as merged but left ☐ in the ledger.
+
+### Verification discipline note
+
+Local e2e must never run while port 3000 is occupied by another server: `reuseExistingServer:
+!process.env.CI` would aim the whole suite — including its mutations — at whatever database that
+server uses, which during this session was not `despl_test`. Every local run this session went
+through a throwaway config pointing at a `:3100` server started from `.env.test`, deleted
+afterwards.
+
 ## Session — [S3] Action-boundary logging + P2002 mapping, 2 Sep 2026
 
 **Status: [S3] shipped on `fix/S3-action-boundary-logging` (branched from the S2 HEAD, not

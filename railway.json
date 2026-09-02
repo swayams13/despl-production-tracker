@@ -4,7 +4,6 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "preDeployCommand": "pnpm exec prisma migrate deploy",
     "startCommand": "pnpm start",
     "healthcheckPath": "/api/health",
     "healthcheckTimeout": 30,

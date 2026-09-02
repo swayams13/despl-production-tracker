@@ -4,6 +4,18 @@ Project guide for Claude Code / AI-assisted build sessions. **Read `docs/BUILD-S
 
 > Full cross-project context pack (status, roadmap, decisions, deployment, known issues) lives in the Obsidian vault: `/Users/sonusingh/SWAYAM OS/4_Projects/Client Work/DESPL/DESPL TRACKER/`. The repo's `progress.md` is canonical; the vault mirrors it — update `progress.md`, then sync the vault (`CURRENT_STATUS.md`, `TASKS.md`, `CHANGELOG.md`) and run `link_vault.py` if doc files were added or renamed.
 
+## Active execution plan  *(added 1 Sep 2026)*
+
+**Current work is sequenced by `docs/mos-execution/PROMPTS-v4.md`.** Read `docs/mos-execution/README.md` before starting any session; log outcomes in `docs/mos-execution/LEDGER.md`. v4 supersedes `docs/mos-blueprint/PROMPTS.md` for phase ORDER and for Gates 0-2 — v3's Phase C-N item prompts are still current. The evidence behind the sequence is `docs/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`; the gate structure is `docs/DESPL_MOS_TRANSFORMATION_PLAN.md`.
+
+**Known state every session needs** (full list in v4's rules block — do not "discover" these and fix them as a side effect):
+- No code in `src/` creates `Component`, `ComponentOperation` or `AssemblyStep`. Only `prisma/seed.ts` and `scripts/seed-despl320-*.ts` do — DESPL-320's execution layer was seeded, not created by the product. Scheduled as Gate 2.
+- `dispatch.service.ts`, `packing.service.ts`, `override.service.ts`, `ncr.service.ts`'s `dispositionNcr`, and `component.service.ts`'s `recordPaintRecord`/`recordDftReading` have zero callers. Scheduled as Gate 1.
+- `Job.status` has no writer anywhere; `assertKitReady` and `assertDrawingReleased` no-op on fields nothing sets.
+- Excluding a process at intake currently deadlocks its successors (`loadGate` misses `bypassExcluded`). Item S1 fixes this.
+
+**Hard bans until Gate 1 exits:** do not re-pin DESPL-320 to `ProcessTemplateVersion` v2; do not publish a version tagging an `evidenceKind` with no reachable producer; do not add a `PAINTING` operation to any route.
+
 ## What this project is
 
 End-to-end production tracker for DESPL (Dhruv EPC Solutions, Vedanta Group). Tracks pressure-vessel manufacturing from PO to dispatch across all departments: 25-stage work-order process, QCP/ITP checkpoints with P/W/H hold points, BOM + heat-number traceability, welding productivity, deadline/KPI accountability, and daily management visibility (MD, CEO, Production Head "SJ"). v1 pilot job: DESPL-320 (9 HP air receivers, serials 320SR01–09).
@@ -18,7 +30,8 @@ TypeScript strict everywhere. Single Next.js full-stack app.
 - `lib/services/` holds ALL business rules — Server Actions and Route Handlers are thin callers, never rule-holders
 - `lib/schedule/` holds the scheduling engine (envelope, CPM, forward/backward, feasibility, override)
 - `lib/shared/` — zod schemas, types, constants (roles, process/status enums, error codes)
-- Deploy: Railway, one `production` environment, auto-deploying from `main` — no separate staging environment exists yet. CI: GitHub Actions runs lint → typecheck → test (pure + DB-gated) → build on every PR/push; it does not deploy (Railway's own auto-deploy does that) and does not run `prisma migrate deploy` against a real database — see `railway.json`'s `deploy.preDeployCommand` for where migrations actually run.
+- Deploy: Railway, one `production` environment, auto-deploying from `main` — no separate staging environment exists yet. CI: GitHub Actions runs lint → typecheck → test (pure + DB-gated) → build on every PR/push; it does not deploy (Railway's own auto-deploy does that) and does not run `prisma migrate deploy` against a real database.
+- **Migrations are applied MANUALLY. Nothing applies them for you.** *(corrected 2 Sep 2026 — this section previously claimed `railway.json`'s `deploy.preDeployCommand` ran them; it never did.)* The Railway service does not honor `railway.json`: every deployment on record shows `preDeployCommand: None`, `builder: RAILPACK` (not the file's `NIXPACKS`), and `healthcheckPath: null`. The `preDeployCommand` key has been removed from `railway.json` so it stops implying otherwise — the remaining keys are equally un-applied, kept only as a statement of intent. **Consequence:** merging to `main` ships code without its schema. That is exactly what happened on 2 Sep — 20 migrations sat unapplied while the code that needed them ran in production. Before deploying anything that adds a migration, follow `docs/mos-execution/MERGE-RUNBOOK.md`: rehearse on a restored copy, then apply by hand, watched.
 
 ## Model usage
 
