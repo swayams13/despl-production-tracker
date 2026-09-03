@@ -76,6 +76,21 @@ jobs:
       # against every PR, before anything can reach main.
       - run: pnpm exec prisma migrate deploy
 
+      # MERGE-RUNBOOK.md §9 item 7, CI half. `migrate deploy` above only proves
+      # the migrations RUN; this proves they produce the schema schema.prisma
+      # describes. Catches the drift class CI can see: a migration edited after
+      # it was applied elsewhere (20260827120001 and the Phase-5 migration both
+      # were), a schema.prisma change committed without its migration, or a
+      # hand-patched database. --exit-code returns 2 when a difference exists.
+      # It cannot catch migrations that were never applied to production —
+      # this database is fresh every run. src/app/api/health/route.ts does that.
+      - name: Migrations produce the schema in schema.prisma
+        run: |
+          pnpm exec prisma migrate diff \
+            --from-url "$DIRECT_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --exit-code
+
       - name: Provision despl_web role
         run: psql "$PSQL_DIRECT_URL" -v despl_web_password=ci_only_password -f scripts/provision-db-role.sql
 
@@ -148,3 +163,47 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # MERGE-RUNBOOK.md §9 item 3. PR #6 was titled as a docs change and carried
+  # 72 commits and 20 migrations onto main; nothing in the process said so out
+  # loud, and nobody applied them for a day. A PR that touches
+  # prisma/migrations/ is a migration PR whatever its title claims, and must be
+  # labelled `migration` — the label is the acknowledgement that MERGE-RUNBOOK's
+  # rehearse-then-apply-by-hand procedure is owed after the merge.
+  #
+  # Separate job on purpose: it must report even when the long `ci` job is still
+  # running, since it is telling you something about the merge, not the code.
+  migration-pr:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Migration changes must be labelled
+        env:
+          # Both are untrusted PR-controlled strings — never interpolate them
+          # into the script body. A branch could be named `$(...)`.
+          BASE_REF: ${{ github.base_ref }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin "$BASE_REF"
+          changed="$(git diff --name-only "$(git merge-base FETCH_HEAD HEAD)" HEAD -- prisma/migrations/)"
+
+          if [ -z "$changed" ]; then
+            echo "No migration changes in this PR."
+            exit 0
+          fi
+
+          echo "This PR changes prisma/migrations/:"
+          echo "$changed"
+
+          if printf '%s' "$LABELS" | grep -Fq '"migration"'; then
+            echo "Labelled 'migration'. Follow docs/mos-execution/MERGE-RUNBOOK.md after merging."
+            exit 0
+          fi
+
+          echo "::error::This PR changes prisma/migrations/ but is not labelled 'migration'. Railway does NOT apply migrations (MERGE-RUNBOOK.md §2) — merging this ships code without its schema. Add the 'migration' label to acknowledge that §5's rehearse-then-apply-by-hand procedure is owed, then re-run."
+          exit 1
