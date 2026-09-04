@@ -5,6 +5,8 @@ import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
 import { loadPortfolio, type PortfolioRow } from "@/lib/services/portfolio.read";
 import { PortfolioBand, healthFromSlug } from "./_portfolio";
 import { CountUp } from "@/components/industrial/count-up";
+import { Sunburst, type SunburstNode } from "@/components/viz";
+import { portfolioToSunburst } from "./_sunburst-data";
 
 const STATUS_COLS = ["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "COMPLETE", "ON_HOLD"] as const;
 const STATUS_LABELS: Record<(typeof STATUS_COLS)[number], string> = {
@@ -78,6 +80,30 @@ function JobSelector({
   );
 }
 
+/**
+ * S13b — sunburst over `loadPortfolio()`'s existing output (no new query):
+ * health -> job -> stage status. A new card alongside "Projects — worst
+ * first" (rendered inside PortfolioBand), not a replacement for it — both
+ * stay so the numbers can be cross-checked. Renders in both page branches
+ * (with and without a selected job's schedule) since this is portfolio-wide,
+ * not scoped to `k`.
+ */
+function PortfolioHealthCard({ data }: { data: SunburstNode[] }) {
+  return (
+    <div className="card" style={{ marginTop: 8, marginBottom: 8 }}>
+      <div className="hd">
+        <h3>Portfolio health</h3>
+        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>
+          health → job → stage status
+        </span>
+      </div>
+      <div style={{ padding: "16px 12px" }}>
+        <Sunburst data={data} />
+      </div>
+    </div>
+  );
+}
+
 export default async function Dashboard({
   searchParams,
 }: {
@@ -90,6 +116,7 @@ export default async function Dashboard({
 
   const sp = await searchParams;
   const portfolio = await loadPortfolio(actor);
+  const sunburstData = portfolioToSunburst(portfolio);
   const healthSlug = first(sp.health);
   const activeFilter = healthFromSlug(healthSlug);
 
@@ -111,6 +138,7 @@ export default async function Dashboard({
       <>
         <div className="page-h"><h1>Dashboard</h1></div>
         <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} jobParam={jobParam} />
+        <PortfolioHealthCard data={sunburstData} />
         {portfolio.rows.length > 0 && (
           <div className="page-h" style={{ marginTop: 8 }}>
             <h2 style={{ fontSize: 15, fontWeight: 600 }}>
@@ -145,6 +173,7 @@ export default async function Dashboard({
       </div>
 
       <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} jobParam={jobParam} />
+      <PortfolioHealthCard data={sunburstData} />
 
       <div className="page-h" style={{ marginTop: 8 }}>
         <h2 style={{ fontSize: 15, fontWeight: 600 }}>
