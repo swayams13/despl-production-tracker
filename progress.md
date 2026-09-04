@@ -2,6 +2,70 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Gate 0 prevention items (§9 items 3+7), A4 QCP-inspection sync split out and merged, S6 started, 4 Sep 2026
+
+**Status: GATE 0 fully closed out; GATE 1 started (S6 done, PR open).**
+
+**Migration guards (`dd35ada`, already on `main` via the prior `ci/gate0-migration-guards`
+branch before this session began).** Closed two of MERGE-RUNBOOK §9's prevention items, the two
+halves of the 2 Sep incident (new code deployed against the old schema, nothing said so): a
+`migration-pr` CI job requiring PRs touching `prisma/migrations/` to carry a `migration` label
+(`base_ref`/label list read via `env:`, not string-interpolated, so a branch named `$(...)`
+can't inject into the job), and `/api/health` comparing `prisma/migrations/` on disk against
+applied `_prisma_migrations` rows, 503ing with the missing names if they diverge — the specific
+check that would have caught 2 Sep. Verified against `despl_test`: 40/40 → 200 `{"status":"ok"}`;
+one extra migration dir planted → 503 `{"pending":[...]}`; removed → 200 again. The other four
+§9 prevention items (branch protection, "never branch off `demo`", treating every
+migration-touching PR specially beyond the label, watching migration deploys) are still open —
+not touched this session, and the LEDGER's "Prevention items applied (§9)" row is still ☐
+pending those.
+
+**Found and split out unrelated uncommitted WIP from `ci/gate0-migration-guards`.** The branch
+had six modified files with no relation to migration guards — a complete, already-tested "A4"
+feature (QCP-execution sync from assembly-step verify/reject) sitting uncommitted. Verified it
+was self-consistent and green before moving it: `pnpm test` 600/600, `pnpm test:db` 932/933
+(the 1 failure — `process.service.test.ts`'s "verify refuses at a genuinely uncleared hold
+point" — reproduced identically with the diff stashed out, confirming it predates and is
+unrelated to this work), typecheck/lint clean. Branched `fix/A4-qcp-inspection-sync` off
+`origin/main`, committed, pushed, opened PR #17, waited for CI, merged (squash). Fix: verifying
+or rejecting an INSPECTION-kind assembly step linked to a real `qcpItemId` now records a
+`QcpExecution` (ACCEPTED/REJECTED) via a new shared `recordQcpExecutionTx` — previously the
+linked checkpoint stayed `PENDING` forever, so `assertNoOpenHoldPoint` and the QCP/hold-point
+view could disagree with what the assembly view showed. Picked up two real bugs along the way
+while touching `bom-route.ts`: `projectComponentRoute` matched actual ops to route steps by a
+single-slot map keyed on `operationId`, so a route using the same canonical operation twice
+(`DISHED_END`'s Pressing/Spinning and Trimming both ride `FORMING`) would mismatch — replaced
+with a per-`operationId` FIFO queue; and the component overall-status derivation, moved from
+`bom.read.ts` into `bom-route.ts` as `computeComponentDisplayStatus`, previously reported a
+component with its first op `COMPLETE` and the rest `NOT_STARTED` as complete/idle instead of
+in-progress. Cleaned up after: deleted the now-fully-merged local+remote
+`ci/gate0-migration-guards` branch, and removed the untracked `_to_delete/` (a stray 1.3MB
+audit tarball + git-info dump sitting since 1 Sep, unrelated to any branch).
+
+**[S6] Role-gated the packing and dispatch mutations** (`docs/mos-execution/PROMPTS-v4.md`,
+Gate 1's first item — "before any UI"). `createPackage`, `assignUnitToPackage`,
+`createDispatchBatch`, `addUnitToBatch`, `recordDispatch` carried only `assertNotClientUser`, no
+role check, while `approveDispatchRelease` was already gated `PRODUCTION_HEAD`/`ADMIN`. Answered
+the prompt's design question (department-scope packing to a STORES/DISPATCH supervisor, or match
+`approveDispatchRelease`?) by checking every existing `requireDepartmentScope` call site
+(`process.service.ts`'s `ownerDepartmentId`, `assembly.service.ts`'s `defaultDepartmentId`,
+`delay.service.ts`, `component.service.ts`) — all resolve against a `departmentId` the mutated
+row itself owns. `Package`/`DispatchBatch` carry no such FK; the seed's "Dispatch & Logistics"
+department covers packing only by scope text, with no schema link. Went with
+`PRODUCTION_HEAD`/`ADMIN` for all five, matching `approveDispatchRelease`, and flagged proper
+department-scoping (needs a migration) as a real follow-up rather than inventing it inside an XS
+item. Followed TDD: wrote 5 `FORBIDDEN`-refusal tests first (3 new in `dispatch.service.test.ts`;
+`packing.service.ts` had no test file at all, so created `packing.service.test.ts` with a
+happy-path case plus 2 refusal cases), confirmed all 5 RED before adding the gates, GREEN after.
+Confirmed no existing Server Action or other caller invokes any of the five functions yet (S7
+hasn't been built), so no call-site breakage. `pnpm test` 600/600, `pnpm test:db` 938/939 (same
+pre-existing unrelated failure as above), typecheck/lint clean. Branched
+`fix/S6-packing-dispatch-role-gates` off `origin/main`, committed, pushed, opened PR #18 — not
+yet merged as of this entry.
+
+**LEDGER.md updated**: S6 row marked ☑ with the design decision and test evidence recorded.
+**Next:** merge PR #18 once CI is green, then S7 (Server Action wrappers for packing/dispatch/NCR).
+
 ## Session — [S5] Migration runbook — production is running new code on the 24 Aug schema, 2 Sep 2026
 
 **Status: S5 delivered, and the incident it uncovered is closed. GATE 0 EXITS.**

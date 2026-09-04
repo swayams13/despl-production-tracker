@@ -51,7 +51,7 @@ Update at the end of every session, before `/clear`.
 
 | # | Item | Branch | Status | Demonstrated on | Notes |
 |---|---|---|---|---|---|
-| S6 | Role gates on packing/dispatch | `fix/S6-packing-dispatch-role-gates` | ☐ | | **before any UI** |
+| S6 | Role gates on packing/dispatch | `fix/S6-packing-dispatch-role-gates` | ☑ | 4 Sep: PR #18 opened, CI pending merge. `createPackage`, `assignUnitToPackage`, `createDispatchBatch`, `addUnitToBatch`, `recordDispatch` gated to `PRODUCTION_HEAD`/`ADMIN`, matching `approveDispatchRelease`'s existing gate. TDD: 5 new FORBIDDEN-refusal tests written and confirmed RED before the gate existed, GREEN after. `packing.service.ts` had no test file — added one. `pnpm test` 600/600, `pnpm test:db` 938/939 (the 1 failure is `process.service.test.ts`'s pre-existing, unrelated hold-point case — reproduces identically with this diff stashed out). Confirmed no existing caller invokes any of the five functions yet (no packing/dispatch Server Actions exist — that's S7), so no call-site breakage. | **before any UI.** Design question answered: `PRODUCTION_HEAD`/`ADMIN` for all five, not department-scoped — every existing `requireDepartmentScope` call site resolves against a `departmentId` the mutated row itself owns (`ProcessPlan.ownerDepartmentId`, `AssemblyTemplateStep.defaultDepartmentId`); `Package`/`DispatchBatch` carry no such FK. The seed's "Dispatch & Logistics" department covers packing by scope text only, with no schema link — scoping it properly needs a migration, flagged as a follow-up, not bundled into this XS item. |
 | S7 | Action wrappers | `feat/S7-packing-dispatch-ncr-actions` | ☐ | | |
 | S8 | Packing UI | `feat/S8-packing-ui` | ☐ | | |
 | S9 | Dispatch UI | `feat/S9-dispatch-ui` | ☐ | | |
