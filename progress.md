@@ -4,7 +4,7 @@
 
 ## Session — S11 NCR disposition UI, 4 Sep 2026
 
-**S11 done (local commit `05ee13d` on `feat/S11-ncr-ui`, not pushed).** `dispositionNcr` and its
+**S11 done, PR #24 merged to `main` (`9aff9cd`).** `dispositionNcr` and its
 Server Action existed with zero callers — every rejection auto-opened an `Ncr` but nothing could
 ever move it past OPEN. Added `loadQcCockpit`'s `openNcrs` (one row per OPEN Ncr, reusing the
 existing `tenantNcrScope` rejection-chain join) and a new "NCRs awaiting disposition" card on
