@@ -60,8 +60,34 @@ export async function receiveStock(actor: Actor, input: ReceiveStockInput): Prom
 /** Shared tenant-anchored lot lookup + running-available check, used by
  * issue/return/scrap. Returns the lot's `bomItem` clientId for client-scope
  * assertion, and the lot's current available qty (received - issued/scrapped
- * + returned) for the over-issue guard. */
+ * + returned) for the over-issue guard.
+ *
+ * S21: locked before reading `txns` — same reason `lockComponentOperation
+ * ForUpdate`/`lockAssemblyStepForUpdate`/`lockProcessPlanForUpdate` lock
+ * their own rows: without it, two concurrent mutations against the same lot
+ * (e.g. two `issueStock` calls) can both read the same stale `available`
+ * snapshot and both pass `createStockTxn`'s over-issue guard, over-issuing
+ * the lot — a real TOCTOU race, not a hypothetical one.
+ *
+ * NOT a `SELECT ... FOR UPDATE` row lock, unlike those three siblings —
+ * Postgres requires UPDATE privilege on the target table for FOR UPDATE
+ * (SELECT alone isn't enough), and `stock_lots`, like `stock_txns` and
+ * `audit_log`, deliberately grants the app role only `SELECT`+`INSERT`
+ * (`ar`, confirmed via `pg_class.relacl`) — an append-only ledger with no
+ * legitimate UPDATE path at the ORM level either (a lot's own `qty` is never
+ * updated; issue/return/scrap all just append a `StockTxn`). Widening that
+ * grant just to support locking would blur a real, deliberate boundary. A
+ * transaction-scoped Postgres advisory lock gives the same mutual exclusion
+ * per lot with no table privilege requirement at all, and releases
+ * automatically at commit/rollback exactly like a row lock would. */
 async function loadLotForMutation(tx: Tx, actor: Actor, stockLotId: number) {
+  // ponytail: bare stockLotId as the advisory-lock key — the DB's advisory
+  // lock key space is global across every table, not scoped to stock_lots,
+  // so this only stays collision-free because it's the only advisory lock
+  // in the codebase. Namespace with a two-key `pg_advisory_xact_lock(ns,
+  // stockLotId)` if a second call site is ever added.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(${stockLotId})`;
+
   const lot = await tx.stockLot.findFirst({
     where: { id: stockLotId, bomItem: { equipment: { job: { tenantId: actor.tenantId } } } },
     select: {

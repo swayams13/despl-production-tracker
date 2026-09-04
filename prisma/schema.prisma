@@ -484,6 +484,10 @@ model OperationRef {
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([defaultDepartmentId])
+  /// S21: _shared.ts's numeric-join gates (loadMappedOps/assertNoOpenNcr)
+  /// filter ComponentOperation by `operation: { leadTimeProcessSeq: seq }`
+  /// on every submitProcess/verifyProcess call — the hot path.
+  @@index([leadTimeProcessSeq])
   @@map("operation_refs")
 }
 
@@ -1073,7 +1077,13 @@ model BomItem {
   @@index([equipmentId])
   @@index([componentTypeId])
   @@index([parentBomItemId])
-  @@index([bomRevisionId])
+  /// S21: an item number must be unique within one BOM revision. NULL
+  /// `bomRevisionId` rows (pre-B3 backfill stragglers, if any) are exempt —
+  /// Postgres treats NULL as distinct per row, so this can't retroactively
+  /// break rows the backfill hasn't reached. Replaces the plain
+  /// `@@index([bomRevisionId])` it was scoped from — this composite index
+  /// already covers every query that filtered on `bomRevisionId` alone.
+  @@unique([bomRevisionId, itemNo])
   @@map("bom_items")
 }
 
@@ -1659,6 +1669,8 @@ model AssemblyTemplateStep {
   @@unique([versionId, seq])
   @@index([versionId])
   @@index([defaultDepartmentId])
+  /// S21: same hot-path join as OperationRef.leadTimeProcessSeq, for the AssemblyStep side.
+  @@index([leadTimeProcessSeq])
   @@map("assembly_template_steps")
 }
 
