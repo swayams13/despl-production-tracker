@@ -95,8 +95,59 @@ Branched `feat/S7-packing-dispatch-ncr-actions` off `origin/main`, committed, pu
 #19, waited for CI, merged squash to `main` (`75f610c`), branch deleted.
 
 **LEDGER.md updated**: S6 and S7 rows both ☑, with merge commits recorded.
-**Next:** S8 (Packing UI) — first UI session for Gate 1, on `/jobs/[id]` per the S8 prompt's
-default assumption (to be confirmed against the `Package` model before designing anything).
+
+**[S8] Packing UI — first UI session for Gate 1.** Read `Package` in `prisma/schema.prisma`
+(~line 844) and `packing.service.ts` before designing anything, per the prompt's own instruction.
+Answer: a `Package` is a physical crate/box — one `weightKg`, one `lengthMm`×`widthMm`×`heightMm`,
+one `preservationNotes` field, the schema's own comment calls it "a packing list of contents by
+serial" — not a truckload or shipment; `DispatchBatch` (S9) is the separate job-wide grouping
+that actually gets released/dispatched. `Package.jobId` has no `equipmentId` of its own, so a
+crate can legitimately hold units from different equipment on the same job — confirmed by a new
+DB-gated test and, later, live: DESPL-320's 9 units (320SR01–09) all listed in one job-wide
+picker. Landed as a "Packing" tab on `/jobs/[id]`, next to the existing seven tabs — argued for
+the prompt's own default location rather than against it, since it's the exact same tab-gated
+server-load pattern every sibling tab (bom/assembly/qcp) already uses, so no new navigation
+concept. Built `packing.read.ts` (`loadPackingPanel` — units grouped by package across the whole
+job, plus the unpacked-units list that seeds the assign picker) with 3 DB-gated tests written
+against the real implementation, then verified honestly RED by temporarily stubbing the function
+to throw and re-running before restoring it — not written-then-assumed-correct. Built
+`packing-panel.tsx`: create-package form, per-package cards with an inline assign-unit picker,
+and — per CLAUDE.md's functional-first rules — an inline `RefusalNote` (my-day's stronger
+pattern) instead of the toast-only convention most other panels use, plus a one-sentence-plus-
+one-action empty state gated on `canManagePacking`. Also added `jobs/[id]/loading.tsx`, which
+didn't exist at all before this session — benefits every tab on the page, not just packing.
+Permissions computed server-side (`canManagePacking = PRODUCTION_HEAD/ADMIN`, matching S6's
+`requireRole` gate exactly) and passed down as a boolean.
+
+**Live-verified through the real `/login` form**, not just tests — and this surfaced a real,
+unrelated local-environment bug along the way: the dev server's boot-time DB-role guard
+(`db-guard.ts`) was throwing `relation "audit_log" does not exist` on every start. Root cause
+was NOT the app or the database — a stale `DATABASE_URL` env var was already exported in this
+session's shell (pointing at an unrelated `vedanta_test` database, left over from something
+else), silently overriding the project's own `.env` file since dotenv doesn't override
+already-set process env vars. Confirmed with a standalone Node/Prisma script outside Next
+entirely before touching anything. Fixed by launching `pnpm dev` with those vars explicitly
+unset for that process, not by editing `.env` or any project file. With that cleared: signed in
+as `sj@despl.local` (PRODUCTION_HEAD), created `PKG-1` (120kg), assigned Unit 320SR01 into it —
+both actions round-tripped through the real Server Actions, re-rendered correctly, toasted.
+Then signed in as `sup.stores@despl.local` (SUPERVISOR, no packing role) and confirmed both the
+"+ New package" button and the per-package "Assign unit" control are hidden, while the same data
+still renders read-only — matching S6's server-side gate, which the existing `FORBIDDEN` tests
+already prove holds even if a UI check were ever bypassed.
+
+`pnpm test` 600/600, `pnpm test:db` 941/942 (same pre-existing, unrelated `process.service.test.ts`
+hold-point failure as every session this week), typecheck/lint/build all clean. Caught and fixed
+my own process slip mid-session: committed S8 directly to local `main` instead of a branch —
+caught before it was pushed, moved the commit to `feat/S8-packing-ui` with `git branch` + `git
+reset --hard`, `main` restored to match `origin/main` exactly, no harm done. Pushed, opened PR
+#20, waited for CI, merged squash to `main` (`2034246`), branch deleted.
+
+**LEDGER.md updated**: S8 row ☑ with the design decision, live-verification detail, and merge
+commit recorded.
+**Next:** S9 (Dispatch UI) — UI over the already-proven `dispatch.service.ts` state machine
+(PLANNED → RELEASED → DISPATCHED); per the S9 prompt, do not change the service this session, and
+confirm with the user which of `dispatchNoteNo`/`gatePassNo`/`vehicleNo`/`lrNo` should be
+mandatory in the form before building it.
 
 ## Session — [S5] Migration runbook — production is running new code on the 24 Aug schema, 2 Sep 2026
 
