@@ -597,6 +597,86 @@ export async function assertNoOpenNcr(
 }
 
 /**
+ * S10 — the reverse quality gate: packing/dispatch have no way today to
+ * refuse a unit carrying an open non-conformance. Unlike `assertNoOpenNcr`,
+ * this is unit-grain, not (jobProcessId, unit)-grain — packing/dispatch
+ * aren't tied to one of the 36 process codes, so there is no
+ * `leadTimeProcessSeq` to join through. Deliberately does NOT reuse
+ * `assertNoOpenNcr`'s numeric-join mechanism: that join exists to narrow an
+ * NCR to ONE process, which is meaningless for a whole-unit check, and it
+ * fails open on a non-numeric `JobProcess.code` — an acceptable SEAM for a
+ * single-process invariant-#4 gate, but not for a terminal shipping gate.
+ * Goes straight through the rejection -> operation/step -> component/unit
+ * chain instead (Gate 3 owns replacing that chain's string/numeric joins
+ * with a real FK — not touched here).
+ */
+export async function assertUnitHasNoOpenNcr(tx: Tx, unitId: number): Promise<void> {
+  const openNcrs = await tx.ncr.findMany({
+    where: {
+      status: { in: [...OPEN_NCR_STATUSES] },
+      OR: [
+        { componentOperationRejection: { componentOperation: { component: { unitId } } } },
+        { assemblyStepRejection: { assemblyStep: { unitId } } },
+      ],
+    },
+    select: {
+      componentOperationRejection: {
+        select: { componentOperation: { select: { operation: { select: { name: true } } } } },
+      },
+      assemblyStepRejection: {
+        select: { assemblyStep: { select: { templateStep: { select: { activity: true } } } } },
+      },
+    },
+  });
+
+  if (openNcrs.length > 0) {
+    const blockingOperations = openNcrs.map(
+      (n) =>
+        n.componentOperationRejection?.componentOperation.operation.name ??
+        n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
+        "unknown operation",
+    );
+    throw new AppError(ERROR_CODES.NCR_OPEN, { unitId, blockingOperations });
+  }
+}
+
+/**
+ * S10 — same reverse-gate reasoning as `assertUnitHasNoOpenNcr`, for hold
+ * points: `assertNoOpenHoldPoint` scopes blocking `QcpItem`s to one
+ * `jobProcessId` via `processLinks`; packing/dispatch need every blocking
+ * checkpoint anywhere in the unit's job, so this scopes through
+ * `QcpTemplate.jobId` instead of a process link.
+ */
+export async function assertUnitHasNoOpenHoldPoint(tx: Tx, unitId: number, jobId: number): Promise<void> {
+  const blockingItems = await tx.qcpItem.findMany({
+    where: {
+      qcpTemplate: { jobId },
+      partyCodes: { some: { qcpCode: { blocksCompletion: true } } },
+    },
+    select: { id: true },
+  });
+  if (blockingItems.length === 0) return;
+
+  const itemIds = blockingItems.map((i) => i.id);
+  const execs = await tx.qcpExecution.findMany({
+    where: { unitId, qcpItemId: { in: itemIds } },
+    orderBy: { attemptNo: "desc" },
+    select: { qcpItemId: true, result: true },
+  });
+
+  const latestByItem = new Map<number, string>();
+  for (const e of execs) if (!latestByItem.has(e.qcpItemId)) latestByItem.set(e.qcpItemId, e.result);
+
+  const open = itemIds.filter((itemId) => {
+    const r = latestByItem.get(itemId);
+    return r !== "ACCEPTED" && r !== "NA";
+  });
+  if (open.length > 0) {
+    throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, { unitId, jobId, openQcpItemIds: open });
+  }
+}
+
+/**
  * `verifyProcess` gate (Phase 5, D4): a stage tagged with
  * `TemplateProcess.evidenceKind` cannot verify until the matching evidence
  * exists for this unit. No-op when `unitId` is null (job/equipment grain —

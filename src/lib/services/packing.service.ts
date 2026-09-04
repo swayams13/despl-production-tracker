@@ -2,6 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { assertUnitHasNoOpenHoldPoint, assertUnitHasNoOpenNcr } from "./_shared";
 import {
   createPackageSchema,
   assignUnitToPackageSchema,
@@ -90,6 +91,12 @@ export async function assignUnitToPackage(actor: Actor, input: AssignUnitToPacka
         packageJobId: pkg.jobId,
       });
     }
+
+    // S10 — the reverse quality gate: a unit carrying an open NCR or an
+    // uncleared blocking hold point is refused at the earliest point it
+    // could otherwise be sealed into a shippable crate.
+    await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
+    await assertUnitHasNoOpenNcr(tx, unit.id);
 
     return audited(tx, actor, async () => {
       const updated = await tx.unit.update({ where: { id: unit.id }, data: { packageId: pkg.id } });
