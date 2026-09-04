@@ -135,6 +135,40 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
   });
 
+  /**
+   * S21: genuine two-transaction race (same shape as client-snapshot.
+   * service.test.ts's verifySnapshot race), not a simulated one. A lot with
+   * exactly enough for ONE full issue, hit by two concurrent issueStock
+   * calls for the full amount each. Without loadLotForMutation's `FOR
+   * UPDATE` lock, both transactions can read the same "available: 8"
+   * snapshot before either commits and both pass the over-issue guard,
+   * over-issuing the lot. WITH the lock, the second transaction's read is
+   * forced to happen strictly after the first's commit, so the outcome is
+   * deterministic: exactly one succeeds, the other sees the reduced
+   * available and is refused INSUFFICIENT_STOCK — never both succeeding.
+   */
+  it("issueStock serializes concurrent issues against the same lot — never both succeed and over-issue it", async () => {
+    const { tenantId, bomItem, user } = await fixture();
+    const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
+    const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 8 });
+
+    const results = await Promise.allSettled([
+      issueStock(ph, { stockLotId: lot.id, qty: 8 }),
+      issueStock(ph, { stockLotId: lot.id, qty: 8 }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const loserCode = (rejected[0] as PromiseRejectedResult & { reason: { code: string } }).reason.code;
+    expect(loserCode).toBe(ERROR_CODES.INSUFFICIENT_STOCK);
+
+    // Exactly one ISSUE txn landed — the lot was not over-issued.
+    const issues = await owner.stockTxn.findMany({ where: { stockLotId: lot.id, type: "ISSUE" } });
+    expect(issues).toHaveLength(1);
+  });
+
   it("scrap is the only txn type that moves shortage-relevant available down, and is refused past the lot's physical boundary", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };

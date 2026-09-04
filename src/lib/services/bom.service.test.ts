@@ -115,6 +115,54 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
     await expectCode(updateBomItem(qc, item.id, { partName: "x" }), ERROR_CODES.FORBIDDEN);
   });
 
+  // ── S21: @@unique([bomRevisionId, itemNo]) ────────────────────────────────
+
+  it("S21: a duplicate itemNo within the SAME bomRevisionId is refused at the DB (P2002)", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+    const revision = await createBomRevision(actor, { equipmentId: equipment.id, revisionNo: 1, status: "DRAFT" });
+
+    await createBomItem(actor, {
+      equipmentId: equipment.id,
+      itemNo: 1,
+      partName: "Gasket",
+      sourceQty: "1 NOS",
+      bomRevisionId: revision.id,
+    });
+
+    await expect(
+      createBomItem(actor, {
+        equipmentId: equipment.id,
+        itemNo: 1,
+        partName: "Gasket (duplicate item_no)",
+        sourceQty: "1 NOS",
+        bomRevisionId: revision.id,
+      }),
+    ).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("S21: the same itemNo across TWO DIFFERENT bomRevisionIds is fine — the constraint is scoped per revision", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+    const revA = await createBomRevision(actor, { equipmentId: equipment.id, revisionNo: 1, status: "DRAFT" });
+    const revB = await createBomRevision(actor, { equipmentId: equipment.id, revisionNo: 2, status: "DRAFT" });
+
+    const a = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 1, partName: "A", sourceQty: "1 NOS", bomRevisionId: revA.id });
+    const b = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 1, partName: "A rev 2", sourceQty: "1 NOS", bomRevisionId: revB.id });
+    expect(a.id).not.toBe(b.id);
+  });
+
+  it("S21: the same itemNo across two rows with NO bomRevisionId (null) is unaffected — Postgres treats NULL as distinct per row", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+
+    const a = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 1, partName: "A", sourceQty: "1 NOS" });
+    const b = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 1, partName: "A (no revision)", sourceQty: "1 NOS" });
+    expect(a.id).not.toBe(b.id);
+    expect(a.bomRevisionId).toBeNull();
+    expect(b.bomRevisionId).toBeNull();
+  });
+
   // ── cycle detection ──────────────────────────────────────────────────────
 
   it("2-level cycle: setting an item's parent to its own child is refused", async () => {
