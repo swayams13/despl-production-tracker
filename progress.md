@@ -2,6 +2,35 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — D5 assumption locked, D6 seeded (PR pending), D7/D8 decided, 4 Sep 2026
+
+**D5 (D-B — TPI maker-checker question).** Presented Swayam three options for what a TPI answer
+could require: (1) maker-checker + append-only audit trail is sufficient — no scope change; (2)
+an e-signature/attestation step — small S12 add; (3) PKI/signed-export format — would need to
+shape the document model before S12 is built. Swayam locked in **(1)** as the working assumption
+for now. LEDGER.md D5 marked ◐, not ☑ — sending the actual question to the TPI contact is still
+Swayam's own action and hasn't happened yet; if the real answer differs, S12's scope adjusts then.
+
+**D6 (D-D / C1 — working vs calendar days, holiday list).** Read `lib/schedule/calendar.ts` and
+`seed/lead-time-model.json`: the engine already supported an arbitrary holiday list
+(`WorkCalendar`/`Holiday` Prisma tables, `calendar.holidays` in `WorkCalendarInput`) — this was a
+data/seed change, not a schema or engine change. Swayam's answer: calendar days confirmed correct
+(already the default), holiday list = every Sunday + major national holidays, nothing else, and
+explicitly flagged as provisional pending SJ's final confirmation. Seeded the 3 fixed-date
+gazetted national holidays (Republic Day, Independence Day, Gandhi Jayanti) for 2026-2027 into
+`seed/lead-time-model.json`'s `calendarBasis.holidays`, wired into `prisma/seed.ts` via
+`tx.holiday.createMany`. Deliberately left out festival holidays (Diwali, Holi, etc.) — dates vary
+and DESPL's actual shop-floor list isn't confirmed. `pnpm typecheck`/`lint`/`test` all clean
+(607/607). PR #29 (`chore/D6-calendar-holidays`) open, CI pending at time of writing.
+
+**D7/D8** were decided earlier this session (see prior LEDGER.md entries) — no new progress.md
+entry was added for them at the time; noting it here for the record: D7 (D-A) = MDR stays off-
+system, S12 scoped to minimum document attachment; D8 (D-C) = ship DESPL-320 on template v1, no
+re-pin.
+
+**Day 1 (D1-D4) and D7/D8 remain closed.** D5 is now a locked working assumption (question itself
+still unsent). D6 is implemented, awaiting CI/merge.
+
 ## Session — D2 done, all Day-1 items closed, 4 Sep 2026
 
 **D2 done — PITR enabled on production.** Found `railway postgres pitr` as a real, working CLI
