@@ -14,6 +14,7 @@ import { StatusChip } from "@/components/industrial/status-chip";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ActionResult } from "@/app/actions/_action";
 import type { MyDayView, MyDayRow } from "@/lib/services/myday.read";
+import { ProjectFilter, groupByJobNumber } from "./_project-filter";
 
 type Category = { id: number; name: string };
 type Refusal = { code: string; message: string };
@@ -863,6 +864,15 @@ export function MyDayClient({
   const [completedOpen, setCompletedOpen] = useState(false);
   const poolRef = useRef<HTMLDivElement | null>(null);
 
+  // S13a — project filter over the "Department pool" section only (the tab
+  // with real row counts per the work item; Mine/Held/Completed are all
+  // scoped to one actor and stay small). Client-side over view.pool, already
+  // fetched — no new query, resets to "All projects" on nothing special
+  // (selecting a project that empties out just shows the empty state).
+  const [poolProject, setPoolProject] = useState<string | null>(null);
+  const poolProjectOptions = useMemo(() => groupByJobNumber(view.pool), [view.pool]);
+  const filteredPool = poolProject == null ? view.pool : view.pool.filter((r) => r.jobNumber === poolProject);
+
   const selectTab = (key: TabKey) => {
     setTab(key);
     if (key !== "pool") setMineTab(key);
@@ -1045,10 +1055,15 @@ export function MyDayClient({
         <div className="hd">
           <b>Department pool</b>
           <span className="meta">Unassigned — claim to take ownership</span>
-          <span className="chip c-idle"><i />{view.pool.length}</span>
+          {poolProjectOptions.length > 1 && (
+            <ProjectFilter options={poolProjectOptions} value={poolProject} onChange={setPoolProject} />
+          )}
+          <span className="chip c-idle"><i />{filteredPool.length}</span>
         </div>
-        {view.pool.length === 0 ? (
-          <p className="note" style={{ margin: "16px 0" }}>Nothing in the department pool right now.</p>
+        {filteredPool.length === 0 ? (
+          <p className="note" style={{ margin: "16px 0" }}>
+            {view.pool.length === 0 ? "Nothing in the department pool right now." : "No pool items for this project."}
+          </p>
         ) : (
           <ResponsiveTable
             table={
@@ -1062,7 +1077,7 @@ export function MyDayClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {view.pool.map((r) => (
+                  {filteredPool.map((r) => (
                     <PoolRowView
                       key={r.ranked.plan.id}
                       row={r}
@@ -1074,7 +1089,7 @@ export function MyDayClient({
                 </tbody>
               </table>
             }
-            cards={view.pool.map((r) => (
+            cards={filteredPool.map((r) => (
               <PoolCardView
                 key={r.ranked.plan.id}
                 row={r}
