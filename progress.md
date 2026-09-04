@@ -2,6 +2,37 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — S13a/S13b/S14 merged, CI green; S15 blocked pending user go-ahead, 4 Sep 2026
+
+**S13a done, PR #25 merged (`a52f8b8`).** My Day project-scoped filter over the "Department
+pool" section — see LEDGER.md S13a row for the full account (row shape confirmed first, new
+accessible dropdown since neither existing one in this codebase has keyboard/Escape/aria support,
+verified interactively with the threshold temporarily lowered then reverted).
+
+**S13b done, PR #26 merged (`77adbb9`).** Dashboard sunburst for portfolio health — hand-rolled
+SVG arc math (no new charting dependency), Health → Job → stage-status hierarchy reshaping
+`loadPortfolio()`'s existing output, colors reusing the existing `HEALTH_CLASS` mapping,
+accessibility matching `s-curve.tsx`'s bar exactly. See LEDGER.md S13b row.
+
+**S14 done, PR #27 merged (`3b7715b`).** Delay-filed and NCR-opened notifications, both firing
+in-transaction like the existing submit→QC pattern; real `/alerts` page replacing the stub. See
+LEDGER.md S14 row. Verified `notify()` actually fires by calling `fileDelayReason`/
+`rejectComponentOperation` directly against the dev DB with constructed `Actor` objects (this
+repo's existing DB-test convention — not a forged session), then confirmed the real page renders
+them via a genuine `/login`. All test-created rows and the one component operation's status were
+reverted afterward so the dev DB isn't left mutated.
+
+All three: `pnpm typecheck`/`lint` clean at merge time, full CI green (`ci` + `migration-pr`) on
+each PR before merging.
+
+**S15 not started — checked in with the user first.** Unlike S13a/S13b/S14, S15 needs a fresh
+production DB dump restored locally (the work item is explicit: never live prod, never
+`despl_demo`) and its own phrasing ("walk me through it") reads as meant to run with the user
+present rather than silently in the background. Asked the user whether to proceed with the
+production dump pull; awaiting their answer before starting.
+
+---
+
 ## Session — S13 shop-floor nav reachability, merged, CI green, 4 Sep 2026
 
 **S13 done, PR #23 merged to `main` (`9d3591d`), CI green** (`ci` pass, `migration-pr` pass, run
