@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { projectComponentRoute, groupProjectedRoute } from "./bom-route";
+import { projectComponentRoute, groupProjectedRoute, computeComponentDisplayStatus } from "./bom-route";
 import type { RouteStepDef, ActualOp } from "./bom-route";
 
 function step(seq: number, operationId: number, operationName: string, leadTimeProcessSeq: number | null = null): RouteStepDef {
@@ -70,6 +70,14 @@ test("id is null for a route step with no matching ComponentOperation row, and c
   expect(result.map((r) => r.id)).toEqual([701, null]);
 });
 
+test("two route steps sharing the same operationId (e.g. DISHED_END's Pressing/Spinning and Trimming both mapped to FORMING) match to their own distinct actual op, not the same one twice", () => {
+  const route = [step(1, 5, "Pressing/Spinning"), step(2, 5, "Trimming")];
+  const actual = [op(5, "Pressing/Spinning", "NOT_STARTED", null, 520), op(5, "Trimming", "IN_PROGRESS", null, 521)];
+  const result = projectComponentRoute(route, actual);
+  expect(result.map((r) => r.id)).toEqual([520, 521]);
+  expect(result.map((r) => r.status)).toEqual(["NOT_STARTED", "IN_PROGRESS"]);
+});
+
 test("carries leadTimeProcessSeq through for checkpoint lookup", () => {
   const route = [step(1, 1, "Cutting", 12)];
   const result = projectComponentRoute(route, []);
@@ -108,4 +116,36 @@ test("groupProjectedRoute: a complete step after a gap does not collapse (only a
   const { collapsedDoneCount, visible } = groupProjectedRoute(steps);
   expect(collapsedDoneCount).toBe(1);
   expect(visible.map((s) => s.operationName)).toEqual(["Forming", "Fit-up"]);
+});
+
+test("computeComponentDisplayStatus: no ops -> idle", () => {
+  expect(computeComponentDisplayStatus([])).toBe("idle");
+});
+
+test("computeComponentDisplayStatus: all NOT_STARTED -> idle", () => {
+  expect(computeComponentDisplayStatus([{ status: "NOT_STARTED" }, { status: "NOT_STARTED" }])).toBe("idle");
+});
+
+test("computeComponentDisplayStatus: all COMPLETE -> complete", () => {
+  expect(computeComponentDisplayStatus([{ status: "COMPLETE" }, { status: "COMPLETE" }])).toBe("complete");
+});
+
+test("computeComponentDisplayStatus: one IN_PROGRESS among NOT_STARTED -> progress", () => {
+  expect(computeComponentDisplayStatus([{ status: "COMPLETE" }, { status: "IN_PROGRESS" }, { status: "NOT_STARTED" }])).toBe("progress");
+});
+
+test("computeComponentDisplayStatus: one SUBMITTED among NOT_STARTED -> submitted", () => {
+  expect(computeComponentDisplayStatus([{ status: "COMPLETE" }, { status: "SUBMITTED" }, { status: "NOT_STARTED" }])).toBe("submitted");
+});
+
+test("computeComponentDisplayStatus: first step COMPLETE, rest NOT_STARTED, nothing active -> progress, not complete (regression: previously fell back to the first op's own COMPLETE status)", () => {
+  expect(
+    computeComponentDisplayStatus([
+      { status: "COMPLETE" },
+      { status: "NOT_STARTED" },
+      { status: "NOT_STARTED" },
+      { status: "NOT_STARTED" },
+      { status: "NOT_STARTED" },
+    ]),
+  ).toBe("progress");
 });

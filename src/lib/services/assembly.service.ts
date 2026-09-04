@@ -5,6 +5,7 @@ import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
 import { closeNcr } from "./ncr.service";
+import { recordQcpExecutionTx } from "./qcp.service";
 import {
   startAssemblyStepSchema,
   submitAssemblyStepSchema,
@@ -243,6 +244,26 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
       for (const ncr of openNcrs) {
         await closeNcr(tx, actor, { ncrId: ncr.id });
       }
+      // A4: an INSPECTION step verifying IS the QCP checkpoint result — record
+      // it so assertNoOpenHoldPoint and the QCP/hold-point view see the same
+      // truth the assembly view just showed, instead of the linked QcpItem
+      // staying stuck PENDING forever (verify already proved QC role + not
+      // the submitter, via assertMakerChecker above).
+      if (step.templateStep.kind === "INSPECTION" && step.qcpItemId != null) {
+        const exec = await recordQcpExecutionTx(tx, actor, {
+          qcpItemId: step.qcpItemId,
+          unitId: step.unitId,
+          result: "ACCEPTED",
+        });
+        await recordAudit(tx, actor, {
+          action: "qcp.record",
+          entityType: "QcpExecution",
+          entityId: exec.id,
+          after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
+          eventType: "QcpExecutionRecorded",
+          eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
+        });
+      }
       return {
         result: updated,
         audit: {
@@ -310,6 +331,26 @@ export async function rejectAssemblyStep(actor: Actor, input: RejectAssemblyStep
           after: { weldJointId: step.weldJointId, testTypeId, result: "REJECT" },
           eventType: "NdtResultRecorded",
           eventPayload: { ndtResultId: ndt.id, weldJointId: step.weldJointId, result: "REJECT" },
+        });
+      }
+      // A4: mirror of verifyAssemblyStep's sync — a rejected INSPECTION step
+      // is itself a QCP checkpoint result (REJECTED), not a silent no-op that
+      // leaves the linked QcpItem looking untouched while the assembly view
+      // shows real activity.
+      if (step.templateStep.kind === "INSPECTION" && step.qcpItemId != null) {
+        const exec = await recordQcpExecutionTx(tx, actor, {
+          qcpItemId: step.qcpItemId,
+          unitId: step.unitId,
+          result: "REJECTED",
+          remarks: detail ?? null,
+        });
+        await recordAudit(tx, actor, {
+          action: "qcp.record",
+          entityType: "QcpExecution",
+          entityId: exec.id,
+          after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "REJECTED" },
+          eventType: "QcpExecutionRecorded",
+          eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "REJECTED" },
         });
       }
       return {
