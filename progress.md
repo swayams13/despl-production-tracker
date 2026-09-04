@@ -198,10 +198,58 @@ was the one file that had never been migrated to it). Verified 3 consecutive loc
 before pushing; CI confirmed green on the next run. Merged squash to `main` (`bd2c450`).
 
 **LEDGER.md updated**: S9 row ☑ with the live-verification detail and the CI-fix note recorded.
-**Next:** S10 — the QC → dispatch gate (marked ★ in PROMPTS-v4.md as "the one that makes shipping
-mean something"): nothing currently stops a unit with an open NCR or uncleared hold point from
-being packed and dispatched. The prompt asks to verify first that `grep "Ncr"
-src/lib/services/dispatch.service.ts` returns zero, before designing the fix.
+
+**[S10] The missing QC → dispatch gate** — marked ★ in PROMPTS-v4.md as "the one that makes
+shipping mean something." Verified the prompt's claim first: `grep "Ncr"
+src/lib/services/dispatch.service.ts` and `packing.service.ts` both returned zero real checks
+(dispatch.service.ts's one hit is a doc-comment citation, not a check). Nothing stopped a unit
+carrying an open NCR or an uncleared blocking hold point from being packed or dispatched.
+
+Answered the three design questions before writing, per the prompt's own instruction:
+1. **Refusal point: both packing and dispatch.** `assignUnitToPackage` and `addUnitToBatch` are
+separate functions with no shared code path — a unit packed clean could develop an NCR (or a
+checkpoint could reopen) in the gap before it's ever added to a batch, since `Package.packageId`
+isn't revoked by a later rejection. Packing is also the earliest point a defective unit could be
+sealed into a shippable crate, matching CLAUDE.md's own Gate 1 exit test.
+2. **Query mechanism: the direct rejection → operation/step → component/unit chain**, not
+`assertNoOpenNcr`'s `leadTimeProcessSeq` numeric join — that join narrows an NCR to ONE process,
+meaningless for a whole-unit gate, and fails open on a non-numeric `JobProcess.code` (an
+acceptable SEAM for the existing single-process invariant-#4 check, not for a terminal shipping
+gate). New `assertUnitHasNoOpenNcr`/`assertUnitHasNoOpenHoldPoint` added to `_shared.ts` go
+straight through the chain instead (hold-point scopes via `QcpTemplate.jobId` rather than
+`QcpItemProcess.jobProcessId`). Left the numeric-join mechanism itself untouched, as instructed
+(Gate 3 item).
+3. **Error codes: reused `NCR_OPEN` and `HOLD_POINT_OPEN`** — both already existed and matched
+exactly.
+
+Wired into `assignUnitToPackage` (packing.service.ts) and `addUnitToBatch` (dispatch.service.ts),
+hold-point check before NCR check in both, matching `process.service.ts`'s own `verifyProcess`
+gate order. 6 new table-driven tests (open-NCR refusal, uncleared-hold-point refusal, clean-unit
+control — × the two call sites), each against fully disposable fixtures (own
+org/component/QcpTemplate/QcpItem chain) rather than shared seed data — deliberately, straight
+off this week's `process-plan.partial-unique.test.ts` lesson. Verified honestly RED before GREEN
+each time: temporarily removed the two gate lines, reran (2 failures, correct code expected but
+not thrown), restored, reran green. Also added the two new functions to `_shared.test.ts`'s
+existing "exports the transactional primitives" smoke list, matching that file's own documented
+convention (behavioral tests live in the service suites; `_shared.test.ts` only asserts the seam
+is wired). No UI change needed — `/jobs/[id]`'s packing/dispatch panels already render any
+`AppError` code via the existing inline `RefusalNote`, so `NCR_OPEN`/`HOLD_POINT_OPEN` surface
+automatically.
+
+`pnpm test` 600/600, `pnpm test:db` 951/952 (same pre-existing, unrelated
+`process.service.test.ts` hold-point failure as every session this week), typecheck/lint/build
+all clean. Branched `feat/S10-qc-dispatch-gate` off `main` *before* committing (S8's lesson still
+holding). Pushed, opened PR #22, waited for CI, merged squash to `main` (`d2b4f36`), branch
+deleted.
+
+**LEDGER.md updated**: S10 row ☑ with the design decisions and merge commit recorded.
+**Next:** S11 — NCR disposition UI. Per the prompt, the read data is already computed and
+discarded (`qc-cockpit.read.ts:249-262`'s rework `{ openCount, totalReworkHours }`,
+`departments.read.ts`'s `DeptCard.openReworkCount`/`DeptDetail.openReworkItems` — none rendered
+today), so this is largely a rendering job on existing reads plus wiring S7's
+`dispositionNcrAction`. Read `assertNcrTransition` (`ncr.service.ts:18-26`) first so the UI only
+offers legal transitions; decide whether `/qc` or `departments/[id]` is the right home (propose
+one, don't build both) and whether to surface `Ncr.reworkDueDate` (never read by any query today).
 
 ## Session — [S5] Migration runbook — production is running new code on the 24 Aug schema, 2 Sep 2026
 
