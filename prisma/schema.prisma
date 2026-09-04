@@ -380,11 +380,17 @@ model UserRole {
 }
 
 model Department {
-  id       Int     @id @default(autoincrement())
-  tenantId Int     @map("tenant_id")
-  code     String
-  name     String
-  scope    String?
+  id           Int     @id @default(autoincrement())
+  tenantId     Int     @map("tenant_id")
+  code         String
+  name         String
+  scope        String?
+  /// Whether this is a desk-side department reachable at /command/[dept]
+  /// (personal dashboards v1) vs. a floor department (redirects to
+  /// /workspace instead). Replaces command-center.read.ts's old hardcoded
+  /// office/floor code lists — tenant-authored data, not a code branch, per
+  /// docs/ADR-product-family-agnostic-platform-v1.md's "DESPL-320 rule".
+  isOfficeDept Boolean @default(false) @map("is_office_dept")
 
   tenant                Organization           @relation(fields: [tenantId], references: [id])
   users                 UserDepartment[]
@@ -475,6 +481,12 @@ model OperationRef {
   /// `canonicalOperations` entry carries no mapping.
   leadTimeProcessSeq  Int?    @map("lead_time_process_seq")
   active              Boolean @default(true)
+  /// B6: declarative replacement for component.service.ts's old
+  /// `operationCode === "PAINTING"` branch. Tenant-authored (seeded from
+  /// `seed/component-routes.json`'s `canonicalOperations.PAINTING`), not a
+  /// code literal — verifyComponentOperation gates on this flag instead of a
+  /// hardcoded op code.
+  requiresDftGate     Boolean @default(false) @map("requires_dft_gate")
 
   tenant            Organization         @relation(fields: [tenantId], references: [id])
   defaultDepartment Department?          @relation(fields: [defaultDepartmentId], references: [id])
@@ -857,9 +869,9 @@ model Package {
   createdBy         Int      @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")
 
-  job          Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  createdByUser User  @relation(fields: [createdBy], references: [id])
-  units        Unit[]
+  job           Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdByUser User   @relation(fields: [createdBy], references: [id])
+  units         Unit[]
 
   @@unique([jobId, packageNo])
   @@index([jobId])
@@ -1074,9 +1086,6 @@ model BomItem {
   parent                  BomItem?                 @relation("BomItemHierarchy", fields: [parentBomItemId], references: [id])
   children                BomItem[]                @relation("BomItemHierarchy")
 
-  @@index([equipmentId])
-  @@index([componentTypeId])
-  @@index([parentBomItemId])
   /// S21: an item number must be unique within one BOM revision. NULL
   /// `bomRevisionId` rows (pre-B3 backfill stragglers, if any) are exempt —
   /// Postgres treats NULL as distinct per row, so this can't retroactively
@@ -1084,6 +1093,9 @@ model BomItem {
   /// `@@index([bomRevisionId])` it was scoped from — this composite index
   /// already covers every query that filtered on `bomRevisionId` alone.
   @@unique([bomRevisionId, itemNo])
+  @@index([equipmentId])
+  @@index([componentTypeId])
+  @@index([parentBomItemId])
   @@map("bom_items")
 }
 

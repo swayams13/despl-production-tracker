@@ -21,10 +21,10 @@ export default async function DepartmentDetail({ params }: { params: Promise<{ i
   // /command/[dept]), but they do reach this page. Link out only for office
   // departments — a floor department's /command/[floor-code] redirects to
   // /workspace, so the link would be a dead control there (CLAUDE.md hard
-  // ban). classifyDeptCode() is command-center.read.ts's own office/floor
-  // table, kept server-side (imported here, not in the client component) so
-  // its DB-backed module never ships to the client bundle.
-  const commandCenterCode = classifyDeptCode(dept.code) === "office" ? dept.code.toLowerCase() : null;
+  // ban). classifyDeptCode() reads Department.isOfficeDept, kept server-side
+  // (imported here, not in the client component) so its DB-backed module
+  // never ships to the client bundle.
+  const commandCenterCode = classifyDeptCode(dept) === "office" ? dept.code.toLowerCase() : null;
 
   return <DepartmentDetailClient dept={dept} commandCenterCode={commandCenterCode} />;
 }

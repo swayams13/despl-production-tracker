@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
-import { loadCommandCenter, classifyDeptCode, resolveCommandCenterAccess, OFFICE_DEPT_CODES } from "@/lib/services/command-center.read";
+import { loadCommandCenter, classifyDeptCode, resolveCommandCenterAccess } from "@/lib/services/command-center.read";
 import { CommandCenterClient } from "./_client";
 
 /**
@@ -10,10 +10,11 @@ import { CommandCenterClient } from "./_client";
  * — the codes are already stable identifiers (seed/lead-time-model.json), so
  * there's no separate slug table to maintain.
  *
- * Routing (task 3.1 ruling 1): the six OFFICE codes render this page; the
- * other seven (floor) codes redirect to `/workspace`; anything that isn't a
- * real department code at all gets `notFound()` — same convention
- * `/departments/[id]` already uses for an invalid id.
+ * Routing (task 3.1 ruling 1): an OFFICE department (`Department.isOfficeDept`)
+ * renders this page; a real floor department redirects to `/workspace`;
+ * anything that isn't a real department code at all in this tenant gets
+ * `notFound()` — same convention `/departments/[id]` already uses for an
+ * invalid id.
  */
 export default async function CommandCenter({ params }: { params: Promise<{ dept: string }> }) {
   const actor = await getActor();
@@ -22,14 +23,13 @@ export default async function CommandCenter({ params }: { params: Promise<{ dept
 
   const { dept } = await params;
   const deptCode = dept.toUpperCase();
-  const kind = classifyDeptCode(deptCode);
-  if (kind === "invalid") notFound();
-  if (kind === "floor") redirect("/workspace");
-
   const department = await withTenant(actor.tenantId, (tx) =>
-    tx.department.findFirst({ where: { tenantId: actor.tenantId, code: deptCode }, select: { id: true, name: true } }),
+    tx.department.findFirst({ where: { tenantId: actor.tenantId, code: deptCode }, select: { id: true, name: true, isOfficeDept: true } }),
   );
-  if (!department) notFound();
+
+  const kind = classifyDeptCode(department);
+  if (kind === "invalid" || !department) notFound();
+  if (kind === "floor") redirect("/workspace");
 
   // Access (task 3.1 ruling 3): dept members + PH/ADMIN get full read+action
   // access; MANAGEMENT gets read-only (page renders, zero action buttons);
@@ -39,7 +39,7 @@ export default async function CommandCenter({ params }: { params: Promise<{ dept
   if (access === "none") notFound();
   const canAct = access === "full";
 
-  const view = await loadCommandCenter(actor, department.id, deptCode as (typeof OFFICE_DEPT_CODES)[number], department.name);
+  const view = await loadCommandCenter(actor, department.id, deptCode, department.name);
 
   const today = new Date().toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" });
 

@@ -139,6 +139,8 @@ async function lockComponentOperationForUpdate(
   departmentId: number | null;
   /** OperationRef.code (e.g. "CUTTING") — B9's drawing gate is CUTTING-specific, identified by code, never a hardcoded id. */
   operationCode: string;
+  /** B6: declarative flag (OperationRef.requiresDftGate), not a hardcoded "PAINTING" code check. */
+  requiresDftGate: boolean;
   previousOp: { seq: number; status: OperationStatus } | null;
 }> {
   await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ${componentOperationId} FOR UPDATE`;
@@ -153,7 +155,13 @@ async function lockComponentOperationForUpdate(
 
   const previousOp = await findPreviousComponentOperation(tx, op, op.component.routeVersionId);
 
-  return { op, departmentId: op.operation.defaultDepartmentId, operationCode: op.operation.code, previousOp };
+  return {
+    op,
+    departmentId: op.operation.defaultDepartmentId,
+    operationCode: op.operation.code,
+    requiresDftGate: op.operation.requiresDftGate,
+    previousOp,
+  };
 }
 
 function requireOperationDepartment(actor: Actor, departmentId: number | null): void {
@@ -343,18 +351,17 @@ export async function verifyComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op, operationCode } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    const { op, requiresDftGate } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
     assertMakerChecker(actor, op.submittedBy);
     const to = assertComponentOpTransition("verify", op.status);
 
-    // P1 (Phase 5): a PAINTING op cannot verify without a recorded coating
-    // system and enough accepted DFT readings — identified by
-    // OperationRef.code, same discipline as B9's CUTTING-only drawing gate
-    // above. "Accepted" is self-attested by whoever recorded the reading;
-    // there is no spec'd min/max micron range to check against (open
-    // question noted in the schema comment and the task report — not
-    // silently resolved here).
-    if (operationCode === "PAINTING") {
+    // P1 (Phase 5): an op flagged OperationRef.requiresDftGate (B6 — was a
+    // hardcoded `operationCode === "PAINTING"` check) cannot verify without a
+    // recorded coating system and enough accepted DFT readings. "Accepted" is
+    // self-attested by whoever recorded the reading; there is no spec'd
+    // min/max micron range to check against (open question noted in the
+    // schema comment and the task report — not silently resolved here).
+    if (requiresDftGate) {
       const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId: op.id } });
       // Coverage is per DISTINCT coat, not a raw accepted-row count — three
       // accepted readings all against the same coatNumber (or all with it

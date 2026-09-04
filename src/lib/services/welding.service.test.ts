@@ -120,6 +120,15 @@ describe.skipIf(!RUN_DB)("welding.service (DB-backed)", async () => {
     );
   });
 
+  it("logWeldJoint refuses a tenant with no WELDING OperationRef (B5: derived, not hardcoded, department)", async () => {
+    const otherOrg = await owner.organization.create({ data: { code: `TEST-WELD-NOOP-${Date.now()}`, name: "No welding op tenant" } });
+    const actor: Actor = { ...actorBase(otherOrg.id), roles: [ROLES.SUPERVISOR], departmentIds: [] };
+    await expectCode(
+      logWeldJoint(actor, { jobId: 1, jointNo: "T-3", jointType: "Test", welderIds: [1] }),
+      ERROR_CODES.NOT_FOUND,
+    );
+  });
+
   it("logWeldJoint refuses a client user — read-only, no exceptions", async () => {
     const { job, unit, fabDept, welder } = await fixture();
     const clientActor: Actor = { ...actorBase(job.tenantId), clientId: 1, roles: [ROLES.SUPERVISOR], departmentIds: [fabDept.id] };

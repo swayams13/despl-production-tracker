@@ -58,67 +58,80 @@
     {
       "code": "PROJECTS",
       "name": "Projects / PMO",
-      "scope": "Order review, kick-off, client interface"
+      "scope": "Order review, kick-off, client interface",
+      "isOfficeDept": true
     },
     {
       "code": "ENGINEERING",
       "name": "Design & Detail Engineering",
-      "scope": "Design calculation, drawings, client approval cycle"
+      "scope": "Design calculation, drawings, client approval cycle",
+      "isOfficeDept": true
     },
     {
       "code": "PLANNING",
       "name": "Planning / PPC",
-      "scope": "BOM & MTO, cutting plan, schedule ownership"
+      "scope": "BOM & MTO, cutting plan, schedule ownership",
+      "isOfficeDept": true
     },
     {
       "code": "PROCUREMENT",
       "name": "Procurement",
-      "scope": "Plates, pipes/forgings/fittings, bought-out items"
+      "scope": "Plates, pipes/forgings/fittings, bought-out items",
+      "isOfficeDept": true
     },
     {
       "code": "STORES",
       "name": "Stores",
-      "scope": "Material receipt, GRN, issue to shop"
+      "scope": "Material receipt, GRN, issue to shop",
+      "isOfficeDept": true
     },
     {
       "code": "QC",
       "name": "Quality Control / QA",
-      "scope": "Incoming inspection, traceability, NDE, hydro, final inspection, name plate"
+      "scope": "Incoming inspection, traceability, NDE, hydro, final inspection, name plate",
+      "isOfficeDept": true
     },
     {
       "code": "FABRICATION_PREP",
       "name": "Fabrication Prep",
-      "scope": "Cutting, blanking, forming, rolling, dishing"
+      "scope": "Cutting, blanking, forming, rolling, dishing",
+      "isOfficeDept": false
     },
     {
       "code": "MACHINE_SHOP",
       "name": "Machine Shop",
-      "scope": "Flange, dish-end, nozzle machining"
+      "scope": "Flange, dish-end, nozzle machining",
+      "isOfficeDept": false
     },
     {
       "code": "FABRICATION",
       "name": "Fabrication / Welding",
-      "scope": "Fit-up, welding, assembly, attachments"
+      "scope": "Fit-up, welding, assembly, attachments",
+      "isOfficeDept": false
     },
     {
       "code": "HEAT_TREATMENT",
       "name": "Heat Treatment",
-      "scope": "PWHT, furnace, charts"
+      "scope": "PWHT, furnace, charts",
+      "isOfficeDept": false
     },
     {
       "code": "SURFACE_PAINT",
       "name": "Surface Treatment & Painting",
-      "scope": "Blasting, surface prep, painting, DFT"
+      "scope": "Blasting, surface prep, painting, DFT",
+      "isOfficeDept": false
     },
     {
       "code": "DOCUMENTATION",
       "name": "Documentation / MDR",
-      "scope": "MDR compilation, certificates"
+      "scope": "MDR compilation, certificates",
+      "isOfficeDept": false
     },
     {
       "code": "DISPATCH",
       "name": "Dispatch & Logistics",
-      "scope": "Packing, preservation, dispatch clearance, loading"
+      "scope": "Packing, preservation, dispatch clearance, loading",
+      "isOfficeDept": false
     }
   ],
   "processes": [
