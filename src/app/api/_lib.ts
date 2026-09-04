@@ -57,6 +57,8 @@ const STATUS: Record<ErrorCode, number> = {
   DFT_NOT_ACCEPTED: 409,
   UNIT_NOT_PACKED: 409,
   CROSS_JOB_ASSIGNMENT: 409,
+  QCP_ITEM_UNRESOLVED: 500,
+  JOB_HAS_INCOMPLETE_PLANS: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

@@ -107,6 +107,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     rejectComponentOperation,
     recordPaintRecord,
     recordDftReading,
+    linkGoverningDrawing,
   } = await import("./component.service");
   const { issueStock } = await import("./stock.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
@@ -131,7 +132,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let kitShortOp = 0; // bomItem required 10, available 3 → refused
   let kitStockedOp = 0; // bomItem required 2, available 5 → allowed
   let kitUntrackedOp = 0; // Component.bomItemId null (SEAM) → allowed
-  let kitNoActivityOp = 0; // bomItem set, zero StockLot rows at all (SEAM) → allowed
+  let kitNoActivityOp = 0; // bomItem set, zero StockLot rows at all → refused (S18: no longer a SEAM)
   let kitCrossTenantOp = 0; // Component.bomItemId points at another tenant's BomItem → NOT_FOUND
   // Fix wave, Critical #1 regression: a full kit (received === required),
   // issuing part of it to the component the first op starts on must not
@@ -147,6 +148,10 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let drawingReleasedRevisionId = 0;
   let drawingSeamCuttingOp = 0; // governingDrawingId null (SEAM) → allowed, no stamp
   let drawingGatedNonCuttingOp = 0; // RECEIPT (not CUTTING) on a component whose drawing is unreleased → allowed, gate is CUTTING-specific
+  // S18 — linkGoverningDrawing fixtures.
+  let linkComponentId = 0; // fresh Component, governingDrawingId starts null
+  let linkDrawingId = 0; // AssemblyDrawing belonging to the same job
+  let linkOtherJobDrawingId = 0; // AssemblyDrawing belonging to a DIFFERENT job — cross-job refusal
   // P1 (Phase 5) — Paint/DFT gate fixtures, wired into verifyComponentOperation's PAINTING-only gate.
   let paintOpNoRecord = 0; // SUBMITTED, no PaintRecord/DftReading at all → DFT_NOT_ACCEPTED
   let paintOpTwoCoats = 0; // SUBMITTED, coatsPlanned=2 → walked through none/unaccepted/partial/full accepted coverage
@@ -435,6 +440,28 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     drawingGatedNonCuttingOp = (
       await owner.componentOperation.create({
         data: { componentId: componentDrawingGatedNonCutting.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    // S18 — linkGoverningDrawing fixtures.
+    const linkComponent = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "LINK-1", componentTypeId: componentType.id },
+    });
+    linkComponentId = linkComponent.id;
+    linkDrawingId = drawingReleased.id;
+    const otherJobForLink = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-co-link-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-CO-LINK-${Date.now()}`,
+      },
+    });
+    linkOtherJobDrawingId = (
+      await owner.assemblyDrawing.create({
+        data: { jobId: otherJobForLink.id, drawingTypeId: drawingType.id, drawingNo: "GA-OTHER-JOB" },
       })
     ).id;
 
@@ -729,9 +756,11 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     expect(started.status).toBe("IN_PROGRESS");
   });
 
-  it("kit gate SEAM: BomItem set but zero StockLot/StockTxn rows recorded at all starts unaffected — 'never tracked' is not 'zero available' (violation case 4, the highest-risk regression)", async () => {
-    const started = await startComponentOperation(supA, { componentOperationId: kitNoActivityOp });
-    expect(started.status).toBe("IN_PROGRESS");
+  it("kit gate S18: BomItem set but zero StockLot/StockTxn rows recorded at all is now refused — a real Component link with 'never stocked' is a genuine shortage, not a SEAM (violation case 4)", async () => {
+    await expectCode(
+      startComponentOperation(supA, { componentOperationId: kitNoActivityOp }),
+      ERROR_CODES.MATERIAL_NOT_AVAILABLE,
+    );
   });
 
   it("kit gate cross-tenant: a Component.bomItemId pointing at another tenant's BomItem is refused as NOT_FOUND, not read across (violation case 5)", async () => {
@@ -784,6 +813,47 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   it("drawing gate is CUTTING-specific: a non-CUTTING operation (RECEIPT) on a component with an unreleased governing drawing is NOT blocked (violation case 4)", async () => {
     const started = await startComponentOperation(supA, { componentOperationId: drawingGatedNonCuttingOp });
     expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  // ── S18: linkGoverningDrawing — the write assertDrawingReleased's gate depends on ────
+
+  async function componentAuditCount(entityId: number): Promise<number> {
+    return owner.auditLog.count({ where: { tenantId, entityType: "Component", entityId: String(entityId) } });
+  }
+
+  it("linkGoverningDrawing: PRODUCTION_HEAD can set a Component's governingDrawingId, audited", async () => {
+    const ph: Actor = { ...supA, roles: [ROLES.PRODUCTION_HEAD] };
+    const before = await componentAuditCount(linkComponentId);
+    const updated = await linkGoverningDrawing(ph, { componentId: linkComponentId, assemblyDrawingId: linkDrawingId });
+    expect(updated.governingDrawingId).toBe(linkDrawingId);
+    expect(await componentAuditCount(linkComponentId)).toBe(before + 1);
+
+    // Clearing it back to null is also a legal, audited write.
+    const cleared = await linkGoverningDrawing(ph, { componentId: linkComponentId, assemblyDrawingId: null });
+    expect(cleared.governingDrawingId).toBeNull();
+  });
+
+  it("linkGoverningDrawing: a SUPERVISOR (no PRODUCTION_HEAD/ADMIN role) is refused", async () => {
+    await expectCode(
+      linkGoverningDrawing(supA, { componentId: linkComponentId, assemblyDrawingId: linkDrawingId }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("linkGoverningDrawing: an AssemblyDrawing belonging to a DIFFERENT job is refused as NOT_FOUND, not linked across jobs", async () => {
+    const ph: Actor = { ...supA, roles: [ROLES.PRODUCTION_HEAD] };
+    await expectCode(
+      linkGoverningDrawing(ph, { componentId: linkComponentId, assemblyDrawingId: linkOtherJobDrawingId }),
+      ERROR_CODES.NOT_FOUND,
+    );
+  });
+
+  it("linkGoverningDrawing: a Component outside the actor's tenant is refused as NOT_FOUND, not read across", async () => {
+    const ph: Actor = { ...supA, roles: [ROLES.PRODUCTION_HEAD] };
+    await expectCode(
+      linkGoverningDrawing(ph, { componentId: 999_999_999, assemblyDrawingId: linkDrawingId }),
+      ERROR_CODES.NOT_FOUND,
+    );
   });
 
   // ── P1 (Phase 5): recordPaintRecord/recordDftReading + the PAINTING verify gate ────

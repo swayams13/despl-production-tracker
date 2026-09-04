@@ -1,5 +1,13 @@
 import { withTenant, type Tx } from "@/lib/db";
-import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
+import {
+  type Actor,
+  assertClientScope,
+  assertMakerChecker,
+  assertNotClientUser,
+  requireDepartmentScope,
+  requireRole,
+  ROLES,
+} from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertKitReady, assertDrawingReleased } from "./_shared";
@@ -14,14 +22,16 @@ import {
   rejectComponentOperationSchema,
   recordPaintRecordSchema,
   recordDftReadingSchema,
+  linkGoverningDrawingSchema,
   type StartComponentOperationInput,
   type SubmitComponentOperationInput,
   type VerifyComponentOperationInput,
   type RejectComponentOperationInput,
   type RecordPaintRecordInput,
   type RecordDftReadingInput,
+  type LinkGoverningDrawingInput,
 } from "@/lib/shared/schemas";
-import type { ComponentOperation, DftReading, PaintRecord } from "@/generated/prisma/client";
+import type { Component, ComponentOperation, DftReading, PaintRecord } from "@/generated/prisma/client";
 import { OperationStatus } from "@/generated/prisma/enums";
 
 /** P1 (Phase 5): a PAINTING op's coats requirement — 1 if unset. */
@@ -660,4 +670,56 @@ export async function materializeComponentsFromBomItems(
   }
 
   return { componentCount, skippedNoRoute };
+}
+
+/**
+ * S18 (Gate 2): set (or clear, with `assemblyDrawingId: null`) a Component's
+ * `governingDrawingId` — the schema's own comment on that column says it is
+ * "MANUALLY set by whoever authors the component's route/BOM link — not
+ * auto-derived," but nothing in `src/` ever called that write until now, so
+ * `assertDrawingReleased`'s CUTTING gate (`_shared.ts`) has been a no-op on
+ * every real component. Same role gate and audit shape as
+ * `drawing.service.ts`'s `createDrawingRevision` — the same authority that
+ * can release a drawing revision is the one that can bind a component to it.
+ */
+export async function linkGoverningDrawing(actor: Actor, input: LinkGoverningDrawingInput): Promise<Component> {
+  const { componentId, assemblyDrawingId } = linkGoverningDrawingSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const component = await tx.component.findFirst({
+      where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
+      select: { id: true, tag: true, governingDrawingId: true, equipment: { select: { job: { select: { id: true, clientId: true } } } } },
+    });
+    if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+    assertClientScope(actor, component.equipment.job.clientId);
+
+    if (assemblyDrawingId != null) {
+      const drawing = await tx.assemblyDrawing.findFirst({
+        where: { id: assemblyDrawingId, jobId: component.equipment.job.id },
+        select: { id: true },
+      });
+      if (!drawing) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId });
+    }
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.component.update({
+        where: { id: componentId },
+        data: { governingDrawingId: assemblyDrawingId },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "component.linkGoverningDrawing",
+          entityType: "Component",
+          entityId: componentId,
+          before: { governingDrawingId: component.governingDrawingId },
+          after: { governingDrawingId: updated.governingDrawingId },
+          eventType: "ComponentGoverningDrawingLinked",
+          eventPayload: { componentId, tag: component.tag, assemblyDrawingId: updated.governingDrawingId },
+        },
+      };
+    });
+  });
 }

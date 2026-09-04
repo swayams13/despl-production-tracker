@@ -105,6 +105,10 @@ export const ERROR_CODES = {
   UNIT_NOT_PACKED: "UNIT_NOT_PACKED",
   /** assignUnitToPackage: the unit and package belong to different jobs (D1, Phase 5). */
   CROSS_JOB_ASSIGNMENT: "CROSS_JOB_ASSIGNMENT",
+  /** materialiseAssemblySteps (S17): an AssemblyTemplateStep's qcpSrNo has no corresponding QcpItem in the job's cloned QcpTemplate at the expected occurrence — refuses rather than leaving qcpItemId silently null. */
+  QCP_ITEM_UNRESOLVED: "QCP_ITEM_UNRESOLVED",
+  /** setJobStatus (S19): status COMPLETE was requested while a ProcessPlan on the job's current ScheduleRun is not yet COMPLETE. */
+  JOB_HAS_INCOMPLETE_PLANS: "JOB_HAS_INCOMPLETE_PLANS",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -176,6 +180,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This painting operation needs an accepted DFT reading for every planned coat before it can verify.",
   UNIT_NOT_PACKED: "This unit has not been packed yet. Assign it to a package before adding it to a dispatch batch.",
   CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
+  QCP_ITEM_UNRESOLVED: "An assembly checkpoint could not be matched to a QCP item. Contact an administrator.",
+  JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
 };
 
 /**

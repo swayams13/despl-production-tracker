@@ -744,9 +744,13 @@ export async function assertEvidenceSatisfied(
  * B7, Phase 4 (CLAUDE.md #2's fourth gate): a component's linked `BomItem`
  * must not be recorded short before its next operation starts. SEAM, same
  * convention as `assertComponentOpsComplete`/`assertNoOpenHoldPoint`: no-op
- * (nothing to check) when `Component.bomItemId` is null (untracked part), or
- * when the `BomItem` has zero `StockLot` rows at all (never tracked, distinct
- * from "zero available" — B6's `availableQty`/`shortage` SEAM convention).
+ * (nothing to check) ONLY when `Component.bomItemId` is null (untracked
+ * part — no BOM link at all, a legitimate authoring gap). S18: a BomItem
+ * with zero `StockLot` rows is NOT a SEAM once it's actually linked from a
+ * Component — "never stocked" is a real shortage (required > 0, available
+ * 0), not "never tracked." (The read-side `availableQty`/`shortage` in
+ * `bom.read.ts` keeps its own null-for-display convention — this only
+ * changes the gate.)
  *
  * `bom.read.ts`'s exported `requiredQty`/`availableQty`/`shortage` each open
  * their own `withTenant` transaction — calling them here would nest a
@@ -781,7 +785,12 @@ export async function assertKitReady(tx: Tx, componentId: number, tenantId: numb
     },
   });
   if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId: component.bomItemId });
-  if (bomItem.stockLots.length === 0) return; // SEAM: zero stock activity recorded at all — never tracked stays silent
+  // S18: a Component WITH a real bomItemId link but zero StockLot rows ever
+  // recorded is not a SEAM anymore — it means the part was never brought in,
+  // a genuine shortage. (The read-side computeAvailableForShortage still
+  // legitimately returns null for this exact input — bom.read.ts's display
+  // wants to show blank/"never tracked" rather than "0 available"; that
+  // convention is untouched. This gate just treats a null available as 0.)
 
   const [unitCount, siblingItems] = await Promise.all([
     tx.unit.count({ where: { equipmentId: bomItem.equipmentId } }),
@@ -799,7 +808,7 @@ export async function assertKitReady(tx: Tx, componentId: number, tenantId: numb
     return; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to check (same fallback as loadBomTree)
   }
 
-  const available = computeAvailableForShortage(bomItem.stockLots)!; // non-null: stockLots.length === 0 already returned above
+  const available = computeAvailableForShortage(bomItem.stockLots) ?? new Decimal(0);
 
   const shortfall = required.minus(available);
   if (shortfall.gt(0)) {

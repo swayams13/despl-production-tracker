@@ -7,13 +7,16 @@ import {
   createJobSchema,
   updateJobDatesSchema,
   updateJobDetailsSchema,
+  setJobStatusSchema,
   type CreateJobInput,
   type UpdateJobDatesInput,
   type UpdateJobDetailsInput,
+  type SetJobStatusInput,
 } from "@/lib/shared/schemas";
 import { validateSpecs } from "@/lib/shared/specs";
 import { notifyJobCreated } from "./notifications.service";
 import { materializeComponentsFromBomItems } from "./component.service";
+import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
 
 /**
  * Job intake (docs/superpowers/specs/2026-08-22-job-intake-design.md).
@@ -38,6 +41,8 @@ export interface CreateJobResult {
   bomItemCount: number;
   /** Component rows materialised from the copied BOM's typed items — see materializeComponentsFromBomItems. */
   componentCount: number;
+  /** AssemblyStep rows materialised per unit from the family's AssemblyTemplate — see materializeAssemblyStepsFromTemplate. 0 if the family has no AssemblyTemplate yet. */
+  assemblyStepCount: number;
   /**
    * QCP source items whose linked process code has no counterpart in the new
    * job's route. Reported, never silently dropped — the wizard lists them.
@@ -220,6 +225,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
 
       let unitCount = 0;
       let firstEquipmentId: number | null = null;
+      const unitIds: number[] = [];
       for (const block of parsed.equipments) {
         const equipment = await tx.equipment.create({
           data: {
@@ -231,15 +237,17 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           },
         });
         firstEquipmentId ??= equipment.id;
-        await tx.unit.createMany({
+        const units = await tx.unit.createManyAndReturn({
           data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo })),
+          select: { id: true },
         });
+        unitIds.push(...units.map((u) => u.id));
         unitCount += block.serials.length;
       }
 
       const qcp = parsed.qcpTemplateSourceId
         ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdByCode, actor.tenantId)
-        : { itemCount: 0, unmatchedProcessCodes: [] as string[] };
+        : { qcpTemplateId: null, itemCount: 0, unmatchedProcessCodes: [] as string[] };
 
       const bom =
         parsed.copyBomFromEquipmentId != null && firstEquipmentId != null
@@ -251,6 +259,15 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           ? await materializeComponentsFromBomItems(tx, parsed.familyId, firstEquipmentId, bom.createdIds)
           : { componentCount: 0, skippedNoRoute: 0 };
 
+      const assembly = await materializeAssemblyStepsFromTemplate(
+        tx,
+        actor.tenantId,
+        job.id,
+        parsed.familyId,
+        unitIds,
+        qcp.qcpTemplateId,
+      );
+
       const result: CreateJobResult = {
         jobId: job.id,
         publicId: job.publicId,
@@ -260,6 +277,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         qcpItemCount: qcp.itemCount,
         bomItemCount: bom.count,
         componentCount: components.componentCount,
+        assemblyStepCount: assembly.stepCount,
         unmatchedQcpProcessCodes: qcp.unmatchedProcessCodes,
       };
 
@@ -281,6 +299,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             unitCount: result.unitCount,
             bomItemCount: result.bomItemCount,
             componentCount: result.componentCount,
+            assemblyStepCount: result.assemblyStepCount,
             excludedProcessCodes: parsed.excludedProcessCodes,
           },
           eventType: "JobCreated",
@@ -411,6 +430,61 @@ export async function updateJobDetails(actor: Actor, input: UpdateJobDetailsInpu
 }
 
 /**
+ * S19: `Job.status` had no writer anywhere in `src/` — every real job sits
+ * at the DB default `ACTIVE` forever, which makes `job-health.ts`'s own
+ * `CANCELLED`/`COMPLETE`/`ON_HOLD` branches dead code in practice. Same role
+ * gate as `updateJobDates`/`updateJobDetails`.
+ *
+ * Guards only the COMPLETE transition: refuses if any `ProcessPlan` on the
+ * job's CURRENT `ScheduleRun`(s) — `isCurrent: true`, scoped per equipment
+ * since a multi-equipment job can carry more than one — is not itself
+ * COMPLETE. Excluded processes never get a `ProcessPlan` row at all
+ * (`envelope.ts` filters them out), so they need no special-casing here.
+ * ACTIVE/ON_HOLD/CANCELLED carry no such guard — pausing or cancelling a job
+ * with open work is a real, unguarded management decision, not a data-
+ * integrity question the way "complete" is.
+ */
+export async function setJobStatus(actor: Actor, input: SetJobStatusInput): Promise<{ jobId: number; status: string }> {
+  const { jobId, status } = setJobStatusSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const job = await tx.job.findFirst({
+      where: { id: jobId, tenantId: actor.tenantId },
+      select: { id: true, status: true },
+    });
+    if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
+    if (job.status === status) return { jobId: job.id, status: job.status }; // no-op, nothing to audit
+
+    if (status === "COMPLETE") {
+      const incomplete = await tx.processPlan.count({
+        where: { scheduleRun: { jobId, isCurrent: true }, status: { not: "COMPLETE" } },
+      });
+      if (incomplete > 0) {
+        throw new AppError(ERROR_CODES.JOB_HAS_INCOMPLETE_PLANS, { jobId, incompletePlanCount: incomplete });
+      }
+    }
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.job.update({ where: { id: jobId }, data: { status } });
+      return {
+        result: { jobId: updated.id, status: updated.status },
+        audit: {
+          action: "job.setStatus",
+          entityType: "Job",
+          entityId: jobId,
+          before: { status: job.status },
+          after: { status: updated.status },
+          eventType: "JobStatusChanged",
+          eventPayload: { jobId, from: job.status, to: updated.status },
+        },
+      };
+    });
+  });
+}
+
+/**
  * Deep-copy a QCP template onto a new job: parties, items, party codes, and
  * the item→process links rebuilt by matching process CODE (not id).
  *
@@ -428,7 +502,7 @@ async function cloneQcpTemplate(
   jobId: number,
   jpIdByCode: Map<string, number>,
   tenantId: number,
-): Promise<{ itemCount: number; unmatchedProcessCodes: string[] }> {
+): Promise<{ qcpTemplateId: number; itemCount: number; unmatchedProcessCodes: string[] }> {
   const source = await tx.qcpTemplate.findFirst({
     // Anchored through job → tenant: qcp_templates is a job-child with no
     // tenant_id of its own, so a bare findUnique would happily return another
@@ -512,7 +586,7 @@ async function cloneQcpTemplate(
     }
   }
 
-  return { itemCount: source.items.length, unmatchedProcessCodes: [...unmatched] };
+  return { qcpTemplateId: copy.id, itemCount: source.items.length, unmatchedProcessCodes: [...unmatched] };
 }
 
 /**

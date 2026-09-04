@@ -279,6 +279,15 @@ export const createDrawingRevisionSchema = z
   .strict();
 export type CreateDrawingRevisionInput = z.infer<typeof createDrawingRevisionSchema>;
 
+/** S18: manually set (or clear) a Component's governing drawing — nothing auto-derives this link. */
+export const linkGoverningDrawingSchema = z
+  .object({
+    componentId: id,
+    assemblyDrawingId: id.nullable(),
+  })
+  .strict();
+export type LinkGoverningDrawingInput = z.infer<typeof linkGoverningDrawingSchema>;
+
 /** Receive a lot of stock against a BOM item (B6, Phase 4) — creates a `StockLot`. */
 export const receiveStockSchema = z
   .object({
@@ -770,6 +779,15 @@ export const updateJobDetailsSchema = z
   })
   .strict();
 export type UpdateJobDetailsInput = z.infer<typeof updateJobDetailsSchema>;
+
+/** S19: Job.status had no writer anywhere. COMPLETE is guarded server-side (see job-intake.service.ts's setJobStatus). */
+export const setJobStatusSchema = z
+  .object({
+    jobId: id,
+    status: z.enum(["ACTIVE", "ON_HOLD", "COMPLETE", "CANCELLED"]),
+  })
+  .strict();
+export type SetJobStatusInput = z.infer<typeof setJobStatusSchema>;
 
 /**
  * Manual BOM authoring (B4, Phase 4) — first direct writer of `BomItem`
