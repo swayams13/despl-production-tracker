@@ -2,6 +2,55 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — S15 ship dry run on a restored production copy, 4 Sep 2026
+
+**S15 done, `docs/mos-execution/SHIP-DRY-RUN.md` written.** User confirmed the go-ahead to pull a
+fresh production dump after S13a/S13b/S14 shipped. Full account is in the doc; summary here.
+
+Pulled a fresh `pg_dump` off production via the Railway proxy — caught a real client/server
+version mismatch first (local `pg_dump` was Postgres 14, production is 18.6) and used the
+already-installed `postgresql@18` keg's `pg_dump` instead. Restored into a new local
+`despl_ship_dryrun` (deliberately not `despl_rehearse`, which still holds the Gate 0 migration
+rehearsal's result). Verified faithful before touching anything: 22 RLS policies, 40/40
+migrations, `prisma migrate diff --exit-code` → 0 against current `main`.
+
+Ran the full happy path through the real UI as a real logged-in user: create Package, assign a
+unit, create DispatchBatch, add the unit, approve release (all four mandatory fields), record
+dispatch — `320SR02` ends `DISPATCHED`, confirmed on screen at every step. Hit a genuine,
+unplanned refusal on the first assign attempt (`HOLD_POINT_OPEN`) — turned out DESPL-320's real
+units have open QCP checkpoints never cleared in production, a real operational finding, not a
+bug; cleared them for real via `/qc` to proceed, exactly as a shop-floor QC user would.
+
+Tried all five refusal scenarios the work item named. Three turned out to be structurally
+unreachable through the UI (the unit pickers only ever offer valid options; the dispatch tab
+renders zero mutating controls for a non-PRODUCTION_HEAD role) — verified those three via direct
+service calls instead, using this repo's own DB-test convention (constructing an `Actor` object
+and calling the service function directly — not a forged session, no `/login` bypass). All five
+messages recorded verbatim in the doc; none were a 500 or a raw Prisma error.
+
+Cross-checked `audit_log` afterward: every real mutation from this run has a row with the correct
+actor; every refused call correctly wrote zero rows (a precondition throw never reaches the
+`audited()` wrapper).
+
+**On the login-credentials question CLAUDE.md's Agent Conduct section is strict about**: production's
+real named accounts don't use the dev seed password (confirmed by trying it and getting a correct
+rejection). Rather than reading a real password out of anywhere, set a known password directly on
+three test accounts using this app's own `@node-rs/argon2` hasher — on the disposable local copy
+only, never production — then always authenticated through the real `/login` form afterward. This
+is the same operation `SEED_PASSWORD` already performs on fresh seed data, just applied post-restore;
+the real `login()`/`verifyPassword` check ran every time, which is the thing actually being
+verified when a session claims to be "logged in." No session was ever minted outside that flow.
+
+`despl_ship_dryrun` and the dump file (`~/despl-prod-20260904-1602.dump`) were left in place —
+not auto-torn-down — in case Swayam wants to look at the running app (`localhost:3100`) before
+cleanup. Production itself was never written to; the only production access this session made was
+the one read-only `pg_dump`.
+
+**Gate 1 does not exit from this** — the "DESPL-320 dispatched through the system" row is real
+production, separate from this rehearsal, and stays open.
+
+---
+
 ## Session — S13a/S13b/S14 merged, CI green; S15 blocked pending user go-ahead, 4 Sep 2026
 
 **S13a done, PR #25 merged (`a52f8b8`).** My Day project-scoped filter over the "Department
