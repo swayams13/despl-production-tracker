@@ -8,9 +8,10 @@ import { loadBomTree } from "@/lib/services/bom.read";
 import { loadAssemblyGrid } from "@/lib/services/assembly.read";
 import { loadQcpGrid } from "@/lib/services/qcp-grid.read";
 import { loadClientPreview } from "@/lib/services/client-snapshot.read";
+import { loadPackingPanel } from "@/lib/services/packing.read";
 import { JobDetailClient } from "./_client";
 
-const TABS = ["overview", "gantt", "bom", "assembly", "qcp", "activity", "client"] as const;
+const TABS = ["overview", "gantt", "bom", "assembly", "qcp", "packing", "activity", "client"] as const;
 type Tab = (typeof TABS)[number];
 
 function first(v: string | string[] | undefined): string | undefined {
@@ -36,6 +37,9 @@ export default async function JobDetail({
 
   const canReviewClientUpdates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
   const canEditJobDates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
+  // cosmetic, the server is authoritative either way.
+  const canManagePacking = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   const { id } = await params;
   const jobId = Number(id);
@@ -49,7 +53,7 @@ export default async function JobDetail({
   const openUnit = toInt(sp.openUnit);
   const openStage = toInt(sp.openStage);
 
-  const [header, unitSpines, events, gantt, bom, assembly, qcp, clientPreview] = await Promise.all([
+  const [header, unitSpines, events, gantt, bom, assembly, qcp, packing, clientPreview] = await Promise.all([
     loadJobHeader(actor, jobId),
     loadJobSpines(actor, jobId),
     loadEvents(actor, { jobId, limit: tab === "activity" ? 100 : 5 }),
@@ -57,6 +61,7 @@ export default async function JobDetail({
     tab === "bom" ? loadBomTree(actor, jobId, equipmentParam, unitParam) : Promise.resolve(null),
     tab === "assembly" ? loadAssemblyGrid(actor, jobId, unitParam) : Promise.resolve(null),
     tab === "qcp" ? loadQcpGrid(actor, jobId, unitParam) : Promise.resolve(null),
+    tab === "packing" ? loadPackingPanel(actor, jobId) : Promise.resolve(null),
     tab === "client" && canReviewClientUpdates ? loadClientPreview(actor, jobId) : Promise.resolve(null),
   ]);
   if (!header) notFound();
@@ -75,9 +80,11 @@ export default async function JobDetail({
       bom={bom}
       assembly={assembly}
       qcp={qcp}
+      packing={packing}
       clientPreview={clientPreview}
       canReviewClientUpdates={canReviewClientUpdates}
       canEditJobDates={canEditJobDates}
+      canManagePacking={canManagePacking}
       tab={tab}
       openUnit={openUnit}
       openStage={openStage}
