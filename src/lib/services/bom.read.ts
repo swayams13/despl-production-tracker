@@ -4,7 +4,7 @@ import { assertClientScope, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
-import { projectComponentRoute, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
+import { projectComponentRoute, computeComponentDisplayStatus, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
 import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
 
 /**
@@ -228,13 +228,6 @@ export interface BomTree {
   delayCategories: DelayCategoryOption[];
 }
 
-function opDisplayStatus(status: string): StageDisplayStatus {
-  if (status === "COMPLETE") return "complete";
-  if (status === "SUBMITTED") return "submitted";
-  if (status === "IN_PROGRESS") return "progress";
-  return "idle";
-}
-
 interface RawComponentForSummary {
   id: number;
   tag: string;
@@ -296,12 +289,7 @@ function buildComponentSummary(
     ...p,
     qcpCheckpoints: p.leadTimeProcessSeq != null ? (checkpointsByProcessCode.get(String(p.leadTimeProcessSeq)) ?? []) : [],
   }));
-  const displayStatus: StageDisplayStatus =
-    ops.length === 0
-      ? "idle"
-      : ops.every((o) => o.status === "COMPLETE")
-        ? "complete"
-        : opDisplayStatus(ops.find((o) => o.status !== "COMPLETE" && o.status !== "NOT_STARTED")?.status ?? ops[0].status);
+  const displayStatus: StageDisplayStatus = computeComponentDisplayStatus(ops);
   const governingDrawing: BomGoverningDrawing | null = c.governingDrawing
     ? {
         id: c.governingDrawing.id,

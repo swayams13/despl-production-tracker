@@ -4,6 +4,8 @@
  * component, can reuse the same collapse logic for rendering. Same pattern
  * as `gantt-layout.ts` / `job-gantt.tsx`. No DB/auth imports belong here.
  */
+import type { StageDisplayStatus } from "@/components/industrial/stage-status";
+
 export interface RouteStepDef {
   seq: number;
   operationId: number;
@@ -67,14 +69,25 @@ export interface ProjectedOp {
  * is appended rather than dropped.
  */
 export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: ActualOp[]): ProjectedOp[] {
-  const actualByOpId = new Map(actualOps.map((o) => [o.operationId, o]));
+  // Queue per operationId, not a single map slot — a route can legitimately
+  // use the same canonical operation twice (e.g. DISHED_END's "Pressing/
+  // Spinning" and "Trimming" both ride FORMING, same physical 36-process
+  // stage tracked as two floor steps). actualOps arrives seq-ordered, so
+  // shifting off the front pairs each route-step occurrence with its own
+  // distinct ComponentOperation row instead of collapsing them onto one.
+  const queueByOpId = new Map<number, ActualOp[]>();
+  for (const o of actualOps) {
+    const queue = queueByOpId.get(o.operationId);
+    if (queue) queue.push(o);
+    else queueByOpId.set(o.operationId, [o]);
+  }
   const matchedIds = new Set<number>();
 
   const projected: ProjectedOp[] = [...routeSteps]
     .sort((a, b) => a.seq - b.seq)
     .map((s) => {
-      const actual = actualByOpId.get(s.operationId);
-      if (actual) matchedIds.add(s.operationId);
+      const actual = queueByOpId.get(s.operationId)?.shift();
+      if (actual) matchedIds.add(actual.id);
       return {
         seq: s.seq,
         operationName: s.operationName,
@@ -94,7 +107,7 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
     });
 
   const extras: ProjectedOp[] = actualOps
-    .filter((o) => !matchedIds.has(o.operationId))
+    .filter((o) => !matchedIds.has(o.id))
     .map((o, i) => ({
       seq: routeSteps.length + i + 1,
       operationName: o.operationName,
@@ -113,6 +126,29 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
     }));
 
   return [...projected, ...extras];
+}
+
+export function opDisplayStatus(status: string): StageDisplayStatus {
+  if (status === "COMPLETE") return "complete";
+  if (status === "SUBMITTED") return "submitted";
+  if (status === "IN_PROGRESS") return "progress";
+  return "idle";
+}
+
+/**
+ * A component's overall display status from its route's op statuses. A
+ * route is often mid-way — some steps COMPLETE, the rest still NOT_STARTED,
+ * nothing currently active between them — and that must read as "in
+ * progress", never as "complete" (reusing a finished step's own status) or
+ * as "idle"/not-started (the route has, in fact, started).
+ */
+export function computeComponentDisplayStatus(ops: { status: string }[]): StageDisplayStatus {
+  if (ops.length === 0) return "idle";
+  if (ops.every((o) => o.status === "COMPLETE")) return "complete";
+  const active = ops.find((o) => o.status !== "COMPLETE" && o.status !== "NOT_STARTED");
+  if (active) return opDisplayStatus(active.status);
+  const started = ops.some((o) => o.status !== "NOT_STARTED");
+  return started ? "progress" : "idle";
 }
 
 export interface ProjectedRouteView<T extends ProjectedOp> {

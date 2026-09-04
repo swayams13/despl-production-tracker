@@ -96,9 +96,13 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
   let step1 = 0; // unit1, seq1 (deptA, no jointRef)
   let step2 = 0; // unit1, seq2 (deptA, jointRef "LS-1") — gated on step1
   let step3 = 0; // unit1, seq3 (deptB, no jointRef) — gated on step2
+  let step4 = 0; // unit1, seq4 (deptB, INSPECTION, linked to qcpItemId) — A4 sync
+  let step5 = 0; // unit1, seq5 (deptB, WORK, no qcpItemId) — A4 sync must not fire here
+  let unit1Id = 0;
   let unit2Step1 = 0; // unit2, seq1 — cross-unit isolation
   let rejectCategoryId = 0;
   let testTypeId = 0;
+  let qcpItemId = 0;
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({ where: { tenantId, entityType: "AssemblyStep", entityId: String(entityId) } });
@@ -170,9 +174,46 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
       },
     });
 
+    // A4: an INSPECTION step whose templateStep resolves to a real QcpItem —
+    // the QCP checkpoint this step's verify/reject is supposed to record.
+    const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "Vessel", vessel: "Vessel" } });
+    const qcpItem = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "4.5", kind: "CHECKPOINT", activity: "Weld Visual Of LS-1" },
+    });
+    qcpItemId = qcpItem.id;
+    const ts4 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 4,
+        groupCode: "E",
+        groupName: "Shell Sub-Assembly (LS-1)",
+        srNo: "4.5",
+        activity: "Weld Visual Of LS-1",
+        kind: "INSPECTION",
+        defaultDepartmentId: deptB.id,
+        qcpSrNo: "4.5",
+      },
+    });
+
+    const ts5 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 5,
+        groupCode: "F",
+        groupName: "Nozzle Sub-Assembly",
+        srNo: "4.6",
+        activity: "Nozzle To Flange/Elbow Set Up",
+        kind: "WORK",
+        defaultDepartmentId: deptB.id,
+      },
+    });
+
     step1 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts1.id, seq: 1 } })).id;
     step2 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts2.id, seq: 2 } })).id;
     step3 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts3.id, seq: 3 } })).id;
+    step4 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts4.id, seq: 4, qcpItemId } })).id;
+    step5 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts5.id, seq: 5 } })).id;
+    unit1Id = unit1.id;
     unit2Step1 = (await owner.assemblyStep.create({ data: { unitId: unit2.id, templateStepId: ts1.id, seq: 1 } })).id;
 
     rejectCategoryId = (await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })).id;
@@ -338,6 +379,38 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     expect(stillOpen).toHaveLength(0);
     const nowClosed = await owner.ncr.findMany({ where: { id: { in: openBefore.map((n) => n.id) } } });
     expect(nowClosed.every((n) => n.status === "CLOSED")).toBe(true);
+  });
+
+  it("A4: reject then verify on an INSPECTION step linked to a real QcpItem records QcpExecution(REJECTED) then QcpExecution(ACCEPTED) as successive attempts — the assembly view and the QCP/hold-point view must agree", async () => {
+    // step4 is gated on step3 (now COMPLETE from the test above).
+    await startAssemblyStep(supB, { assemblyStepId: step4 });
+    await submitAssemblyStep(supB, { assemblyStepId: step4 });
+
+    const rejected = await rejectAssemblyStep(qc, { assemblyStepId: step4, categoryId: rejectCategoryId, detail: "recheck" });
+    expect(rejected.status).toBe("IN_PROGRESS");
+
+    const afterReject = await owner.qcpExecution.findMany({ where: { qcpItemId, unitId: unit1Id }, orderBy: { attemptNo: "asc" } });
+    expect(afterReject).toHaveLength(1);
+    expect(afterReject[0]).toMatchObject({ result: "REJECTED", clearedBy: qc.userId, attemptNo: 1 });
+
+    await submitAssemblyStep(supB, { assemblyStepId: step4 });
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step4 });
+    expect(verified.status).toBe("COMPLETE");
+
+    const afterVerify = await owner.qcpExecution.findMany({ where: { qcpItemId, unitId: unit1Id }, orderBy: { attemptNo: "asc" } });
+    expect(afterVerify).toHaveLength(2);
+    expect(afterVerify[1]).toMatchObject({ result: "ACCEPTED", clearedBy: qc.userId, attemptNo: 2 });
+  });
+
+  it("A4: verifying a WORK-kind step (no qcpItemId) records no QcpExecution — the sync is scoped to INSPECTION steps only", async () => {
+    // step5 is gated on step4 (now COMPLETE from the test above).
+    await startAssemblyStep(supB, { assemblyStepId: step5 });
+    await submitAssemblyStep(supB, { assemblyStepId: step5 });
+
+    const before = await owner.qcpExecution.count({});
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step5 });
+    expect(verified.status).toBe("COMPLETE");
+    expect(await owner.qcpExecution.count({})).toBe(before);
   });
 
   it("illegal transition: verifying a NOT_STARTED step is refused", async () => {
