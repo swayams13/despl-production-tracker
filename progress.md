@@ -2,6 +2,37 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — S11 NCR disposition UI, 4 Sep 2026
+
+**S11 done (local commit `05ee13d` on `feat/S11-ncr-ui`, not pushed).** `dispositionNcr` and its
+Server Action existed with zero callers — every rejection auto-opened an `Ncr` but nothing could
+ever move it past OPEN. Added `loadQcCockpit`'s `openNcrs` (one row per OPEN Ncr, reusing the
+existing `tenantNcrScope` rejection-chain join) and a new "NCRs awaiting disposition" card on
+`/qc` with an inline expand-in-place disposition form (same pattern as `dispatch-panel.tsx`'s
+`ApproveReleaseForm`), wired to the pre-existing `dispositionNcrAction`.
+
+Three decisions made and written into the commit: `reworkDueDate` surfaced only for REWORK/REPAIR;
+`reworkOwnerId` left out entirely (no user-picker component exists yet anywhere in this codebase);
+and — the one genuinely open question the work item flagged — **did not** add a maker-checker
+check to `dispositionNcr`, because `ncr.service.test.ts`'s own DB fixture has the same QC actor
+reject an operation and then disposition the resulting Ncr (lines 118/164) — reject and disposition
+are both QC judgment calls on one defect, not a submit/verify pair, and adding the check would
+have broken behavior the existing test already treats as correct.
+
+Verified: `pnpm typecheck`/`lint` clean, `pnpm test` 600/600, `pnpm test:db` 951/952 (the one
+failure is the same pre-existing, already-documented `process.service.test.ts` hold-point case).
+Real `/login` as `qc@despl.local` against the dev DB's one seeded OPEN Ncr: a SUPERVISOR actor's
+attempt was correctly refused FORBIDDEN with the `RefusalNote` rendering inline, then the QC actor
+recorded a REWORK disposition — status, disposition, notes and `reworkStartedAt` all round-tripped
+correctly and the row dropped out of the open list live, no refresh needed. Reset the dev DB's Ncr
+row back to OPEN afterward so the manual QA click doesn't leave the seed mutated.
+
+**S12 not started — still gated on D5.** The work item text says "DO NOT START THIS SESSION until
+I have told you the answer to the TPI/ASME record-integrity question"; `LEDGER.md`'s D5 row is
+still ☐. Skipped per the item's own instruction rather than guessing the answer.
+
+---
+
 ## Session — Gate 0 prevention items (§9 items 3+7), A4 QCP-inspection sync split out and merged, S6 started, 4 Sep 2026
 
 **Status: GATE 0 fully closed out; GATE 1 started (S6 done, PR open).**
