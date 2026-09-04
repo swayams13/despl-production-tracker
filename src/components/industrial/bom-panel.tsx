@@ -319,6 +319,7 @@ function BomItemForm({
   const [sourceQty, setSourceQty] = useState(editing?.sourceQty ?? "");
   const [material, setMaterial] = useState(editing?.material ?? "");
   const [uom, setUom] = useState(editing?.uom ?? "");
+  const [qtyPer, setQtyPer] = useState(editing?.qtyPer != null ? String(editing.qtyPer) : "");
   const [parentBomItemId, setParentBomItemId] = useState(editing?.parentBomItemId != null ? String(editing.parentBomItemId) : "");
 
   const save = () => {
@@ -326,6 +327,10 @@ function BomItemForm({
     if (!sourceQty.trim()) return toast.error("Quantity is required.");
     const n = Number(itemNo);
     if (!Number.isInteger(n) || n <= 0) return toast.error("Item no. must be a positive integer.");
+    const qtyPerNum = qtyPer.trim() ? Number(qtyPer) : null;
+    if (qtyPer.trim() && (!Number.isFinite(qtyPerNum) || qtyPerNum! <= 0)) {
+      return toast.error("Qty per unit must be a positive number.");
+    }
 
     start(async () => {
       // Task review Important #2: in edit mode, an emptied field means
@@ -341,6 +346,7 @@ function BomItemForm({
             sourceQty: sourceQty.trim(),
             material: material.trim() || null,
             uom: uom.trim() || null,
+            qtyPer: qtyPerNum,
             parentBomItemId: parentBomItemId ? Number(parentBomItemId) : null,
           })
         : await createBomItemAction(jobId, {
@@ -350,6 +356,7 @@ function BomItemForm({
             sourceQty: sourceQty.trim(),
             material: material.trim() || undefined,
             uom: uom.trim() || undefined,
+            qtyPer: qtyPerNum ?? undefined,
             parentBomItemId: parentBomItemId ? Number(parentBomItemId) : undefined,
           });
       if (!r.ok) toast.error(r.message);
@@ -371,6 +378,7 @@ function BomItemForm({
       <input className="ws-detail" placeholder="Qty (e.g. 40 NOS)" value={sourceQty} onChange={(e) => setSourceQty(e.target.value)} style={{ width: 130 }} />
       <input className="ws-detail" placeholder="Material (optional)" value={material} onChange={(e) => setMaterial(e.target.value)} style={{ width: 130 }} />
       <input className="ws-detail" placeholder="UoM (optional)" value={uom} onChange={(e) => setUom(e.target.value)} style={{ width: 90 }} />
+      <input className="ws-detail" type="number" min={0} step="any" placeholder="Qty per unit (optional)" value={qtyPer} onChange={(e) => setQtyPer(e.target.value)} style={{ width: 150 }} title="Numeric quantity required per Unit — drives shortage calculation" />
       <select className="btn" value={parentBomItemId} onChange={(e) => setParentBomItemId(e.target.value)} aria-label="Parent BOM item">
         <option value="">No parent (top level)</option>
         {parentOptions.map((it) => <option key={it.id} value={it.id}>{it.itemNo} — {it.partName}</option>)}
