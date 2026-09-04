@@ -228,14 +228,18 @@ export interface WorkspaceFilter {
   sort?: string; // critical (default) | overdue | due
 }
 
-const STAGE_COUNT = 25;
-
-/** Exported so myday.read.ts's cross-job row labels reuse this instead of a second implementation. */
+/**
+ * B7: no more universal "of 25" — the work-order stage count is per family
+ * (`WorkOrderStage`), not a fixed constant, so this just names the stage
+ * number(s) a process rolls up into without asserting a family-wide total.
+ * Exported so myday.read.ts's cross-job row labels reuse this instead of a
+ * second implementation.
+ */
 export function stageLabel(workOrderStages: number[]): string {
   if (workOrderStages.length === 0) return "—";
   const lo = Math.min(...workOrderStages);
   const hi = Math.max(...workOrderStages);
-  return lo === hi ? `Stage ${lo} of ${STAGE_COUNT}` : `Stages ${lo}–${hi} of ${STAGE_COUNT}`;
+  return lo === hi ? `Stage ${lo}` : `Stages ${lo}–${hi}`;
 }
 
 function sameCalendarDay(a: Date, b: Date): boolean {

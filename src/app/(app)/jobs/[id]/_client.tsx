@@ -197,7 +197,7 @@ export function JobDetailClient({
         <>
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="hd">
-              <h3>Stage spine — 25-stage work order</h3>
+              <h3>Stage spine{jobRollup.length > 0 ? ` — ${jobRollup.length}-stage work order` : ""}</h3>
               <div className="legend">
                 <span className="chip c-complete"><i />Done</span>
                 <span className="chip c-progress"><i />Active</span>

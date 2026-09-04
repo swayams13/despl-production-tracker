@@ -51,6 +51,9 @@ function readJson<T>(file: string): T {
 interface LeadTimeModel {
   calendarBasis: { value: string; weekOff: string[]; holidays?: { date: string; name: string }[] };
   departments: { code: string; name: string; scope: string | null; isOfficeDept: boolean }[];
+  /// B7: display names for the 25-stage work-order reporting view, keyed by
+  /// stage number as a string (JSON object keys are always strings).
+  workOrderStageNames: { names: Record<string, string> };
   processes: {
     code: number;
     name: string;
@@ -670,6 +673,18 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
       const families = await tx.productFamily.findMany({ where: { tenantId } });
       const familyIdByCode = new Map(families.map((f) => [f.code, f.id]));
       stats.productFamilies = families.length;
+
+      // ── 6a. Work-order stage names (B7) — PRESSURE_VESSEL only; other
+      // families have no stage crosswalk yet (TemplateProcess.workOrderStages
+      // stays empty for them) ─────────────────────────────────────────────
+      await tx.workOrderStage.createMany({
+        data: Object.entries(leadTime.workOrderStageNames.names).map(([stageNo, name]) => ({
+          tenantId,
+          familyId: familyIdByCode.get("PRESSURE_VESSEL")!,
+          stageNo: Number(stageNo),
+          name,
+        })),
+      });
 
       // ── 7. PRESSURE_VESSEL process template v1 (the 36-process spine) ──
       const pvTemplate = await tx.processTemplate.create({
