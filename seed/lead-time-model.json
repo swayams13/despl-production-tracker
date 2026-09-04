@@ -40,7 +40,15 @@
     "weekOff": [
       "SUN"
     ],
-    "TODO": "CONFIRM WITH SJ: are the printed 'Days' working days or calendar days? Holidays list required."
+    "holidays": [
+      { "date": "2026-01-26", "name": "Republic Day" },
+      { "date": "2026-08-15", "name": "Independence Day" },
+      { "date": "2026-10-02", "name": "Gandhi Jayanti" },
+      { "date": "2027-01-26", "name": "Republic Day" },
+      { "date": "2027-08-15", "name": "Independence Day" },
+      { "date": "2027-10-02", "name": "Gandhi Jayanti" }
+    ],
+    "TODO": "PROVISIONAL (D6, 4 Sep 2026, from Swayam, pending SJ confirmation): printed 'Days' are calendar days, week-off is Sunday only -- confirmed, matches the pre-existing default. Holiday list currently seeded with only the 3 fixed-date gazetted national holidays; festival holidays (Diwali, Holi, etc.) are NOT included -- their dates vary and DESPL's actual shop-floor list hasn't been confirmed. This whole block may change after that confirmation."
   },
   "durationPolicy": {
     "mode": "FIXED_BASELINE_EDITABLE_PER_PROJECT",
