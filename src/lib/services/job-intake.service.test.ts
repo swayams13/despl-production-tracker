@@ -179,6 +179,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
   // fails on the FK and the swallowed `.catch` used to leave every test job
   // behind in despl_test. Delete createJob's own writes bottom-up first.
   async function deleteJobAndChildren(id: number) {
+    // Component's equipmentId/unitId FKs are not onDelete: Cascade (only
+    // ComponentOperation cascades off Component) — must go before bomItem/unit.
+    await owner.component.deleteMany({ where: { equipment: { jobId: id } } });
     await owner.bomItem.deleteMany({ where: { equipment: { jobId: id } } });
     await owner.unit.deleteMany({ where: { equipment: { jobId: id } } });
     await owner.equipment.deleteMany({ where: { jobId: id } });
@@ -426,6 +429,38 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     expect(
       await owner.materialIdentification.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),
     ).toBe(0);
+  });
+
+  it("S16: materialises Component + ComponentOperation for typed BOM lines copied at intake", async () => {
+    const refs = await seedRefs();
+    // Any BomItem with a componentTypeId that has a PUBLISHED RouteTemplateVersion —
+    // the seeded route library (prisma/seed.ts §8) applies to every family (familyId: null).
+    const typedBomItem = await owner.bomItem.findFirstOrThrow({
+      where: { componentTypeId: { not: null } },
+      include: { equipment: { include: { _count: { select: { bomItems: true } } } } },
+    });
+    const sourceEquipment = typedBomItem.equipment;
+
+    const r = await createJob(
+      actor(),
+      base({ jobNumber: "TEST-COMP-1", copyBomFromEquipmentId: sourceEquipment.id }, refs),
+    );
+    created.push(r.jobId);
+
+    const newEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+    const newComponents = await owner.component.findMany({
+      where: { equipmentId: newEquipment.id },
+      include: { operations: true, bomItem: true },
+    });
+
+    expect(newComponents.length).toBe(r.componentCount);
+    expect(newComponents.length).toBeGreaterThan(0);
+    for (const c of newComponents) {
+      expect(c.bomItemId).not.toBeNull();
+      expect(c.bomItem!.equipmentId).toBe(newEquipment.id); // not the source equipment's BomItem row
+      expect(c.operations.length).toBeGreaterThan(0);
+      for (const op of c.operations) expect(op.status).toBe("NOT_STARTED");
+    }
   });
 
   it("copyBom preserves a parent/child BOM hierarchy (fix wave, Important #4)", async () => {

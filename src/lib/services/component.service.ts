@@ -21,7 +21,8 @@ import {
   type RecordPaintRecordInput,
   type RecordDftReadingInput,
 } from "@/lib/shared/schemas";
-import type { ComponentOperation, DftReading, OperationStatus, PaintRecord } from "@/generated/prisma/client";
+import type { ComponentOperation, DftReading, PaintRecord } from "@/generated/prisma/client";
+import { OperationStatus } from "@/generated/prisma/enums";
 
 /** P1 (Phase 5): a PAINTING op's coats requirement — 1 if unset. */
 const DEFAULT_COATS_REQUIRED = 1;
@@ -566,4 +567,97 @@ export async function recordDftReading(actor: Actor, input: RecordDftReadingInpu
       };
     });
   });
+}
+
+/**
+ * S16 (Gate 2): materialise Component + ComponentOperation rows for BomItem
+ * rows created inside job-intake.service.ts's createJob (the copyBom path —
+ * the only place createJob itself writes typed BomItem rows today; a BOM
+ * imported afterward via bom.service.ts's importBomItems never carries
+ * componentTypeId at all, and linking it via updateBomItem is a separate,
+ * un-materialised follow-on, not this item's scope). Mirrors
+ * scripts/seed-despl320-components.ts's loop instead of inventing a new
+ * mechanism — same `(unitId, tag)` scoping, same "no route version → skip,
+ * don't error" behaviour, `createMany` for the operations batch.
+ *
+ * A BomItem with no `componentTypeId`, or a `componentTypeId` with no
+ * PUBLISHED `RouteTemplateVersion` for the job's family, is skipped — not an
+ * error. Neither is malformed data; both mean "this part isn't separately
+ * routed yet."
+ */
+export async function materializeComponentsFromBomItems(
+  tx: Tx,
+  familyId: number,
+  equipmentId: number,
+  bomItemIds: number[],
+): Promise<{ componentCount: number; skippedNoRoute: number }> {
+  if (bomItemIds.length === 0) return { componentCount: 0, skippedNoRoute: 0 };
+
+  const bomItems = await tx.bomItem.findMany({
+    where: { id: { in: bomItemIds }, componentTypeId: { not: null } },
+    select: { id: true, componentTypeId: true, partName: true, itemNo: true },
+  });
+  if (bomItems.length === 0) return { componentCount: 0, skippedNoRoute: 0 };
+
+  const units = await tx.unit.findMany({ where: { equipmentId }, select: { id: true }, orderBy: { id: "asc" } });
+
+  const typeIds = [...new Set(bomItems.map((b) => b.componentTypeId!))];
+  const templates = await tx.routeTemplate.findMany({
+    where: { componentTypeId: { in: typeIds }, OR: [{ familyId }, { familyId: null }] },
+    include: {
+      versions: { where: { status: "PUBLISHED" }, orderBy: { version: "desc" }, include: { steps: { orderBy: { seq: "asc" } } } },
+    },
+  });
+  // A family-specific route template takes precedence over the generic (familyId null) one
+  // for the same componentTypeId; within a template, the highest-version PUBLISHED row wins.
+  const templateByTypeId = new Map<number, (typeof templates)[number]>();
+  for (const t of templates) {
+    const existing = templateByTypeId.get(t.componentTypeId);
+    if (!existing || (existing.familyId == null && t.familyId != null)) templateByTypeId.set(t.componentTypeId, t);
+  }
+
+  let componentCount = 0;
+  let skippedNoRoute = 0;
+  const usedTags = new Set<string>();
+
+  for (const b of bomItems) {
+    const routeVersion = templateByTypeId.get(b.componentTypeId!)?.versions[0];
+    if (!routeVersion) {
+      skippedNoRoute++;
+      continue;
+    }
+
+    const scopes: (number | null)[] = units.length > 0 ? units.map((u) => u.id) : [null];
+    for (const unitId of scopes) {
+      let tag = b.partName;
+      const tagKey = `${unitId}:${tag}`;
+      if (usedTags.has(tagKey)) tag = `${b.partName} (#${b.itemNo})`;
+      usedTags.add(`${unitId}:${tag}`);
+
+      const component = await tx.component.create({
+        data: {
+          equipmentId,
+          unitId,
+          bomItemId: b.id,
+          tag,
+          componentTypeId: b.componentTypeId!,
+          routeVersionId: routeVersion.id,
+        },
+      });
+
+      if (routeVersion.steps.length > 0) {
+        await tx.componentOperation.createMany({
+          data: routeVersion.steps.map((step) => ({
+            componentId: component.id,
+            seq: step.seq,
+            operationId: step.operationId,
+            status: OperationStatus.NOT_STARTED,
+          })),
+        });
+      }
+      componentCount++;
+    }
+  }
+
+  return { componentCount, skippedNoRoute };
 }

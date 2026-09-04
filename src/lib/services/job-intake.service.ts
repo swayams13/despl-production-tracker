@@ -13,6 +13,7 @@ import {
 } from "@/lib/shared/schemas";
 import { validateSpecs } from "@/lib/shared/specs";
 import { notifyJobCreated } from "./notifications.service";
+import { materializeComponentsFromBomItems } from "./component.service";
 
 /**
  * Job intake (docs/superpowers/specs/2026-08-22-job-intake-design.md).
@@ -35,6 +36,8 @@ export interface CreateJobResult {
   unitCount: number;
   qcpItemCount: number;
   bomItemCount: number;
+  /** Component rows materialised from the copied BOM's typed items — see materializeComponentsFromBomItems. */
+  componentCount: number;
   /**
    * QCP source items whose linked process code has no counterpart in the new
    * job's route. Reported, never silently dropped — the wizard lists them.
@@ -238,10 +241,15 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdByCode, actor.tenantId)
         : { itemCount: 0, unmatchedProcessCodes: [] as string[] };
 
-      const bomItemCount =
+      const bom =
         parsed.copyBomFromEquipmentId != null && firstEquipmentId != null
           ? await copyBom(tx, parsed.copyBomFromEquipmentId, firstEquipmentId, actor.tenantId)
-          : 0;
+          : { count: 0, createdIds: [] };
+
+      const components =
+        bom.createdIds.length > 0 && firstEquipmentId != null
+          ? await materializeComponentsFromBomItems(tx, parsed.familyId, firstEquipmentId, bom.createdIds)
+          : { componentCount: 0, skippedNoRoute: 0 };
 
       const result: CreateJobResult = {
         jobId: job.id,
@@ -250,7 +258,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         edgeCount: version.edges.length,
         unitCount,
         qcpItemCount: qcp.itemCount,
-        bomItemCount,
+        bomItemCount: bom.count,
+        componentCount: components.componentCount,
         unmatchedQcpProcessCodes: qcp.unmatchedProcessCodes,
       };
 
@@ -270,6 +279,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             processCount: result.processCount,
             equipmentCount: parsed.equipments.length,
             unitCount: result.unitCount,
+            bomItemCount: result.bomItemCount,
+            componentCount: result.componentCount,
             excludedProcessCodes: parsed.excludedProcessCodes,
           },
           eventType: "JobCreated",
@@ -532,7 +543,7 @@ async function copyBom(
   sourceEquipmentId: number,
   targetEquipmentId: number,
   tenantId: number,
-): Promise<number> {
+): Promise<{ count: number; createdIds: number[] }> {
   const source = await tx.equipment.findFirst({
     where: { id: sourceEquipmentId, job: { tenantId } },
     include: { bomItems: { orderBy: { itemNo: "asc" } } },
@@ -540,7 +551,7 @@ async function copyBom(
   if (!source) {
     throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Equipment", equipmentId: sourceEquipmentId });
   }
-  if (source.bomItems.length === 0) return 0;
+  if (source.bomItems.length === 0) return { count: 0, createdIds: [] };
 
   const created = await tx.bomItem.createManyAndReturn({
     data: source.bomItems.map((b) => ({
@@ -572,5 +583,5 @@ async function copyBom(
     await tx.bomItem.update({ where: { id: targetChildId }, data: { parentBomItemId: targetParentId } });
   }
 
-  return source.bomItems.length;
+  return { count: source.bomItems.length, createdIds: created.map((c) => c.id) };
 }

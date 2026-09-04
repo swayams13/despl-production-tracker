@@ -1077,7 +1077,7 @@ function StepReview({
           <div className="hd"><h3>Job created</h3></div>
           <div style={{ padding: 16 }}>
             <p style={{ margin: "0 0 10px" }}>
-              <b>{createdJob.publicId}</b> — {createdJob.unitCount} unit{createdJob.unitCount === 1 ? "" : "s"}, {createdJob.processCount} processes, {createdJob.qcpItemCount} QCP items, {createdJob.bomItemCount} BOM lines.
+              <b>{createdJob.publicId}</b> — {createdJob.unitCount} unit{createdJob.unitCount === 1 ? "" : "s"}, {createdJob.processCount} processes, {createdJob.qcpItemCount} QCP items, {createdJob.bomItemCount} BOM lines, {createdJob.componentCount} components.
             </p>
             {createdJob.unmatchedQcpProcessCodes.length > 0 && (
               <p className="note" style={{ textAlign: "left", margin: "0 0 10px" }}>
