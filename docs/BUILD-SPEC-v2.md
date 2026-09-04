@@ -80,7 +80,9 @@ else -> INFEASIBLE (short by N days; must be escalated before the order is accep
 
 ### 1.6 Calendar
 
-Default: **calendar days, 6-day week, Sunday off, no holiday list.** Isolated in one module (`lib/schedule/calendar.ts`) because C1 will change it.
+Default: **calendar days, 6-day week, Sunday off, 3 fixed-date national holidays/year seeded** (Republic Day, Independence Day, Gandhi Jayanti — `seed/lead-time-model.json`'s `calendarBasis.holidays`). Isolated in one module (`lib/schedule/calendar.ts`) because C1 may still change it.
+
+**Provisional answer to C1 (D6, 4 Sep 2026, from Swayam):** calendar days is confirmed correct — a printed lead time of "10 days" already includes any Sundays/holidays that fall inside that span, so the team must finish without those days counting as available work time, not get them added back. Holiday list: every Sunday plus major national holidays, nothing else. Currently seeded with only the 3 fixed-date gazetted holidays; festival holidays (Diwali, Holi, etc.) are deliberately **not** included — their dates vary and DESPL's actual shop-floor list isn't confirmed yet. **Still pending final confirmation from SJ** — treat as the working default, not closed.
 
 ---
 
@@ -186,7 +188,7 @@ v1 is in-app only (PRD decision, 03 Aug 2026 — unchanged). Payload is stored e
 
 | # | Question | Blocks | Default in use |
 |---|---|---|---|
-| C1 | Are the table's "Days" **working days or calendar days**? Holiday list? | Every computed date; changes the DE0467 finding from 22 days to ~6 | Calendar days, 6-day week, Sun off |
+| C1 | Are the table's "Days" **working days or calendar days**? Holiday list? | Every computed date; changes the DE0467 finding from 22 days to ~6 | **Provisionally answered (D6, 4 Sep 2026, Swayam):** calendar days, 6-day week, Sun off + 3 fixed national holidays seeded. Festival holidays not yet confirmed. Pending SJ sign-off — see §1.6. |
 | C2 | Confirm the concurrency the table implies (e.g. nozzle fab running while shell NDE is open) | Layer-2 lags | Fitted from the printed table |
 | C3 | Confirm procurement start points: plates after design calc (P3); pipes + bought-out after drawings (P4) | P7/P8/P9 planned dates | As derived |
 | C4 | Does the 17-week envelope hold for **40 units** (DE0463) and for **3 equipments in one order** (DE0467)? | Per-project scaling | Fixed baseline, editable |

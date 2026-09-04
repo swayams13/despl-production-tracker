@@ -49,7 +49,7 @@ function readJson<T>(file: string): T {
 // ── source file shapes (only what we read) ────────────────────────────────
 
 interface LeadTimeModel {
-  calendarBasis: { value: string; weekOff: string[] };
+  calendarBasis: { value: string; weekOff: string[]; holidays?: { date: string; name: string }[] };
   departments: { code: string; name: string; scope: string | null }[];
   processes: {
     code: number;
@@ -630,15 +630,24 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
         SAT: 6,
         SUN: 7,
       };
-      await tx.workCalendar.create({
+      const workCalendar = await tx.workCalendar.create({
         data: {
           tenantId,
           code: leadTime.calendarBasis.value,
-          name: "Default — 6-day week, Sunday off (C1 pending DESPL confirmation)",
+          name: "Default — 6-day week, Sunday off, national holidays (C1/D6 provisional pending SJ confirmation)",
           weekOffDays: leadTime.calendarBasis.weekOff.map((d) => weekOffMap[d]),
           isDefault: true,
         },
       });
+      if (leadTime.calendarBasis.holidays?.length) {
+        await tx.holiday.createMany({
+          data: leadTime.calendarBasis.holidays.map((h) => ({
+            calendarId: workCalendar.id,
+            date: new Date(h.date),
+            name: h.name,
+          })),
+        });
+      }
 
       // ── 6. Product families ──────────────────────────────────────────
       const familyDefs = [
