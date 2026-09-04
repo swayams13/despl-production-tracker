@@ -5119,3 +5119,37 @@ Almost everything below is **latent** — the engine and the auth primitives are
 2. **Per DESPL's own table, 17 weeks is both the minimum and the maximum** — rows 35–36 print a single value. There is no documented "fast" case.
 3. **12 data issues** in the live trackers — see `seed/data-issues.json` (job number mismatch, lost sub-assembly labels, misused Material Identification column, ambiguous dates, no planned dates, no owners).
 4. **DESPL-320 (the pilot job) still has no order date and no delivery date** — genuinely unknown at seed time and left null rather than invented (`prisma/seed.ts`). Surfaced by building `lib/services/`: the scheduler correctly *refuses* to plan a job with no anchor date (`SCHEDULE_DATA_MISSING`), so the pilot cannot be scheduled until DESPL supplies its PO/order date and committed dispatch date. DE0463 and DE0467 both already carry real dates and schedule fine. **This is the pilot's critical-path input for the schedule/dashboard screens.**
+
+## Session — Fix command-center.read.ts's department-code hardcode (found by B10), 4 Sep 2026
+
+**Item:** the `command-center.read.ts` finding B10's literal guard surfaced — hardcoded all 13 of DESPL's real department codes across `OFFICE_DEPT_CODES`/`ALL_DEPT_CODES`, used for `/command/[dept]` and `/my-day`/`/departments/[id]`'s Command Center routing. Branch `fix/command-center-dept-codes-data-driven`.
+
+**Investigated first:** `Department` already has a `scope` column, but it's free-text description ("Order review, kick-off, client interface"), not an office/floor classification — genuinely no data-level representation existed. Presented the fix to Swayam before touching schema: add `Department.isOfficeDept` (boolean), sourced from `seed/lead-time-model.json` going forward, not hardcoded in `src/`. Confirmed.
+
+**What changed:**
+- Migration `20260904220000_department_is_office_dept`: adds `Department.isOfficeDept` (NOT NULL, default false), backfills the 6 codes today's hardcoded array already listed as office — behavior-preserving. Applied to `despl_test` only, `migrate diff --exit-code` → 0.
+- `seed/lead-time-model.json`'s 13 department entries each gained `isOfficeDept`; `prisma/seed.ts` passes it through — the real source of truth moves to seed data.
+- `command-center.read.ts`: deleted `OFFICE_DEPT_CODES`/`ALL_DEPT_CODES`. `classifyDeptCode` now takes the caller's own department lookup result (`{isOfficeDept: boolean} | null`) instead of matching against hardcoded arrays — stays pure/DB-free (table-driven-testable, per its own original design intent), just decides from real data instead of literals. Failing-test-first: rewrote the 15-case `.each` table (slug strings) into 3 direct cases (office/floor/invalid) matching the new signature — red (old signature) before, green after. `PIPELINE_LABELS` (per-office-dept English copy) is a genuinely different, deeper problem — deliberately left alone, type loosened to `Record<string, ...>` with a new `DEFAULT_PIPELINE_LABELS` fallback so a future office department with no authored copy degrades gracefully instead of crashing.
+- `command/[dept]/page.tsx`: now queries the department once (with `isOfficeDept` selected) instead of twice (a pure-function-then-redundant-DB-lookup) — simplification that fell out of the fix, not scope creep.
+- `departments/[id]/page.tsx` / `departments.read.ts`: `DeptDetail` gained `isOfficeDept`; the "Command Center →" link now derives from it instead of the deleted array.
+- `my-day/page.tsx`: `myDepartments` selects `isOfficeDept`; the office-dept-membership check for the Command Center link uses it directly.
+
+**Verified:** `pnpm typecheck`/`lint`/`test` clean (595/595 — 15→3 test-count delta from the rewritten table, expected). `pnpm test:db` 963/964 (same pre-existing unrelated `process.service.test.ts` failure). Manually confirmed zero remaining department-code string literals in `command-center.read.ts`. Live browser pass against `despl_test` (real `/login` as `admin@despl.local`): `/command/qc` renders the real Quality Control cockpit; `/command/fabrication` correctly redirects to `/workspace`; `/command/not-a-real-dept` correctly 404s; `/departments/6` (QC) shows "Command Center →"; `/departments/7` (Fabrication Prep) correctly has no such link — all four routing/link outcomes proven live, not simulated, and all now driven by the real `isOfficeDept` column.
+
+**Not fixed here, correctly out of scope:** `PIPELINE_LABELS`'s per-department English copy authoring — a deeper, separate design problem (UI copy as code vs. data) than what B10's matcher actually flagged (it's bare object keys, not quoted string literals, so B10 never caught it either). Named for a future item, not silently expanded into this one.
+
+**Next:** B5 (`welding.service.ts`'s `FABRICATION` department-code hardcode — the other item B10 confirmed still open) is the next natural pick before Phase C authoring, since it's the same class of bug and already discovered.
+
+## Session — B5: un-hardcode welding.service.ts's FABRICATION department lookup, 4 Sep 2026
+
+**Item:** `welding.service.ts:24`'s `fabricationDepartmentId` looked up `Department` by `code: "FABRICATION"` and threw `NOT_FOUND` for any tenant whose taxonomy names it differently — the last B10-confirmed literal besides the one fixed above. Same branch (`fix/command-center-dept-codes-data-driven`).
+
+**Investigated first:** the blueprint prompt (`docs/mos-blueprint/PROMPTS.md` B5) offers three options and prefers (a) deriving over configuring. `WeldJoint.componentId` is nullable — a joint isn't always tied to a `Component`/`ComponentOperation`, so deriving per-call from the specific joint's operation isn't reliable. But `OperationRef` (tenant-scoped reference table) already carries a `WELDING` row with `defaultDepartmentId`, seeded from `seed/component-routes.json`'s `canonicalOperations.WELDING.dept` — the exact same tenant-authored data every other component route's department assignment already uses. That's a real derivation, not a new hardcode, and needs zero schema change.
+
+**What changed:**
+- `welding.service.ts`: renamed `fabricationDepartmentId` → `weldingDepartmentId`; it now does `tx.operationRef.findFirst({ where: { tenantId, code: "WELDING" } })` and returns `defaultDepartmentId`, throwing `NOT_FOUND` (`entity: "OperationRef"`) if the row or its department link is missing. One call site (`logWeldJoint`) updated.
+- `welding.service.test.ts`: added the refusal case the prompt asks for — a tenant with no `WELDING` `OperationRef` gets `NOT_FOUND` from `logWeldJoint`, before it ever reaches the job/component lookups.
+
+**Verified:** `pnpm typecheck` clean. `pnpm test:db`: 965/966 — the same pre-existing unrelated `process.service.test.ts` "verify refuses at a genuinely uncleared hold point" failure noted in the session above, unrelated to this change; every `welding.service.test.ts` case (including the new one) passes, and the existing FABRICATION-scoped tests still pass because the seeded `WELDING` OperationRef's `defaultDepartmentId` resolves to the same Fabrication department the old hardcode pointed at — behavior-preserving for DESPL-320.
+
+**Not fixed here:** B6 (`component.service.ts`'s `operationCode === "PAINTING"` literal) — the prompt sequences it strictly after B5, as its own commit.

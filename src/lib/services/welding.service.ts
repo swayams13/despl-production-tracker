@@ -20,10 +20,19 @@ import type { WeldJoint, NdtResult } from "@/generated/prisma/client";
  * mutation in this codebase.
  */
 
-async function fabricationDepartmentId(tx: Tx, tenantId: number): Promise<number> {
-  const dept = await tx.department.findFirst({ where: { tenantId, code: "FABRICATION" } });
-  if (!dept) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Department", code: "FABRICATION" });
-  return dept.id;
+/**
+ * B5: was a hardcoded `code: "FABRICATION"` department lookup — broke for any
+ * tenant whose taxonomy names it differently. Derives instead from the
+ * WELDING `OperationRef`'s `defaultDepartmentId`, the same tenant-authored
+ * seed data (`seed/component-routes.json`'s `canonicalOperations.WELDING.dept`)
+ * that already drives every component route's department assignment.
+ */
+async function weldingDepartmentId(tx: Tx, tenantId: number): Promise<number> {
+  const op = await tx.operationRef.findFirst({ where: { tenantId, code: "WELDING" } });
+  if (!op?.defaultDepartmentId) {
+    throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "OperationRef", code: "WELDING" });
+  }
+  return op.defaultDepartmentId;
 }
 
 /**
@@ -124,7 +133,7 @@ export async function logWeldJoint(actor: Actor, input: LogWeldJointInput): Prom
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const deptId = await fabricationDepartmentId(tx, actor.tenantId);
+    const deptId = await weldingDepartmentId(tx, actor.tenantId);
     requireDepartmentScope(actor, deptId);
 
     return audited(tx, actor, async () => {
