@@ -1,6 +1,28 @@
 import { afterAll, describe, expect, it } from "vitest";
-import { loadPrioritizedJob, loadOpenHoldPoints, loadJobKpis } from "./workspace.read";
+import { loadPrioritizedJob, loadOpenHoldPoints, loadJobKpis, stageLabel } from "./workspace.read";
 import { ROLES, type Actor } from "@/lib/authz";
+
+/**
+ * B9: a family with no `workOrderStages[]` crosswalk (the empty-array case
+ * `TemplateProcess`'s own doc comment calls out) must render as a plain "—",
+ * never a hardcoded-count label — this is the pure half of "a family may opt
+ * out of the 25-stage reporting view entirely" (the DB-backed half, proving
+ * `loadJobSpines` itself returns no segments for such a job, lives in
+ * spine.read.stage-names.test.ts).
+ */
+describe("stageLabel (pure)", () => {
+  it("empty workOrderStages (a family with no reporting crosswalk) renders \"—\", not a bogus count", () => {
+    expect(stageLabel([])).toBe("—");
+  });
+
+  it("a single stage number", () => {
+    expect(stageLabel([6])).toBe("Stage 6");
+  });
+
+  it("a range of stage numbers, no universal total appended", () => {
+    expect(stageLabel([5, 6, 7])).toBe("Stages 5–7");
+  });
+});
 
 /**
  * Read-only wiring: spine + CPM + prioritizer against real bootstrapped data.
