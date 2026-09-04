@@ -55,12 +55,32 @@ export interface ReworkSummary {
   totalReworkHours: number;
 }
 
+/**
+ * S11 — one row per Ncr still in OPEN status, i.e. rejected but never
+ * dispositioned (`dispositionNcr` is the only legal transition out of OPEN;
+ * REWORK_IN_PROGRESS/DISPOSITIONED/CLOSED are all past that decision, so they
+ * don't belong in an actionable list).
+ */
+export interface OpenNcrRow {
+  ncrId: number;
+  jobId: number;
+  jobNumber: string;
+  unitId: number | null;
+  serialNo: string | null;
+  entityLabel: string;
+  categoryName: string;
+  rejectionDetail: string | null;
+  rejectedByName: string;
+  rejectedAt: string;
+}
+
 export interface QcCockpit {
   queue: QcQueueRow[];
   holdPoints: GlobalHoldPoint[];
   yieldTrend: WeeklyYield[];
   rejectsByCheckpoint: RejectByCheckpoint[];
   rework: ReworkSummary;
+  openNcrs: OpenNcrRow[];
 }
 
 interface QueueRow {
@@ -267,12 +287,83 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
           10,
       ) / 10;
 
+    // ── S11: OPEN Ncrs, i.e. rejected and awaiting a QC disposition ─────────
+    const openNcrRows = await tx.ncr.findMany({
+      where: { status: "OPEN", ...tenantNcrScope },
+      orderBy: { id: "asc" },
+      select: {
+        id: true,
+        dispositionNotes: true,
+        componentOperationRejection: {
+          select: {
+            detail: true,
+            rejectedAt: true,
+            rejector: { select: { name: true } },
+            category: { select: { name: true } },
+            componentOperation: {
+              select: {
+                component: { select: { tag: true, unitId: true, unit: { select: { serialNo: true } }, equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } } } },
+                operation: { select: { name: true } },
+              },
+            },
+          },
+        },
+        assemblyStepRejection: {
+          select: {
+            detail: true,
+            rejectedAt: true,
+            rejector: { select: { name: true } },
+            category: { select: { name: true } },
+            assemblyStep: {
+              select: {
+                templateStep: { select: { activity: true } },
+                unit: { select: { id: true, serialNo: true, equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const openNcrs: OpenNcrRow[] = openNcrRows.map((n) => {
+      const cor = n.componentOperationRejection;
+      const asr = n.assemblyStepRejection;
+      if (cor) {
+        const c = cor.componentOperation.component;
+        return {
+          ncrId: n.id,
+          jobId: c.equipment.jobId,
+          jobNumber: c.equipment.job.jobNumber,
+          unitId: c.unitId,
+          serialNo: c.unit?.serialNo ?? null,
+          entityLabel: `${c.tag} · ${cor.componentOperation.operation.name}`,
+          categoryName: cor.category.name,
+          rejectionDetail: cor.detail,
+          rejectedByName: cor.rejector.name,
+          rejectedAt: cor.rejectedAt.toISOString(),
+        };
+      }
+      const step = asr!.assemblyStep;
+      return {
+        ncrId: n.id,
+        jobId: step.unit.equipment.jobId,
+        jobNumber: step.unit.equipment.job.jobNumber,
+        unitId: step.unit.id,
+        serialNo: step.unit.serialNo,
+        entityLabel: step.templateStep.activity,
+        categoryName: asr!.category.name,
+        rejectionDetail: asr!.detail,
+        rejectedByName: asr!.rejector.name,
+        rejectedAt: asr!.rejectedAt.toISOString(),
+      };
+    });
+
     return {
       queue,
       holdPoints,
       yieldTrend,
       rejectsByCheckpoint: rejectsByCheckpoint.slice(0, 8),
       rework: { openCount, totalReworkHours },
+      openNcrs,
     };
   });
 }
