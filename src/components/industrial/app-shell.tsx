@@ -115,10 +115,19 @@ const icons = {
   ),
 };
 
-// The four destinations shared by the tablet icon rail and phone bottom nav
-// (Task 4, SPEC-supervisor-ui-v3 §3 SupervisorNav row). Order is exact.
+// Destinations shared by the tablet icon rail and phone bottom nav
+// (Task 4, SPEC-supervisor-ui-v3 §3 SupervisorNav row, extended by S13 with
+// the three real desktop-sidebar destinations a shop-floor tablet had no way
+// to reach below 1024px). Order is exact.
+// ponytail: /workspace, /qc, /jobs reuse the desktop icon set (icons.*) rather
+// than adding new navXxx-style glyphs in the thicker rail stroke — a visual
+// mismatch, not a functional one. Match the stroke style when someone revisits
+// the icon set.
 const SHELL_NAV: { href: string; label: string; icon: ReactNode; badge?: "overdue" | "unread" }[] = [
   { href: "/my-day", label: "Today", icon: icons.navToday, badge: "overdue" },
+  { href: "/workspace", label: "Workspace", icon: icons.workspace },
+  { href: "/qc", label: "QC", icon: icons.qc },
+  { href: "/jobs", label: "Jobs", icon: icons.jobs },
   { href: "/board", label: "Board", icon: icons.navBoard },
   { href: "/alerts", label: "Alerts", icon: icons.navAlerts, badge: "unread" },
   { href: "/profile", label: "Profile", icon: icons.navProfile },
@@ -189,14 +198,14 @@ function notificationHref(n: NotificationRow): string | null {
 export function AppShell({
   children,
   userName,
-  userRole,
+  userRoles,
   overdueCount,
   notifications,
   jobs,
 }: {
   children: ReactNode;
   userName: string;
-  userRole: string;
+  userRoles: string[];
   overdueCount: number;
   notifications: { unreadCount: number; recent: NotificationRow[] };
   jobs: JobListItem[];
@@ -204,7 +213,7 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const initials = userName.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
-  const roleLabel = ROLE_LABEL[userRole] ?? userRole;
+  const roleLabel = userRoles.map((r) => ROLE_LABEL[r] ?? r).join(" / ") || "—";
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
 
@@ -213,13 +222,13 @@ export function AppShell({
   // below) when on /admin/equipment-types or /admin/templates — otherwise
   // the shorter "/admin" href would win.
   const adminGroupItems = [
-    ...(userRole === "ADMIN" || userRole === "PRODUCTION_HEAD"
+    ...(userRoles.includes("ADMIN") || userRoles.includes("PRODUCTION_HEAD")
       ? [
           { href: "/admin/equipment-types", label: "Equipment types", icon: icons.admin },
           { href: "/admin/templates", label: "Process routes", icon: icons.admin },
         ]
       : []),
-    ...(userRole === "ADMIN" || userRole === "MANAGEMENT"
+    ...(userRoles.includes("ADMIN") || userRoles.includes("MANAGEMENT")
       ? [{ href: "/admin", label: "Admin", icon: icons.admin }]
       : []),
   ];

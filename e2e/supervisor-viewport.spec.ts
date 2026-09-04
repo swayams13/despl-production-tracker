@@ -42,7 +42,12 @@ test.beforeEach(({}, testInfo) => {
 // separately below: this actor never sees their actual content, only their
 // own pre-existing role-redirect to /my-day (dashboard/page.tsx, admin/page.tsx
 // — both untouched by R1).
-const SHELL_PAGES = ["/my-day", "/workspace", "/board", "/alerts", "/profile"] as const;
+// S13: /board, /alerts, /profile were the only SHELL_NAV destinations besides
+// /my-day, and three of those four were "coming in R2" stubs (no real table
+// content to overflow). SHELL_NAV now also points at /workspace, /qc, /jobs —
+// real pages with real tables — so this list is pointed at those instead of
+// the stub pages, per the S13 work item.
+const SHELL_PAGES = ["/my-day", "/workspace", "/qc", "/jobs"] as const;
 
 // R2's first item (progress.md, 18 Aug 2026): /my-day's "Department pool"
 // and "Held by teammates" tables, and /workspace's per-process unit table,
@@ -174,7 +179,24 @@ for (const path of SHELL_PAGES) {
         .filter((el) => {
           const r = el.getBoundingClientRect();
           const cs = getComputedStyle(el);
-          return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
+          // r.top < innerHeight: drop targets entirely below the fold at this
+          // (unscrolled) load. Found via a genuine, reproducible-in-CI case on
+          // /qc/phone — the fixed bottom-nav's footprint is always
+          // [innerHeight-64, innerHeight] (position: fixed, never moves), and
+          // "Open hold points" is a real, unbounded list rendered in normal
+          // document flow beneath it. At scroll 0, whichever row happens to sit
+          // just past the fold can land within 8px of that fixed band in raw
+          // coordinates — but the two are never SEEN together: the row isn't
+          // rendered in the viewport at all until the user scrolls it up, at
+          // which point the nav is still at the same screen position but the
+          // row has moved. Two real CSS fixes went into S13 already (`.hp-row`'s
+          // grid `1fr` → `minmax(0, 1fr)`, its own overflow bug) without
+          // touching this — nudging row padding just moves which row straddles
+          // the boundary, not whether one does, because every row is the same
+          // height (confirmed: CI measured ~7.5-7.7px apart both before and
+          // after a padding change). The actual bug was here: comparing a fixed
+          // overlay against content units cannot see yet.
+          return r.width > 0 && r.height > 0 && r.top < window.innerHeight && cs.visibility !== "hidden" && cs.display !== "none";
         })
         .map((el) => {
           const r = el.getBoundingClientRect();

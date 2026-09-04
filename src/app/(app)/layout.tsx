@@ -59,7 +59,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
     <ThemeRoot {...theme}>
       <AppShell
         userName={actor?.name ?? "—"}
-        userRole={actor?.roles[0] ?? ""}
+        userRoles={actor?.roles ?? []}
         overdueCount={overdueCount}
         notifications={notifications}
         jobs={jobs}

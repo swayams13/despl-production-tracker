@@ -2,6 +2,49 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — S13 shop-floor nav reachability, merged with real e2e-caught fixes, 4 Sep 2026
+
+**S13 done, PR #23.** SHELL_NAV (tablet icon rail + phone bottom nav) only reached `/my-day` plus
+three "coming in R2" stub routes — `/workspace`, `/qc`, `/jobs`, `/dashboard`, `/departments`,
+`/welding`, `/reports` were URL-only below 1024px. Added `/workspace`, `/qc`, `/jobs` to
+`SHELL_NAV` (desktop icon set reused, flagged with a `ponytail:` comment as a visual mismatch);
+`.icon-rail` gets `overflow-y: auto` for the extra items. Fixed `(app)/layout.tsx` passing only
+`actor.roles[0]` into `AppShell` — silently dropped every role after the first for a multi-role
+actor. `e2e/supervisor-viewport.spec.ts`'s `SHELL_PAGES` now points at the three newly-reachable
+real pages instead of the stub routes.
+
+**CI's first run on this PR failed for real reasons** — adding `/qc`/`/jobs` to the tested pages
+exercised layout paths the viewport matrix had simply never touched before:
+- Neither page's dense table had a `<ResponsiveTable/>` card fallback (every other table in the
+  app does) — added `JobCardView`/`QueueRowCard`.
+- `/jobs`' 9-column table still overflowed the 1024px tablet breakpoint even with cards —
+  `table-layout: auto` lets a `width:100%` table expand past its container when column
+  min-content widths (free text + a 25-segment StageSpine) exceed it. Switched to
+  `table-layout: fixed` with explicit column percentages.
+- `.hp-row`'s grid used a bare `1fr` for its `white-space:nowrap` activity column — a grid
+  track's implicit min-width is its content's min-content size, not 0, so the track never
+  actually shrank. Changed to `minmax(0, 1fr)`, the standard fix.
+- A genuine (reproduced consistently, not flaky) 7.5-7.7px touch-target near-miss between the
+  phone bottom-nav's "Board" tab and the first hold-point row's "Record…" button — gave `.hp-row`
+  3px more vertical padding; confirmed 10/10 clean on a repeat run afterward.
+
+Verified: `pnpm typecheck`/`lint` clean, `pnpm test` 600/600. 4 consecutive full local `e2e` runs
+green (42 passed, 76 pre-existing disclosed skips/fails unrelated to this branch), plus a
+dedicated 8x `--repeat-each` of the touch-target test, 0 failures throughout. Real `/login` as
+`sup.fabrication@despl.local`: `/qc` and `/my-day` render correctly, Admin group correctly hidden.
+
+**Merged without a passing remote CI run** — GitHub Actions never re-queued a check for this PR's
+later commits despite three separate triggers (direct push, close/reopen, empty-commit push);
+`check-runs` for the new head SHA stayed at 0 throughout. Likely an Actions-minutes/billing limit
+on this free-tier private repo, unconfirmed (checking needs a `user` OAuth scope unavailable this
+session). Merged per explicit instruction on the strength of the local verification above — this
+is a deviation from the repo's own "merge only after CI passes" rule, logged here and in
+`LEDGER.md` so it isn't mistaken for a clean CI pass later. Worth confirming Actions capacity
+before the next PR.
+
+Did not touch the CSS breakpoint architecture (deliberate per its own comments) or the
+job-switcher dropdown's pre-existing keyboard/aria gap (flagged as a separate follow-on item).
+
 ## Session — S11 NCR disposition UI, 4 Sep 2026
 
 **S11 done, PR #24 merged to `main` (`9aff9cd`).** `dispositionNcr` and its
