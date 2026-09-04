@@ -144,10 +144,64 @@ reset --hard`, `main` restored to match `origin/main` exactly, no harm done. Pus
 
 **LEDGER.md updated**: S8 row ☑ with the design decision, live-verification detail, and merge
 commit recorded.
-**Next:** S9 (Dispatch UI) — UI over the already-proven `dispatch.service.ts` state machine
-(PLANNED → RELEASED → DISPATCHED); per the S9 prompt, do not change the service this session, and
-confirm with the user which of `dispatchNoteNo`/`gatePassNo`/`vehicleNo`/`lrNo` should be
-mandatory in the form before building it.
+
+**[S9] Dispatch UI — UI over the already-proven state machine**
+(`dispatch.service.ts:36-42`, 373 lines of tests) — no service change. Asked before building, per
+the S9 prompt's own instruction: which of `dispatchNoteNo`/`gatePassNo`/`vehicleNo`/`lrNo` should
+be mandatory in the release-approval form, given all four are `String?` in the schema. Answer:
+**all four mandatory** — a stricter UI-level requirement only, schema stays optional. Built
+`dispatch.read.ts` (`loadDispatchPanel` — batches with status always taken from the real
+`deriveDispatchBatchStatus`, never re-derived; `packedUnits` excludes units already linked into
+any batch, since a unit ships once) with 4 DB-gated tests, confirmed RED (module not found) before
+implementing. The tests caught a real bug in the first draft themselves: `packedUnits` didn't
+exclude already-batched units, so a batched unit kept reappearing in the add-unit picker — fixed
+by adding `dispatchBatchUnits: { none: {} }` to the query. Built `dispatch-panel.tsx`: create-batch
+form, per-batch cards with an add-unit picker (only while PLANNED), the approve-release form,
+record-dispatch button, inline `RefusalNote`. "Which button is next" is a plain switch on the
+already-derived status enum (PLANNED → approveRelease, RELEASED → recordDispatch, DISPATCHED →
+none) — mirrors `DISPATCH_BATCH_TRANSITIONS`'s linear order rather than reimplementing it
+client-side; `assertDispatchBatchTransition` itself can't be imported into a client component
+(it lives in a Prisma-touching server module), so the UI reuses only the already-derived `status`
+value, never the raw nullable columns. `canManageDispatch` reuses S6's `PRODUCTION_HEAD`/`ADMIN`
+gate exactly — S6 already gated all five dispatch mutations identically, so there's no separate
+permission tier for "approve" vs. the rest.
+
+**Live-verified through the real `/login` form, full state cycle**: signed in as `sj@despl.local`
+(PRODUCTION_HEAD), created Batch 1 (planned 10 Sep 2026), added Unit 320SR01 (packed in the S8
+session), confirmed the release form blocks submission with a clear per-field toast when any of
+the four fields is empty, filled all four and approved release (status → RELEASED, vehicle no.
+shown, "Record dispatch" now the only button), recorded dispatch (status → DISPATCHED, terminal —
+no buttons render, dispatch detail line shows note/gate-pass/LR). Then signed in as
+`sup.stores@despl.local` (SUPERVISOR) and confirmed the same batch renders fully read-only, zero
+controls.
+
+**Branch-hygiene note**: learned from the S8 slip — created `feat/S9-dispatch-ui` from `main`
+*before* committing this time, not after.
+
+**CI caught a real, unrelated pre-existing bug.** PR #21's first CI run failed
+`process-plan.partial-unique.test.ts` with `jobProcess.findFirstOrThrow` finding zero rows; a
+full rerun reproduced identically (not a one-off flake). Traced the root cause rather than
+retrying blindly: that file's `beforeAll` queried `organization.findUniqueOrThrow({ where: {
+code: "DESPL" } })` then `job.findFirstOrThrow({ where: { tenantId } })` then
+`jobProcess.findFirstOrThrow({ where: { jobId } })` — the middle two carried no `orderBy`, so
+which row Postgres actually returned for "the first Job"/"the first JobProcess" was never
+guaranteed by SQL semantics; it depends on physical row order, unrelated to the test's own logic.
+`vitest.config.ts` disables file parallelism for `RUN_DB_TESTS` specifically to prevent
+cross-file races on shared seed data (its own comment documents this exact risk class), so the
+trigger here wasn't concurrent execution — adding `dispatch.read.test.ts` (a new DB-gated file)
+shifted vitest's sequential file-scheduling order enough to flip which physical row the unordered
+query returned. Asked the user how to proceed (fix now / merge anyway with a follow-up / hold)
+rather than deciding unilaterally to route around a red CI — chose to fix now. Rewrote the test
+to build its own disposable org/department/job/jobProcess/units/scheduleRun fixture and tear it
+down afterward, exactly matching every sibling DB-gated test file's established convention (this
+was the one file that had never been migrated to it). Verified 3 consecutive local runs green
+before pushing; CI confirmed green on the next run. Merged squash to `main` (`bd2c450`).
+
+**LEDGER.md updated**: S9 row ☑ with the live-verification detail and the CI-fix note recorded.
+**Next:** S10 — the QC → dispatch gate (marked ★ in PROMPTS-v4.md as "the one that makes shipping
+mean something"): nothing currently stops a unit with an open NCR or uncleared hold point from
+being packed and dispatched. The prompt asks to verify first that `grep "Ncr"
+src/lib/services/dispatch.service.ts` returns zero, before designing the fix.
 
 ## Session — [S5] Migration runbook — production is running new code on the 24 Aug schema, 2 Sep 2026
 
