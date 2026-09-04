@@ -42,7 +42,12 @@ test.beforeEach(({}, testInfo) => {
 // separately below: this actor never sees their actual content, only their
 // own pre-existing role-redirect to /my-day (dashboard/page.tsx, admin/page.tsx
 // — both untouched by R1).
-const SHELL_PAGES = ["/my-day", "/workspace", "/board", "/alerts", "/profile"] as const;
+// S13: /board, /alerts, /profile were the only SHELL_NAV destinations besides
+// /my-day, and three of those four were "coming in R2" stubs (no real table
+// content to overflow). SHELL_NAV now also points at /workspace, /qc, /jobs —
+// real pages with real tables — so this list is pointed at those instead of
+// the stub pages, per the S13 work item.
+const SHELL_PAGES = ["/my-day", "/workspace", "/qc", "/jobs"] as const;
 
 // R2's first item (progress.md, 18 Aug 2026): /my-day's "Department pool"
 // and "Held by teammates" tables, and /workspace's per-process unit table,
