@@ -3,6 +3,7 @@ import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
+import { assertUnitHasNoOpenHoldPoint, assertUnitHasNoOpenNcr } from "./_shared";
 import {
   createDispatchBatchSchema,
   addUnitToBatchSchema,
@@ -141,6 +142,14 @@ export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): 
     if (unit.packageId == null) {
       throw new AppError(ERROR_CODES.UNIT_NOT_PACKED, { unitId });
     }
+
+    // S10 — same reverse quality gate as packing.service.ts's
+    // assignUnitToPackage: a unit already packed clean could develop an NCR
+    // (or a checkpoint could reopen) before it's ever added to a batch, so
+    // this is a genuinely separate check, not a redundant re-run of
+    // packing's own gate.
+    await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
+    await assertUnitHasNoOpenNcr(tx, unit.id);
 
     return audited(tx, actor, async () => {
       const link = await tx.dispatchBatchUnit.create({ data: { dispatchBatchId: batch.id, unitId: unit.id } });

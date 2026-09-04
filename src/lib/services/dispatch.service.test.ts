@@ -118,6 +118,18 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
   async function deleteOrgAndChildren(tenantId: number) {
     await owner.dispatchBatchUnit.deleteMany({ where: { dispatchBatch: { job: { tenantId } } } });
     await owner.dispatchBatch.deleteMany({ where: { job: { tenantId } } });
+    await owner.ncr.deleteMany({ where: { componentOperationRejection: { componentOperation: { component: { equipment: { job: { tenantId } } } } } } });
+    await owner.componentOperationRejection.deleteMany({ where: { componentOperation: { component: { equipment: { job: { tenantId } } } } } });
+    await owner.componentOperation.deleteMany({ where: { component: { equipment: { job: { tenantId } } } } });
+    await owner.component.deleteMany({ where: { equipment: { job: { tenantId } } } });
+    await owner.componentTypeRef.deleteMany({ where: { tenantId } });
+    await owner.operationRef.deleteMany({ where: { tenantId } });
+    await owner.delayCategoryRef.deleteMany({ where: { tenantId } });
+    await owner.qcpItemPartyCode.deleteMany({ where: { qcpItem: { qcpTemplate: { job: { tenantId } } } } });
+    await owner.qcpItem.deleteMany({ where: { qcpTemplate: { job: { tenantId } } } });
+    await owner.inspectionParty.deleteMany({ where: { qcpTemplate: { job: { tenantId } } } });
+    await owner.qcpCodeRef.deleteMany({ where: { tenantId } });
+    await owner.qcpTemplate.deleteMany({ where: { job: { tenantId } } });
     await owner.unit.updateMany({ where: { equipment: { job: { tenantId } } }, data: { packageId: null } });
     await owner.package.deleteMany({ where: { job: { tenantId } } });
     await owner.unit.deleteMany({ where: { equipment: { job: { tenantId } } } });
@@ -181,6 +193,41 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
       },
     });
     return { tenantId, job, equipment, unit, user, client, family };
+  }
+
+  /** S10 — opens an Ncr against the given unit via a real
+   * ComponentOperationRejection chain, the same chain assertUnitHasNoOpenNcr reads. */
+  async function openNcr(tenantId: number, job: { id: number }, unit: { id: number }, user: { id: number }) {
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "PLATE", name: "Plate" } });
+    const operation = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting" } });
+    const equipment = await owner.equipment.findFirstOrThrow({ where: { jobId: job.id } });
+    const component = await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    const componentOperation = await owner.componentOperation.create({
+      data: { componentId: component.id, seq: 1, operationId: operation.id },
+    });
+    const category = await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } });
+    const rejection = await owner.componentOperationRejection.create({
+      data: { componentOperationId: componentOperation.id, categoryId: category.id, rejectedBy: user.id },
+    });
+    await owner.ncr.create({ data: { componentOperationRejectionId: rejection.id, status: "OPEN" } });
+  }
+
+  /** S10 — a blocking QCP checkpoint on the given job with no cleared
+   * execution for the unit, the same chain assertUnitHasNoOpenHoldPoint reads. */
+  async function openHoldPoint(tenantId: number, job: { id: number }) {
+    const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "V", vessel: "V" } });
+    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "QC" } });
+    const qcpCode = await owner.qcpCodeRef.create({
+      data: { tenantId, code: "H", label: "Hold", blocksCompletion: true },
+    });
+    const qcpItem = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Weld visual" },
+    });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: qcpItem.id, inspectionPartyId: party.id, qcpCodeId: qcpCode.id },
+    });
   }
 
   function actorBase(tenantId: number, userId: number, roles: string[] = []): Actor {
@@ -403,5 +450,43 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     expect(() =>
       approveDispatchReleaseSchema.parse({ dispatchBatchId: 1, releaseApprovedAt: new Date().toISOString() }),
     ).toThrow();
+  });
+
+  describe("S10 — reverse quality gate on addUnitToBatch", () => {
+    it("refuses a packed unit with an open Ncr (NCR_OPEN)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-NCR" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      await openNcr(tenantId, job, unit, user);
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await expectCode(
+        addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id }),
+        ERROR_CODES.NCR_OPEN,
+      );
+    });
+
+    it("refuses a packed unit with an uncleared blocking hold point (HOLD_POINT_OPEN)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-HOLD" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      await openHoldPoint(tenantId, job);
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await expectCode(
+        addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id }),
+        ERROR_CODES.HOLD_POINT_OPEN,
+      );
+    });
+
+    it("a clean packed unit (no open Ncr, no blocking hold point) still adds to the batch", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-CLEAN" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      const link = await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+      expect(link.unitId).toBe(unit.id);
+    });
   });
 });

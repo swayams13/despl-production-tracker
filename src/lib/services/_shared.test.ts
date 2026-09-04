@@ -5,6 +5,8 @@ import {
   jobEdgeToScheduleEdge,
   assertNoUnfiledDelayBlock,
   assertNoOpenHoldPoint,
+  assertUnitHasNoOpenNcr,
+  assertUnitHasNoOpenHoldPoint,
   loadPredecessorStates,
   loadJobSpine,
   persistScheduleRun,
@@ -174,6 +176,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("DB-backed helpers (service suites ex
       lockProcessPlanForUpdate,
       assertNoUnfiledDelayBlock,
       assertNoOpenHoldPoint,
+      assertUnitHasNoOpenNcr,
+      assertUnitHasNoOpenHoldPoint,
       loadPredecessorStates,
     ]) {
       expect(typeof fn).toBe("function");
