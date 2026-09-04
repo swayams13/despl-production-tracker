@@ -16,8 +16,8 @@ Update at the end of every session, before `/clear`.
 | D4 | `SEED_PASSWORD` confirmed set in Railway env | ☑ | 4 Sep | Set via `railway variable set SEED_PASSWORD --stdin --skip-deploys` on `despl-production-tracker` — confirmed present via `railway variables --kv`, no redeploy triggered (only read at seed-script execution time, not app runtime). Empirically confirmed low prior risk too: production's real named accounts do **not** use the dev default password (`despl-dev-only` tried and correctly rejected during the S15 dry run) — this closes the gap against a *future* re-seed, not an active exposure. |
 | D5 | D-B sent — TPI/ASME record-integrity question | ☐ | | blocks S12 |
 | D6 | D-D sent — C1 working days vs calendar days | ☐ | | every date is provisional until answered |
-| D7 | D-A decided — does the MDR come out of the system? | ☐ | | recommendation: no, not for this job |
-| D8 | D-C decided — re-pin DESPL-320 to v2? | ☐ | | recommendation: no, ship on v1 |
+| D7 | D-A decided — does the MDR come out of the system? | ☑ | 4 Sep | **Decided: no — the system stays the evidence trail, MDR assembled the old way.** S12 (document attachment) is scoped exactly to this: `Document` model wired to `MaterialIdentification`/`DrawingRevision`/`QcpExecution`, not the MDR compiler. Still blocked on D5 (the TPI question) before S12 can start. |
+| D8 | D-C decided — re-pin DESPL-320 to v2? | ☑ | 4 Sep | **Decided: no — ship DESPL-320 on template v1.** `scripts/add-packing-dispatch-evidence-v2.ts` stays as-is (deliberately not re-pinning); the evidence gate proves itself on job #2 instead. |
 
 ---
 
