@@ -2,6 +2,27 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — D2 done, all Day-1 items closed, 4 Sep 2026
+
+**D2 done — PITR enabled on production.** Found `railway postgres pitr` as a real, working CLI
+command (not previously known to exist — the earlier assumption that this needed the Railway
+dashboard was wrong; `railway --help`'s command list has a dedicated `postgres` subcommand tree
+covering PITR/HA/pgbouncer). `railway postgres pitr enable --service Postgres --no-deploy`
+committed the config; checked with the user before making it live since that meant restarting the
+production Postgres container (a brief connection blip) rather than waiting for an uncertain
+next-deploy trigger — confirmed, ran `railway restart --service Postgres --yes`. App back to a
+real `200` on `/login` immediately after. `railway postgres pitr status` confirms `Status: enabled`,
+`Bucket wired: yes`. The command's own "Live coverage (best effort)" sub-check (actual
+backup/archiver activity, distinct from the enable/wire status) couldn't be confirmed — it fails
+on an SSH error against `ssh.railway.com` from this session, unrelated to PITR's own state; worth
+a look in Railway's dashboard Backups tab once the first archive cycle has run.
+
+**All four Day-1 items are now closed: D1 ☑, D2 ☑, D3 ☑, D4 ☑.** D5–D8 (decisions, not actions)
+are still open — D5 blocks S12, D6 affects every date in the system, D7/D8 already have
+recommendations in the ledger awaiting a yes/no.
+
+---
+
 ## Session — D4 done, D3 fully done (code + production rotation), D2 still Swayam's, 4 Sep 2026
 
 **D4 done.** `SEED_PASSWORD` set on Railway's `despl-production-tracker` service via
