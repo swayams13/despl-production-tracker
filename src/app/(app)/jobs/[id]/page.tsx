@@ -9,9 +9,10 @@ import { loadAssemblyGrid } from "@/lib/services/assembly.read";
 import { loadQcpGrid } from "@/lib/services/qcp-grid.read";
 import { loadClientPreview } from "@/lib/services/client-snapshot.read";
 import { loadPackingPanel } from "@/lib/services/packing.read";
+import { loadDispatchPanel } from "@/lib/services/dispatch.read";
 import { JobDetailClient } from "./_client";
 
-const TABS = ["overview", "gantt", "bom", "assembly", "qcp", "packing", "activity", "client"] as const;
+const TABS = ["overview", "gantt", "bom", "assembly", "qcp", "packing", "dispatch", "activity", "client"] as const;
 type Tab = (typeof TABS)[number];
 
 function first(v: string | string[] | undefined): string | undefined {
@@ -40,6 +41,9 @@ export default async function JobDetail({
   // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
   // cosmetic, the server is authoritative either way.
   const canManagePacking = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  // S6 gated all five dispatch mutations (create/add/approve/record) to the
+  // same PRODUCTION_HEAD/ADMIN pair — one boolean covers all of them.
+  const canManageDispatch = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   const { id } = await params;
   const jobId = Number(id);
@@ -53,7 +57,7 @@ export default async function JobDetail({
   const openUnit = toInt(sp.openUnit);
   const openStage = toInt(sp.openStage);
 
-  const [header, unitSpines, events, gantt, bom, assembly, qcp, packing, clientPreview] = await Promise.all([
+  const [header, unitSpines, events, gantt, bom, assembly, qcp, packing, dispatch, clientPreview] = await Promise.all([
     loadJobHeader(actor, jobId),
     loadJobSpines(actor, jobId),
     loadEvents(actor, { jobId, limit: tab === "activity" ? 100 : 5 }),
@@ -62,6 +66,7 @@ export default async function JobDetail({
     tab === "assembly" ? loadAssemblyGrid(actor, jobId, unitParam) : Promise.resolve(null),
     tab === "qcp" ? loadQcpGrid(actor, jobId, unitParam) : Promise.resolve(null),
     tab === "packing" ? loadPackingPanel(actor, jobId) : Promise.resolve(null),
+    tab === "dispatch" ? loadDispatchPanel(actor, jobId) : Promise.resolve(null),
     tab === "client" && canReviewClientUpdates ? loadClientPreview(actor, jobId) : Promise.resolve(null),
   ]);
   if (!header) notFound();
@@ -81,10 +86,12 @@ export default async function JobDetail({
       assembly={assembly}
       qcp={qcp}
       packing={packing}
+      dispatch={dispatch}
       clientPreview={clientPreview}
       canReviewClientUpdates={canReviewClientUpdates}
       canEditJobDates={canEditJobDates}
       canManagePacking={canManagePacking}
+      canManageDispatch={canManageDispatch}
       tab={tab}
       openUnit={openUnit}
       openStage={openStage}

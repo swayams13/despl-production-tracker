@@ -11,7 +11,7 @@ export default function JobDetailLoading() {
         <span className="skel" style={{ width: 220, height: 12, marginLeft: 10 }} />
       </div>
       <div className="tabs">
-        {["Overview", "Timeline", "BOM & Components", "Assembly", "QCP", "Packing", "Activity"].map((label) => (
+        {["Overview", "Timeline", "BOM & Components", "Assembly", "QCP", "Packing", "Dispatch", "Activity"].map((label) => (
           <span key={label} className="tab" style={{ opacity: 0.5 }}>
             {label}
           </span>

@@ -10,6 +10,7 @@ import { BomPanel } from "@/components/industrial/bom-panel";
 import { AssemblyPanel } from "@/components/industrial/assembly-panel";
 import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { PackingPanel } from "@/components/industrial/packing-panel";
+import { DispatchPanel } from "@/components/industrial/dispatch-panel";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { ClientPortalView } from "@/components/industrial/client-portal-view";
 import { ClientReviewBanner } from "@/components/industrial/client-review-banner";
@@ -23,6 +24,7 @@ import type { BomTree } from "@/lib/services/bom.read";
 import type { AssemblyGrid } from "@/lib/services/assembly.read";
 import type { QcpGrid as QcpGridData } from "@/lib/services/qcp-grid.read";
 import type { PackingPanel as PackingPanelData } from "@/lib/services/packing.read";
+import type { DispatchPanel as DispatchPanelData } from "@/lib/services/dispatch.read";
 import type { ClientPreview } from "@/lib/services/client-snapshot.read";
 
 function fmtDate(iso: string | null): string {
@@ -49,10 +51,12 @@ export function JobDetailClient({
   assembly,
   qcp,
   packing,
+  dispatch,
   clientPreview,
   canReviewClientUpdates,
   canEditJobDates,
   canManagePacking,
+  canManageDispatch,
   tab,
   openUnit,
   openStage: openStageParam,
@@ -67,11 +71,13 @@ export function JobDetailClient({
   assembly: AssemblyGrid | null;
   qcp: QcpGridData | null;
   packing: PackingPanelData | null;
+  dispatch: DispatchPanelData | null;
   clientPreview: ClientPreview | null;
   canReviewClientUpdates: boolean;
   canEditJobDates: boolean;
   canManagePacking: boolean;
-  tab: "overview" | "gantt" | "bom" | "assembly" | "qcp" | "packing" | "activity" | "client";
+  canManageDispatch: boolean;
+  tab: "overview" | "gantt" | "bom" | "assembly" | "qcp" | "packing" | "dispatch" | "activity" | "client";
   /** Deep-link from a notification (`?openUnit=&openStage=`) — auto-opens the StageSheet once on mount. */
   openUnit?: number;
   openStage?: number;
@@ -151,6 +157,7 @@ export function JobDetailClient({
         <Link href={`/jobs/${jobId}?tab=assembly`} className={`tab${tab === "assembly" ? " on" : ""}`}>Assembly</Link>
         <Link href={`/jobs/${jobId}?tab=qcp`} className={`tab${tab === "qcp" ? " on" : ""}`}>QCP / Hold points</Link>
         <Link href={`/jobs/${jobId}?tab=packing`} className={`tab${tab === "packing" ? " on" : ""}`}>Packing</Link>
+        <Link href={`/jobs/${jobId}?tab=dispatch`} className={`tab${tab === "dispatch" ? " on" : ""}`}>Dispatch</Link>
         <Link href={`/jobs/${jobId}?tab=activity`} className={`tab${tab === "activity" ? " on" : ""}`}>Activity</Link>
         {canReviewClientUpdates && (
           <Link href={`/jobs/${jobId}?tab=client`} className={`tab${tab === "client" ? " on" : ""}`}>Client View</Link>
@@ -170,6 +177,12 @@ export function JobDetailClient({
           <PackingPanel jobId={jobId} data={packing} canManagePacking={canManagePacking} />
         ) : (
           <p className="note" style={{ margin: "16px 0" }}>No packing data for this job.</p>
+        )
+      ) : tab === "dispatch" ? (
+        dispatch ? (
+          <DispatchPanel jobId={jobId} data={dispatch} canManageDispatch={canManageDispatch} />
+        ) : (
+          <p className="note" style={{ margin: "16px 0" }}>No dispatch data for this job.</p>
         )
       ) : tab === "client" ? (
         clientPreview ? (
