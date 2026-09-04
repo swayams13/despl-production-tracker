@@ -403,3 +403,115 @@ export async function rejectAssemblyStep(actor: Actor, input: RejectAssemblyStep
     });
   });
 }
+
+/**
+ * S17 (Gate 2): materialise AssemblyStep rows per Unit inside job-intake.
+ * service.ts's createJob. Mirrors scripts/seed-despl320-assembly-steps.ts's
+ * shape (idempotent-per-(unitId,seq) is moot here — createJob only ever
+ * writes a brand-new job) but replaces its 0.5-threshold fuzzy text match on
+ * the deliberately non-unique AssemblyTemplateStep.qcpSrNo with a
+ * deterministic one: within the template's own step order and the job's own
+ * QcpTemplate item order, the Nth step sharing a given srNo binds to the Nth
+ * QcpItem sharing that srNo — verified exact (0 mismatches) against the real
+ * PRESSURE_VESSEL template and QCP source data (seed/assembly-template-
+ * pressure-vessel-v1.json vs seed/qcp-templates.json), which is what a
+ * printed QCP's repeated sr-no rows actually mean: sequential checkpoints
+ * for the same weld joint (edge prep, setup, weld, visual, NDT), authored in
+ * the same order in both documents.
+ *
+ * Only INSPECTION-kind steps consume qcpItemId at all — assembly.service.ts's
+ * own submit/reject paths only ever read it under `kind === "INSPECTION"`,
+ * matching AssemblyStep.qcpItemId's own schema comment. WORK-kind steps are
+ * gated by weldJointId instead (bound later, as the floor logs the joint),
+ * so they're never even attempted here.
+ *
+ * Fails loudly (QCP_ITEM_UNRESOLVED) rather than leaving qcpItemId null when
+ * an INSPECTION step's srNo has no matching occurrence in the job's own
+ * QcpTemplate — CLAUDE.md's "do not guess" standard means an unresolvable
+ * checkpoint is a real data problem (the chosen QCP template doesn't cover
+ * this assembly template), not something to silently skip.
+ */
+export async function materializeAssemblyStepsFromTemplate(
+  tx: Tx,
+  tenantId: number,
+  jobId: number,
+  familyId: number,
+  unitIds: number[],
+  qcpTemplateId: number | null,
+): Promise<{ stepCount: number; boundToQcp: number }> {
+  if (unitIds.length === 0) return { stepCount: 0, boundToQcp: 0 };
+
+  const asmTemplate = await tx.assemblyTemplate.findFirst({ where: { tenantId, familyId } });
+  if (!asmTemplate) return { stepCount: 0, boundToQcp: 0 }; // no assembly template authored for this family yet — a legitimate seam
+
+  const version = await tx.assemblyTemplateVersion.findFirst({
+    where: { templateId: asmTemplate.id, status: "PUBLISHED" },
+    orderBy: { version: "desc" },
+    include: { steps: { orderBy: { seq: "asc" } } },
+  });
+  if (!version || version.steps.length === 0) return { stepCount: 0, boundToQcp: 0 };
+  const steps = version.steps;
+
+  // createJob is the only caller and always creates a brand-new Job, whose
+  // assemblyTemplateVersionId is unconditionally null — no "already pinned,
+  // don't re-pin" branch needed (unlike the seed script, which can also run
+  // against an existing job).
+  await tx.job.update({ where: { id: jobId }, data: { assemblyTemplateVersionId: version.id } });
+
+  // Occurrence index of each step within its own srNo group, in template step order.
+  const srNoOccurrence = new Map<number, number>(); // templateStepId -> 0-based index within its srNo group
+  const srNoCounters = new Map<string, number>();
+  for (const step of steps) {
+    if (!step.srNo) continue;
+    const idx = srNoCounters.get(step.srNo) ?? 0;
+    srNoOccurrence.set(step.id, idx);
+    srNoCounters.set(step.srNo, idx + 1);
+  }
+
+  const qcpItemsBySrNo = new Map<string, { id: number }[]>();
+  if (qcpTemplateId != null) {
+    const qcpItems = await tx.qcpItem.findMany({
+      where: { qcpTemplateId },
+      orderBy: { sequence: "asc" },
+      select: { id: true, srNo: true },
+    });
+    for (const item of qcpItems) {
+      const list = qcpItemsBySrNo.get(item.srNo) ?? [];
+      list.push({ id: item.id });
+      qcpItemsBySrNo.set(item.srNo, list);
+    }
+  }
+
+  function resolveQcpItemId(step: (typeof steps)[number]): number | null {
+    // No QCP template chosen at intake at all — a legitimate seam, not a failure to resolve.
+    if (qcpTemplateId == null) return null;
+    if (step.kind !== "INSPECTION" || !step.srNo) return null;
+    const candidates = qcpItemsBySrNo.get(step.srNo);
+    const idx = srNoOccurrence.get(step.id) ?? 0;
+    const match = candidates?.[idx];
+    if (!match) {
+      throw new AppError(ERROR_CODES.QCP_ITEM_UNRESOLVED, {
+        templateStepId: step.id,
+        srNo: step.srNo,
+        occurrence: idx,
+        qcpTemplateId,
+      });
+    }
+    return match.id;
+  }
+
+  let stepCount = 0;
+  let boundToQcp = 0;
+  const rows: { unitId: number; templateStepId: number; seq: number; qcpItemId: number | null }[] = [];
+  for (const unitId of unitIds) {
+    for (const step of steps) {
+      const qcpItemId = resolveQcpItemId(step);
+      if (qcpItemId != null) boundToQcp++;
+      rows.push({ unitId, templateStepId: step.id, seq: step.seq, qcpItemId });
+      stepCount++;
+    }
+  }
+  await tx.assemblyStep.createMany({ data: rows });
+
+  return { stepCount, boundToQcp };
+}

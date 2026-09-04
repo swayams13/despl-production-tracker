@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES } from "@/lib/shared/errors";
-import { createJob, updateJobDetails } from "./job-intake.service";
+import { createJob, updateJobDetails, setJobStatus } from "./job-intake.service";
 import type { CreateJobInput } from "@/lib/shared/schemas";
 
 function actor(over: Partial<Actor> = {}): Actor {
@@ -179,9 +179,19 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
   // fails on the FK and the swallowed `.catch` used to leave every test job
   // behind in despl_test. Delete createJob's own writes bottom-up first.
   async function deleteJobAndChildren(id: number) {
-    // Component's equipmentId/unitId FKs are not onDelete: Cascade (only
-    // ComponentOperation cascades off Component) — must go before bomItem/unit.
+    // Component's and AssemblyStep's equipmentId/unitId FKs are not
+    // onDelete: Cascade (only their own children cascade off them) — must
+    // go before bomItem/unit.
     await owner.component.deleteMany({ where: { equipment: { jobId: id } } });
+    await owner.assemblyStep.deleteMany({ where: { unit: { equipment: { jobId: id } } } });
+    // ProcessPlan.jobProcessId is onDelete: RESTRICT — Postgres's cascade
+    // ordering races Job→JobProcess(cascade) against
+    // Job→ScheduleRun(cascade)→ProcessPlan(cascade), and the RESTRICT check
+    // on job_processes can fire before process_plans is gone, blocking the
+    // whole delete (S19's setJobStatus tests are the first in this file to
+    // create ProcessPlan rows directly). Delete explicitly, before job.delete.
+    await owner.processPlan.deleteMany({ where: { scheduleRun: { jobId: id } } });
+    await owner.scheduleRun.deleteMany({ where: { jobId: id } });
     await owner.bomItem.deleteMany({ where: { equipment: { jobId: id } } });
     await owner.unit.deleteMany({ where: { equipment: { jobId: id } } });
     await owner.equipment.deleteMany({ where: { jobId: id } });
@@ -463,6 +473,49 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     }
   });
 
+  it("S17: materialises AssemblyStep per unit and pins the job's AssemblyTemplateVersion", async () => {
+    const refs = await seedRefs();
+    const qcpSource = await owner.qcpTemplate.findFirstOrThrow({ where: { job: { jobNumber: "DESPL-320" } } });
+    const asmVersion = await owner.assemblyTemplateVersion.findFirstOrThrow({
+      where: { template: { tenantId: 1, familyId: refs.familyId }, status: "PUBLISHED" },
+      orderBy: { version: "desc" },
+      include: { steps: true },
+    });
+
+    const r = await createJob(
+      actor(),
+      base(
+        {
+          jobNumber: "TEST-ASM-1",
+          qcpTemplateSourceId: qcpSource.id,
+          equipments: [{ equipmentTypeId: null, name: "Vessel", blockNo: 1, remarks: null, serials: ["U1", "U2"] }],
+        },
+        refs,
+      ),
+    );
+    created.push(r.jobId);
+
+    const inspectionStepCount = asmVersion.steps.filter((s) => s.kind === "INSPECTION").length;
+    expect(r.assemblyStepCount).toBe(asmVersion.steps.length * 2);
+
+    const job = await owner.job.findUniqueOrThrow({ where: { id: r.jobId } });
+    expect(job.assemblyTemplateVersionId).toBe(asmVersion.id);
+
+    const newSteps = await owner.assemblyStep.findMany({
+      where: { unit: { equipment: { jobId: r.jobId } } },
+      include: { templateStep: true, qcpItem: true },
+    });
+    expect(newSteps.length).toBe(asmVersion.steps.length * 2);
+
+    const boundInspectionSteps = newSteps.filter((s) => s.templateStep.kind === "INSPECTION" && s.qcpItemId != null);
+    expect(boundInspectionSteps.length).toBe(inspectionStepCount * 2); // every INSPECTION step resolves — 0 mismatches verified against real seed data
+    for (const s of boundInspectionSteps) expect(s.qcpItem!.qcpTemplateId).not.toBe(qcpSource.id); // bound to the NEW job's cloned QcpItem, not the source's
+
+    for (const s of newSteps) {
+      if (s.templateStep.kind === "WORK") expect(s.qcpItemId).toBeNull();
+    }
+  });
+
   it("copyBom preserves a parent/child BOM hierarchy (fix wave, Important #4)", async () => {
     const refs = await seedRefs();
 
@@ -513,5 +566,98 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     created.push(r.jobId);
     const job = await owner.job.findUniqueOrThrow({ where: { id: r.jobId } });
     expect(job.specs).toEqual({ designPressure: 10.5 });
+  });
+
+  // ── S19: setJobStatus ────────────────────────────────────────────────
+
+  async function makeScheduleRun(jobId: number, planStatuses: ("NOT_STARTED" | "COMPLETE")[]) {
+    const jobProcesses = await owner.jobProcess.findMany({ where: { jobId }, orderBy: { seq: "asc" } });
+    const run = await owner.scheduleRun.create({
+      data: { jobId, version: 1, mode: "FORWARD", projectStartDate: new Date("2026-01-01"), isCurrent: true },
+    });
+    for (let i = 0; i < planStatuses.length; i++) {
+      const jp = jobProcesses[i];
+      await owner.processPlan.create({
+        data: {
+          scheduleRunId: run.id,
+          jobProcessId: jp.id,
+          ownerDepartmentId: jp.departmentId,
+          status: planStatuses[i],
+        },
+      });
+    }
+    return run.id;
+  }
+
+  it("setJobStatus: refuses ADMIN/PRODUCTION_HEAD-only actions from a SUPERVISOR", async () => {
+    const refs = await seedRefs();
+    const r = await createJob(actor(), base({ jobNumber: "TEST-STATUS-RBAC" }, refs));
+    created.push(r.jobId);
+    await expect(
+      setJobStatus(actor({ roles: [ROLES.SUPERVISOR] }), { jobId: r.jobId, status: "ON_HOLD" }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("setJobStatus: ON_HOLD and CANCELLED are unguarded even with incomplete plans", async () => {
+    const refs = await seedRefs();
+    const r = await createJob(actor(), base({ jobNumber: "TEST-STATUS-UNGUARDED" }, refs));
+    created.push(r.jobId);
+    await makeScheduleRun(r.jobId, ["NOT_STARTED", "NOT_STARTED"]);
+
+    const held = await setJobStatus(actor(), { jobId: r.jobId, status: "ON_HOLD" });
+    expect(held.status).toBe("ON_HOLD");
+    const cancelled = await setJobStatus(actor(), { jobId: r.jobId, status: "CANCELLED" });
+    expect(cancelled.status).toBe("CANCELLED");
+  });
+
+  it("setJobStatus: COMPLETE is refused while a ProcessPlan on the current ScheduleRun is not COMPLETE", async () => {
+    const refs = await seedRefs();
+    const r = await createJob(actor(), base({ jobNumber: "TEST-STATUS-INCOMPLETE" }, refs));
+    created.push(r.jobId);
+    await makeScheduleRun(r.jobId, ["COMPLETE", "NOT_STARTED"]);
+
+    await expect(setJobStatus(actor(), { jobId: r.jobId, status: "COMPLETE" })).rejects.toMatchObject({
+      code: ERROR_CODES.JOB_HAS_INCOMPLETE_PLANS,
+    });
+  });
+
+  it("setJobStatus: COMPLETE succeeds once every ProcessPlan on the current run is COMPLETE, and is audited", async () => {
+    const refs = await seedRefs();
+    const r = await createJob(actor(), base({ jobNumber: "TEST-STATUS-COMPLETE" }, refs));
+    created.push(r.jobId);
+    await makeScheduleRun(r.jobId, ["COMPLETE", "COMPLETE"]);
+
+    const auditBefore = await owner.auditLog.count({ where: { entityType: "Job", entityId: String(r.jobId), action: "job.setStatus" } });
+    const updated = await setJobStatus(actor(), { jobId: r.jobId, status: "COMPLETE" });
+    expect(updated.status).toBe("COMPLETE");
+    const job = await owner.job.findUniqueOrThrow({ where: { id: r.jobId } });
+    expect(job.status).toBe("COMPLETE");
+    expect(
+      await owner.auditLog.count({ where: { entityType: "Job", entityId: String(r.jobId), action: "job.setStatus" } }),
+    ).toBe(auditBefore + 1);
+  });
+
+  it("setJobStatus: a PROCESS PLAN on a NON-current (superseded) run never blocks COMPLETE", async () => {
+    const refs = await seedRefs();
+    const r = await createJob(actor(), base({ jobNumber: "TEST-STATUS-OLDRUN" }, refs));
+    created.push(r.jobId);
+    const staleRunId = await makeScheduleRun(r.jobId, ["NOT_STARTED"]); // will be flipped non-current below
+    await owner.scheduleRun.update({ where: { id: staleRunId }, data: { isCurrent: false } });
+    await makeScheduleRun(r.jobId, ["COMPLETE", "COMPLETE"]); // the real current run, fully complete
+
+    const updated = await setJobStatus(actor(), { jobId: r.jobId, status: "COMPLETE" });
+    expect(updated.status).toBe("COMPLETE");
+  });
+
+  it("setJobStatus: setting the same status again is a no-op (no audit row)", async () => {
+    const refs = await seedRefs();
+    const r = await createJob(actor(), base({ jobNumber: "TEST-STATUS-NOOP" }, refs));
+    created.push(r.jobId);
+    const auditBefore = await owner.auditLog.count({ where: { entityType: "Job", entityId: String(r.jobId), action: "job.setStatus" } });
+    const result = await setJobStatus(actor(), { jobId: r.jobId, status: "ACTIVE" }); // already ACTIVE by default
+    expect(result.status).toBe("ACTIVE");
+    expect(
+      await owner.auditLog.count({ where: { entityType: "Job", entityId: String(r.jobId), action: "job.setStatus" } }),
+    ).toBe(auditBefore);
   });
 });

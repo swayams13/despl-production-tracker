@@ -52,3 +52,12 @@ export async function rejectComponentOperationAction(
     svc.rejectComponentOperation(await requireActor(), { componentOperationId, categoryId, detail }),
   );
 }
+export async function linkGoverningDrawingAction(
+  jobId: number,
+  componentId: number,
+  assemblyDrawingId: number | null,
+): Promise<ActionResult> {
+  return run(jobId, async () =>
+    svc.linkGoverningDrawing(await requireActor(), { componentId, assemblyDrawingId }),
+  );
+}
