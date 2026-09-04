@@ -67,6 +67,7 @@ async function lockDispatchBatchForUpdate(tx: Tx, dispatchBatchId: number, tenan
 
 export async function createDispatchBatch(actor: Actor, input: CreateDispatchBatchInput): Promise<DispatchBatch> {
   const { jobId, seq, plannedDate, remarks } = createDispatchBatchSchema.parse(input);
+  requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
@@ -107,6 +108,7 @@ export async function createDispatchBatch(actor: Actor, input: CreateDispatchBat
  */
 export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): Promise<DispatchBatchUnit> {
   const { dispatchBatchId, unitId } = addUnitToBatchSchema.parse(input);
+  requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
@@ -219,6 +221,7 @@ export async function approveDispatchRelease(
  */
 export async function recordDispatch(actor: Actor, input: RecordDispatchInput): Promise<DispatchBatch> {
   const { dispatchBatchId } = recordDispatchSchema.parse(input);
+  requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {

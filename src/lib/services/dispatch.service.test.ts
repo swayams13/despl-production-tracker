@@ -216,6 +216,40 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     expect(dispatched.actualDispatchDate).not.toBeNull();
   });
 
+  it("createDispatchBatch refuses a non-Production-Head, non-Admin caller (FORBIDDEN)", async () => {
+    const { tenantId, job, user } = await fixture();
+    const supervisor = actorBase(tenantId, user.id, [ROLES.SUPERVISOR]);
+    await expectCode(
+      createDispatchBatch(supervisor, { jobId: job.id, seq: 1, plannedDate: new Date() }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("addUnitToBatch refuses a non-Production-Head, non-Admin caller (FORBIDDEN)", async () => {
+    const { tenantId, job, unit, user } = await fixture();
+    const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+    const supervisor = actorBase(tenantId, user.id, [ROLES.SUPERVISOR]);
+    const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-GATE" });
+    await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+    const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    await expectCode(
+      addUnitToBatch(supervisor, { dispatchBatchId: batch.id, unitId: unit.id }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("recordDispatch refuses a non-Production-Head, non-Admin caller (FORBIDDEN)", async () => {
+    const { tenantId, job, unit, user } = await fixture();
+    const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+    const supervisor = actorBase(tenantId, user.id, [ROLES.SUPERVISOR]);
+    const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-GATE-2" });
+    await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+    const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+    await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
+    await expectCode(recordDispatch(supervisor, { dispatchBatchId: batch.id }), ERROR_CODES.FORBIDDEN);
+  });
+
   it("addUnitToBatch refuses an unpacked unit (UNIT_NOT_PACKED)", async () => {
     const { tenantId, job, unit, user } = await fixture();
     const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);

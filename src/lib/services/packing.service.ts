@@ -1,5 +1,5 @@
 import { withTenant, type Tx } from "@/lib/db";
-import { type Actor, assertNotClientUser } from "@/lib/authz";
+import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import {
@@ -27,6 +27,7 @@ async function assertJobInTenant(tx: Tx, jobId: number, tenantId: number): Promi
 export async function createPackage(actor: Actor, input: CreatePackageInput): Promise<Package> {
   const { jobId, packageNo, weightKg, lengthMm, widthMm, heightMm, preservationNotes } =
     createPackageSchema.parse(input);
+  requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
@@ -68,6 +69,7 @@ export async function createPackage(actor: Actor, input: CreatePackageInput): Pr
  */
 export async function assignUnitToPackage(actor: Actor, input: AssignUnitToPackageInput): Promise<Unit> {
   const { packageId, unitId } = assignUnitToPackageSchema.parse(input);
+  requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
