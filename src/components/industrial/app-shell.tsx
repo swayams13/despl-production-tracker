@@ -11,6 +11,7 @@ import { setThemeAction } from "@/app/actions/preferences";
 import { logout } from "@/app/actions/auth";
 import { nextThemeState, themeLabel } from "@/lib/theme";
 import type { NotificationRow } from "@/lib/services/notifications.read";
+import { fmtWhen, notificationHref } from "@/lib/notifications-ui";
 import type { JobListItem } from "@/lib/services/jobs.read";
 
 // Icons inlined from the mockup (lucide-react is pinned at an atypical 1.x here;
@@ -171,29 +172,6 @@ const ROLE_LABEL: Record<string, string> = {
   QC: "QC / QA",
   CLIENT_VIEWER: "Client",
 };
-
-function fmtWhen(iso: string): string {
-  const d = new Date(iso);
-  const days = Math.floor((Date.now() - d.getTime()) / 864e5);
-  if (days <= 0) return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-  if (days === 1) return "Yesterday";
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-}
-
-/** Where a notification's payload sends you when clicked. */
-function notificationHref(n: NotificationRow): string | null {
-  const p = n.payload as { jobId?: number; unitId?: number; stageNo?: number; date?: string } | null;
-  if (n.type === "DIGEST_PUBLISHED") return p?.date ? `/reports?date=${p.date}` : "/reports";
-  if (n.type === "CLIENT_UPDATE_PUBLISHED" || n.type === "CLIENT_UPDATE_REJECTED") {
-    return p?.jobId != null ? `/jobs/${p.jobId}?tab=client` : null;
-  }
-  if (p?.jobId != null && p.stageNo != null) {
-    return p.unitId != null
-      ? `/jobs/${p.jobId}?openUnit=${p.unitId}&openStage=${p.stageNo}`
-      : `/jobs/${p.jobId}`;
-  }
-  return null;
-}
 
 export function AppShell({
   children,

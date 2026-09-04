@@ -1,11 +1,12 @@
 import { withTenant, type Tx } from "@/lib/db";
-import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope } from "@/lib/authz";
+import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertKitReady, assertDrawingReleased } from "./_shared";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
 import { closeNcr } from "./ncr.service";
+import { notify, userIdsWithRole } from "./notifications.service";
 import {
   startComponentOperationSchema,
   submitComponentOperationSchema,
@@ -432,6 +433,41 @@ export async function rejectComponentOperation(
       // disposition — the rework/QA workflow layered on top of the
       // immutable rejection record.
       await tx.ncr.create({ data: { componentOperationRejectionId: rejection.id } });
+
+      // S14 — was silent. QC is who dispositions an Ncr (S11's disposition
+      // UI), so QC is who needs to know one opened, same transaction as the
+      // ncr.create above (a failed notify rolls back the whole reject).
+      const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
+      if (qcIds.length > 0) {
+        const ctx = await tx.componentOperation.findUniqueOrThrow({
+          where: { id: op.id },
+          select: {
+            operation: { select: { name: true } },
+            component: {
+              select: {
+                tag: true,
+                unitId: true,
+                unit: { select: { serialNo: true } },
+                equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } },
+              },
+            },
+          },
+        });
+        await notify(
+          tx,
+          actor.tenantId,
+          qcIds.map((recipientId) => ({
+            recipientId,
+            type: "NCR_OPENED",
+            entityType: "ComponentOperation",
+            entityId: op.id,
+            title: `NCR opened: ${ctx.component.tag} · ${ctx.operation.name}`,
+            body: `${ctx.component.equipment.job.jobNumber}${ctx.component.unit ? ` · Unit ${ctx.component.unit.serialNo}` : ""}`,
+            payload: { jobId: ctx.component.equipment.jobId, unitId: ctx.component.unitId },
+          })),
+        );
+      }
+
       return {
         result: updated,
         audit: {
