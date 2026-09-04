@@ -127,7 +127,13 @@ interface LiveJobsFile {
 interface ComponentRoutesFile {
   canonicalOperations: Record<
     string,
-    { label: string; dept: string; csvColumn: string | null; leadTimeProcess: number }
+    {
+      label: string;
+      dept: string;
+      csvColumn: string | null;
+      leadTimeProcess: number;
+      requiresDftGate?: boolean;
+    }
   >;
   routes: {
     componentType: string;
@@ -551,6 +557,7 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
           defaultDepartmentId: deptIdByCode.get(meta.dept)!,
           sourceColumn: meta.csvColumn,
           leadTimeProcessSeq: meta.leadTimeProcess,
+          requiresDftGate: meta.requiresDftGate ?? false,
         })),
       });
       const operations = await tx.operationRef.findMany({ where: { tenantId } });

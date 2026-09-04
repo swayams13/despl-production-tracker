@@ -156,6 +156,9 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let paintOpNoRecord = 0; // SUBMITTED, no PaintRecord/DftReading at all → DFT_NOT_ACCEPTED
   let paintOpTwoCoats = 0; // SUBMITTED, coatsPlanned=2 → walked through none/unaccepted/partial/full accepted coverage
   let paintOpDuplicateCoat = 0; // coatsPlanned=3, all accepted readings on the SAME coatNumber → must still be refused (task review Important #1)
+  // B6 — the gate is OperationRef.requiresDftGate now, not the "PAINTING" code string.
+  let unflaggedPaintingCodeOp = 0; // code "PAINTING", requiresDftGate: false → must verify with no PaintRecord (proves the code string itself no longer gates)
+  let flaggedNonPaintingCodeOp = 0; // code "GALVANIZING", requiresDftGate: true, no PaintRecord → must be refused (proves the flag, not the code, gates)
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -467,7 +470,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
 
     // P1 (Phase 5) — Paint/DFT gate fixtures.
     const opPainting = await owner.operationRef.create({
-      data: { tenantId, code: "PAINTING", name: "Painting", defaultDepartmentId: deptA.id },
+      data: { tenantId, code: "PAINTING", name: "Painting", defaultDepartmentId: deptA.id, requiresDftGate: true },
     });
     const componentPaintNoRecord = await owner.component.create({
       data: { equipmentId: equipment.id, tag: "PAINT-NO-RECORD", componentTypeId: componentType.id },
@@ -491,6 +494,30 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     paintOpDuplicateCoat = (
       await owner.componentOperation.create({
         data: { componentId: componentPaintDuplicateCoat.id, seq: 1, operationId: opPainting.id },
+      })
+    ).id;
+
+    // B6 — flag-driven, not code-string-driven.
+    const opPaintingUnflagged = await owner.operationRef.create({
+      data: { tenantId, code: "PAINTING_LEGACY", name: "Painting (legacy, unflagged)", defaultDepartmentId: deptA.id, requiresDftGate: false },
+    });
+    const componentUnflaggedPainting = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "PAINT-UNFLAGGED", componentTypeId: componentType.id },
+    });
+    unflaggedPaintingCodeOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentUnflaggedPainting.id, seq: 1, operationId: opPaintingUnflagged.id },
+      })
+    ).id;
+    const opGalvanizingFlagged = await owner.operationRef.create({
+      data: { tenantId, code: "GALVANIZING", name: "Galvanizing", defaultDepartmentId: deptA.id, requiresDftGate: true },
+    });
+    const componentFlaggedGalvanizing = await owner.component.create({
+      data: { equipmentId: equipment.id, tag: "GALV-FLAGGED", componentTypeId: componentType.id },
+    });
+    flaggedNonPaintingCodeOp = (
+      await owner.componentOperation.create({
+        data: { componentId: componentFlaggedGalvanizing.id, seq: 1, operationId: opGalvanizingFlagged.id },
       })
     ).id;
 
@@ -908,6 +935,19 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     await recordDftReading(supA, { componentOperationId: paintOpDuplicateCoat, coatNumber: 3, readingMicrons: 73, accepted: true });
     const verified = await verifyComponentOperation(qc, { componentOperationId: paintOpDuplicateCoat });
     expect(verified.status).toBe("COMPLETE");
+  });
+
+  it("B6: an op with code \"PAINTING_LEGACY\" but requiresDftGate: false verifies with no PaintRecord — the code string no longer gates", async () => {
+    await startComponentOperation(supA, { componentOperationId: unflaggedPaintingCodeOp });
+    await submitComponentOperation(supA, { componentOperationId: unflaggedPaintingCodeOp });
+    const verified = await verifyComponentOperation(qc, { componentOperationId: unflaggedPaintingCodeOp });
+    expect(verified.status).toBe("COMPLETE");
+  });
+
+  it("B6: a non-PAINTING op (code \"GALVANIZING\") flagged requiresDftGate: true is refused with no PaintRecord — the flag gates, not the code", async () => {
+    await startComponentOperation(supA, { componentOperationId: flaggedNonPaintingCodeOp });
+    await submitComponentOperation(supA, { componentOperationId: flaggedNonPaintingCodeOp });
+    await expectCode(verifyComponentOperation(qc, { componentOperationId: flaggedNonPaintingCodeOp }), ERROR_CODES.DFT_NOT_ACCEPTED);
   });
 
   it("recordDftReading is tenant-anchored: another tenant's actor cannot attach a reading to this operation by id (NOT_FOUND)", async () => {

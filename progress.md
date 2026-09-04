@@ -5153,3 +5153,18 @@ Almost everything below is **latent** — the engine and the auth primitives are
 **Verified:** `pnpm typecheck` clean. `pnpm test:db`: 965/966 — the same pre-existing unrelated `process.service.test.ts` "verify refuses at a genuinely uncleared hold point" failure noted in the session above, unrelated to this change; every `welding.service.test.ts` case (including the new one) passes, and the existing FABRICATION-scoped tests still pass because the seeded `WELDING` OperationRef's `defaultDepartmentId` resolves to the same Fabrication department the old hardcode pointed at — behavior-preserving for DESPL-320.
 
 **Not fixed here:** B6 (`component.service.ts`'s `operationCode === "PAINTING"` literal) — the prompt sequences it strictly after B5, as its own commit.
+
+## Session — B6: replace component.service.ts's operationCode === "PAINTING" literal, 4 Sep 2026
+
+**Item:** `verifyComponentOperation`'s DFT/paint gate was keyed off `operationCode === "PAINTING"` — a hardcoded op code, the last of B10's confirmed literals. Same branch, sequenced right after B5 per the blueprint prompt. Presented the migration SQL to Swayam before touching schema; confirmed.
+
+**What changed:**
+- `prisma/schema.prisma`: `OperationRef.requiresDftGate` (`Boolean @default(false)`) — declarative, tenant-scoped like every other `OperationRef` column.
+- Migration `20260904230000_operation_ref_requires_dft_gate` (hand-written): adds the column, backfills `true` where `code = 'PAINTING'` — behavior-preserving for every existing tenant. Applied to `despl_test` only; `migrate diff --exit-code` → 0. Not re-seeded — the backfill UPDATE already brought existing rows in line with the seed source, and the seed script isn't idempotent (would throw on re-run against non-empty data, per the standing note above).
+- `seed/component-routes.json`: `PAINTING`'s `canonicalOperations` entry gained `"requiresDftGate": true`; `prisma/seed.ts`'s `ComponentRoutesFile` type and `operationRef.createMany` pass it through — new tenants get the flag from data, no code branch.
+- `component.service.ts`: `lockComponentOperationForUpdate` returns `requiresDftGate` (from the already-included `operation` relation) alongside the existing `operationCode`; `verifyComponentOperation` gates on `requiresDftGate` instead of `operationCode === "PAINTING"`.
+- `component.service.test.ts`: existing PAINTING fixture explicitly sets `requiresDftGate: true` (previously implicit via the code string, now would default to `false` and silently break the fixture). Added two new fixtures/tests proving the flag — not the code — gates: an op coded `PAINTING_LEGACY` with the flag off verifies with no PaintRecord; an op coded `GALVANIZING` with the flag on is refused with no PaintRecord.
+
+**Verified:** `pnpm typecheck`/`lint`/`test` clean (595/595). `pnpm test:db` 966/967 — same pre-existing unrelated `process.service.test.ts` "verify refuses at a genuinely uncleared hold point" failure noted in the B5 session above; every `component.service.test.ts` case, including both new B6 cases, passes.
+
+**Not fixed here:** B7/B8 (kill the hardcoded 25-stage table, `<StageSpine />` from `TemplateProcess`) — next per the blueprint's sequencing, not touched in this session.
