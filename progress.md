@@ -64,7 +64,39 @@ pre-existing unrelated failure as above), typecheck/lint clean. Branched
 yet merged as of this entry.
 
 **LEDGER.md updated**: S6 row marked ☑ with the design decision and test evidence recorded.
-**Next:** merge PR #18 once CI is green, then S7 (Server Action wrappers for packing/dispatch/NCR).
+
+**Update, same day:** PR #18 (S6) CI passed, merged squash to `main` (`330dcb0`), branch deleted.
+Then a docs-only commit (`c9d9ca7`, this progress.md/LEDGER.md update) pushed directly to `main`
+on explicit instruction, before S6's merge — so `main`'s actual order is `c9d9ca7` then `330dcb0`.
+
+**[S7] Server Action wrappers for packing, dispatch and NCR disposition.** Thin wrappers only
+(`requireActor()` + `toActionError`, no business logic), matching `stock.ts`'s exact shape:
+`src/app/actions/packing.ts` (`createPackageAction`, `assignUnitToPackageAction`), `dispatch.ts`
+(`createDispatchBatchAction`, `addUnitToBatchAction`, `approveDispatchReleaseAction`,
+`recordDispatchAction`), `ncr.ts` (`dispositionNcrAction`). Decided **not** to expose `closeNcr`:
+its own comment in `ncr.service.ts` says it takes an already-open `tx` rather than opening its
+own, and its `ncrId` lookup carries no tenant filter — safe today only because its two existing
+callers (`verifyComponentOperation`, `verifyAssemblyStep`) already tenant-scope the
+operation/step before finding the `ncrId`. Wrapping it in a Server Action means a
+client-supplied `ncrId` reaching that unscoped lookup directly, which needs a real tenant filter
+added to the service first — new service-layer logic, not a thin wrapper, so left out rather
+than bundled into an S-sized item. `revalidatePath` targets follow the existing per-domain
+convention (`` `/jobs/${jobId}` ``, matching `component.ts`/`assembly.ts`/`bom.ts`/`drawing.ts`/
+`stock.ts`) rather than copying `process.ts`'s stub `/board` path; packing/dispatch actions take
+`jobId` as an explicit param since not every schema carries one (same shape `stock.ts` already
+uses for `stockLotId`-keyed mutations); `dispositionNcrAction` has no `jobId` in its schema and
+no job-scoped page renders NCR data yet, so it revalidates the two real pages that do read `Ncr`
+aggregates today — `/workspace` (`workspace.read.ts`'s per-unit `openNcrCount`) and `/qc`
+(`qc-cockpit.read.ts`'s tenant-wide rework load). No new test file — the codebase has no
+per-domain action test files at all (`stock.ts`/`drawing.ts`/`component.ts` etc. are untested at
+this layer too), consistent with these being pure pass-through wrappers with no logic of their
+own to test. `pnpm test` 600/600 (unchanged — new files only), typecheck/lint/build clean.
+Branched `feat/S7-packing-dispatch-ncr-actions` off `origin/main`, committed, pushed, opened PR
+#19, waited for CI, merged squash to `main` (`75f610c`), branch deleted.
+
+**LEDGER.md updated**: S6 and S7 rows both ☑, with merge commits recorded.
+**Next:** S8 (Packing UI) — first UI session for Gate 1, on `/jobs/[id]` per the S8 prompt's
+default assumption (to be confirmed against the `Package` model before designing anything).
 
 ## Session — [S5] Migration runbook — production is running new code on the 24 Aug schema, 2 Sep 2026
 
