@@ -50,7 +50,7 @@ function readJson<T>(file: string): T {
 
 interface LeadTimeModel {
   calendarBasis: { value: string; weekOff: string[]; holidays?: { date: string; name: string }[] };
-  departments: { code: string; name: string; scope: string | null }[];
+  departments: { code: string; name: string; scope: string | null; isOfficeDept: boolean }[];
   processes: {
     code: number;
     name: string;
@@ -503,6 +503,7 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
           code: d.code,
           name: d.name,
           scope: d.scope,
+          isOfficeDept: d.isOfficeDept,
         })),
       });
       const departments = await tx.department.findMany({ where: { tenantId } });

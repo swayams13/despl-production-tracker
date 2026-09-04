@@ -10,11 +10,12 @@ import { istDay } from "./myday.read";
 
 /**
  * `/command/[dept]` (personal dashboards v1, SPEC §7.4) — the desk-side
- * counterpart to `/my-day`/`/workspace` for the six OFFICE departments
- * (PROJECTS, ENGINEERING, PLANNING, PROCUREMENT, QC, STORES — task 3.1
- * ruling 1: "PMO" in the spec text is this seed's PROJECTS code). Floor
- * departments never reach this reader — `/command/[dept]/page.tsx` redirects
- * them to `/workspace` before calling in.
+ * counterpart to `/my-day`/`/workspace` for a tenant's OFFICE departments
+ * (`Department.isOfficeDept`; DESPL's own 6 today are PROJECTS, ENGINEERING,
+ * PLANNING, PROCUREMENT, QC, STORES — task 3.1 ruling 1: "PMO" in the spec
+ * text is this seed's PROJECTS code). Floor departments never reach this
+ * reader — `/command/[dept]/page.tsx` redirects them to `/workspace` before
+ * calling in.
  *
  * Cross-job aggregation follows myday.read.ts's precedent verbatim (ruling
  * 2a): loop the tenant's ACTIVE jobs, run the existing spine → CPM →
@@ -29,26 +30,6 @@ import { istDay } from "./myday.read";
  * pilot scale, revisit together if that ever needs batching.
  */
 
-/** The six office departments this page serves (task 3.1 ruling 1). Every
- * other seeded department code is a floor department and redirects to
- * `/workspace` before `loadCommandCenter` is ever called. */
-export const OFFICE_DEPT_CODES = ["PROJECTS", "ENGINEERING", "PLANNING", "PROCUREMENT", "QC", "STORES"] as const;
-
-/** All 13 seeded department codes (seed/lead-time-model.json) — used only to
- * tell "a real floor department code" (→ redirect to /workspace) apart from
- * "not a department code at all" (→ notFound(), same convention
- * /departments/[id] uses for an invalid id). */
-export const ALL_DEPT_CODES = [
-  ...OFFICE_DEPT_CODES,
-  "FABRICATION_PREP",
-  "MACHINE_SHOP",
-  "FABRICATION",
-  "HEAT_TREATMENT",
-  "SURFACE_PAINT",
-  "DOCUMENTATION",
-  "DISPATCH",
-] as const;
-
 /**
  * Pipeline column labels (task 3.1 ruling 2c / SPEC §7.4 "dept pipeline"):
  * cosmetic relabeling of the same 6 `PlanState` values into each office
@@ -57,8 +38,14 @@ export const ALL_DEPT_CODES = [
  * only, so every dept still has exactly these 6 buckets, just worded in its
  * own language. One file, easy for DESPL to correct later (same pattern as
  * decision #6, "drafted by us, corrected by DESPL").
+ *
+ * Deliberately still keyed by DESPL's 6 known department codes (not
+ * data-driven) — copywriting authored per department, not a lookup/routing
+ * decision like the office/floor split `Department.isOfficeDept` now owns.
+ * A department with no entry here falls back to `DEFAULT_PIPELINE_LABELS`
+ * (see `loadCommandCenter`) rather than crashing.
  */
-export const PIPELINE_LABELS: Record<(typeof OFFICE_DEPT_CODES)[number], Record<PlanState, string>> = {
+export const PIPELINE_LABELS: Record<string, Record<PlanState, string>> = {
   PROJECTS: {
     BLOCKED: "Waiting on prior step",
     READY: "Ready for PO review",
@@ -109,20 +96,34 @@ export const PIPELINE_LABELS: Record<(typeof OFFICE_DEPT_CODES)[number], Record<
   },
 };
 
+/** Generic English fallback for an office department with no entry in
+ * `PIPELINE_LABELS` yet — a new office department is data (an
+ * `isOfficeDept: true` row), so it must render something sensible before
+ * anyone gets around to writing it its own copy. */
+const DEFAULT_PIPELINE_LABELS: Record<PlanState, string> = {
+  BLOCKED: "Blocked",
+  READY: "Ready",
+  IN_PROGRESS: "In progress",
+  SUBMITTED: "Submitted",
+  ON_HOLD: "On hold",
+  DONE: "Done",
+};
+
 const PIPELINE_ORDER: PlanState[] = ["BLOCKED", "READY", "IN_PROGRESS", "SUBMITTED", "ON_HOLD", "DONE"];
 
 /**
- * Which real department a `/command/[dept]` URL slug names, pulled out as a
- * pure function (no DB) so the routing rule (task 3.1 ruling 1 — office
- * codes render, floor codes redirect to /workspace, anything else is
- * `notFound()`) is table-driven-testable without a page-render harness,
- * which this codebase doesn't have.
+ * Which real department a `/command/[dept]` URL slug names (task 3.1 ruling
+ * 1 — office departments render, floor departments redirect to /workspace,
+ * anything that isn't a real department in this tenant is `notFound()`).
+ * Pulled out as a pure function over the caller's own department lookup
+ * (no DB access here, no hardcoded department-code list) so the routing
+ * rule stays table-driven-testable without a page-render harness, which
+ * this codebase doesn't have. `Department.isOfficeDept` is the real
+ * source of truth — see the migration that added it.
  */
-export function classifyDeptCode(slug: string): "office" | "floor" | "invalid" {
-  const code = slug.toUpperCase();
-  if ((OFFICE_DEPT_CODES as readonly string[]).includes(code)) return "office";
-  if ((ALL_DEPT_CODES as readonly string[]).includes(code)) return "floor";
-  return "invalid";
+export function classifyDeptCode(department: { isOfficeDept: boolean } | null): "office" | "floor" | "invalid" {
+  if (!department) return "invalid";
+  return department.isOfficeDept ? "office" : "floor";
 }
 
 export type CommandCenterAccess = "full" | "readonly" | "none";
@@ -177,7 +178,7 @@ export interface CommandCenterPipelineColumn {
 
 export interface CommandCenterView {
   deptId: number;
-  deptCode: (typeof OFFICE_DEPT_CODES)[number];
+  deptCode: string;
   deptName: string;
   /** Dept items COMPLETE or SUBMITTED today (server date), any assignee —
    * dept-wide version of myday.read.ts's clearedToday. */
@@ -202,7 +203,7 @@ export interface CommandCenterView {
 export async function loadCommandCenter(
   actor: Actor,
   deptId: number,
-  deptCode: (typeof OFFICE_DEPT_CODES)[number],
+  deptCode: string,
   deptName: string,
 ): Promise<CommandCenterView> {
   const now = new Date();
@@ -329,7 +330,7 @@ export async function loadCommandCenter(
   // doneThisWeek uses) — an unbounded "everything ever completed" column
   // would grow forever and isn't what "pipeline" means for a live cockpit.
   const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
-  const labels = PIPELINE_LABELS[deptCode];
+  const labels = PIPELINE_LABELS[deptCode] ?? DEFAULT_PIPELINE_LABELS;
   const pipeline: CommandCenterPipelineColumn[] = PIPELINE_ORDER.map((state) => {
     let rows = ownRows.filter((r) => r.ranked.state === state);
     if (state === "DONE") {

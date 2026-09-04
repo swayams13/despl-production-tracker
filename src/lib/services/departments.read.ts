@@ -189,6 +189,7 @@ export interface DeptDetail {
   id: number;
   code: string;
   name: string;
+  isOfficeDept: boolean;
   representative: string | null;
   openItems: DeptOpenItem[];
   cycleTime: DeptCycleTimeRow[];
@@ -277,6 +278,7 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
       id: dept.id,
       code: dept.code,
       name: dept.name,
+      isOfficeDept: dept.isOfficeDept,
       representative: rep?.user.name ?? null,
       openItems,
       cycleTime,

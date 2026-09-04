@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { loadMyDay } from "@/lib/services/myday.read";
-import { OFFICE_DEPT_CODES } from "@/lib/services/command-center.read";
 import { MyDayClient } from "./_client";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -19,10 +18,14 @@ const ROLE_LABEL: Record<string, string> = {
  * departments" line and the "Command Center →" link's target (task 3.1
  * ruling 5) — a page-level concern (like workspace/page.tsx's pilotJobId),
  * not worth a new service function for one small lookup. */
-async function myDepartments(tenantId: number, ids: number[]): Promise<{ name: string; code: string }[]> {
+async function myDepartments(tenantId: number, ids: number[]): Promise<{ name: string; code: string; isOfficeDept: boolean }[]> {
   if (ids.length === 0) return [];
   return withTenant(tenantId, async (tx) => {
-    const rows = await tx.department.findMany({ where: { id: { in: ids } }, select: { name: true, code: true }, orderBy: { name: "asc" } });
+    const rows = await tx.department.findMany({
+      where: { id: { in: ids } },
+      select: { name: true, code: true, isOfficeDept: true },
+      orderBy: { name: "asc" },
+    });
     return rows;
   });
 }
@@ -49,7 +52,7 @@ export default async function MyDay() {
   // redirect to /workspace, so the link would be a dead control there
   // (CLAUDE.md hard ban). Belonging to more than one office dept: link to
   // the first — a nice-to-have nav link, not worth a picker.
-  const officeDept = depts.find((d) => (OFFICE_DEPT_CODES as readonly string[]).includes(d.code));
+  const officeDept = depts.find((d) => d.isOfficeDept);
 
   return (
     <>

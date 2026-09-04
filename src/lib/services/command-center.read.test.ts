@@ -30,26 +30,19 @@ function actor(over: Partial<Actor> = {}): Actor {
 }
 
 describe("classifyDeptCode — routing (ruling 1)", () => {
-  const cases: { slug: string; expected: "office" | "floor" | "invalid" }[] = [
-    { slug: "PROJECTS", expected: "office" },
-    { slug: "engineering", expected: "office" }, // case-insensitive
-    { slug: "planning", expected: "office" },
-    { slug: "procurement", expected: "office" },
-    { slug: "qc", expected: "office" },
-    { slug: "stores", expected: "office" },
-    { slug: "fabrication_prep", expected: "floor" },
-    { slug: "machine_shop", expected: "floor" },
-    { slug: "fabrication", expected: "floor" },
-    { slug: "heat_treatment", expected: "floor" },
-    { slug: "surface_paint", expected: "floor" },
-    { slug: "documentation", expected: "floor" },
-    { slug: "dispatch", expected: "floor" },
-    { slug: "not-a-department", expected: "invalid" },
-    { slug: "", expected: "invalid" },
-  ];
+  // No department-code literals: classifyDeptCode takes the real row
+  // (or null, for "no such department in this tenant") and decides purely
+  // from its isOfficeDept flag — never a hardcoded office/floor code list.
+  it("office department -> office", () => {
+    expect(classifyDeptCode({ isOfficeDept: true })).toBe("office");
+  });
 
-  it.each(cases)("$slug → $expected", ({ slug, expected }) => {
-    expect(classifyDeptCode(slug)).toBe(expected);
+  it("floor department -> floor", () => {
+    expect(classifyDeptCode({ isOfficeDept: false })).toBe("floor");
+  });
+
+  it("no matching department in this tenant -> invalid", () => {
+    expect(classifyDeptCode(null)).toBe("invalid");
   });
 });
 

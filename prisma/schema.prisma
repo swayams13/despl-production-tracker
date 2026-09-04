@@ -385,6 +385,12 @@ model Department {
   code     String
   name     String
   scope    String?
+  /// Whether this is a desk-side department reachable at /command/[dept]
+  /// (personal dashboards v1) vs. a floor department (redirects to
+  /// /workspace instead). Replaces command-center.read.ts's old hardcoded
+  /// office/floor code lists — tenant-authored data, not a code branch, per
+  /// docs/ADR-product-family-agnostic-platform-v1.md's "DESPL-320 rule".
+  isOfficeDept Boolean @default(false) @map("is_office_dept")
 
   tenant                Organization           @relation(fields: [tenantId], references: [id])
   users                 UserDepartment[]
