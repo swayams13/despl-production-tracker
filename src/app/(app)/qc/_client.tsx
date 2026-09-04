@@ -1,11 +1,108 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type MouseEvent } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { recordQcpAction } from "@/app/actions/qcp";
-import type { QcCockpit } from "@/lib/services/qc-cockpit.read";
+import { dispositionNcrAction } from "@/app/actions/ncr";
+import type { ActionResult } from "@/app/actions/_action";
+import type { QcCockpit, OpenNcrRow } from "@/lib/services/qc-cockpit.read";
+
+type Refusal = { code: string; message: string };
+type NcrDisposition = "USE_AS_IS" | "REPAIR" | "REWORK" | "SCRAP" | "CONCESSION";
+const REWORK_DISPOSITIONS: NcrDisposition[] = ["REWORK", "REPAIR"];
+
+function stop(e: MouseEvent) {
+  e.stopPropagation();
+}
+
+/** Same inline-refusal pattern as packing-panel.tsx / dispatch-panel.tsx — never toast-only. */
+function RefusalNote({ refusal }: { refusal: Refusal | null }) {
+  if (!refusal) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6, fontSize: 11 }} onClick={stop}>
+      <span className="chip c-overdue"><i />{refusal.code}</span>
+      <span style={{ color: "var(--muted)", flex: "1 1 160px" }}>{refusal.message}</span>
+    </div>
+  );
+}
+
+/**
+ * Inline disposition form for one OPEN Ncr. All five dispositions are legal
+ * from OPEN (ncr.service.ts's NCR_TRANSITIONS) — REWORK/REPAIR route to
+ * REWORK_IN_PROGRESS, the other three to DISPOSITIONED; the service decides
+ * which, this form just collects the value.
+ *
+ * reworkDueDate is surfaced only for REWORK/REPAIR — it's meaningless for a
+ * disposition that sends no work back to the floor. reworkOwnerId (schema/
+ * service already support it) has no picker here — no user-search component
+ * exists yet in this codebase; add one when someone asks to assign a named
+ * rework owner instead of just a due date.
+ */
+function DispositionForm({
+  row,
+  pending,
+  start,
+  onDone,
+  onCancel,
+}: {
+  row: OpenNcrRow;
+  pending: boolean;
+  start: (fn: () => Promise<void>) => void;
+  onDone: (r: ActionResult | null) => void;
+  onCancel: () => void;
+}) {
+  const [disposition, setDisposition] = useState<NcrDisposition>("REWORK");
+  const [notes, setNotes] = useState("");
+  const [reworkDueDate, setReworkDueDate] = useState("");
+
+  const save = () => {
+    start(async () => {
+      const r = await dispositionNcrAction(row.ncrId, disposition, {
+        notes: notes.trim() || undefined,
+        reworkDueDate:
+          REWORK_DISPOSITIONS.includes(disposition) && reworkDueDate ? new Date(reworkDueDate) : undefined,
+      });
+      onDone(r);
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }} onClick={stop}>
+      <select className="ws-detail" value={disposition} onChange={(e) => setDisposition(e.target.value as NcrDisposition)}>
+        <option value="REWORK">Rework</option>
+        <option value="REPAIR">Repair</option>
+        <option value="USE_AS_IS">Use as-is</option>
+        <option value="CONCESSION">Concession</option>
+        <option value="SCRAP">Scrap</option>
+      </select>
+      {REWORK_DISPOSITIONS.includes(disposition) && (
+        <input
+          type="date"
+          className="ws-detail"
+          value={reworkDueDate}
+          onChange={(e) => setReworkDueDate(e.target.value)}
+          style={{ width: 140 }}
+          aria-label="Rework due date"
+        />
+      )}
+      <input
+        className="ws-detail"
+        placeholder="Notes (optional)"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        style={{ flex: "1 1 200px" }}
+      />
+      <button className="btn btn-accent" disabled={pending} onClick={save}>
+        Save disposition
+      </button>
+      <button className="btn" disabled={pending} onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
 
 function fmtWhen(iso: string | null): string {
   if (!iso) return "—";
@@ -33,6 +130,9 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
   const router = useRouter();
   const [recordingKey, setRecordingKey] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [dispositioningId, setDispositioningId] = useState<number | null>(null);
+  const [dispositionPending, startDisposition] = useTransition();
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
 
   const record = (qcpItemId: number, unitId: number, result: "ACCEPTED" | "REJECTED" | "NA") => {
     start(async () => {
@@ -44,6 +144,18 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
         router.refresh();
       }
     });
+  };
+
+  const onDispositionResult = (r: ActionResult | null) => {
+    if (!r || !r.ok) {
+      setRefusal(r ? { code: r.code, message: r.message } : null);
+      if (r) toast.error(r.message);
+      return;
+    }
+    setRefusal(null);
+    setDispositioningId(null);
+    toast.success("Disposition recorded.");
+    router.refresh();
   };
 
   const maxRejects = Math.max(1, ...cockpit.rejectsByCheckpoint.map((r) => r.count));
@@ -116,6 +228,52 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
                 </div>
               );
             })
+        )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="hd">
+          <h3>NCRs awaiting disposition</h3>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>
+            {cockpit.openNcrs.length} open · {cockpit.rework.openCount} total in rework/disposition ·{" "}
+            {cockpit.rework.totalReworkHours}h avg rework closed
+          </span>
+        </div>
+        {cockpit.openNcrs.length === 0 ? (
+          <p className="note" style={{ margin: "16px 0" }}>Nothing awaiting disposition.</p>
+        ) : (
+          cockpit.openNcrs.map((n) => (
+            <div
+              key={n.ncrId}
+              style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: "1px solid var(--border)", fontSize: 12 }}
+            >
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {n.entityLabel} · <span className="mono">{n.jobNumber}</span>
+                {n.serialNo ? ` · Unit ${n.serialNo}` : ""}
+              </span>
+              <span className="chip c-overdue"><i />{n.categoryName}</span>
+              <span style={{ color: "var(--muted)", fontSize: 11 }}>
+                {n.rejectionDetail ?? "—"} · rejected by {n.rejectedByName}
+              </span>
+              {dispositioningId === n.ncrId ? (
+                <DispositionForm
+                  row={n}
+                  pending={dispositionPending}
+                  start={startDisposition}
+                  onDone={onDispositionResult}
+                  onCancel={() => {
+                    setDispositioningId(null);
+                    setRefusal(null);
+                  }}
+                />
+              ) : (
+                <button className="btn" disabled={dispositionPending} onClick={() => setDispositioningId(n.ncrId)}>
+                  Disposition…
+                </button>
+              )}
+              {dispositioningId === n.ncrId && <RefusalNote refusal={refusal} />}
+            </div>
+          ))
         )}
       </div>
 

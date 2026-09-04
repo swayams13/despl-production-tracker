@@ -75,6 +75,16 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadQcCockpit (DB)", async () => {
     for (let i = 1; i < cockpit.rejectsByCheckpoint.length; i++) {
       expect(cockpit.rejectsByCheckpoint[i].count).toBeLessThanOrEqual(cockpit.rejectsByCheckpoint[i - 1].count);
     }
+
+    // S11: openNcrs is the OPEN-only subset of rework.openCount (which also
+    // covers REWORK_IN_PROGRESS/DISPOSITIONED) — never larger than it — and
+    // every row resolves to a real job.
+    expect(cockpit.openNcrs.length).toBeLessThanOrEqual(cockpit.rework.openCount);
+    for (const n of cockpit.openNcrs) {
+      expect(typeof n.jobNumber).toBe("string");
+      expect(typeof n.entityLabel).toBe("string");
+      expect(typeof n.rejectedByName).toBe("string");
+    }
   });
 
   // Isolated fixture (own throwaway ScheduleRun/ProcessPlan, cleaned up
