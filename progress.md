@@ -2,40 +2,77 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
-## Session — S13 shop-floor nav reachability, 4 Sep 2026
+## Session — S13 shop-floor nav reachability, merged with real e2e-caught fixes, 4 Sep 2026
 
-**S13 done (local commit `6d151af` on `fix/S13-shell-nav-reachability`, not pushed).** SHELL_NAV
-(tablet icon rail + phone bottom nav) only reached `/my-day` plus three "coming in R2" stub
-routes — `/workspace`, `/qc`, `/jobs`, `/dashboard`, `/departments`, `/welding`, `/reports` were
-URL-only below 1024px. Added `/workspace`, `/qc`, `/jobs` to `SHELL_NAV` (desktop icon set reused,
-flagged with a `ponytail:` comment as a visual mismatch — the rail's icons are a thicker stroke —
-not a functional gap); `.icon-rail` gets `overflow-y: auto` for the extra items. Also fixed
-`(app)/layout.tsx` passing only `actor.roles[0]` into `AppShell` — silently dropped every role
-after the first for a multi-role actor; `AppShell` now takes the full `roles` array and the two
-admin-group checks use `.includes()`. `e2e/supervisor-viewport.spec.ts`'s `SHELL_PAGES` now points
-at the three newly-reachable real pages instead of the stub routes (not run in CI this session —
-see the environment note below).
+**S13 done, PR #23.** SHELL_NAV (tablet icon rail + phone bottom nav) only reached `/my-day` plus
+three "coming in R2" stub routes — `/workspace`, `/qc`, `/jobs`, `/dashboard`, `/departments`,
+`/welding`, `/reports` were URL-only below 1024px. Added `/workspace`, `/qc`, `/jobs` to
+`SHELL_NAV` (desktop icon set reused, flagged with a `ponytail:` comment as a visual mismatch);
+`.icon-rail` gets `overflow-y: auto` for the extra items. Fixed `(app)/layout.tsx` passing only
+`actor.roles[0]` into `AppShell` — silently dropped every role after the first for a multi-role
+actor. `e2e/supervisor-viewport.spec.ts`'s `SHELL_PAGES` now points at the three newly-reachable
+real pages instead of the stub routes.
 
-Verified: `pnpm typecheck`/`pnpm lint` clean, `pnpm test` 600/600. Real `/login` as
-`sup.fabrication@despl.local` (SUPERVISOR) — `/qc` and `/my-day` render correctly, sidebar still
-correctly hides the Admin group. Could not get the actual tablet/phone CSS breakpoint to render in
-this session's browser tool (`resize_window`/`window.resizeTo` did not change `window.innerWidth`
-in the connected Chrome instance), so confirmed the DOM output directly instead: both `.icon-rail`
-and `.bottom-nav` render the correct 7-item list (`/my-day`, `/workspace`, `/qc`, `/jobs`,
-`/board`, `/alerts`, `/profile`) regardless of which is `display:none` at the current width — the
-untouched CSS toggle is the only thing deciding visibility, and that logic wasn't changed. Did not
-run the e2e suite itself: playwright's build+start couldn't resolve `audit_log` at boot, root-
-caused to a **stale `DATABASE_URL` left exported in this shell session from an unrelated project**
-(`vedanta_test`) shadowing `.env` — not a repo bug, `unset DATABASE_URL DIRECT_URL` fixed `pnpm dev`
-immediately. Left for whoever runs `pnpm e2e` next to `unset` first if they hit the same error.
+**CI's first run on this PR failed for real reasons** — adding `/qc`/`/jobs` to the tested pages
+exercised layout paths the viewport matrix had simply never touched before:
+- Neither page's dense table had a `<ResponsiveTable/>` card fallback (every other table in the
+  app does) — added `JobCardView`/`QueueRowCard`.
+- `/jobs`' 9-column table still overflowed the 1024px tablet breakpoint even with cards —
+  `table-layout: auto` lets a `width:100%` table expand past its container when column
+  min-content widths (free text + a 25-segment StageSpine) exceed it. Switched to
+  `table-layout: fixed` with explicit column percentages.
+- `.hp-row`'s grid used a bare `1fr` for its `white-space:nowrap` activity column — a grid
+  track's implicit min-width is its content's min-content size, not 0, so the track never
+  actually shrank. Changed to `minmax(0, 1fr)`, the standard fix.
+- A genuine (reproduced consistently, not flaky) 7.5-7.7px touch-target near-miss between the
+  phone bottom-nav's "Board" tab and the first hold-point row's "Record…" button — gave `.hp-row`
+  3px more vertical padding; confirmed 10/10 clean on a repeat run afterward.
+
+Verified: `pnpm typecheck`/`lint` clean, `pnpm test` 600/600. 4 consecutive full local `e2e` runs
+green (42 passed, 76 pre-existing disclosed skips/fails unrelated to this branch), plus a
+dedicated 8x `--repeat-each` of the touch-target test, 0 failures throughout. Real `/login` as
+`sup.fabrication@despl.local`: `/qc` and `/my-day` render correctly, Admin group correctly hidden.
+
+**Merged without a passing remote CI run** — GitHub Actions never re-queued a check for this PR's
+later commits despite three separate triggers (direct push, close/reopen, empty-commit push);
+`check-runs` for the new head SHA stayed at 0 throughout. Likely an Actions-minutes/billing limit
+on this free-tier private repo, unconfirmed (checking needs a `user` OAuth scope unavailable this
+session). Merged per explicit instruction on the strength of the local verification above — this
+is a deviation from the repo's own "merge only after CI passes" rule, logged here and in
+`LEDGER.md` so it isn't mistaken for a clean CI pass later. Worth confirming Actions capacity
+before the next PR.
 
 Did not touch the CSS breakpoint architecture (deliberate per its own comments) or the
-job-switcher dropdown's pre-existing keyboard/aria gap (flagged as a separate follow-on item, not
-this session's scope).
+job-switcher dropdown's pre-existing keyboard/aria gap (flagged as a separate follow-on item).
 
-**S12 not started — still gated on D5.** The work item text says "DO NOT START THIS SESSION
-until I have told you the answer to the TPI/ASME record-integrity question"; `LEDGER.md`'s D5 row
-is still ☐. Skipped per the item's own instruction rather than guessing the answer.
+## Session — S11 NCR disposition UI, 4 Sep 2026
+
+**S11 done, PR #24 merged to `main` (`9aff9cd`).** `dispositionNcr` and its
+Server Action existed with zero callers — every rejection auto-opened an `Ncr` but nothing could
+ever move it past OPEN. Added `loadQcCockpit`'s `openNcrs` (one row per OPEN Ncr, reusing the
+existing `tenantNcrScope` rejection-chain join) and a new "NCRs awaiting disposition" card on
+`/qc` with an inline expand-in-place disposition form (same pattern as `dispatch-panel.tsx`'s
+`ApproveReleaseForm`), wired to the pre-existing `dispositionNcrAction`.
+
+Three decisions made and written into the commit: `reworkDueDate` surfaced only for REWORK/REPAIR;
+`reworkOwnerId` left out entirely (no user-picker component exists yet anywhere in this codebase);
+and — the one genuinely open question the work item flagged — **did not** add a maker-checker
+check to `dispositionNcr`, because `ncr.service.test.ts`'s own DB fixture has the same QC actor
+reject an operation and then disposition the resulting Ncr (lines 118/164) — reject and disposition
+are both QC judgment calls on one defect, not a submit/verify pair, and adding the check would
+have broken behavior the existing test already treats as correct.
+
+Verified: `pnpm typecheck`/`lint` clean, `pnpm test` 600/600, `pnpm test:db` 951/952 (the one
+failure is the same pre-existing, already-documented `process.service.test.ts` hold-point case).
+Real `/login` as `qc@despl.local` against the dev DB's one seeded OPEN Ncr: a SUPERVISOR actor's
+attempt was correctly refused FORBIDDEN with the `RefusalNote` rendering inline, then the QC actor
+recorded a REWORK disposition — status, disposition, notes and `reworkStartedAt` all round-tripped
+correctly and the row dropped out of the open list live, no refresh needed. Reset the dev DB's Ncr
+row back to OPEN afterward so the manual QA click doesn't leave the seed mutated.
+
+**S12 not started — still gated on D5.** The work item text says "DO NOT START THIS SESSION until
+I have told you the answer to the TPI/ASME record-integrity question"; `LEDGER.md`'s D5 row is
+still ☐. Skipped per the item's own instruction rather than guessing the answer.
 
 ---
 
