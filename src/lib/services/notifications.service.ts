@@ -1,5 +1,5 @@
 import { withTenant, type Tx } from "@/lib/db";
-import { assertNotClientUser, type Actor } from "@/lib/authz";
+import { assertNotClientUser, ROLES, type Actor } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { HOLD_POINT_AGE_ALERT_DAYS, NUDGE_COOLDOWN_MINUTES } from "@/lib/shared/constants";
@@ -76,7 +76,7 @@ export async function notifyJobCreated(
       where: { tenantId: actor.tenantId, active: true, departments: { some: { departmentId: { in: deptIds } } } },
       select: { id: true },
     }),
-    userIdsWithRole(tx, actor.tenantId, "PRODUCTION_HEAD"),
+    userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD),
   ]);
 
   const recipientIds = new Set([...supervisorRows.map((u) => u.id), ...productionHeadIds]);
@@ -156,7 +156,7 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
     const pending = overduePlans.filter((p) => !notifiedIds.has(p.id));
     if (pending.length === 0) return;
 
-    const productionHeadIds = await userIdsWithRole(tx, actor.tenantId, "PRODUCTION_HEAD");
+    const productionHeadIds = await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD);
 
     // One batched lookup for every distinct owning department instead of one
     // query per plan.
@@ -259,7 +259,7 @@ export async function nudgeQc(actor: Actor, planId: number, ageDays: number): Pr
 
     const ctx = await loadPlanNotifyContext(tx, plan);
     const recipients = [
-      ...new Set([...(await userIdsWithRole(tx, actor.tenantId, "QC")), ...(await userIdsWithRole(tx, actor.tenantId, "PRODUCTION_HEAD"))]),
+      ...new Set([...(await userIdsWithRole(tx, actor.tenantId, ROLES.QC)), ...(await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD))]),
     ];
     if (recipients.length === 0) return;
 
@@ -294,7 +294,7 @@ async function syncHoldPointAgedNotifications(actor: Actor): Promise<void> {
 
   await withTenant(actor.tenantId, async (tx) => {
     const recipients = [
-      ...new Set([...(await userIdsWithRole(tx, actor.tenantId, "QC")), ...(await userIdsWithRole(tx, actor.tenantId, "PRODUCTION_HEAD"))]),
+      ...new Set([...(await userIdsWithRole(tx, actor.tenantId, ROLES.QC)), ...(await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD))]),
     ];
     if (recipients.length === 0) return;
 

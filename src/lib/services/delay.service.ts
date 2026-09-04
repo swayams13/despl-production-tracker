@@ -3,12 +3,14 @@ import { audited } from "@/lib/audit";
 import {
   assertNotClientUser,
   requireDepartmentScope,
+  ROLES,
   type Actor,
 } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { fileDelayReasonSchema, type FileDelayReasonInput } from "@/lib/shared/schemas";
 import type { DelayReason } from "@/generated/prisma/client";
-import { lockProcessPlanForUpdate } from "./_shared";
+import { lockProcessPlanForUpdate, loadPlanNotifyContext } from "./_shared";
+import { notify, userIdsWithRole } from "./notifications.service";
 
 /**
  * Delay reasons (CLAUDE.md invariant #7).
@@ -54,6 +56,30 @@ export async function fileDelayReason(
           // filedAt: DB default now(); reviewStatus: DB default PENDING.
         },
       });
+
+      // S14 — was silent. Production Head, same reviewer role nudgeQc already
+      // notifies for a held plan (notifications.service.ts) — a delay reason
+      // is exactly the kind of exception PH needs surfaced, not discovered by
+      // opening the job later. Same transaction as the existing submit->QC
+      // notify (process.service.ts): a failed notify rolls back the file.
+      const productionHeadIds = await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD);
+      if (productionHeadIds.length > 0) {
+        const ctx = await loadPlanNotifyContext(tx, plan);
+        await notify(
+          tx,
+          actor.tenantId,
+          productionHeadIds.map((recipientId) => ({
+            recipientId,
+            type: "DELAY_FILED",
+            entityType: "DelayReason",
+            entityId: reason.id,
+            title: `Delay filed: ${ctx.processName}${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}`,
+            body: `${category.name} · filed by ${actor.name} · ${ctx.jobNumber}`,
+            payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo },
+          })),
+        );
+      }
+
       return {
         result: reason,
         audit: {

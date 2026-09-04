@@ -4,6 +4,7 @@ import {
   assertMakerChecker,
   assertNotClientUser,
   requireDepartmentScope,
+  ROLES,
 } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { assertStateTransition } from "./state-machine";
@@ -198,7 +199,7 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
 
     // §6: "item submitted → QC" — same transaction, so a failed notify rolls
     // back the whole submit rather than leaving a silent gap.
-    const qcIds = await userIdsWithRole(tx, actor.tenantId, "QC");
+    const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
     const ctx = await loadPlanNotifyContext(tx, updated);
     await notify(
       tx,
