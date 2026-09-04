@@ -2,6 +2,43 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — S13 shop-floor nav reachability, 4 Sep 2026
+
+**S13 done (local commit `6d151af` on `fix/S13-shell-nav-reachability`, not pushed).** SHELL_NAV
+(tablet icon rail + phone bottom nav) only reached `/my-day` plus three "coming in R2" stub
+routes — `/workspace`, `/qc`, `/jobs`, `/dashboard`, `/departments`, `/welding`, `/reports` were
+URL-only below 1024px. Added `/workspace`, `/qc`, `/jobs` to `SHELL_NAV` (desktop icon set reused,
+flagged with a `ponytail:` comment as a visual mismatch — the rail's icons are a thicker stroke —
+not a functional gap); `.icon-rail` gets `overflow-y: auto` for the extra items. Also fixed
+`(app)/layout.tsx` passing only `actor.roles[0]` into `AppShell` — silently dropped every role
+after the first for a multi-role actor; `AppShell` now takes the full `roles` array and the two
+admin-group checks use `.includes()`. `e2e/supervisor-viewport.spec.ts`'s `SHELL_PAGES` now points
+at the three newly-reachable real pages instead of the stub routes (not run in CI this session —
+see the environment note below).
+
+Verified: `pnpm typecheck`/`pnpm lint` clean, `pnpm test` 600/600. Real `/login` as
+`sup.fabrication@despl.local` (SUPERVISOR) — `/qc` and `/my-day` render correctly, sidebar still
+correctly hides the Admin group. Could not get the actual tablet/phone CSS breakpoint to render in
+this session's browser tool (`resize_window`/`window.resizeTo` did not change `window.innerWidth`
+in the connected Chrome instance), so confirmed the DOM output directly instead: both `.icon-rail`
+and `.bottom-nav` render the correct 7-item list (`/my-day`, `/workspace`, `/qc`, `/jobs`,
+`/board`, `/alerts`, `/profile`) regardless of which is `display:none` at the current width — the
+untouched CSS toggle is the only thing deciding visibility, and that logic wasn't changed. Did not
+run the e2e suite itself: playwright's build+start couldn't resolve `audit_log` at boot, root-
+caused to a **stale `DATABASE_URL` left exported in this shell session from an unrelated project**
+(`vedanta_test`) shadowing `.env` — not a repo bug, `unset DATABASE_URL DIRECT_URL` fixed `pnpm dev`
+immediately. Left for whoever runs `pnpm e2e` next to `unset` first if they hit the same error.
+
+Did not touch the CSS breakpoint architecture (deliberate per its own comments) or the
+job-switcher dropdown's pre-existing keyboard/aria gap (flagged as a separate follow-on item, not
+this session's scope).
+
+**S12 not started — still gated on D5.** The work item text says "DO NOT START THIS SESSION
+until I have told you the answer to the TPI/ASME record-integrity question"; `LEDGER.md`'s D5 row
+is still ☐. Skipped per the item's own instruction rather than guessing the answer.
+
+---
+
 ## Session — Gate 0 prevention items (§9 items 3+7), A4 QCP-inspection sync split out and merged, S6 started, 4 Sep 2026
 
 **Status: GATE 0 fully closed out; GATE 1 started (S6 done, PR open).**
