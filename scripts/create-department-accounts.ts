@@ -3,22 +3,36 @@
 // request (26 Aug 2026): fabrication, qc, procurement, and a second
 // production/floor login also scoped to FABRICATION (no separate
 // "PRODUCTION" department exists in the schema — see seed/lead-time-model.json).
-// Same credential ("despl123@") for all 4, mustChangePassword=false, so the
-// team can log in immediately; password rotation is deferred, not skipped
-// (see createUserSchema's mustChangePassword field).
+// Already run against production once — these 4 accounts exist. This script
+// stays in the repo as the record of how they were created and in case a
+// 5th department account is ever needed the same way, not for re-running
+// against the existing 4 (createUser will just fail on the duplicate email).
+//
+// D3 (LEDGER.md): the account credential this script used ("despl123@") was
+// a real, shared, hardcoded password committed to source — removed below.
+// Rotating the 4 LIVE production passwords is a separate, human-coordinated
+// step (whoever uses these accounts day-to-day needs to be told the new
+// one), not something this script — or any script — should do unilaterally.
+// The right tool for that already exists: /admin's Employees table has a
+// real "Reset password" action (generateResetPasswordAction ->
+// resetUserPassword, admin.service.ts) that generates a temp password and
+// forces mustChangePassword on next login. Use that, once, per account.
 //
 // Follows scripts/bootstrap-admin.ts's pattern exactly: real createUser
 // service call under a synthetic actor, connecting via DIRECT_URL as table
 // owner. Not a session/JWT forge — no cookie or token is created.
 //
 // Usage:
-//   DIRECT_URL=... DATABASE_URL=... pnpm db:create-dept-accounts
+//   DIRECT_URL=... DATABASE_URL=... DEPT_ACCOUNT_PASSWORD=... pnpm db:create-dept-accounts
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { createUser } from "../src/lib/services/admin.service";
 import { ROLES, type Actor } from "../src/lib/authz";
 
-const PASSWORD = "despl123@";
+if (!process.env.DEPT_ACCOUNT_PASSWORD) {
+  throw new Error("create-department-accounts: set DEPT_ACCOUNT_PASSWORD — no hardcoded default (D3, LEDGER.md).");
+}
+const PASSWORD: string = process.env.DEPT_ACCOUNT_PASSWORD;
 
 const ACCOUNTS: { email: string; name: string; roleCode: (typeof ROLES)[keyof typeof ROLES]; deptCode: string }[] = [
   { email: "fabrication@despl.local", name: "Fabrication", roleCode: ROLES.SUPERVISOR, deptCode: "FABRICATION" },
