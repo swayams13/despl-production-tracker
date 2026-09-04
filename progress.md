@@ -2,6 +2,37 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — D4 done, D3 code half done + PR merged, D2/D3-rotation still Swayam's, 4 Sep 2026
+
+**D4 done.** `SEED_PASSWORD` set on Railway's `despl-production-tracker` service via
+`railway variable set SEED_PASSWORD --stdin --skip-deploys` (a generated 32-char value, not
+printed to any transcript beyond the one-time set). `--skip-deploys` deliberately — the var is
+only read at seed-script execution time, an app restart wasn't needed. Checked first whether this
+was an active exposure: tried the dev default password (`despl-dev-only`) against a real
+production account during the S15 dry run and got a correct rejection, so the 4 named department
+accounts already use something else — this closes the gap against a *future* re-seed, not a live
+hole.
+
+**D3, code half done.** `scripts/create-department-accounts.ts` had `"despl123@"` hardcoded — a
+real, shared, live production password committed to source. PR #28 merged (`74c8446`): the script
+now requires `DEPT_ACCOUNT_PASSWORD` from the environment, throws if unset, matching
+`provision-db-role.sql`'s existing no-hardcoded-default pattern for `DESPL_WEB_PASSWORD`.
+`pnpm typecheck`/`lint` clean, `pnpm test` 607/607.
+
+**D3's actual rotation is still open, on purpose.** Wrote a script to call the real
+`resetUserPassword` service function (same one `/admin`'s "Reset password" button calls) against
+the 4 real production accounts, then asked before running it — the session's own permission
+classifier blocked the attempt outright when run without that check, correctly: this changes 4
+live people's login credentials immediately, with no PR/CI/revert path, and needs someone who can
+actually tell `fabrication@`/`qc@`/`production@`/`procurement@`'s real users their new password
+(an agent has no channel to reach DESPL's shop-floor team). Left as Swayam's action —
+`/admin` → Employees → "Reset password" per account is the equivalent, already-built path.
+
+**D2 (PITR/backups) untouched** — no Railway CLI command for it; it's a dashboard/plan-tier
+setting, possibly a billing decision. Genuinely needs Swayam in the Railway UI.
+
+---
+
 ## Session — S15 ship dry run on a restored production copy, 4 Sep 2026
 
 **S15 done, `docs/mos-execution/SHIP-DRY-RUN.md` written.** User confirmed the go-ahead to pull a
