@@ -1,8 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
-import { stageName } from "@/lib/shared/stage-names";
-import { loadJobSpine, loadMappedOps, type MappedOp } from "./_shared";
+import { loadJobSpine, loadMappedOps, loadWorkOrderStageNames, workOrderStageName, type MappedOp } from "./_shared";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ProcessPlanStatus } from "@/generated/prisma/client";
 
@@ -100,12 +99,14 @@ export async function loadStageDetail(
   stageNo: number,
 ): Promise<StageDetail | null> {
   return withTenant(actor.tenantId, async (tx) => {
-    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true, jobNumber: true } });
+    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true, jobNumber: true, familyId: true } });
     if (!job) return null;
     assertClientScope(actor, job.clientId);
 
     const unit = await tx.unit.findFirst({ where: { id: unitId, equipment: { jobId } }, select: { serialNo: true } });
     if (!unit) return null;
+
+    const stageNames = await loadWorkOrderStageNames(tx, actor.tenantId, job.familyId);
 
     const viewRows = await tx.$queryRaw<ViewRow[]>`
       SELECT fill_status, is_overdue, is_rejected, governing_plan_id
@@ -294,7 +295,7 @@ export async function loadStageDetail(
       jobId,
       jobNumber: job.jobNumber,
       stageNo,
-      stageName: stageName(stageNo),
+      stageName: workOrderStageName(stageNames, stageNo),
       unitId,
       serialNo: unit.serialNo,
       deptName: governingProcess?.department.name ?? "—",

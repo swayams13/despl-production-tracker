@@ -229,6 +229,7 @@ model Organization {
   jobs              Job[]
   componentTypes    ComponentTypeRef[]
   equipmentTypes    EquipmentTypeRef[]
+  workOrderStages   WorkOrderStage[]
   operations        OperationRef[]
   testTypes         TestTypeRef[]
   drawingTypes      DrawingTypeRef[]
@@ -623,10 +624,33 @@ model ProductFamily {
   routes            RouteTemplate[]
   equipmentTypes    EquipmentTypeRef[]
   assemblyTemplates AssemblyTemplate[]
+  workOrderStages   WorkOrderStage[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@map("product_families")
+}
+
+/// B7: display names for the 25-stage work-order reporting view
+/// (`TemplateProcess.workOrderStages[]`'s target numbers), per family —
+/// replaces the old hardcoded, family-agnostic `STAGE_NAMES` constant
+/// (`src/lib/shared/stage-names.ts`, deleted). A family with no stage
+/// crosswalk yet (workOrderStages always `[]`) simply has no rows here;
+/// callers fall back to a plain "Stage N" label.
+model WorkOrderStage {
+  id       Int    @id @default(autoincrement())
+  tenantId Int    @map("tenant_id")
+  familyId Int    @map("family_id")
+  stageNo  Int    @map("stage_no")
+  name     String
+
+  tenant Organization  @relation(fields: [tenantId], references: [id])
+  family ProductFamily @relation(fields: [familyId], references: [id])
+
+  @@unique([tenantId, familyId, stageNo])
+  @@index([tenantId])
+  @@index([familyId])
+  @@map("work_order_stages")
 }
 
 model ProcessTemplate {

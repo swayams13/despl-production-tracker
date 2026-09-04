@@ -116,6 +116,23 @@ export function jobEdgeToScheduleEdge(row: JobProcessEdge): ScheduleEdge {
   };
 }
 
+// ── Work-order stage names (B7) ──────────────────────────────────────────
+
+/**
+ * Display names for the 25-stage work-order reporting view, per family —
+ * replaces the old hardcoded, family-agnostic `STAGE_NAMES` constant
+ * (`src/lib/shared/stage-names.ts`, deleted). A family with no stage
+ * crosswalk yet has no rows; callers fall back to a plain "Stage N" label.
+ */
+export async function loadWorkOrderStageNames(tx: Tx, tenantId: number, familyId: number): Promise<Map<number, string>> {
+  const rows = await tx.workOrderStage.findMany({ where: { tenantId, familyId } });
+  return new Map(rows.map((r) => [r.stageNo, r.name]));
+}
+
+export function workOrderStageName(names: Map<number, string>, stageNo: number): string {
+  return names.get(stageNo) ?? `Stage ${stageNo}`;
+}
+
 // ── Job spine loader ─────────────────────────────────────────────────────
 
 export interface JobSpine {

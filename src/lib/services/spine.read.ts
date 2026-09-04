@@ -1,6 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
-import { stageName } from "@/lib/shared/stage-names";
+import { loadWorkOrderStageNames, workOrderStageName } from "./_shared";
 import type { StageDisplayStatus, StageSegment } from "@/components/industrial/stage-status";
 
 /**
@@ -28,9 +28,11 @@ interface Row {
 
 export async function loadJobSpines(actor: Actor, jobId: number): Promise<UnitSpine[] | null> {
   return withTenant(actor.tenantId, async (tx) => {
-    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
+    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true, familyId: true } });
     if (!job) return null;
     assertClientScope(actor, job.clientId);
+
+    const stageNames = await loadWorkOrderStageNames(tx, actor.tenantId, job.familyId);
 
     // RLS (security_invoker view) already scopes to the tenant; the explicit
     // job_id filter is the query predicate, not the security boundary.
@@ -52,7 +54,7 @@ export async function loadJobSpines(actor: Actor, jobId: number): Promise<UnitSp
       }
       spine.segments.push({
         stageNo: r.stage_no,
-        stageName: stageName(r.stage_no),
+        stageName: workOrderStageName(stageNames, r.stage_no),
         status: r.fill_status,
         // Raw "any plan overdue" flag — the component's showsOverduePip() decides
         // whether it renders as a pip (overdue but the fill isn't already overdue).
