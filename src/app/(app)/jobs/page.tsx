@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { loadJobs } from "@/lib/services/jobs.read";
 import { StageSpine } from "@/components/industrial/stage-spine";
-import { JobRow } from "./_row";
+import { ResponsiveTable } from "@/components/industrial/responsive-table";
+import { JobRow, JobCardView } from "./_row";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -44,67 +45,78 @@ export default async function JobsList() {
         </p>
       ) : (
         <div className="card">
-          <table>
-            <thead>
-              <tr>
-                <th>Job</th>
-                <th>Family</th>
-                <th>Description</th>
-                <th className="num">Units</th>
-                <th style={{ minWidth: 160 }}>Stages</th>
-                <th style={{ minWidth: 140 }}>% complete</th>
-                <th>Forecast vs due</th>
-                <th className="num">Open holds</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.map((j) => (
-                <JobRow key={j.id} jobId={j.id}>
-                  <td>
-                    <span className="mono" style={{ color: "var(--text)", fontWeight: 500 }}>{j.jobNumber}</span>
-                  </td>
-                  <td style={{ color: "var(--muted)" }}>{j.familyName}</td>
-                  <td>{j.projectName ?? "—"}</td>
-                  <td className="num mono">{j.unitCount}</td>
-                  <td>
-                    {j.unitRollup.length > 0 ? (
-                      <StageSpine variant="mini" segments={j.unitRollup} />
-                    ) : (
-                      <span style={{ color: "var(--muted)", fontSize: 11 }}>No schedule</span>
-                    )}
-                  </td>
-                  <td>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div className="pbar" style={{ flex: 1, marginTop: 0 }}>
-                        <i style={{ width: `${j.percentComplete}%` }} />
-                      </div>
-                      <span className="mono" style={{ fontSize: 12 }}>{j.percentComplete}%</span>
-                    </div>
-                  </td>
-                  <td>
-                    {j.committedDeliveryDate == null ? (
-                      <span style={{ color: "var(--muted)" }}>No date set</span>
-                    ) : j.forecastVarianceDays == null ? (
-                      <span style={{ color: "var(--muted)" }}>—</span>
-                    ) : (
-                      <span
-                        className="mono"
-                        style={{ color: j.forecastVarianceDays > 0 ? "var(--s-overdue)" : "var(--s-complete)", fontWeight: 600 }}
-                      >
-                        {j.forecastVarianceDays > 0 ? "+" : ""}
-                        {j.forecastVarianceDays}d
-                      </span>
-                    )}
-                  </td>
-                  <td className="num mono" style={{ color: j.openHoldPoints > 0 ? "var(--s-hold)" : "var(--muted)" }}>
-                    {j.openHoldPoints}
-                  </td>
-                  <td style={{ color: "var(--muted)", fontSize: 12 }}>{fmtWhen(j.lastActivityAt)}</td>
-                </JobRow>
-              ))}
-            </tbody>
-          </table>
+          <ResponsiveTable
+            table={
+              // table-layout: fixed — 9 columns of free-text + a fixed-width
+              // (25-stage) StageSpine overflow their container's natural
+              // content width at 1024px (found overflowing 28-144px in
+              // e2e's tablet project); fixed layout caps every column to its
+              // % share instead of expanding past 100%, wrapping long text
+              // rather than pushing the table wider than the viewport.
+              <table style={{ tableLayout: "fixed" }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: "9%" }}>Job</th>
+                    <th style={{ width: "10%" }}>Family</th>
+                    <th style={{ width: "15%" }}>Description</th>
+                    <th className="num" style={{ width: "6%" }}>Units</th>
+                    <th style={{ width: "18%" }}>Stages</th>
+                    <th style={{ width: "12%" }}>% complete</th>
+                    <th style={{ width: "12%" }}>Forecast vs due</th>
+                    <th className="num" style={{ width: "8%" }}>Open holds</th>
+                    <th style={{ width: "10%" }}>Updated</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((j) => (
+                    <JobRow key={j.id} jobId={j.id}>
+                      <td>
+                        <span className="mono" style={{ color: "var(--text)", fontWeight: 500 }}>{j.jobNumber}</span>
+                      </td>
+                      <td style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.familyName}</td>
+                      <td style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.projectName ?? "—"}</td>
+                      <td className="num mono">{j.unitCount}</td>
+                      <td style={{ overflow: "hidden" }}>
+                        {j.unitRollup.length > 0 ? (
+                          <StageSpine variant="mini" segments={j.unitRollup} />
+                        ) : (
+                          <span style={{ color: "var(--muted)", fontSize: 11 }}>No schedule</span>
+                        )}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div className="pbar" style={{ flex: 1, marginTop: 0 }}>
+                            <i style={{ width: `${j.percentComplete}%` }} />
+                          </div>
+                          <span className="mono" style={{ fontSize: 12 }}>{j.percentComplete}%</span>
+                        </div>
+                      </td>
+                      <td>
+                        {j.committedDeliveryDate == null ? (
+                          <span style={{ color: "var(--muted)" }}>No date set</span>
+                        ) : j.forecastVarianceDays == null ? (
+                          <span style={{ color: "var(--muted)" }}>—</span>
+                        ) : (
+                          <span
+                            className="mono"
+                            style={{ color: j.forecastVarianceDays > 0 ? "var(--s-overdue)" : "var(--s-complete)", fontWeight: 600 }}
+                          >
+                            {j.forecastVarianceDays > 0 ? "+" : ""}
+                            {j.forecastVarianceDays}d
+                          </span>
+                        )}
+                      </td>
+                      <td className="num mono" style={{ color: j.openHoldPoints > 0 ? "var(--s-hold)" : "var(--muted)" }}>
+                        {j.openHoldPoints}
+                      </td>
+                      <td style={{ color: "var(--muted)", fontSize: 12 }}>{fmtWhen(j.lastActivityAt)}</td>
+                    </JobRow>
+                  ))}
+                </tbody>
+              </table>
+            }
+            cards={jobs.map((j) => <JobCardView key={j.id} job={j} />)}
+          />
         </div>
       )}
     </>

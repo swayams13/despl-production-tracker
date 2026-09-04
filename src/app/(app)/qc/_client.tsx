@@ -4,8 +4,9 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
+import { ResponsiveTable } from "@/components/industrial/responsive-table";
 import { recordQcpAction } from "@/app/actions/qcp";
-import type { QcCockpit } from "@/lib/services/qc-cockpit.read";
+import type { QcCockpit, QcQueueRow } from "@/lib/services/qc-cockpit.read";
 
 function fmtWhen(iso: string | null): string {
   if (!iso) return "—";
@@ -27,6 +28,24 @@ const CHIP: Record<string, string> = {
   "QC review": "c-submitted",
   Reinspect: "c-overdue",
 };
+
+/** `<ResponsiveTable />`'s card counterpart to "Awaiting your verification"'s
+ * 6-column table — same open-stage-sheet onClick as the table row. */
+function QueueRowCard({ row, onOpen }: { row: QcQueueRow; onOpen: () => void }) {
+  return (
+    <div className="rt-card" onClick={onOpen} style={{ cursor: "pointer" }}>
+      <div className="rt-card-top">
+        <b className="mono">{row.jobNumber}</b>
+        <span className="mono" style={{ color: "var(--muted)", fontSize: 12 }}>{row.serialNo}</span>
+      </div>
+      <div className="rt-card-meta">{row.processName} · {row.deptName}</div>
+      <div className="rt-card-row">
+        <span>{row.submittedByName ?? "—"}</span>
+        <span className="mono">{fmtWhen(row.submittedAt)}</span>
+      </div>
+    </div>
+  );
+}
 
 export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
   const { sheet, openStage, refreshStage, closeSheet } = useStageSheetLauncher();
@@ -63,21 +82,28 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
         {cockpit.queue.length === 0 ? (
           <p className="note" style={{ margin: "16px 0" }}>Nothing awaiting verification.</p>
         ) : (
-          <table>
-            <thead><tr><th>Job</th><th>Unit</th><th>Process</th><th>Department</th><th>Submitted by</th><th className="num">When</th></tr></thead>
-            <tbody>
-              {cockpit.queue.map((q) => (
-                <tr key={q.planId} className="row" onClick={() => openStage(q.jobId, q.unitId, q.stageNo)} style={{ cursor: "pointer" }}>
-                  <td className="mono">{q.jobNumber}</td>
-                  <td className="mono" style={{ color: "var(--muted)" }}>{q.serialNo}</td>
-                  <td>{q.processName}</td>
-                  <td>{q.deptName}</td>
-                  <td>{q.submittedByName ?? "—"}</td>
-                  <td className="num mono" style={{ color: "var(--muted)" }}>{fmtWhen(q.submittedAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <ResponsiveTable
+            table={
+              <table>
+                <thead><tr><th>Job</th><th>Unit</th><th>Process</th><th>Department</th><th>Submitted by</th><th className="num">When</th></tr></thead>
+                <tbody>
+                  {cockpit.queue.map((q) => (
+                    <tr key={q.planId} className="row" onClick={() => openStage(q.jobId, q.unitId, q.stageNo)} style={{ cursor: "pointer" }}>
+                      <td className="mono">{q.jobNumber}</td>
+                      <td className="mono" style={{ color: "var(--muted)" }}>{q.serialNo}</td>
+                      <td>{q.processName}</td>
+                      <td>{q.deptName}</td>
+                      <td>{q.submittedByName ?? "—"}</td>
+                      <td className="num mono" style={{ color: "var(--muted)" }}>{fmtWhen(q.submittedAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            }
+            cards={cockpit.queue.map((q) => (
+              <QueueRowCard key={q.planId} row={q} onOpen={() => openStage(q.jobId, q.unitId, q.stageNo)} />
+            ))}
+          />
         )}
       </div>
 
