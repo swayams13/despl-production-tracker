@@ -115,6 +115,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("assignment service — claim/assign/
     });
     return owner.processPlan.create({
       data: {
+        jobId: jobIdRef,
         scheduleRunId: runId,
         jobProcessId: jp.id,
         unitId: null,

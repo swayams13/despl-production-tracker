@@ -127,10 +127,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — cross-departme
 
     // Stores' own process is not complete -> Procurement's plan is BLOCKED.
     await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpStores.id, ownerDepartmentId: deptStores.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpStores.id, ownerDepartmentId: deptStores.id, status: "NOT_STARTED" },
     });
     const blockedPlan = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpProcurement.id, ownerDepartmentId: deptProcurement.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpProcurement.id, ownerDepartmentId: deptProcurement.id, status: "NOT_STARTED" },
     });
 
     const viewer: Actor = {

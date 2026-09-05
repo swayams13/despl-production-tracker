@@ -32,6 +32,7 @@ describe.skipIf(!RUN_DB)("ProcessPlan — partial unique index (DB)", async () =
 
   let tenantId = 0;
   let departmentId = 0;
+  let jobId = 0;
   let jobProcessId = 0;
   let scheduleRunId = 0;
   let unit1Id = 0;
@@ -61,6 +62,7 @@ describe.skipIf(!RUN_DB)("ProcessPlan — partial unique index (DB)", async () =
       },
     });
 
+    jobId = job.id;
     const jobProcess = await owner.jobProcess.create({
       data: { jobId: job.id, seq: 1, code: "P1", name: "Test process", departmentId, workOrderStages: [1] },
     });
@@ -96,10 +98,10 @@ describe.skipIf(!RUN_DB)("ProcessPlan — partial unique index (DB)", async () =
 
   it("allows multiple ProcessPlan rows with different non-null unitId values for the same (scheduleRunId, jobProcessId)", async () => {
     const plan1 = await owner.processPlan.create({
-      data: { scheduleRunId, jobProcessId, unitId: unit1Id, ownerDepartmentId: departmentId },
+      data: { jobId, scheduleRunId, jobProcessId, unitId: unit1Id, ownerDepartmentId: departmentId },
     });
     const plan2 = await owner.processPlan.create({
-      data: { scheduleRunId, jobProcessId, unitId: unit2Id, ownerDepartmentId: departmentId },
+      data: { jobId, scheduleRunId, jobProcessId, unitId: unit2Id, ownerDepartmentId: departmentId },
     });
 
     expect(plan1.unitId).toBe(unit1Id);
@@ -110,14 +112,14 @@ describe.skipIf(!RUN_DB)("ProcessPlan — partial unique index (DB)", async () =
 
   it("rejects a second ProcessPlan with unitId=NULL for the same (scheduleRunId, jobProcessId) pair", async () => {
     const plan1 = await owner.processPlan.create({
-      data: { scheduleRunId, jobProcessId, unitId: null, ownerDepartmentId: departmentId },
+      data: { jobId, scheduleRunId, jobProcessId, unitId: null, ownerDepartmentId: departmentId },
     });
     expect(plan1.unitId).toBeNull();
 
     let error: Error | null = null;
     try {
       await owner.processPlan.create({
-        data: { scheduleRunId, jobProcessId, unitId: null, ownerDepartmentId: departmentId },
+        data: { jobId, scheduleRunId, jobProcessId, unitId: null, ownerDepartmentId: departmentId },
       });
     } catch (e) {
       error = e as Error;

@@ -86,7 +86,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("cross-tenant write/read holes (DB, a
       data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date("2026-01-01"), isCurrent: true },
     });
     const processPlan = await owner.processPlan.create({
-      data: { scheduleRunId: scheduleRun.id, jobProcessId: jobProcess.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: scheduleRun.id, jobProcessId: jobProcess.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     return { tenantId, jobId: job.id, unitId: unit.id, bomItemId: bomItem.id, weldJointId: weldJoint.id, qcpItemId: qcpItem.id, planId: processPlan.id };

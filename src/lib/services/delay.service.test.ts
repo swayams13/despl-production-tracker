@@ -115,6 +115,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("fileDelayReason — file → unblock
     runId = run.id;
     const plan = await owner.processPlan.create({
       data: {
+        jobId: job.id,
         scheduleRunId: run.id,
         jobProcessId: jp.id,
         unitId: null,

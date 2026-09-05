@@ -108,7 +108,7 @@ describe.skipIf(!RUN_DB)("Task 1.1 migration backfill (DB)", async () => {
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
     const plan = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id },
     });
     expect(plan.assigneeUserId).toBeNull();
   });

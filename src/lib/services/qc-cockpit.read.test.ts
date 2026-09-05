@@ -103,6 +103,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadQcCockpit (DB)", async () => {
     });
     const stalePlan = await owner.processPlan.create({
       data: {
+        jobId: job.id,
         scheduleRunId: staleRun.id,
         jobProcessId: jobProcess.id,
         unitId: unit.id,

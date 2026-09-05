@@ -209,6 +209,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     const mkPlan = (jobProcessId: number, departmentId: number, plannedFinish: Date) =>
       owner.processPlan.create({
         data: {
+          jobId: job.id,
           scheduleRunId: run.id,
           jobProcessId,
           unitId: null,
@@ -434,11 +435,11 @@ describe.skipIf(!RUN_DB)("S1: excluded process does not deadlock its successor (
     // No ProcessPlan is created for jpB — mirrors generateSchedule, which
     // never materialises a plan for an included:false JobProcess.
     await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpA.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpA.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
     });
     planC = (
       await owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jpC.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpC.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
       })
     ).id;
 
@@ -771,7 +772,7 @@ describe.skipIf(!RUN_DB)("submitProcess component-ops gate (Phase 3, R2, DB-back
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
     const plan = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     const user = await owner.user.create({
@@ -862,7 +863,7 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
     const plan = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     const userSup = await owner.user.create({
@@ -1033,13 +1034,13 @@ describe.skipIf(!RUN_DB)("verifyProcess evidence gate (Phase 5, D4, DB-backed)",
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
     const planPacking = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpPacking.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpPacking.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
     const planDispatch = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpDispatch.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpDispatch.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
     const planUntagged = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpUntagged.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpUntagged.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     const userSup = await owner.user.create({

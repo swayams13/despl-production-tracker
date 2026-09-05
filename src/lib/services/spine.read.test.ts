@@ -83,7 +83,7 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ladder (DB-backed, isolated fixtur
 
     const mkPlan = (jobProcessId: number) =>
       owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId, unitId, ownerDepartmentId: REF.dept, status: "NOT_STARTED", plannedFinish: future },
+        data: { jobId, scheduleRunId: run.id, jobProcessId, unitId, ownerDepartmentId: REF.dept, status: "NOT_STARTED", plannedFinish: future },
       });
     planA = (await mkPlan(jpA.id)).id;
     planB = (await mkPlan(jpB.id)).id;

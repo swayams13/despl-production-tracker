@@ -118,7 +118,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
         data: { jobId, version: 1, mode: "FORWARD", projectStartDate: past, isCurrent: true },
       });
       const plan = await owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: REF.dept, status: "IN_PROGRESS", plannedFinish: past },
+        data: { jobId, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: REF.dept, status: "IN_PROGRESS", plannedFinish: past },
       });
       planId = plan.id;
     });
@@ -200,19 +200,19 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
 
       const jpAssigned = await owner.jobProcess.create({ data: { jobId: job.id, seq: 1, code: "A1", name: "Assigned process", departmentId: deptId, workOrderStages: [1] } });
       const assignedPlan = await owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jpAssigned.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past, assigneeUserId: memberAId },
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpAssigned.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past, assigneeUserId: memberAId },
       });
       assignedPlanId = assignedPlan.id;
 
       const jpUnassigned = await owner.jobProcess.create({ data: { jobId: job.id, seq: 2, code: "A2", name: "Unassigned process", departmentId: deptId, workOrderStages: [1] } });
       const unassignedPlan = await owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jpUnassigned.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past },
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpUnassigned.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past },
       });
       unassignedPlanId = unassignedPlan.id;
 
       const jpInactiveAssignee = await owner.jobProcess.create({ data: { jobId: job.id, seq: 3, code: "A3", name: "Inactive-assignee process", departmentId: deptId, workOrderStages: [1] } });
       const inactiveAssigneePlan = await owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jpInactiveAssignee.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past, assigneeUserId: inactiveMemberId },
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpInactiveAssignee.id, unitId: null, ownerDepartmentId: deptId, status: "IN_PROGRESS", plannedFinish: past, assigneeUserId: inactiveMemberId },
       });
       inactiveAssigneePlanId = inactiveAssigneePlan.id;
     });
@@ -295,7 +295,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
       const run = await owner.scheduleRun.create({ data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true } });
       const jp = await owner.jobProcess.create({ data: { jobId: job.id, seq: 1, code: "N1", name: "Held process", departmentId: dept.id, workOrderStages: [1] } });
       const plan = await owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status: "ON_HOLD" },
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status: "ON_HOLD" },
       });
       planId = plan.id;
     });

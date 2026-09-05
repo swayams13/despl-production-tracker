@@ -73,6 +73,7 @@ describe.skipIf(!RUN_DB)("D16 — assignment never bypasses gating (DB)", async 
     const mkPlan = (jobProcessId: number) =>
       owner.processPlan.create({
         data: {
+          jobId: job.id,
           scheduleRunId: run.id,
           jobProcessId,
           unitId: null,

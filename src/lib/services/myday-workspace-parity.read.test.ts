@@ -91,7 +91,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday/workspace overdue-count parity
       });
       return owner.processPlan.create({
         data: {
-          scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptSolo.id, assigneeUserId: meUser.id,
+          jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptSolo.id, assigneeUserId: meUser.id,
           status: opts.status, plannedFinish: opts.plannedFinish, actualFinish: opts.actualFinish ?? null,
         },
       });
