@@ -22,7 +22,7 @@ import type { QcpExecution, QcpExecutionResult, QcpItem, QcpTemplate } from "@/g
 export async function recordQcpExecutionTx(
   tx: Tx,
   actor: Actor,
-  args: { qcpItemId: number; unitId: number; result: QcpExecutionResult; remarks?: string | null; jobId?: number | null },
+  args: { qcpItemId: number; unitId: number; result: QcpExecutionResult; remarks?: string | null; jobId: number },
 ): Promise<QcpExecution> {
   // Next attempt number for this (item, unit) — re-inspection after rejection.
   const prior = await tx.qcpExecution.aggregate({
@@ -39,7 +39,7 @@ export async function recordQcpExecutionTx(
       result: args.result,
       clearedBy: actor.userId,
       remarks: args.remarks ?? null,
-      jobId: args.jobId ?? null,
+      jobId: args.jobId,
       // recordedAt: DB default now() (invariant #1).
     },
   });
