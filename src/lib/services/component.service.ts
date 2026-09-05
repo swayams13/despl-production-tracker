@@ -152,6 +152,10 @@ async function lockComponentOperationForUpdate(
   if (!op) {
     throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ComponentOperation", componentOperationId });
   }
+  // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
+  // to the operation's own (denormalized) job — same pattern as
+  // lockProcessPlanForUpdate in _shared.ts.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(op.jobId)}, true)`;
 
   const previousOp = await findPreviousComponentOperation(tx, op, op.component.routeVersionId);
 

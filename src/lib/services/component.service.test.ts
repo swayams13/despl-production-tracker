@@ -135,6 +135,12 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let kitUntrackedOp = 0; // Component.bomItemId null (SEAM) → allowed
   let kitNoActivityOp = 0; // bomItem set, zero StockLot rows at all → refused (S18: no longer a SEAM)
   let kitCrossTenantOp = 0; // Component.bomItemId points at another tenant's BomItem → NOT_FOUND
+  // H1 — job-level RLS backstop: Component.bomItemId pointing at a BomItem in
+  // a DIFFERENT job of the SAME tenant (not reachable via app writes, same
+  // discipline as kitCrossTenantOp but one door down: assertKitReady's
+  // BomItem lookup is only ever tenant-scoped, never job-scoped in code —
+  // job_isolation RLS is the only thing that can catch this).
+  let kitCrossJobOp = 0;
   // Fix wave, Critical #1 regression: a full kit (received === required),
   // issuing part of it to the component the first op starts on must not
   // manufacture a false shortage that then refuses the SAME component's next op.
@@ -364,6 +370,30 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     kitCrossTenantOp = (
       await owner.componentOperation.create({
         data: { jobId, componentId: componentKitCrossTenant.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    // H1 — same-tenant, DIFFERENT job BomItem cross-link.
+    const jobB = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-co-jobrls-b-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-CO-RLS-B-${Date.now()}`,
+      },
+    });
+    const jobBEquipment = await owner.equipment.create({ data: { jobId: jobB.id, name: "Job B Vessel" } });
+    const jobBBomItem = await owner.bomItem.create({
+      data: { jobId: jobB.id, equipmentId: jobBEquipment.id, itemNo: 1, partName: "Job B's part", sourceQty: "1 NOS.", qtyPer: 1, uom: "NOS." },
+    });
+    const componentKitCrossJob = await owner.component.create({
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-XJ", componentTypeId: componentType.id, bomItemId: jobBBomItem.id },
+    });
+    kitCrossJobOp = (
+      await owner.componentOperation.create({
+        data: { jobId, componentId: componentKitCrossJob.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
@@ -798,6 +828,10 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
 
   it("kit gate cross-tenant: a Component.bomItemId pointing at another tenant's BomItem is refused as NOT_FOUND, not read across (violation case 5)", async () => {
     await expectCode(startComponentOperation(supA, { componentOperationId: kitCrossTenantOp }), ERROR_CODES.NOT_FOUND);
+  });
+
+  it("H1 job-level RLS backstop: a Component.bomItemId pointing at a SAME-tenant, DIFFERENT job's BomItem is refused as NOT_FOUND — assertKitReady's tenant-only lookup would otherwise read it across", async () => {
+    await expectCode(startComponentOperation(supA, { componentOperationId: kitCrossJobOp }), ERROR_CODES.NOT_FOUND);
   });
 
   it("kit gate regression (fix wave Critical #1): issuing material to a component after starting its first operation does not manufacture a false shortage for its NEXT operation on that same component", async () => {

@@ -74,6 +74,10 @@ async function lockAssemblyStepForUpdate(
     include: { templateStep: { select: { seq: true, defaultDepartmentId: true, kind: true, jointRef: true } } },
   });
   if (!step) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyStep", assemblyStepId });
+  // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
+  // to the step's own (denormalized) job — same pattern as
+  // lockProcessPlanForUpdate in _shared.ts.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(step.jobId)}, true)`;
 
   const previousStep =
     step.templateStep.seq > 1

@@ -438,4 +438,59 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     };
     await expectCode(startAssemblyStep(intruder, { assemblyStepId: unit2Step1 }), ERROR_CODES.NOT_FOUND);
   });
+
+  it("H1 job-level RLS backstop: verifyAssemblyStep's openNcrs lookup, scoped only by assemblyStepId (never jobId in the query itself), no longer reaches an Ncr row mistagged with a DIFFERENT job's jobId — the fix is app.job_id being set from the step's OWN jobId by lockAssemblyStepForUpdate, not an application-level filter", async () => {
+    // Real reject → real AssemblyStepRejection → real (correctly job-scoped)
+    // Ncr, exactly like rejectAssemblyStep's own code path. Then corrupt that
+    // one row's jobId to a different, real job in the SAME tenant — not
+    // reachable via any app write (same "not reachable via app writes"
+    // convention as component.service.test.ts's kitCrossTenantOp/
+    // kitCrossJobOp), simulating the exact "wrong job_id snuck onto a row"
+    // class of bug this whole plan defends against. Before this task's fix,
+    // verifyAssemblyStep's openNcrs findMany has no jobId in its where clause
+    // at all — it would find and close this mistagged Ncr regardless. After
+    // the fix, app.job_id is set to this step's own job for the rest of the
+    // transaction, and job_isolation RLS (Task 4) makes the mistagged row
+    // invisible to that same findMany — so it survives, unclosed.
+    const otherJob = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-asm-rls-${Date.now()}`,
+        clientId: (await owner.client.create({ data: { tenantId, name: "RLS Client" } })).id,
+        familyId: (await owner.productFamily.findFirstOrThrow({ where: { tenantId } })).id,
+        templateVersionId: (
+          await owner.processTemplateVersion.findFirstOrThrow({ where: { template: { tenantId } } })
+        ).id,
+        jobNumber: `JOB-ASM-RLS-${Date.now()}`,
+      },
+    });
+
+    const step1Row = await owner.assemblyStep.findUniqueOrThrow({ where: { id: step1 }, select: { unitId: true, templateStepId: true } });
+    const rlsUnitEquipment = await owner.unit.findUniqueOrThrow({ where: { id: step1Row.unitId }, select: { equipmentId: true } });
+    const rlsUnit = await owner.unit.create({ data: { jobId, equipmentId: rlsUnitEquipment.equipmentId, serialNo: "RLS-1" } });
+    // Reuse step1's own templateStep (seq 1, deptA, no jointRef — no
+    // previous-step gate, no joint-binding requirement) so this fixture
+    // needs nothing beyond a fresh unit.
+    const rlsStep = await owner.assemblyStep.create({
+      data: { unitId: rlsUnit.id, templateStepId: step1Row.templateStepId, seq: 1, jobId },
+    });
+
+    await startAssemblyStep(supA, { assemblyStepId: rlsStep.id });
+    await submitAssemblyStep(supA, { assemblyStepId: rlsStep.id });
+    await rejectAssemblyStep(qc, { assemblyStepId: rlsStep.id, categoryId: rejectCategoryId });
+
+    const rejection = await owner.assemblyStepRejection.findFirstOrThrow({ where: { assemblyStepId: rlsStep.id } });
+    const ncr = await owner.ncr.findFirstOrThrow({ where: { assemblyStepRejectionId: rejection.id } });
+    expect(ncr.status).not.toBe("CLOSED");
+    // Corrupt: point this real Ncr at a DIFFERENT job in the same tenant.
+    await owner.ncr.update({ where: { id: ncr.id }, data: { jobId: otherJob.id } });
+
+    // reject already left the step IN_PROGRESS (its "to" state) — no second
+    // start needed, just resubmit and verify.
+    await submitAssemblyStep(supA, { assemblyStepId: rlsStep.id });
+    await verifyAssemblyStep(qc, { assemblyStepId: rlsStep.id });
+
+    const afterVerify = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(afterVerify.status).not.toBe("CLOSED");
+  });
 });
