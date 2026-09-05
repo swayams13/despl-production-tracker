@@ -109,13 +109,17 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
   });
 
   it("receive then issue does NOT reduce shortage-relevant available (fix wave, Critical #1) — issuing into the product is consumption as intended, not loss", async () => {
-    const { tenantId, bomItem, user } = await fixture();
+    const { tenantId, job, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 10, heatNumber: "H100" });
     expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
+    // H1: receiveStock populates jobId on the created StockLot.
+    expect(lot.jobId).toBe(job.id);
 
-    await issueStock(ph, { stockLotId: lot.id, qty: 4 });
+    const txn = await issueStock(ph, { stockLotId: lot.id, qty: 4 });
     expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
+    // H1: createStockTxn populates jobId from the lot's own jobId.
+    expect(txn.jobId).toBe(job.id);
   });
 
   it("issuing exactly the lot's physical available amount succeeds; one more fails (exact boundary) — the lot-level over-issue guard is a separate, unaffected physical-ledger check", async () => {
