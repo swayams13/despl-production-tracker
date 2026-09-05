@@ -108,6 +108,10 @@ async function loadLotForMutation(tx: Tx, actor: Actor, stockLotId: number) {
   if (!lot) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "StockLot", stockLotId });
   assertClientScope(actor, lot.bomItem.equipment.job.clientId);
 
+  // H1: job-level RLS backstop — scope the rest of this transaction to the
+  // lot's own job, same pattern as _shared.ts's other lock* helpers.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(lot.jobId)}, true)`;
+
   let available = lot.qty.toNumber();
   for (const t of lot.txns) {
     const q = t.qty.toNumber();
@@ -136,11 +140,21 @@ async function createStockTxn(
     }
 
     if (componentId != null) {
+      // H1: componentId must belong to the SAME job as the stockLotId being
+      // mutated, not merely the same tenant — the gap named in the research
+      // ("an issue against Job A's stock lot could be logged against a
+      // component belonging to Job B").
       const component = await tx.component.findFirst({
-        where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
+        where: { id: componentId, jobId },
         select: { id: true },
       });
-      if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+      if (!component) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { entity: "Component", componentId, stockLotId },
+          "Component does not belong to this stock lot's job.",
+        );
+      }
     }
 
     return audited(tx, actor, async () => {

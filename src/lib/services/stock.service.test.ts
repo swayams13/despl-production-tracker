@@ -199,6 +199,43 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     await expectCode(issueStock(ph, { stockLotId: lot.id, qty: 1 }), ERROR_CODES.INSUFFICIENT_STOCK);
   });
 
+  it("createStockTxn refuses a componentId from a different job than the stockLotId's own job", async () => {
+    // H1: Job A's StockLot + Job B's Component in the SAME tenant.
+    const { tenantId, job, bomItem, user } = await fixture();
+    const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
+    const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 10 });
+
+    const client = await owner.client.findFirstOrThrow({ where: { tenantId } });
+    const jobB = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-stock-b-${Date.now()}-${Math.random()}`,
+        clientId: client.id,
+        familyId: job.familyId,
+        templateVersionId: job.templateVersionId,
+        jobNumber: `DE-STOCK-B-${Date.now()}-${Math.random()}`,
+      },
+    });
+    const equipmentB = await owner.equipment.create({ data: { jobId: jobB.id, name: "Air Receiver B", blockNo: 1 } });
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+    const componentB = await owner.component.create({
+      data: { jobId: jobB.id, equipmentId: equipmentB.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+
+    await expectCode(
+      issueStock(ph, { stockLotId: lot.id, qty: 1, componentId: componentB.id }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+
+    // Control: a componentId genuinely in the lot's own job (Job A) succeeds.
+    const equipmentA = await owner.equipment.findFirstOrThrow({ where: { jobId: job.id } });
+    const componentA = await owner.component.create({
+      data: { jobId: job.id, equipmentId: equipmentA.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    const txn = await issueStock(ph, { stockLotId: lot.id, qty: 1, componentId: componentA.id });
+    expect(txn.componentId).toBe(componentA.id);
+  });
+
   it("cross-tenant: another tenant's actor cannot reach this bom item or lot", async () => {
     const { tenantId, bomItem, user } = await fixture();
     const { tenantId: otherTenantId, user: otherUser } = await fixture();
