@@ -22,4 +22,11 @@ describe("isValidCronSecret", () => {
     expect(isValidCronSecret("Bearer anything", undefined)).toBe(false);
     expect(isValidCronSecret(null, undefined)).toBe(false);
   });
+
+  it("rejects a header with a secret of different length without timing side-channel", () => {
+    // Much shorter wrong guess (should not throw; length check prevents that)
+    expect(isValidCronSecret("Bearer x", "abc123")).toBe(false);
+    // Much longer wrong guess
+    expect(isValidCronSecret("Bearer abc123extracharacters", "abc123")).toBe(false);
+  });
 });
