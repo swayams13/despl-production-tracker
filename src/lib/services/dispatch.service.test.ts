@@ -255,6 +255,10 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
     await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
 
+    // H1: addUnitToBatch populates jobId on the created DispatchBatchUnit.
+    const dbu = await owner.dispatchBatchUnit.findFirst({ where: { dispatchBatchId: batch.id, unitId: unit.id } });
+    expect(dbu?.jobId).toBe(batch.jobId);
+
     const released = await approveDispatchRelease(ph, { dispatchBatchId: batch.id, vehicleNo: "MH-01-AB-1234" });
     expect(released.releaseApprovedAt).not.toBeNull();
     expect(released.releaseApprovedBy).toBe(ph.userId);

@@ -152,7 +152,9 @@ export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): 
     await assertUnitHasNoOpenNcr(tx, unit.id);
 
     return audited(tx, actor, async () => {
-      const link = await tx.dispatchBatchUnit.create({ data: { dispatchBatchId: batch.id, unitId: unit.id } });
+      const link = await tx.dispatchBatchUnit.create({
+        data: { dispatchBatchId: batch.id, unitId: unit.id, jobId: batch.jobId },
+      });
       return {
         result: link,
         audit: {
