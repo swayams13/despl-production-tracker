@@ -238,7 +238,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         });
         firstEquipmentId ??= equipment.id;
         const units = await tx.unit.createManyAndReturn({
-          data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo })),
+          data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo, jobId: job.id })),
           select: { id: true },
         });
         unitIds.push(...units.map((u) => u.id));
@@ -251,12 +251,12 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
 
       const bom =
         parsed.copyBomFromEquipmentId != null && firstEquipmentId != null
-          ? await copyBom(tx, parsed.copyBomFromEquipmentId, firstEquipmentId, actor.tenantId)
+          ? await copyBom(tx, parsed.copyBomFromEquipmentId, firstEquipmentId, actor.tenantId, job.id)
           : { count: 0, createdIds: [] };
 
       const components =
         bom.createdIds.length > 0 && firstEquipmentId != null
-          ? await materializeComponentsFromBomItems(tx, parsed.familyId, firstEquipmentId, bom.createdIds)
+          ? await materializeComponentsFromBomItems(tx, parsed.familyId, firstEquipmentId, bom.createdIds, job.id)
           : { componentCount: 0, skippedNoRoute: 0 };
 
       const assembly = await materializeAssemblyStepsFromTemplate(
@@ -537,7 +537,7 @@ async function cloneQcpTemplate(
   const partyIdMap = new Map<number, number>();
   for (const p of source.parties) {
     const created = await tx.inspectionParty.create({
-      data: { qcpTemplateId: copy.id, code: p.code, name: p.name },
+      data: { qcpTemplateId: copy.id, jobId, code: p.code, name: p.name },
     });
     partyIdMap.set(p.id, created.id);
   }
@@ -547,6 +547,7 @@ async function cloneQcpTemplate(
     const created = await tx.qcpItem.create({
       data: {
         qcpTemplateId: copy.id,
+        jobId,
         sequence: item.sequence,
         srNo: item.srNo,
         kind: item.kind,
@@ -575,6 +576,7 @@ async function cloneQcpTemplate(
       await tx.qcpItemPartyCode.create({
         data: {
           qcpItemId: created.id,
+          jobId,
           inspectionPartyId: newPartyId,
           qcpCodeId: pc.qcpCodeId,
         },
@@ -588,7 +590,7 @@ async function cloneQcpTemplate(
         continue;
       }
       await tx.qcpItemProcess.create({
-        data: { qcpItemId: created.id, jobProcessId: newJobProcessId },
+        data: { qcpItemId: created.id, jobProcessId: newJobProcessId, jobId },
       });
     }
   }
@@ -624,6 +626,7 @@ async function copyBom(
   sourceEquipmentId: number,
   targetEquipmentId: number,
   tenantId: number,
+  jobId: number,
 ): Promise<{ count: number; createdIds: number[] }> {
   const source = await tx.equipment.findFirst({
     where: { id: sourceEquipmentId, job: { tenantId } },
@@ -637,6 +640,7 @@ async function copyBom(
   const created = await tx.bomItem.createManyAndReturn({
     data: source.bomItems.map((b) => ({
       equipmentId: targetEquipmentId,
+      jobId,
       itemNo: b.itemNo,
       blockNo: b.blockNo,
       partName: b.partName,
