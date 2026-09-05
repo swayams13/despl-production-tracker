@@ -53,4 +53,20 @@ describe.skipIf(!RUN_DB)("publishDigest (DB-backed)", async () => {
     const n = await owner.notification.findFirstOrThrow({ where: { type: "DIGEST_PUBLISHED", recipientId: managementUserId } });
     expect(n.body).toBe("Sent automatically");
   });
+
+  it("is idempotent: publishing the same date twice notifies once and the second call returns 0", async () => {
+    const { tenantId, managementUserId } = await makeOrgWithManagementUser("idempotent");
+    const ph = actor(tenantId, 997, "Production Head", [ROLES.PRODUCTION_HEAD]);
+
+    const first = await publishDigest(ph, "2026-09-05");
+    expect(first).toBe(1);
+
+    const second = await publishDigest(ph, "2026-09-05");
+    expect(second).toBe(0);
+
+    const notifications = await owner.notification.findMany({
+      where: { type: "DIGEST_PUBLISHED", recipientId: managementUserId },
+    });
+    expect(notifications).toHaveLength(1);
+  });
 });

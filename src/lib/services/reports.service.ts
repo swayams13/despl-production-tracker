@@ -19,6 +19,12 @@ export async function publishDigest(actor: Actor, date: string, opts?: { auto?: 
   requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   return withTenant(actor.tenantId, async (tx) => {
+    const alreadyPublished = await tx.notification.findFirst({
+      where: { type: "DIGEST_PUBLISHED", entityType: "Digest", entityId: dateEntityId(date) },
+      select: { id: true },
+    });
+    if (alreadyPublished) return 0;
+
     const managementIds = await userIdsWithRole(tx, actor.tenantId, "MANAGEMENT");
 
     return audited(tx, actor, async () => {

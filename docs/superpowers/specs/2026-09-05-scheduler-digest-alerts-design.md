@@ -41,7 +41,7 @@ Both routes:
 Two entry points, each looping every `Organization`:
 
 - `runAlertReconciliation(): Promise<TenantRunResult[]>` — for each org, calls the two reconciliation functions (below) inside a try/catch, collects per-org result.
-- `runDailyDigest(date: string): Promise<TenantRunResult[]>` — for each org, loads that org's default `WorkCalendar` (+ holidays), skips via `isWorkingDay()` (`lib/schedule/calendar.ts:24`) if not a working day, otherwise resolves a system actor and calls `publishDigest(actor, date, { auto: true })`.
+- `runDailyDigest(asOf?: Date): Promise<DigestRunResult[]>` — `asOf` defaults to `new Date()`; a fixed value lets a test point "today" at a specific calendar date without needing to seed a holiday for the real current date. For each org, loads that org's default `WorkCalendar` (+ holidays), skips via `isWorkingDay()` (`lib/schedule/calendar.ts:24`) if not a working day, otherwise resolves a system actor and calls `publishDigest(actor, date, { auto: true })`.
 
 ### Changes to existing code
 
@@ -66,7 +66,7 @@ Railway cron → POST /api/cron/alerts (secret checked)
 **Daily digest (once/day, working days only):**
 ```
 Railway cron → POST /api/cron/digest (secret checked)
-  → runDailyDigest(todayIST)
+  → runDailyDigest(asOf)  [defaults to new Date()]
     → for each Organization:
       → load org's default WorkCalendar + holidays
       → isWorkingDay(today, calendar)?

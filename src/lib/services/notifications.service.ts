@@ -120,10 +120,11 @@ export async function markAllNotificationsRead(actor: Actor): Promise<void> {
 
 /**
  * ponytail: a full table scan of current plans/hold-points per call, fine at
- * demo scale (hundreds of rows) — move to a real cron once row counts make
- * this measurably slow. Idempotent either way: each condition is notified at
- * most once, keyed by (type, entityType, entityId[, unitId in payload]), so
- * repeated calls across many page loads never duplicate a row.
+ * demo scale (hundreds of rows) — the hourly cron (`/api/cron/alerts`, see
+ * cron.service.ts's `runAlertReconciliation`) now exists and calls this
+ * function. Idempotent either way: each condition is notified at most once,
+ * keyed by (type, entityType, entityId[, unitId in payload]), so repeated
+ * cron runs never duplicate a row.
  */
 export async function syncOverdueStageNotifications(tenantId: number): Promise<void> {
   await withTenant(tenantId, async (tx) => {

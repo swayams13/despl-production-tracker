@@ -810,17 +810,17 @@ const PUBLIC_PATHS = ["/login", "/api/health", "/api/cron"];
 
 - [ ] **Step 4: Manual smoke test against a running dev server**
 
-Run: `pnpm dev` in one terminal. In another (with `.env` sourced so `CRON_SECRET` is set, or export it inline):
+Run: `pnpm dev` in one terminal. In another (with `.env` sourced so `CRON_SECRET` is set, or export it inline). `--fail-with-body` (curl >= 7.76, released 2021 — safe to assume on both this dev machine and Railway's cron runner image) makes curl exit non-zero on a non-2xx response while still printing the body, so a wrong secret or a route regression shows up as a failed run instead of a silent 401/500 that looks identical to success:
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:3000/api/cron/alerts
 # Expected: 401 (no Authorization header)
 
-curl -s -X POST http://localhost:3000/api/cron/alerts \
+curl -s --fail-with-body -X POST http://localhost:3000/api/cron/alerts \
   -H "Authorization: Bearer $CRON_SECRET"
 # Expected: 200, JSON body {"results":[{"tenantId":1,"ok":true}, ...]}
 
-curl -s -X POST http://localhost:3000/api/cron/digest \
+curl -s --fail-with-body -X POST http://localhost:3000/api/cron/digest \
   -H "Authorization: Bearer $CRON_SECRET"
 # Expected: 200, JSON body with one entry per seeded tenant (ok:true,
 # skipped:true if today is a Sunday/holiday in the dev seed's calendar,
@@ -848,8 +848,8 @@ git commit -m "feat: cron-triggered routes for alert reconciliation and daily di
 Hand to Swayam once Task 6 is merged and deployed:
 
 1. Generate a secret: `openssl rand -hex 32`.
-2. Set it in Railway's environment for the main app service: `railway variable set CRON_SECRET --skip-deploys` (same pattern used for `SEED_PASSWORD` in the H1/D4 session).
-3. Create two Railway Cron Schedule services in the same project, both with a minimal start command that does the `curl` shown in Task 6 Step 4 against the deployed app's real URL instead of `localhost:3000`:
+2. `CRON_SECRET` must be readable as `$CRON_SECRET` by THREE separate Railway services — the main app (which reads it via `process.env.CRON_SECRET` in `isValidCronSecret`) AND both cron services created in step 3 below (their `curl` command needs it to build the `Authorization` header). Railway variables are per-service by default, so setting it only on the app service leaves the cron services with an empty/missing `$CRON_SECRET` and every curl silently sends `Authorization: Bearer ` (permanent 401). Set it once as a project-level/shared variable if the Railway plan supports that (so all services in the project inherit it); otherwise run `railway variable set CRON_SECRET --skip-deploys` against each of the three services individually with the identical value.
+3. Create two Railway Cron Schedule services in the same project, both with a minimal start command that does the `curl` shown in Task 6 Step 4 — but pointed at the deployed app's real public URL (e.g. `https://<app>.up.railway.app`), never `localhost:3000` (that only exists on the dev machine that ran the smoke test):
    - Hourly: cron expression `0 * * * *`, target `/api/cron/alerts`.
    - Daily: cron expression `0 1 * * *` (01:00 UTC = 6:30 AM IST — note this is UTC+5:30, not a whole-hour offset, so the exact minute matters), target `/api/cron/digest`.
 
