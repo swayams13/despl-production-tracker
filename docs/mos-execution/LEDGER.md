@@ -90,7 +90,7 @@ Update at the end of every session, before `/clear`.
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| — | Numeric-join FK, family-scoped | ☑ | 4 Sep: `fix/gate3-operationref-family-fk` (separate branch, not yet merged). |
+| — | Numeric-join FK, family-scoped | ☑ | 5 Sep: `fix/gate3-operationref-family-fk-v2` (separate branch, not yet merged). **Correction:** the 4 Sep row below pointed at `fix/gate3-operationref-family-fk`, a branch with zero commits beyond `main` — that work was never actually done, only the branch was cut. Caught while starting Phase C properly this session; redone from scratch (new `OperationRefFamilySeq` table, migration `20260905020000`, `v_process_plan_percent` rewrite — a raw-SQL view the original TS-only grep would have missed — plus an adversarial DB test proving the fix). See `progress.md`'s "Phase C begins" session log. |
 | — | B3 — remove DESPL-320 workspace fallback + B3a switcher | ☑ | 4 Sep: `fix/B3-remove-despl320-fallback` (separate branch, not yet merged). |
 | — | B4 — un-hardcode `PRESSURE_VESSEL` in admin durations | ☑ | 4 Sep: `fix/B4-family-parameterize-admin` (separate branch, not yet merged). |
 | — | B10 — CI literal guard | ☑ | 4 Sep: `chore/B10-literal-guard` (separate branch, not yet merged). |
