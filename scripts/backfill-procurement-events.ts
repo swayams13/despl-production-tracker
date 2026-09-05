@@ -143,9 +143,10 @@ async function main() {
 
   const bomItems = await prisma.bomItem.findMany({
     where: { id: { in: [...new Set(events.map((e) => e.bomItemId))] } },
-    select: { id: true, equipment: { select: { job: { select: { tenantId: true } } } } },
+    select: { id: true, jobId: true, equipment: { select: { job: { select: { tenantId: true } } } } },
   });
   const tenantByBomItem = new Map(bomItems.map((b) => [b.id, b.equipment.job.tenantId]));
+  const jobIdByBomItem = new Map(bomItems.map((b) => [b.id, b.jobId]));
 
   const eventsByBomItem = new Map<number, PlannedEvent[]>();
   for (const e of events) {
@@ -171,9 +172,10 @@ async function main() {
   let inserted = 0;
   for (const [bomItemId, bomItemEvents] of eventsByBomItem) {
     const by = byForBomItem.get(bomItemId)!;
+    const jobId = jobIdByBomItem.get(bomItemId)!;
     await prisma.$transaction(
       bomItemEvents.map((e) =>
-        prisma.procurementEvent.create({ data: { bomItemId: e.bomItemId, type: e.type, qty: e.qty, refNo: e.refNo, at: e.at, by } }),
+        prisma.procurementEvent.create({ data: { jobId, bomItemId: e.bomItemId, type: e.type, qty: e.qty, refNo: e.refNo, at: e.at, by } }),
       ),
     );
     inserted += bomItemEvents.length;

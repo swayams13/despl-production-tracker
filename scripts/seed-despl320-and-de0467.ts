@@ -385,7 +385,7 @@ async function seedQcpTemplate(
   });
 
   const partyCodeRows: { qcpItemId: number; inspectionPartyId: number; qcpCodeId: number }[] = [];
-  const processLinkRows: { qcpItemId: number; jobProcessId: number }[] = [];
+  const processLinkRows: { jobId: number; qcpItemId: number; jobProcessId: number }[] = [];
   spec.items.forEach((item, i) => {
     const qcpItemId = itemIds[i];
     if (item.kind === "CHECKPOINT" && item.codes) {
@@ -398,10 +398,15 @@ async function seedQcpTemplate(
       }
     }
     if (spec.jobProcessIdByCode) {
+      // jobProcessIdByCode is only ever supplied for a real job — QcpItemProcess.jobId
+      // is NOT-NULL (unlike its parent QcpItem, which stays nullable for library rows).
+      if (spec.jobId == null) {
+        throw new Error(`QcpItem ${item.srNo}: jobProcessIdByCode supplied with no jobId`);
+      }
       for (const processCode of item.leadTimeProcesses ?? []) {
         const jobProcessId = spec.jobProcessIdByCode.get(String(processCode));
         if (!jobProcessId) throw new Error(`QcpItem ${item.srNo}: unknown process ${processCode}`);
-        processLinkRows.push({ qcpItemId, jobProcessId });
+        processLinkRows.push({ jobId: spec.jobId, qcpItemId, jobProcessId });
       }
     }
   });
@@ -524,6 +529,7 @@ async function main() {
         await tx.jobProcessEdge.createMany({
           data: leadTime.processes.flatMap((p) =>
             p.edges.map((e) => ({
+              jobId: jobRow.id,
               processId: jpIdByCode.get(String(p.code))!,
               predecessorId: jpIdByCode.get(String(e.predecessor))!,
               type: e.type as ProcessEdgeType,
@@ -560,6 +566,7 @@ async function main() {
                 create: group.map((d, i) => {
                   const revisionNo = Number(d.revNo);
                   return {
+                    jobId: jobRow.id,
                     revisionNo: Number.isFinite(revisionNo) && revisionNo > 0 ? revisionNo : i + 1,
                     status: d.releasedDate ? "RELEASED" : "DRAFT",
                     approvedAt: isoDate(d.approvalDate ?? null),
@@ -588,6 +595,7 @@ async function main() {
             const suggestedType = suggestComponentType(item, routedTypeCodes);
             const bomItem = await tx.bomItem.create({
               data: {
+                jobId: jobRow.id,
                 equipmentId: equipment.id,
                 itemNo: item.itemNo,
                 blockNo: block.blockNo,
@@ -605,7 +613,7 @@ async function main() {
             const procurementEventRows = buildProcurementEventRows(item.procurement, item.qty);
             if (procurementEventRows.length) {
               await tx.procurementEvent.createMany({
-                data: procurementEventRows.map((r) => ({ ...r, bomItemId: bomItem.id, by: procurementActor.id })),
+                data: procurementEventRows.map((r) => ({ ...r, jobId: jobRow.id, bomItemId: bomItem.id, by: procurementActor.id })),
               });
             }
             const typeCode = suggestedType ?? "OTHER";
@@ -615,6 +623,7 @@ async function main() {
             multiRevisionDrawingId = null;
             const component = await tx.component.create({
               data: {
+                jobId: jobRow.id,
                 equipmentId: equipment.id,
                 bomItemId: bomItem.id,
                 tag: `B${block.blockNo}-I${item.itemNo}`,
@@ -629,6 +638,7 @@ async function main() {
               if (!opCode) throw new Error(`unmapped operations[].operation "${op.operation}"`);
               await tx.componentOperation.create({
                 data: {
+                  jobId: jobRow.id,
                   componentId: component.id,
                   seq: ++seq,
                   operationId: refs.operationIdByCode.get(opCode)!,
@@ -642,6 +652,7 @@ async function main() {
             if (item.qc.materialIdentification) {
               await tx.componentOperation.create({
                 data: {
+                  jobId: jobRow.id,
                   componentId: component.id,
                   seq: ++seq,
                   operationId: refs.operationIdByCode.get(mtcOp)!,
@@ -724,6 +735,7 @@ async function main() {
         await tx.jobProcessEdge.createMany({
           data: leadTime.processes.flatMap((p) =>
             p.edges.map((e) => ({
+              jobId: pilotJob.id,
               processId: pilotJpIdByCode.get(String(p.code))!,
               predecessorId: pilotJpIdByCode.get(String(e.predecessor))!,
               type: e.type as ProcessEdgeType,
@@ -738,6 +750,7 @@ async function main() {
         const to = serialRange ? Number(serialRange[2]) : 1;
         await tx.unit.createMany({
           data: Array.from({ length: to - from + 1 }, (_, i) => ({
+            jobId: pilotJob.id,
             equipmentId: pilotEquipment.id,
             serialNo: `320SR${String(from + i).padStart(2, "0")}`,
           })),

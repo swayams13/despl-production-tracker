@@ -131,7 +131,7 @@ async function main() {
   // ROLLING ComponentOperation each one is now missing.
   const componentsToMigrate = await prisma.component.findMany({
     where: { componentTypeId: componentType.id, routeVersionId: currentVersion.id },
-    select: { id: true, operations: { select: { seq: true, operationId: true } } },
+    select: { id: true, jobId: true, operations: { select: { seq: true, operationId: true } } },
   });
 
   let migrated = 0;
@@ -144,7 +144,7 @@ async function main() {
     if (!alreadyHasRolling) {
       const nextSeq = Math.max(0, ...c.operations.map((o) => o.seq)) + 1;
       await prisma.componentOperation.create({
-        data: { componentId: c.id, seq: nextSeq, operationId: rolling.id, status: OperationStatus.NOT_STARTED },
+        data: { jobId: c.jobId, componentId: c.id, seq: nextSeq, operationId: rolling.id, status: OperationStatus.NOT_STARTED },
       });
       opsAdded++;
     }
