@@ -445,12 +445,12 @@ export async function rejectComponentOperation(
         data: { status: to, submittedBy: null },
       });
       const rejection = await tx.componentOperationRejection.create({
-        data: { componentOperationId: op.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId },
+        data: { componentOperationId: op.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId, jobId: op.jobId },
       });
       // N1 (Phase 5): every rejection opens exactly one Ncr for QC to
       // disposition — the rework/QA workflow layered on top of the
       // immutable rejection record.
-      await tx.ncr.create({ data: { componentOperationRejectionId: rejection.id } });
+      await tx.ncr.create({ data: { componentOperationRejectionId: rejection.id, jobId: op.jobId } });
 
       // S14 — was silent. QC is who dispositions an Ncr (S11's disposition
       // UI), so QC is who needs to know one opened, same transaction as the
@@ -528,8 +528,8 @@ export async function recordPaintRecord(actor: Actor, input: RecordPaintRecordIn
     return audited(tx, actor, async () => {
       const record = await tx.paintRecord.upsert({
         where: { componentOperationId: op.id },
-        create: { componentOperationId: op.id, coatingSystem, coatsPlanned: coatsPlanned ?? null },
-        update: { coatingSystem, coatsPlanned: coatsPlanned ?? null },
+        create: { componentOperationId: op.id, coatingSystem, coatsPlanned: coatsPlanned ?? null, jobId: op.jobId },
+        update: { coatingSystem, coatsPlanned: coatsPlanned ?? null, jobId: op.jobId },
       });
       return {
         result: record,
@@ -569,6 +569,7 @@ export async function recordDftReading(actor: Actor, input: RecordDftReadingInpu
           readingMicrons,
           accepted,
           recordedBy: actor.userId,
+          jobId: op.jobId,
         },
       });
       return {
@@ -607,6 +608,7 @@ export async function materializeComponentsFromBomItems(
   familyId: number,
   equipmentId: number,
   bomItemIds: number[],
+  jobId: number,
 ): Promise<{ componentCount: number; skippedNoRoute: number }> {
   if (bomItemIds.length === 0) return { componentCount: 0, skippedNoRoute: 0 };
 
@@ -659,6 +661,7 @@ export async function materializeComponentsFromBomItems(
           tag,
           componentTypeId: b.componentTypeId!,
           routeVersionId: routeVersion.id,
+          jobId,
         },
       });
 
@@ -669,6 +672,7 @@ export async function materializeComponentsFromBomItems(
             seq: step.seq,
             operationId: step.operationId,
             status: OperationStatus.NOT_STARTED,
+            jobId,
           })),
         });
       }

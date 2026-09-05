@@ -113,6 +113,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
+  let jobId = 0;
   let supA: Actor; // supervisor+QC in deptA (maker)
   let qc: Actor; // QC only, different user (checker)
   let supB: Actor; // supervisor in a DIFFERENT department (wrong-department attempt)
@@ -194,6 +195,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
         jobNumber: `JOB-CO-${Date.now()}`,
       },
     });
+    jobId = job.id;
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
     const componentType = await owner.componentTypeRef.create({
       data: { tenantId, code: "PLATE", name: "Plate" },
@@ -225,7 +227,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     ).id;
     componentBOpSeq1 = (
       await owner.componentOperation.create({
-        data: { componentId: componentB.id, seq: 1, operationId: opReceipt.id },
+        data: { componentId: componentB.id, seq: 1, operationId: opReceipt.id, jobId },
       })
     ).id;
 
@@ -477,7 +479,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     });
     paintOpNoRecord = (
       await owner.componentOperation.create({
-        data: { componentId: componentPaintNoRecord.id, seq: 1, operationId: opPainting.id },
+        data: { componentId: componentPaintNoRecord.id, seq: 1, operationId: opPainting.id, jobId },
       })
     ).id;
     const componentPaintTwoCoats = await owner.component.create({
@@ -732,6 +734,10 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     });
     expect(rejections).toHaveLength(1);
     expect(rejections[0]).toMatchObject({ categoryId: rejectCategoryId, detail: "PAUT indication", rejectedBy: qc.userId });
+    // H1: rejectComponentOperation populates jobId on the rejection and the Ncr it opens.
+    expect(rejections[0].jobId).toBe(jobId);
+    const ncrForRejection = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejections[0].id } });
+    expect(ncrForRejection.jobId).toBe(jobId);
 
     // N1 (Phase 5): reject opens exactly one Ncr, linked to that rejection.
     const ncr = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejections[0].id } });
@@ -892,8 +898,11 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   });
 
   it("DFT gate: PaintRecord + readings recorded but none accepted is still refused (violation case 2)", async () => {
-    await recordPaintRecord(supA, { componentOperationId: paintOpNoRecord, coatingSystem: "Epoxy zinc-rich" });
-    await recordDftReading(supA, { componentOperationId: paintOpNoRecord, readingMicrons: 40, accepted: false });
+    const record = await recordPaintRecord(supA, { componentOperationId: paintOpNoRecord, coatingSystem: "Epoxy zinc-rich" });
+    const reading = await recordDftReading(supA, { componentOperationId: paintOpNoRecord, readingMicrons: 40, accepted: false });
+    // H1: recordPaintRecord/recordDftReading populate jobId from the op's own jobId.
+    expect(record.jobId).toBe(jobId);
+    expect(reading.jobId).toBe(jobId);
     await expectCode(verifyComponentOperation(qc, { componentOperationId: paintOpNoRecord }), ERROR_CODES.DFT_NOT_ACCEPTED);
   });
 
