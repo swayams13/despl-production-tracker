@@ -73,14 +73,14 @@ describe.skipIf(!RUN_DB)("mtc.service (DB-backed)", async () => {
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "1" },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "1" },
     });
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
     const componentA = await owner.component.create({
-      data: { equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SR01-SHELL", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SR01-SHELL", componentTypeId: componentType.id },
     });
     const componentB = await owner.component.create({
-      data: { equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SR02-SHELL", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SR02-SHELL", componentTypeId: componentType.id },
     });
     const user = await owner.user.create({
       data: {

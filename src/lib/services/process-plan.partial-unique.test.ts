@@ -69,8 +69,8 @@ describe.skipIf(!RUN_DB)("ProcessPlan — partial unique index (DB)", async () =
     jobProcessId = jobProcess.id;
 
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver" } });
-    const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
-    const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "02" } });
+    const unit1 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
+    const unit2 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "02" } });
     unit1Id = unit1.id;
     unit2Id = unit2.id;
 

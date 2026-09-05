@@ -178,7 +178,7 @@ describe.skipIf(!RUN_DB)("route.service (DB-backed)", async () => {
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "HEAD-1", componentTypeId: ct.id, routeVersionId: v1.id },
+      data: { jobId: job.id, equipmentId: equipment.id, tag: "HEAD-1", componentTypeId: ct.id, routeVersionId: v1.id },
     });
 
     const v2 = await createOrReviseRouteTemplate(admin, {

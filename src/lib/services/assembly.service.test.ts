@@ -131,8 +131,8 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     });
     jobId = job.id;
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
-    const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
-    const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "02" } });
+    const unit1 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
+    const unit2 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "02" } });
 
     const asmTemplate = await owner.assemblyTemplate.create({ data: { tenantId, familyId: family.id, name: "A-Q" } });
     const asmVersion = await owner.assemblyTemplateVersion.create({

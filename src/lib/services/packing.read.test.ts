@@ -98,9 +98,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("packing.read — loadPackingPanel (D
 
     const equipmentA = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver A" } });
     const equipmentB = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver B" } });
-    const unitA1 = await owner.unit.create({ data: { equipmentId: equipmentA.id, serialNo: "A-01" } });
-    const unitA2 = await owner.unit.create({ data: { equipmentId: equipmentA.id, serialNo: "A-02" } });
-    const unitB1 = await owner.unit.create({ data: { equipmentId: equipmentB.id, serialNo: "B-01" } });
+    const unitA1 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipmentA.id, serialNo: "A-01" } });
+    const unitA2 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipmentA.id, serialNo: "A-02" } });
+    const unitB1 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipmentB.id, serialNo: "B-01" } });
 
     const pkg = await owner.package.create({
       data: {

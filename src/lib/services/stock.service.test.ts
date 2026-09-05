@@ -74,10 +74,10 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
     for (let i = 0; i < unitCount; i++) {
-      await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: `SR${i + 1}` } });
+      await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: `SR${i + 1}` } });
     }
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
     });
     const user = await owner.user.create({
       data: {

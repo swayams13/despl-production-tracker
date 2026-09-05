@@ -320,13 +320,13 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadMappedOps — family-scoped nume
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "SR01" } });
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
     });
     await owner.componentOperation.create({
-      data: { componentId: component.id, seq: 1, operationId: cutting.id, status: "IN_PROGRESS" },
+      data: { jobId: job.id, componentId: component.id, seq: 1, operationId: cutting.id, status: "IN_PROGRESS" },
     });
 
     // A JobProcess coded "9" — family B's real CUTTING number, NOT family

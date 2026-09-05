@@ -78,7 +78,7 @@ describe.skipIf(!RUN_DB)("spine.read stageName + family opt-out (B7/B8/B9, DB-ba
         data: { jobId, seq: 1, code: "1", name: "Fam2 only process", departmentId: dept.id, workOrderStages: [1] },
       });
       const eq = await owner.equipment.create({ data: { jobId, name: "Fam2 equipment" } });
-      await owner.unit.create({ data: { equipmentId: eq.id, serialNo: "FAM2-U1" } });
+      await owner.unit.create({ data: { jobId, equipmentId: eq.id, serialNo: "FAM2-U1" } });
     });
 
     it("falls back to a plain \"Stage N\" label instead of reusing PRESSURE_VESSEL's names", async () => {
@@ -123,7 +123,7 @@ describe.skipIf(!RUN_DB)("spine.read stageName + family opt-out (B7/B8/B9, DB-ba
       // has no 25-stage reporting view at all, not just no names for it.
       await owner.jobProcess.create({ data: { jobId, seq: 1, code: "1", name: "Fam3 only process", departmentId: dept.id } });
       const eq = await owner.equipment.create({ data: { jobId, name: "Fam3 equipment" } });
-      await owner.unit.create({ data: { equipmentId: eq.id, serialNo: "FAM3-U1" } });
+      await owner.unit.create({ data: { jobId, equipmentId: eq.id, serialNo: "FAM3-U1" } });
     });
 
     it("loadJobSpines returns an empty spine (real job, no crash) — the view's unnest() has nothing to join for a family with no crosswalk", async () => {

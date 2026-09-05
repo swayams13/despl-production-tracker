@@ -68,9 +68,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("cross-tenant write/read holes (DB, a
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell", sourceQty: "1" },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Shell", sourceQty: "1" },
     });
     const weldJoint = await owner.weldJoint.create({
       data: { jobId: job.id, unitId: unit.id, jointNo: "LS-1", jointType: "LONG_SEAM", loggedBy: 1 },

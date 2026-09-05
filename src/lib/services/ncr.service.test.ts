@@ -95,10 +95,10 @@ describe.skipIf(!RUN_DB)("dispositionNcr (DB-backed)", async () => {
       data: { tenantId, code: "RECEIPT", name: "Receipt", defaultDepartmentId: deptA.id },
     });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "N1", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, tag: "N1", componentTypeId: componentType.id },
     });
     const op = await owner.componentOperation.create({
-      data: { componentId: component.id, seq: 1, operationId: opReceipt.id },
+      data: { jobId: job.id, componentId: component.id, seq: 1, operationId: opReceipt.id },
     });
     opId = op.id;
     const rejectCategoryId = (await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })).id;

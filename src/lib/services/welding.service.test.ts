@@ -105,7 +105,7 @@ describe.skipIf(!RUN_DB)("welding.service (DB-backed)", async () => {
     const otherEquipment = await owner.equipment.create({ data: { jobId: otherJob.id, name: "Other vessel" } });
     const otherType = await owner.componentTypeRef.create({ data: { tenantId: otherOrg.id, code: "PLATE", name: "Plate" } });
     const otherComponent = await owner.component.create({
-      data: { equipmentId: otherEquipment.id, tag: "X1", componentTypeId: otherType.id },
+      data: { jobId: otherJob.id, equipmentId: otherEquipment.id, tag: "X1", componentTypeId: otherType.id },
     });
 
     const supervisor: Actor = { ...actorBase(job.tenantId), roles: [ROLES.SUPERVISOR], departmentIds: [fabDept.id] };

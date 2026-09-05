@@ -559,10 +559,11 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     const sourceEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: sourceJob.jobId } });
 
     const parent = await owner.bomItem.create({
-      data: { equipmentId: sourceEquipment.id, itemNo: 101, partName: "Sub-assembly", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+      data: { jobId: sourceJob.jobId, equipmentId: sourceEquipment.id, itemNo: 101, partName: "Sub-assembly", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
     });
     const child = await owner.bomItem.create({
       data: {
+        jobId: sourceJob.jobId,
         equipmentId: sourceEquipment.id,
         itemNo: 102,
         partName: "Bolt",

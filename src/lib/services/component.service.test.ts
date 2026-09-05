@@ -209,25 +209,25 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     });
 
     const componentA = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "N1", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "N1", componentTypeId: componentType.id },
     });
     const componentB = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "N2", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "N2", componentTypeId: componentType.id },
     });
 
     opSeq1 = (
       await owner.componentOperation.create({
-        data: { componentId: componentA.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentA.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
     opSeq2 = (
       await owner.componentOperation.create({
-        data: { componentId: componentA.id, seq: 2, operationId: opCutting.id },
+        data: { jobId, componentId: componentA.id, seq: 2, operationId: opCutting.id },
       })
     ).id;
     componentBOpSeq1 = (
       await owner.componentOperation.create({
-        data: { componentId: componentB.id, seq: 1, operationId: opReceipt.id, jobId },
+        data: { jobId, componentId: componentB.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
@@ -244,25 +244,25 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     await owner.routeStep.create({ data: { routeVersionId: routeVersion.id, seq: 1, operationId: opCutting.id } });
     await owner.routeStep.create({ data: { routeVersionId: routeVersion.id, seq: 2, operationId: opReceipt.id } });
     const componentC = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "N3", componentTypeId: componentType.id, routeVersionId: routeVersion.id },
+      data: { jobId, equipmentId: equipment.id, tag: "N3", componentTypeId: componentType.id, routeVersionId: routeVersion.id },
     });
     componentCReceiptOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentC.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentC.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
     componentCCuttingOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentC.id, seq: 2, operationId: opCutting.id },
+        data: { jobId, componentId: componentC.id, seq: 2, operationId: opCutting.id },
       })
     ).id;
 
     const componentD = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "N4", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "N4", componentTypeId: componentType.id },
     });
     opDetailTest = (
       await owner.componentOperation.create({
-        data: { componentId: componentD.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentD.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
     rejectCategoryId = (
@@ -275,57 +275,57 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     // B7 — assertKitReady fixtures. explodeBomItem's `required` is
     // qtyPer * unitCount, so this equipment needs exactly one Unit row (no
     // other test above depends on unitCount, so adding it here is safe).
-    await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "KIT-1" } });
+    await owner.unit.create({ data: { jobId, equipmentId: equipment.id, serialNo: "KIT-1" } });
 
     const bomItemShort = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Gasket, Short", sourceQty: "10 NOS.", qtyPer: 10, uom: "NOS." },
+      data: { jobId, equipmentId: equipment.id, itemNo: 1, partName: "Gasket, Short", sourceQty: "10 NOS.", qtyPer: 10, uom: "NOS." },
     });
-    await owner.stockLot.create({ data: { bomItemId: bomItemShort.id, location: "Yard A", qty: 3 } });
+    await owner.stockLot.create({ data: { jobId, bomItemId: bomItemShort.id, location: "Yard A", qty: 3 } });
 
     const bomItemStocked = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 2, partName: "Gasket, Stocked", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+      data: { jobId, equipmentId: equipment.id, itemNo: 2, partName: "Gasket, Stocked", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
     });
-    await owner.stockLot.create({ data: { bomItemId: bomItemStocked.id, location: "Yard A", qty: 5 } });
+    await owner.stockLot.create({ data: { jobId, bomItemId: bomItemStocked.id, location: "Yard A", qty: 5 } });
 
     // Zero StockLot rows for this item at all — the SEAM case ("never
     // tracked" vs "tracked but 0 available"), distinct from bomItemShort.
     const bomItemNoActivity = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 3, partName: "Gasket, Untracked", sourceQty: "5 NOS.", qtyPer: 5, uom: "NOS." },
+      data: { jobId, equipmentId: equipment.id, itemNo: 3, partName: "Gasket, Untracked", sourceQty: "5 NOS.", qtyPer: 5, uom: "NOS." },
     });
 
     const componentKitShort = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "KIT-SHORT", componentTypeId: componentType.id, bomItemId: bomItemShort.id },
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-SHORT", componentTypeId: componentType.id, bomItemId: bomItemShort.id },
     });
     kitShortOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentKitShort.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentKitShort.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
     const componentKitStocked = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "KIT-STOCKED", componentTypeId: componentType.id, bomItemId: bomItemStocked.id },
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-STOCKED", componentTypeId: componentType.id, bomItemId: bomItemStocked.id },
     });
     kitStockedOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentKitStocked.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentKitStocked.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
     const componentKitUntracked = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "KIT-UNTRACKED", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-UNTRACKED", componentTypeId: componentType.id },
     });
     kitUntrackedOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentKitUntracked.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentKitUntracked.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
     const componentKitNoActivity = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "KIT-NOACT", componentTypeId: componentType.id, bomItemId: bomItemNoActivity.id },
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-NOACT", componentTypeId: componentType.id, bomItemId: bomItemNoActivity.id },
     });
     kitNoActivityOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentKitNoActivity.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentKitNoActivity.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
@@ -356,14 +356,14 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     });
     const otherEquipment = await owner.equipment.create({ data: { jobId: otherJob.id, name: "Other Vessel" } });
     const otherBomItem = await owner.bomItem.create({
-      data: { equipmentId: otherEquipment.id, itemNo: 1, partName: "Other tenant's part", sourceQty: "1 NOS.", qtyPer: 1, uom: "NOS." },
+      data: { jobId: otherJob.id, equipmentId: otherEquipment.id, itemNo: 1, partName: "Other tenant's part", sourceQty: "1 NOS.", qtyPer: 1, uom: "NOS." },
     });
     const componentKitCrossTenant = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "KIT-XT", componentTypeId: componentType.id, bomItemId: otherBomItem.id },
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-XT", componentTypeId: componentType.id, bomItemId: otherBomItem.id },
     });
     kitCrossTenantOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentKitCrossTenant.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentKitCrossTenant.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
@@ -371,24 +371,24 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     // received 9), two ops on the SAME component, so issuing material after
     // op1 starts can be checked against op2's start on that very component.
     const bomItemIssueRegression = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 4, partName: "Gasket, Full Kit", sourceQty: "9 NOS.", qtyPer: 9, uom: "NOS." },
+      data: { jobId, equipmentId: equipment.id, itemNo: 4, partName: "Gasket, Full Kit", sourceQty: "9 NOS.", qtyPer: 9, uom: "NOS." },
     });
     const issueRegressionLot = await owner.stockLot.create({
-      data: { bomItemId: bomItemIssueRegression.id, location: "Yard A", qty: 9 },
+      data: { jobId, bomItemId: bomItemIssueRegression.id, location: "Yard A", qty: 9 },
     });
     kitIssueRegressionLotId = issueRegressionLot.id;
     const componentIssueRegression = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "KIT-ISSUE-REGRESSION", componentTypeId: componentType.id, bomItemId: bomItemIssueRegression.id },
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-ISSUE-REGRESSION", componentTypeId: componentType.id, bomItemId: bomItemIssueRegression.id },
     });
     kitIssueRegressionComponentId = componentIssueRegression.id;
     kitIssueRegressionOp1 = (
       await owner.componentOperation.create({
-        data: { componentId: componentIssueRegression.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentIssueRegression.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
     kitIssueRegressionOp2 = (
       await owner.componentOperation.create({
-        data: { componentId: componentIssueRegression.id, seq: 2, operationId: opCutting.id },
+        data: { jobId, componentId: componentIssueRegression.id, seq: 2, operationId: opCutting.id },
       })
     ).id;
 
@@ -400,57 +400,57 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       data: { jobId: job.id, drawingTypeId: drawingType.id, drawingNo: "GA-1" },
     });
     await owner.drawingRevision.create({
-      data: { assemblyDrawingId: drawingDraft.id, revisionNo: 1, status: "DRAFT" },
+      data: { jobId: job.id, assemblyDrawingId: drawingDraft.id, revisionNo: 1, status: "DRAFT" },
     });
     const drawingReleased = await owner.assemblyDrawing.create({
       data: { jobId: job.id, drawingTypeId: drawingType.id, drawingNo: "GA-2" },
     });
     drawingReleasedRevisionId = (
       await owner.drawingRevision.create({
-        data: { assemblyDrawingId: drawingReleased.id, revisionNo: 1, status: "RELEASED", releasedAt: new Date() },
+        data: { jobId: job.id, assemblyDrawingId: drawingReleased.id, revisionNo: 1, status: "RELEASED", releasedAt: new Date() },
       })
     ).id;
 
     const componentDrawingGated = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "DWG-GATED", componentTypeId: componentType.id, governingDrawingId: drawingDraft.id },
+      data: { jobId, equipmentId: equipment.id, tag: "DWG-GATED", componentTypeId: componentType.id, governingDrawingId: drawingDraft.id },
     });
     drawingGatedCuttingOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentDrawingGated.id, seq: 1, operationId: opCutting.id },
+        data: { jobId, componentId: componentDrawingGated.id, seq: 1, operationId: opCutting.id },
       })
     ).id;
 
     const componentDrawingReleased = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "DWG-RELEASED", componentTypeId: componentType.id, governingDrawingId: drawingReleased.id },
+      data: { jobId, equipmentId: equipment.id, tag: "DWG-RELEASED", componentTypeId: componentType.id, governingDrawingId: drawingReleased.id },
     });
     drawingReleasedComponentId = componentDrawingReleased.id;
     drawingReleasedCuttingOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentDrawingReleased.id, seq: 1, operationId: opCutting.id },
+        data: { jobId, componentId: componentDrawingReleased.id, seq: 1, operationId: opCutting.id },
       })
     ).id;
 
     const componentDrawingSeam = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "DWG-SEAM", componentTypeId: componentType.id }, // governingDrawingId left null
+      data: { jobId, equipmentId: equipment.id, tag: "DWG-SEAM", componentTypeId: componentType.id }, // governingDrawingId left null
     });
     drawingSeamCuttingOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentDrawingSeam.id, seq: 1, operationId: opCutting.id },
+        data: { jobId, componentId: componentDrawingSeam.id, seq: 1, operationId: opCutting.id },
       })
     ).id;
 
     const componentDrawingGatedNonCutting = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "DWG-GATED-RECEIPT", componentTypeId: componentType.id, governingDrawingId: drawingDraft.id },
+      data: { jobId, equipmentId: equipment.id, tag: "DWG-GATED-RECEIPT", componentTypeId: componentType.id, governingDrawingId: drawingDraft.id },
     });
     drawingGatedNonCuttingOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentDrawingGatedNonCutting.id, seq: 1, operationId: opReceipt.id },
+        data: { jobId, componentId: componentDrawingGatedNonCutting.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
     // S18 — linkGoverningDrawing fixtures.
     const linkComponent = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "LINK-1", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "LINK-1", componentTypeId: componentType.id },
     });
     linkComponentId = linkComponent.id;
     linkDrawingId = drawingReleased.id;
@@ -475,27 +475,27 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       data: { tenantId, code: "PAINTING", name: "Painting", defaultDepartmentId: deptA.id, requiresDftGate: true },
     });
     const componentPaintNoRecord = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "PAINT-NO-RECORD", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "PAINT-NO-RECORD", componentTypeId: componentType.id },
     });
     paintOpNoRecord = (
       await owner.componentOperation.create({
-        data: { componentId: componentPaintNoRecord.id, seq: 1, operationId: opPainting.id, jobId },
+        data: { jobId, componentId: componentPaintNoRecord.id, seq: 1, operationId: opPainting.id },
       })
     ).id;
     const componentPaintTwoCoats = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "PAINT-TWO-COATS", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "PAINT-TWO-COATS", componentTypeId: componentType.id },
     });
     paintOpTwoCoats = (
       await owner.componentOperation.create({
-        data: { componentId: componentPaintTwoCoats.id, seq: 1, operationId: opPainting.id },
+        data: { jobId, componentId: componentPaintTwoCoats.id, seq: 1, operationId: opPainting.id },
       })
     ).id;
     const componentPaintDuplicateCoat = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "PAINT-DUP-COAT", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "PAINT-DUP-COAT", componentTypeId: componentType.id },
     });
     paintOpDuplicateCoat = (
       await owner.componentOperation.create({
-        data: { componentId: componentPaintDuplicateCoat.id, seq: 1, operationId: opPainting.id },
+        data: { jobId, componentId: componentPaintDuplicateCoat.id, seq: 1, operationId: opPainting.id },
       })
     ).id;
 
@@ -504,22 +504,22 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       data: { tenantId, code: "PAINTING_LEGACY", name: "Painting (legacy, unflagged)", defaultDepartmentId: deptA.id, requiresDftGate: false },
     });
     const componentUnflaggedPainting = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "PAINT-UNFLAGGED", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "PAINT-UNFLAGGED", componentTypeId: componentType.id },
     });
     unflaggedPaintingCodeOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentUnflaggedPainting.id, seq: 1, operationId: opPaintingUnflagged.id },
+        data: { jobId, componentId: componentUnflaggedPainting.id, seq: 1, operationId: opPaintingUnflagged.id },
       })
     ).id;
     const opGalvanizingFlagged = await owner.operationRef.create({
       data: { tenantId, code: "GALVANIZING", name: "Galvanizing", defaultDepartmentId: deptA.id, requiresDftGate: true },
     });
     const componentFlaggedGalvanizing = await owner.component.create({
-      data: { equipmentId: equipment.id, tag: "GALV-FLAGGED", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, tag: "GALV-FLAGGED", componentTypeId: componentType.id },
     });
     flaggedNonPaintingCodeOp = (
       await owner.componentOperation.create({
-        data: { componentId: componentFlaggedGalvanizing.id, seq: 1, operationId: opGalvanizingFlagged.id },
+        data: { jobId, componentId: componentFlaggedGalvanizing.id, seq: 1, operationId: opGalvanizingFlagged.id },
       })
     ).id;
 

@@ -122,7 +122,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — cross-departme
       data: { jobId: job.id, seq: 2, code: "P2", name: "PO placement", departmentId: deptProcurement.id, durationMinDays: 1, durationMaxDays: 2 },
     });
     await owner.jobProcessEdge.create({
-      data: { processId: jpProcurement.id, predecessorId: jpStores.id, type: "FINISH_TO_START", lagDays: 0 },
+      data: { jobId: job.id, processId: jpProcurement.id, predecessorId: jpStores.id, type: "FINISH_TO_START", lagDays: 0 },
     });
 
     // Stores' own process is not complete -> Procurement's plan is BLOCKED.

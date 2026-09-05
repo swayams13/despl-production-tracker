@@ -65,7 +65,7 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ladder (DB-backed, isolated fixtur
     });
     jobId = job.id;
     const eq = await owner.equipment.create({ data: { jobId, name: "VLT-EQ" } });
-    const unit = await owner.unit.create({ data: { equipmentId: eq.id, serialNo: "VLT01" } });
+    const unit = await owner.unit.create({ data: { jobId, equipmentId: eq.id, serialNo: "VLT01" } });
     unitId = unit.id;
 
     // Three processes all backing STAGE (§11.1 multi-process aggregation).
@@ -90,7 +90,7 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ladder (DB-backed, isolated fixtur
     planC = (await mkPlan(jpC.id)).id;
 
     // Link an existing QcpItem to process A so is_rejected can be exercised.
-    await owner.qcpItemProcess.create({ data: { qcpItemId: REF.qcpItem, jobProcessId: jpA.id } });
+    await owner.qcpItemProcess.create({ data: { jobId, qcpItemId: REF.qcpItem, jobProcessId: jpA.id } });
   });
 
   afterAll(async () => {
@@ -164,7 +164,7 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ladder (DB-backed, isolated fixtur
     expect((await fill()).is_rejected).toBe(false); // no execution yet
     await owner.qcpExecution.upsert({
       where: { qcpItemId_unitId_attemptNo: { qcpItemId: REF.qcpItem, unitId, attemptNo: 1 } },
-      create: { qcpItemId: REF.qcpItem, unitId, result: "REJECTED", attemptNo: 1 },
+      create: { jobId, qcpItemId: REF.qcpItem, unitId, result: "REJECTED", attemptNo: 1 },
       update: { result: "REJECTED" },
     });
     expect((await fill()).is_rejected).toBe(true);
