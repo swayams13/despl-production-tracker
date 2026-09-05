@@ -5220,3 +5220,34 @@ Almost everything below is **latent** — the engine and the auth primitives are
 **Verified:** docs-only change; no code touched, no test run needed beyond confirming the git history claims above with `git log`/`git ls-files`.
 
 **Phase B (B1–B13) is now fully closed** per `docs/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`'s own item list.
+
+## Session wrap — 5 Sep 2026
+
+**Shipped this session (PRs #34–#36, all merged to `main`, plus one direct docs commit):**
+- **B10 finding**: `command-center.read.ts`'s hardcoded office/floor department-code arrays → `Department.isOfficeDept` (data-driven).
+- **B5**: `welding.service.ts`'s hardcoded `FABRICATION` department code → derived from the `WELDING` `OperationRef`.
+- **B6**: `component.service.ts`'s `operationCode === "PAINTING"` → declarative `OperationRef.requiresDftGate` flag.
+- **3 migrations applied to production** (S21's `BomItem` unique/index pair + the two above) via `MERGE-RUNBOOK.md`'s dump→rehearse→verify→apply→verify procedure, watched. Production is at 43/0 migrations, `migrate diff --exit-code` → 0.
+- **B7/B8**: killed `stage-names.ts`'s hardcoded 25-stage name table → new tenant+family-scoped `WorkOrderStage` table (migration applied everywhere including production, 25 real `PRESSURE_VESSEL` names backfilled).
+- **B9**: verified (not rebuilt) that a family can opt out of the 25-stage reporting view entirely — the mechanism already existed, B7/B8 just made naming family-scoped.
+- **B11–B13**: closed out Phase B's remaining docs items (one real ADR addition, two already-done confirmations).
+
+**Phase B (B1–B13) is fully closed.**
+
+**Decisions made along the way:**
+- B5's department resolution: derive from the `WELDING` `OperationRef.defaultDepartmentId` (option (a), per the blueprint's own preference) rather than a new config flag.
+- B6's gate: a declarative `OperationRef.requiresDftGate` boolean (option analogous to (b)/(c) in the blueprint's framing), migration + backfill, confirmed with Swayam before writing the migration.
+- B9's scope: "verify only" — the existing `workOrderStages[]` mechanism already satisfies the acceptance criterion; declined the larger process-grain-spine rewrite an older doc's worked example implied.
+
+**Known footguns re-hit and now written down repeatedly (worth fixing properly, not just re-discovering):**
+1. `provision-db-role.sql` resets `despl_web`'s password **cluster-wide** when run against any local database where that role already exists — hit again this session despite being flagged in the 4 Sep S15 session. Caught and fixed each time, but it keeps happening. Consider a guard in the script itself (skip/warn if the role already exists with a different password) rather than relying on memory.
+2. `pnpm dev` silently picks up a stray shell-level `DATABASE_URL` if one is already set (Next.js's env loader doesn't override existing `process.env` values) — connected to an unrelated `vedanta_test` database this session. Worth an explicit `unset` step in the dev script, or a startup check.
+3. `pnpm db:seed` is still not idempotent against non-empty tenant data — every session this week has had to work around this with one-off scripts instead of the real seed path.
+
+**Blockers / next steps:**
+- **Next phase item**: `docs/mos-execution/LEDGER.md`'s Gate 3 table shows Phase B fully closed; the next open row is "Family / template / route / QCP authoring" (Phase C, v3 §7) — a much larger item than anything done this session.
+- Manual real-login browser check on **production** (not local dev) for the B10/B5/B6/B7-B8 migrations is still outstanding — logged in `LEDGER.md` as done-pending-that-check.
+
+**Update, same day — B7/B8's production migration applied:** `20260905010000_work_order_stage` was applied to production following the same dump→rehearse→verify→apply→verify procedure (fresh dump, restored + rehearsed on `despl_rehearse`, zero drift, RLS+policy confirmed, applied — succeeded on the first attempt, no classifier block this time). Production now at 44/0 migrations. **Real gap caught and closed in the same pass:** a migration and its seed data are two different things — the migration alone would have left every production stage name silently falling back to "Stage N" instead of "Cutting"/"Forming"/etc., since PR #35's code had already auto-deployed before the schema caught up. Backfilled the 25 real `PRESSURE_VESSEL` `WorkOrderStage` rows from `seed/lead-time-model.json` directly (same `tenantId=1`/`familyId=1` as local). Confirmed via `psql`: names resolve correctly. App online, `/api/health` → 200, no restart needed (additive schema).
+
+Vault sync: none of this session's changes added or renamed vault doc files, so `link_vault.py` doesn't need a run. Vault `CURRENT_STATUS.md`/`TASKS.md`/`CHANGELOG.md` should still be refreshed from this log by the next session that touches them, per the workspace `CLAUDE.md`'s standing instruction.
