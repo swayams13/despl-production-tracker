@@ -231,6 +231,7 @@ model Organization {
   equipmentTypes    EquipmentTypeRef[]
   workOrderStages   WorkOrderStage[]
   operations        OperationRef[]
+  operationRefSeqs  OperationRefFamilySeq[]
   testTypes         TestTypeRef[]
   drawingTypes      DrawingTypeRef[]
   delayCategories   DelayCategoryRef[]
@@ -475,12 +476,6 @@ model OperationRef {
   defaultDepartmentId Int?    @map("default_department_id")
   /// Column name in DESPL's live tracker CSVs, where one exists.
   sourceColumn        String? @map("source_column")
-  /// Which of the 36 lead-time processes (`JobProcess.code`, as a number)
-  /// this component-level operation rolls up into. Lets a BOM component's
-  /// route step resolve its gating QCP checkpoints via
-  /// `QcpItemProcess` → `JobProcess`. Null where the seed's
-  /// `canonicalOperations` entry carries no mapping.
-  leadTimeProcessSeq  Int?    @map("lead_time_process_seq")
   active              Boolean @default(true)
   /// B6: declarative replacement for component.service.ts's old
   /// `operationCode === "PAINTING"` branch. Tenant-authored (seeded from
@@ -489,19 +484,47 @@ model OperationRef {
   /// hardcoded op code.
   requiresDftGate     Boolean @default(false) @map("requires_dft_gate")
 
-  tenant            Organization         @relation(fields: [tenantId], references: [id])
-  defaultDepartment Department?          @relation(fields: [defaultDepartmentId], references: [id])
+  tenant            Organization            @relation(fields: [tenantId], references: [id])
+  defaultDepartment Department?             @relation(fields: [defaultDepartmentId], references: [id])
   routeSteps        RouteStep[]
   componentOps      ComponentOperation[]
+  familySeqMappings OperationRefFamilySeq[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([defaultDepartmentId])
-  /// S21: _shared.ts's numeric-join gates (loadMappedOps/assertNoOpenNcr)
-  /// filter ComponentOperation by `operation: { leadTimeProcessSeq: seq }`
-  /// on every submitProcess/verifyProcess call — the hot path.
-  @@index([leadTimeProcessSeq])
   @@map("operation_refs")
+}
+
+/// Gate 3 fix: `OperationRef.leadTimeProcessSeq` used to be one tenant-wide
+/// number per canonical operation, authored only for PRESSURE_VESSEL's
+/// 36-process spine — a second family's `JobProcess.code` numbering would
+/// silently match through it (the join is by bare value, no FK). This table
+/// makes the mapping family-scoped: the same physical operation (e.g.
+/// CUTTING) can roll up into a different lead-time-process number per
+/// family, and a family with no row here fails open (SEAM, same convention
+/// as `_shared.ts`'s non-numeric-code case) instead of silently borrowing
+/// another family's number.
+model OperationRefFamilySeq {
+  id                 Int @id @default(autoincrement())
+  tenantId           Int @map("tenant_id")
+  operationRefId     Int @map("operation_ref_id")
+  familyId           Int @map("family_id")
+  /// Which of the family's own template processes (`JobProcess.code`, as a
+  /// number) this operation rolls up into.
+  leadTimeProcessSeq Int @map("lead_time_process_seq")
+
+  tenant       Organization  @relation(fields: [tenantId], references: [id])
+  operationRef OperationRef  @relation(fields: [operationRefId], references: [id], onDelete: Cascade)
+  family       ProductFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([operationRefId, familyId])
+  @@index([tenantId])
+  /// _shared.ts's numeric-join gates (loadMappedOps/assertNoOpenNcr) filter
+  /// by (familyId, leadTimeProcessSeq) on every submitProcess/verifyProcess
+  /// call — the hot path S21 originally indexed on OperationRef itself.
+  @@index([familyId, leadTimeProcessSeq])
+  @@map("operation_ref_family_seqs")
 }
 
 /// NDT / test methods. RT, UT, DP, HT, PNEUMATIC, VACUUM — plus PAUT, TOFD,
@@ -618,13 +641,14 @@ model ProductFamily {
   name     String
   active   Boolean @default(true)
 
-  tenant            Organization       @relation(fields: [tenantId], references: [id])
+  tenant            Organization            @relation(fields: [tenantId], references: [id])
   templates         ProcessTemplate[]
   jobs              Job[]
   routes            RouteTemplate[]
   equipmentTypes    EquipmentTypeRef[]
   assemblyTemplates AssemblyTemplate[]
   workOrderStages   WorkOrderStage[]
+  operationRefSeqs  OperationRefFamilySeq[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1864,6 +1888,11 @@ model QcpItem {
   acceptanceCriteria String?     @map("acceptance_criteria")
   record             String?
   remarks            String?
+  /// C7: for a LIBRARY item (its QcpTemplate.jobId is null) only — the raw
+  /// process-code strings (e.g. ["12", "16"]) this checkpoint is meant to
+  /// gate once cloned into a real job. Unused/ignored once the item belongs
+  /// to a job-owned template; real linkage there is via QcpItemProcess.
+  libraryProcessCodes String[] @default([]) @map("library_process_codes")
 
   qcpTemplate   QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
   partyCodes    QcpItemPartyCode[]

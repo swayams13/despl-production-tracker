@@ -688,8 +688,14 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
     // uses to clear a QCP hold point before proceeding.
     const blockedSubmit = await submitProcess(maker, { processPlanId: planId(seq10Id) }).catch((e) => e);
     expect(isAppError(blockedSubmit) && blockedSubmit.code).toBe(ERROR_CODES.COMPONENT_OPS_INCOMPLETE);
+    // Gate 3 fix: leadTimeProcessSeq is now family-scoped (OperationRefFamilySeq).
+    const job = await owner.job.findUniqueOrThrow({ where: { id: jobId }, select: { familyId: true } });
+    const seq10OperationRefIds = await owner.operationRefFamilySeq.findMany({
+      where: { familyId: job.familyId, leadTimeProcessSeq: 10 },
+      select: { operationRefId: true },
+    });
     await owner.componentOperation.updateMany({
-      where: { component: { unitId: unit.id }, operation: { leadTimeProcessSeq: 10 } },
+      where: { component: { unitId: unit.id }, operationId: { in: seq10OperationRefIds.map((r) => r.operationRefId) } },
       data: { status: "COMPLETE" },
     });
 
@@ -749,7 +755,10 @@ describe.skipIf(!RUN_DB)("submitProcess component-ops gate (Phase 3, R2, DB-back
     });
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
     const operation = await owner.operationRef.create({
-      data: { tenantId, code: "CUTTING", name: "Cutting / Blanking", leadTimeProcessSeq: 12 },
+      data: { tenantId, code: "CUTTING", name: "Cutting / Blanking" },
+    });
+    await owner.operationRefFamilySeq.create({
+      data: { tenantId, operationRefId: operation.id, familyId: family.id, leadTimeProcessSeq: 12 },
     });
     const component = await owner.component.create({
       data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
@@ -834,7 +843,10 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
     });
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
     const operation = await owner.operationRef.create({
-      data: { tenantId, code: "WELDING", name: "Shell Welding", leadTimeProcessSeq: 13, defaultDepartmentId: dept.id },
+      data: { tenantId, code: "WELDING", name: "Shell Welding", defaultDepartmentId: dept.id },
+    });
+    await owner.operationRefFamilySeq.create({
+      data: { tenantId, operationRefId: operation.id, familyId: family.id, leadTimeProcessSeq: 13 },
     });
     const component = await owner.component.create({
       data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },

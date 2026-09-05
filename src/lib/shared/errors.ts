@@ -109,6 +109,8 @@ export const ERROR_CODES = {
   QCP_ITEM_UNRESOLVED: "QCP_ITEM_UNRESOLVED",
   /** setJobStatus (S19): status COMPLETE was requested while a ProcessPlan on the job's current ScheduleRun is not yet COMPLETE. */
   JOB_HAS_INCOMPLETE_PLANS: "JOB_HAS_INCOMPLETE_PLANS",
+  /** setOperationRefFamilySeq (C6): the given number is not among the family's own published TemplateProcess.seq values. */
+  ROUTE_STEP_SEQ_UNKNOWN: "ROUTE_STEP_SEQ_UNKNOWN",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -182,6 +184,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
   QCP_ITEM_UNRESOLVED: "An assembly checkpoint could not be matched to a QCP item. Contact an administrator.",
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
+  ROUTE_STEP_SEQ_UNKNOWN:
+    "This number does not match any process in the family's published route — check the template's process list.",
 };
 
 /**

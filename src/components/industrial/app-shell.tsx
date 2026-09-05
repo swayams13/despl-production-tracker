@@ -205,6 +205,8 @@ export function AppShell({
           { href: "/admin/families", label: "Product families", icon: icons.admin },
           { href: "/admin/equipment-types", label: "Equipment types", icon: icons.admin },
           { href: "/admin/templates", label: "Process routes", icon: icons.admin },
+          { href: "/admin/routes", label: "Component routes", icon: icons.admin },
+          { href: "/admin/qcp-templates", label: "QCP templates", icon: icons.admin },
         ]
       : []),
     ...(userRoles.includes("ADMIN") || userRoles.includes("MANAGEMENT")

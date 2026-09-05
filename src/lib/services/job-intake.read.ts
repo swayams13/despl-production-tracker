@@ -254,3 +254,283 @@ export async function loadTemplateProcesses(
     }));
   });
 }
+
+// ── Component route authoring (C6) ──────────────────────────────────────
+
+export interface RouteStepAdminRow {
+  seq: number;
+  operationCode: string;
+  operationName: string;
+  printed: string | null;
+  optional: boolean;
+}
+
+export interface RouteTemplateVersionAdminRow {
+  id: number;
+  version: number;
+  status: string;
+  printedRoute: string | null;
+  stepCount: number;
+  steps: RouteStepAdminRow[];
+  /** Component rows pinned to this exact version (`Component.routeVersionId`). */
+  jobCount: number;
+}
+
+export interface RouteTemplateAdminRow {
+  id: number;
+  name: string;
+  versions: RouteTemplateVersionAdminRow[];
+}
+
+export interface ComponentTypeRouteAdminRow {
+  componentTypeId: number;
+  componentTypeCode: string;
+  componentTypeName: string;
+  /** The familyId: null route for this component type, if one exists. */
+  shared: RouteTemplateAdminRow | null;
+  /** Family-specific routes, which take precedence over `shared` at intake time. */
+  families: Array<{ familyId: number; familyName: string; route: RouteTemplateAdminRow }>;
+}
+
+export interface OperationRefFamilySeqAdminRow {
+  operationRefId: number;
+  operationCode: string;
+  operationName: string;
+  mappings: Array<{ familyId: number; familyName: string; leadTimeProcessSeq: number }>;
+}
+
+export interface RouteTemplateAdmin {
+  componentTypes: ComponentTypeRouteAdminRow[];
+  /** Every OperationRef used by any route in this tenant, with its per-family lead-time-seq mappings. */
+  operationFamilySeqs: OperationRefFamilySeqAdminRow[];
+  /** Every ProductFamily — for the family picker in the author/revise dialog. */
+  families: Array<{ id: number; name: string }>;
+  /** The full OperationRef catalog — for the step editor's "existing operation" picker. */
+  operations: Array<{ id: number; code: string; name: string; defaultDepartmentId: number | null }>;
+  departments: Array<{ id: number; name: string }>;
+}
+
+/**
+ * Everything the route-authoring admin screen needs in one round trip: every
+ * `ComponentTypeRef`'s routes (shared + per-family), each version's steps,
+ * every referenced `OperationRef`'s current `OperationRefFamilySeq` mappings
+ * (so the UI can show e.g. "CUTTING → PRESSURE_VESSEL: seq 12, PIPE_SPOOL:
+ * (not set)"), and the plain option lists (families, the full operation
+ * catalog, departments) the author/revise dialog needs for its pickers.
+ */
+export async function loadRouteTemplateAdmin(actor: Actor): Promise<RouteTemplateAdmin> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const [componentTypes, families, operations, departments] = await Promise.all([
+      tx.componentTypeRef.findMany({
+        where: { tenantId: actor.tenantId },
+        orderBy: { name: "asc" },
+      }),
+      tx.productFamily.findMany({
+        where: { tenantId: actor.tenantId, active: true },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      tx.operationRef.findMany({
+        where: { tenantId: actor.tenantId },
+        orderBy: { name: "asc" },
+        select: { id: true, code: true, name: true, defaultDepartmentId: true },
+      }),
+      tx.department.findMany({
+        where: { tenantId: actor.tenantId },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+    ]);
+
+    const routes = await tx.routeTemplate.findMany({
+      where: { tenantId: actor.tenantId },
+      include: {
+        family: { select: { id: true, name: true } },
+        versions: {
+          orderBy: { version: "desc" },
+          include: {
+            steps: { orderBy: { seq: "asc" }, include: { operation: { select: { code: true, name: true } } } },
+            _count: { select: { components: true } },
+          },
+        },
+      },
+    });
+
+    const routesByComponentType = new Map<number, typeof routes>();
+    for (const r of routes) {
+      const list = routesByComponentType.get(r.componentTypeId) ?? [];
+      list.push(r);
+      routesByComponentType.set(r.componentTypeId, list);
+    }
+
+    const toRouteRow = (r: (typeof routes)[number]): RouteTemplateAdminRow => ({
+      id: r.id,
+      name: r.name,
+      versions: r.versions.map((v) => ({
+        id: v.id,
+        version: v.version,
+        status: v.status,
+        printedRoute: v.printedRoute,
+        stepCount: v.steps.length,
+        steps: v.steps.map((s) => ({
+          seq: s.seq,
+          operationCode: s.operation.code,
+          operationName: s.operation.name,
+          printed: s.printed,
+          optional: s.optional,
+        })),
+        jobCount: v._count.components,
+      })),
+    });
+
+    const componentTypeRows: ComponentTypeRouteAdminRow[] = componentTypes.map((ct) => {
+      const forType = routesByComponentType.get(ct.id) ?? [];
+      const shared = forType.find((r) => r.familyId == null);
+      const familyRoutes = forType
+        .filter((r) => r.familyId != null)
+        .map((r) => ({ familyId: r.familyId!, familyName: r.family!.name, route: toRouteRow(r) }));
+      return {
+        componentTypeId: ct.id,
+        componentTypeCode: ct.code,
+        componentTypeName: ct.name,
+        shared: shared ? toRouteRow(shared) : null,
+        families: familyRoutes,
+      };
+    });
+
+    const operationRefIds = [
+      ...new Set(routes.flatMap((r) => r.versions.flatMap((v) => v.steps.map((s) => s.operationId)))),
+    ];
+    const usedOperations =
+      operationRefIds.length === 0
+        ? []
+        : await tx.operationRef.findMany({
+            where: { id: { in: operationRefIds } },
+            include: { familySeqMappings: { include: { family: { select: { id: true, name: true } } } } },
+          });
+
+    const operationFamilySeqs: OperationRefFamilySeqAdminRow[] = usedOperations.map((o) => ({
+      operationRefId: o.id,
+      operationCode: o.code,
+      operationName: o.name,
+      mappings: o.familySeqMappings.map((m) => ({
+        familyId: m.familyId,
+        familyName: m.family.name,
+        leadTimeProcessSeq: m.leadTimeProcessSeq,
+      })),
+    }));
+
+    return { componentTypes: componentTypeRows, operationFamilySeqs, families, operations, departments };
+  });
+}
+
+// ── QCP template authoring (C7) ──────────────────────────────────────────
+
+export interface QcpTemplateItemAdminRow {
+  id: number;
+  sequence: number;
+  srNo: string;
+  kind: string;
+  section: string | null;
+  activity: string;
+  characteristic: string | null;
+  extentOfCheck: string | null;
+  applicableDocument: string | null;
+  acceptanceCriteria: string | null;
+  record: string | null;
+  remarks: string | null;
+  /** For a library item: the process codes it will resolve to once cloned. */
+  libraryProcessCodes: string[];
+  partyCodes: Array<{ partyCode: string; qcpCode: string; blocksCompletion: boolean; waivable: boolean }>;
+}
+
+export interface QcpTemplateLibraryAdminRow {
+  id: number;
+  jobLabel: string;
+  vessel: string;
+  revision: number;
+  designCode: string | null;
+  parties: Array<{ id: number; code: string; name: string | null }>;
+  items: QcpTemplateItemAdminRow[];
+}
+
+/**
+ * Every library `QcpTemplate` (jobId null) with its parties and items, for
+ * the from-scratch authoring admin screen (list + detail). Same missing-
+ * tenant-anchor caveat as `cloneQcpTemplate`/`loadIntakeOptions` — a
+ * library row genuinely has no tenantId column to scope by.
+ */
+export async function loadQcpTemplateLibraryAdmin(actor: Actor): Promise<QcpTemplateLibraryAdminRow[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const templates = await tx.qcpTemplate.findMany({
+      where: { jobId: null },
+      orderBy: { jobLabel: "asc" },
+      include: {
+        parties: { orderBy: { code: "asc" } },
+        items: {
+          orderBy: { sequence: "asc" },
+          include: { partyCodes: { include: { inspectionParty: true, qcpCode: true } } },
+        },
+      },
+    });
+
+    return templates.map((t) => ({
+      id: t.id,
+      jobLabel: t.jobLabel,
+      vessel: t.vessel,
+      revision: t.revision,
+      designCode: t.designCode,
+      parties: t.parties.map((p) => ({ id: p.id, code: p.code, name: p.name })),
+      items: t.items.map((i) => ({
+        id: i.id,
+        sequence: i.sequence,
+        srNo: i.srNo,
+        kind: i.kind,
+        section: i.section,
+        activity: i.activity,
+        characteristic: i.characteristic,
+        extentOfCheck: i.extentOfCheck,
+        applicableDocument: i.applicableDocument,
+        acceptanceCriteria: i.acceptanceCriteria,
+        record: i.record,
+        remarks: i.remarks,
+        libraryProcessCodes: i.libraryProcessCodes,
+        partyCodes: i.partyCodes.map((pc) => ({
+          partyCode: pc.inspectionParty.code,
+          qcpCode: pc.qcpCode.code,
+          blocksCompletion: pc.qcpCode.blocksCompletion,
+          waivable: pc.qcpCode.waivable,
+        })),
+      })),
+    }));
+  });
+}
+
+export interface QcpCodeRefOption {
+  code: string;
+  label: string;
+  blocksCompletion: boolean;
+  waivable: boolean;
+}
+
+/** The tenant's QcpCodeRef catalog, for the party-code picker in the C7
+ * item-authoring form — `addQcpItemToLibraryTemplate` refuses any `qcpCode`
+ * not already in this list. */
+export async function loadQcpCodeRefOptions(actor: Actor): Promise<QcpCodeRefOption[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const rows = await tx.qcpCodeRef.findMany({
+      where: { tenantId: actor.tenantId },
+      orderBy: { code: "asc" },
+    });
+    return rows.map((r) => ({ code: r.code, label: r.label, blocksCompletion: r.blocksCompletion, waivable: r.waivable }));
+  });
+}
