@@ -68,9 +68,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("cross-tenant write/read holes (DB, a
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell", sourceQty: "1" },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Shell", sourceQty: "1" },
     });
     const weldJoint = await owner.weldJoint.create({
       data: { jobId: job.id, unitId: unit.id, jointNo: "LS-1", jointType: "LONG_SEAM", loggedBy: 1 },
@@ -86,7 +86,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("cross-tenant write/read holes (DB, a
       data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date("2026-01-01"), isCurrent: true },
     });
     const processPlan = await owner.processPlan.create({
-      data: { scheduleRunId: scheduleRun.id, jobProcessId: jobProcess.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: scheduleRun.id, jobProcessId: jobProcess.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     return { tenantId, jobId: job.id, unitId: unit.id, bomItemId: bomItem.id, weldJointId: weldJoint.id, qcpItemId: qcpItem.id, planId: processPlan.id };

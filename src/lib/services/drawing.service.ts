@@ -23,14 +23,18 @@ export async function createDrawingRevision(
   actor: Actor,
   input: CreateDrawingRevisionInput,
 ): Promise<DrawingRevision> {
-  const { assemblyDrawingId, revisionNo, status } = createDrawingRevisionSchema.parse(input);
+  const { jobId, assemblyDrawingId, revisionNo, status } = createDrawingRevisionSchema.parse(input);
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return withTenant(actor.tenantId, async (tx) => {
+    // H1: filter by the caller's declared jobId, not just tenantId — an
+    // assemblyDrawingId from a different job in the SAME tenant must be
+    // refused, not silently accepted (same pattern as
+    // component.service.ts's linkGoverningDrawing).
     const drawing = await tx.assemblyDrawing.findFirst({
-      where: { id: assemblyDrawingId, job: { tenantId: actor.tenantId } },
-      select: { id: true, job: { select: { clientId: true } } },
+      where: { id: assemblyDrawingId, jobId, job: { tenantId: actor.tenantId } },
+      select: { id: true, job: { select: { clientId: true, id: true } } },
     });
     if (!drawing) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId });
     assertClientScope(actor, drawing.job.clientId);
@@ -68,6 +72,7 @@ export async function createDrawingRevision(
           revisionNo,
           status,
           releasedAt: status === "RELEASED" ? new Date() : null,
+          jobId: drawing.job.id,
         },
       });
       return {

@@ -63,8 +63,8 @@ describe.skipIf(!RUN_DB)("D16 — assignment never bypasses gating (DB)", async 
     const jpA = await owner.jobProcess.create({ data: { jobId: job.id, seq: 10, code: "10", name: "A", departmentId: deptId } });
     const jpB = await owner.jobProcess.create({ data: { jobId: job.id, seq: 20, code: "20", name: "B", departmentId: deptId } });
     const jpC = await owner.jobProcess.create({ data: { jobId: job.id, seq: 30, code: "30", name: "C", departmentId: deptId } });
-    await owner.jobProcessEdge.create({ data: { processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 } });
-    await owner.jobProcessEdge.create({ data: { processId: jpC.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 } });
+    await owner.jobProcessEdge.create({ data: { jobId: job.id, processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 } });
+    await owner.jobProcessEdge.create({ data: { jobId: job.id, processId: jpC.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 } });
 
     const run = await owner.scheduleRun.create({
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
@@ -73,6 +73,7 @@ describe.skipIf(!RUN_DB)("D16 — assignment never bypasses gating (DB)", async 
     const mkPlan = (jobProcessId: number) =>
       owner.processPlan.create({
         data: {
+          jobId: job.id,
           scheduleRunId: run.id,
           jobProcessId,
           unitId: null,

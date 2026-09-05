@@ -49,6 +49,7 @@ export async function fileDelayReason(
     return audited(tx, actor, async () => {
       const reason = await tx.delayReason.create({
         data: {
+          jobId: plan.jobId,
           processPlanId,
           categoryId,
           detail: detail ?? null,

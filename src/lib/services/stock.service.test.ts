@@ -74,10 +74,10 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
     for (let i = 0; i < unitCount; i++) {
-      await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: `SR${i + 1}` } });
+      await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: `SR${i + 1}` } });
     }
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
     });
     const user = await owner.user.create({
       data: {
@@ -109,13 +109,17 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
   });
 
   it("receive then issue does NOT reduce shortage-relevant available (fix wave, Critical #1) — issuing into the product is consumption as intended, not loss", async () => {
-    const { tenantId, bomItem, user } = await fixture();
+    const { tenantId, job, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 10, heatNumber: "H100" });
     expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
+    // H1: receiveStock populates jobId on the created StockLot.
+    expect(lot.jobId).toBe(job.id);
 
-    await issueStock(ph, { stockLotId: lot.id, qty: 4 });
+    const txn = await issueStock(ph, { stockLotId: lot.id, qty: 4 });
     expect((await availableQty(ph, bomItem.id))?.toNumber()).toBe(10);
+    // H1: createStockTxn populates jobId from the lot's own jobId.
+    expect(txn.jobId).toBe(job.id);
   });
 
   it("issuing exactly the lot's physical available amount succeeds; one more fails (exact boundary) — the lot-level over-issue guard is a separate, unaffected physical-ledger check", async () => {
@@ -193,6 +197,43 @@ describe.skipIf(!RUN_DB)("stock.service (DB-backed)", async () => {
     // up to 7 succeeds, one more fails.
     await issueStock(ph, { stockLotId: lot.id, qty: 7 });
     await expectCode(issueStock(ph, { stockLotId: lot.id, qty: 1 }), ERROR_CODES.INSUFFICIENT_STOCK);
+  });
+
+  it("createStockTxn refuses a componentId from a different job than the stockLotId's own job", async () => {
+    // H1: Job A's StockLot + Job B's Component in the SAME tenant.
+    const { tenantId, job, bomItem, user } = await fixture();
+    const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
+    const lot = await receiveStock(ph, { bomItemId: bomItem.id, location: "Yard A", qty: 10 });
+
+    const client = await owner.client.findFirstOrThrow({ where: { tenantId } });
+    const jobB = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-stock-b-${Date.now()}-${Math.random()}`,
+        clientId: client.id,
+        familyId: job.familyId,
+        templateVersionId: job.templateVersionId,
+        jobNumber: `DE-STOCK-B-${Date.now()}-${Math.random()}`,
+      },
+    });
+    const equipmentB = await owner.equipment.create({ data: { jobId: jobB.id, name: "Air Receiver B", blockNo: 1 } });
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+    const componentB = await owner.component.create({
+      data: { jobId: jobB.id, equipmentId: equipmentB.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+
+    await expectCode(
+      issueStock(ph, { stockLotId: lot.id, qty: 1, componentId: componentB.id }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+
+    // Control: a componentId genuinely in the lot's own job (Job A) succeeds.
+    const equipmentA = await owner.equipment.findFirstOrThrow({ where: { jobId: job.id } });
+    const componentA = await owner.component.create({
+      data: { jobId: job.id, equipmentId: equipmentA.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    const txn = await issueStock(ph, { stockLotId: lot.id, qty: 1, componentId: componentA.id });
+    expect(txn.componentId).toBe(componentA.id);
   });
 
   it("cross-tenant: another tenant's actor cannot reach this bom item or lot", async () => {

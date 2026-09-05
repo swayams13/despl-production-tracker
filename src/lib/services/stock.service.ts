@@ -25,7 +25,7 @@ export async function receiveStock(actor: Actor, input: ReceiveStockInput): Prom
   return withTenant(actor.tenantId, async (tx) => {
     const bomItem = await tx.bomItem.findFirst({
       where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
-      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+      select: { equipment: { select: { job: { select: { clientId: true, id: true } } } } },
     });
     if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
     assertClientScope(actor, bomItem.equipment.job.clientId);
@@ -40,7 +40,14 @@ export async function receiveStock(actor: Actor, input: ReceiveStockInput): Prom
 
     return audited(tx, actor, async () => {
       const lot = await tx.stockLot.create({
-        data: { bomItemId, heatNumber: heatNumber ?? null, location, qty, sourceProcurementEventId: sourceProcurementEventId ?? null },
+        data: {
+          bomItemId,
+          heatNumber: heatNumber ?? null,
+          location,
+          qty,
+          sourceProcurementEventId: sourceProcurementEventId ?? null,
+          jobId: bomItem.equipment.job.id,
+        },
       });
       return {
         result: lot,
@@ -93,6 +100,7 @@ async function loadLotForMutation(tx: Tx, actor: Actor, stockLotId: number) {
     select: {
       id: true,
       qty: true,
+      jobId: true,
       bomItem: { select: { equipment: { select: { job: { select: { clientId: true } } } } } },
       txns: { select: { type: true, qty: true } },
     },
@@ -100,13 +108,17 @@ async function loadLotForMutation(tx: Tx, actor: Actor, stockLotId: number) {
   if (!lot) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "StockLot", stockLotId });
   assertClientScope(actor, lot.bomItem.equipment.job.clientId);
 
+  // H1: job-level RLS backstop — scope the rest of this transaction to the
+  // lot's own job, same pattern as _shared.ts's other lock* helpers.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(lot.jobId)}, true)`;
+
   let available = lot.qty.toNumber();
   for (const t of lot.txns) {
     const q = t.qty.toNumber();
     if (t.type === "RETURN") available += q;
     else available -= q; // ISSUE | SCRAP
   }
-  return { available };
+  return { available, jobId: lot.jobId };
 }
 
 async function createStockTxn(
@@ -122,22 +134,32 @@ async function createStockTxn(
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { available } = await loadLotForMutation(tx, actor, stockLotId);
+    const { available, jobId } = await loadLotForMutation(tx, actor, stockLotId);
     if (guardOverIssue && qty > available) {
       throw new AppError(ERROR_CODES.INSUFFICIENT_STOCK, { stockLotId, requested: qty, available });
     }
 
     if (componentId != null) {
+      // H1: componentId must belong to the SAME job as the stockLotId being
+      // mutated, not merely the same tenant — the gap named in the research
+      // ("an issue against Job A's stock lot could be logged against a
+      // component belonging to Job B").
       const component = await tx.component.findFirst({
-        where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
+        where: { id: componentId, jobId },
         select: { id: true },
       });
-      if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+      if (!component) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { entity: "Component", componentId, stockLotId },
+          "Component does not belong to this stock lot's job.",
+        );
+      }
     }
 
     return audited(tx, actor, async () => {
       const txn = await tx.stockTxn.create({
-        data: { stockLotId, type, qty, by: actor.userId, componentId: componentId ?? null, note: note ?? null },
+        data: { stockLotId, type, qty, by: actor.userId, componentId: componentId ?? null, note: note ?? null, jobId },
       });
       return {
         result: txn,

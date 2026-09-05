@@ -18,7 +18,7 @@
     "test:db": "set -a && . ./.env.test && set +a && RUN_DB_TESTS=1 vitest run",
     "e2e": "playwright test",
     "format": "prettier --write .",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "tsx prisma/seed.ts && tsx scripts/h1-backfill-job-ids.ts",
     "db:seed:reference": "SEED_REFERENCE_ONLY=1 tsx prisma/seed.ts",
     "db:bootstrap": "tsx scripts/bootstrap-schedule.ts",
     "db:bootstrap-admin": "tsx scripts/bootstrap-admin.ts",

@@ -83,7 +83,7 @@ async function assertParentValid(
 async function loadEquipment(tx: Tx, actor: Actor, equipmentId: number) {
   const equipment = await tx.equipment.findFirst({
     where: { id: equipmentId, job: { tenantId: actor.tenantId } },
-    select: { job: { select: { clientId: true } } },
+    select: { job: { select: { clientId: true, id: true } } },
   });
   if (!equipment) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Equipment", equipmentId });
   assertClientScope(actor, equipment.job.clientId);
@@ -101,12 +101,12 @@ export async function createBomItem(actor: Actor, input: CreateBomItemInput): Pr
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return withTenant(actor.tenantId, async (tx) => {
-    await loadEquipment(tx, actor, parsed.equipmentId);
+    const equipment = await loadEquipment(tx, actor, parsed.equipmentId);
     if (parsed.bomRevisionId != null) await assertBomRevisionValid(tx, parsed.equipmentId, parsed.bomRevisionId);
     if (parsed.parentBomItemId != null) await assertParentValid(tx, parsed.equipmentId, null, parsed.parentBomItemId);
 
     return audited(tx, actor, async () => {
-      const item = await tx.bomItem.create({ data: parsed });
+      const item = await tx.bomItem.create({ data: { ...parsed, jobId: equipment.job.id } });
       return {
         result: item,
         audit: {
@@ -259,7 +259,7 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
   return withTenant(
     actor.tenantId,
     async (tx) => {
-      await loadEquipment(tx, actor, equipmentId);
+      const equipment = await loadEquipment(tx, actor, equipmentId);
       if (bomRevisionId != null) await assertBomRevisionValid(tx, equipmentId, bomRevisionId);
 
       const created: BomItem[] = [];
@@ -272,7 +272,7 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
           failures.push({ row: rowNo, error: parsedRow.error.issues.map((iss) => iss.message).join("; ") });
           continue;
         }
-        const data = { ...parsedRow.data, equipmentId, bomRevisionId: bomRevisionId ?? null };
+        const data = { ...parsedRow.data, equipmentId, bomRevisionId: bomRevisionId ?? null, jobId: equipment.job.id };
 
         try {
           if (data.parentBomItemId != null) {
@@ -330,7 +330,7 @@ export async function createBomRevision(actor: Actor, input: CreateBomRevisionIn
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return withTenant(actor.tenantId, async (tx) => {
-    await loadEquipment(tx, actor, equipmentId);
+    const equipment = await loadEquipment(tx, actor, equipmentId);
 
     const highest = await tx.bomRevision.findFirst({
       where: { equipmentId },
@@ -360,6 +360,7 @@ export async function createBomRevision(actor: Actor, input: CreateBomRevisionIn
           status,
           createdBy: actor.userId,
           releasedAt: status === "RELEASED" ? new Date() : null,
+          jobId: equipment.job.id,
         },
       });
       return {

@@ -176,7 +176,7 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
       unitId: plan.unitId,
     });
 
-    await assertComponentOpsComplete(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+    await assertComponentOpsComplete(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
 
     const updated = await audited(tx, actor, async () => {
       const updated = await tx.processPlan.update({
@@ -236,8 +236,8 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
 
     const { edges, states } = await loadGate(tx, plan);
     assertCanComplete(edges, states);
-    await assertNoOpenHoldPoint(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
-    await assertNoOpenNcr(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+    await assertNoOpenHoldPoint(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
+    await assertNoOpenNcr(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
     await assertEvidenceSatisfied(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
 
     return audited(tx, actor, async () => {

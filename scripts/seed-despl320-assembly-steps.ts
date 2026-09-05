@@ -136,7 +136,7 @@ async function main() {
       const qcpItemId = resolveQcpItemId(step);
       if (qcpItemId != null) boundToQcp++;
       await prisma.assemblyStep.create({
-        data: { unitId: unit.id, templateStepId: step.id, seq: step.seq, qcpItemId },
+        data: { jobId: unit.jobId, unitId: unit.id, templateStepId: step.id, seq: step.seq, qcpItemId },
       });
       created++;
     }

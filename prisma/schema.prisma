@@ -231,6 +231,7 @@ model Organization {
   equipmentTypes    EquipmentTypeRef[]
   workOrderStages   WorkOrderStage[]
   operations        OperationRef[]
+  operationRefSeqs  OperationRefFamilySeq[]
   testTypes         TestTypeRef[]
   drawingTypes      DrawingTypeRef[]
   delayCategories   DelayCategoryRef[]
@@ -475,12 +476,6 @@ model OperationRef {
   defaultDepartmentId Int?    @map("default_department_id")
   /// Column name in DESPL's live tracker CSVs, where one exists.
   sourceColumn        String? @map("source_column")
-  /// Which of the 36 lead-time processes (`JobProcess.code`, as a number)
-  /// this component-level operation rolls up into. Lets a BOM component's
-  /// route step resolve its gating QCP checkpoints via
-  /// `QcpItemProcess` → `JobProcess`. Null where the seed's
-  /// `canonicalOperations` entry carries no mapping.
-  leadTimeProcessSeq  Int?    @map("lead_time_process_seq")
   active              Boolean @default(true)
   /// B6: declarative replacement for component.service.ts's old
   /// `operationCode === "PAINTING"` branch. Tenant-authored (seeded from
@@ -489,19 +484,47 @@ model OperationRef {
   /// hardcoded op code.
   requiresDftGate     Boolean @default(false) @map("requires_dft_gate")
 
-  tenant            Organization         @relation(fields: [tenantId], references: [id])
-  defaultDepartment Department?          @relation(fields: [defaultDepartmentId], references: [id])
+  tenant            Organization            @relation(fields: [tenantId], references: [id])
+  defaultDepartment Department?             @relation(fields: [defaultDepartmentId], references: [id])
   routeSteps        RouteStep[]
   componentOps      ComponentOperation[]
+  familySeqMappings OperationRefFamilySeq[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([defaultDepartmentId])
-  /// S21: _shared.ts's numeric-join gates (loadMappedOps/assertNoOpenNcr)
-  /// filter ComponentOperation by `operation: { leadTimeProcessSeq: seq }`
-  /// on every submitProcess/verifyProcess call — the hot path.
-  @@index([leadTimeProcessSeq])
   @@map("operation_refs")
+}
+
+/// Gate 3 fix: `OperationRef.leadTimeProcessSeq` used to be one tenant-wide
+/// number per canonical operation, authored only for PRESSURE_VESSEL's
+/// 36-process spine — a second family's `JobProcess.code` numbering would
+/// silently match through it (the join is by bare value, no FK). This table
+/// makes the mapping family-scoped: the same physical operation (e.g.
+/// CUTTING) can roll up into a different lead-time-process number per
+/// family, and a family with no row here fails open (SEAM, same convention
+/// as `_shared.ts`'s non-numeric-code case) instead of silently borrowing
+/// another family's number.
+model OperationRefFamilySeq {
+  id                 Int @id @default(autoincrement())
+  tenantId           Int @map("tenant_id")
+  operationRefId     Int @map("operation_ref_id")
+  familyId           Int @map("family_id")
+  /// Which of the family's own template processes (`JobProcess.code`, as a
+  /// number) this operation rolls up into.
+  leadTimeProcessSeq Int @map("lead_time_process_seq")
+
+  tenant       Organization  @relation(fields: [tenantId], references: [id])
+  operationRef OperationRef  @relation(fields: [operationRefId], references: [id], onDelete: Cascade)
+  family       ProductFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([operationRefId, familyId])
+  @@index([tenantId])
+  /// _shared.ts's numeric-join gates (loadMappedOps/assertNoOpenNcr) filter
+  /// by (familyId, leadTimeProcessSeq) on every submitProcess/verifyProcess
+  /// call — the hot path S21 originally indexed on OperationRef itself.
+  @@index([familyId, leadTimeProcessSeq])
+  @@map("operation_ref_family_seqs")
 }
 
 /// NDT / test methods. RT, UT, DP, HT, PNEUMATIC, VACUUM — plus PAUT, TOFD,
@@ -618,13 +641,14 @@ model ProductFamily {
   name     String
   active   Boolean @default(true)
 
-  tenant            Organization       @relation(fields: [tenantId], references: [id])
+  tenant            Organization            @relation(fields: [tenantId], references: [id])
   templates         ProcessTemplate[]
   jobs              Job[]
   routes            RouteTemplate[]
   equipmentTypes    EquipmentTypeRef[]
   assemblyTemplates AssemblyTemplate[]
   workOrderStages   WorkOrderStage[]
+  operationRefSeqs  OperationRefFamilySeq[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -801,22 +825,52 @@ model Job {
   status                    JobStatus   @default(ACTIVE)
   remarks                   String?
 
-  tenant                  Organization             @relation(fields: [tenantId], references: [id])
-  client                  Client                   @relation(fields: [clientId], references: [id])
-  family                  ProductFamily            @relation(fields: [familyId], references: [id])
-  templateVersion         ProcessTemplateVersion   @relation(fields: [templateVersionId], references: [id])
-  assemblyTemplateVersion AssemblyTemplateVersion? @relation(fields: [assemblyTemplateVersionId], references: [id])
-  calendar                WorkCalendar?            @relation(fields: [calendarId], references: [id])
-  equipments              Equipment[]
-  processes               JobProcess[]
-  scheduleRuns            ScheduleRun[]
-  qcpTemplates            QcpTemplate[]
-  drawings                AssemblyDrawing[]
-  snapshots               ProgressSnapshot[]
-  dispatchBatches         DispatchBatch[]
-  packages                Package[]
-  weldJoints              WeldJoint[]
-  weldLogs                WeldLog[]
+  tenant                       Organization                  @relation(fields: [tenantId], references: [id])
+  client                       Client                        @relation(fields: [clientId], references: [id])
+  family                       ProductFamily                 @relation(fields: [familyId], references: [id])
+  templateVersion              ProcessTemplateVersion        @relation(fields: [templateVersionId], references: [id])
+  assemblyTemplateVersion      AssemblyTemplateVersion?      @relation(fields: [assemblyTemplateVersionId], references: [id])
+  calendar                     WorkCalendar?                 @relation(fields: [calendarId], references: [id])
+  equipments                   Equipment[]
+  processes                    JobProcess[]
+  scheduleRuns                 ScheduleRun[]
+  qcpTemplates                 QcpTemplate[]
+  drawings                     AssemblyDrawing[]
+  snapshots                    ProgressSnapshot[]
+  dispatchBatches              DispatchBatch[]
+  packages                     Package[]
+  weldJoints                   WeldJoint[]
+  weldLogs                     WeldLog[]
+  // H1 job-level RLS backstop: back-relations for the 28 denormalized job_id
+  // columns (see docs/superpowers/plans/2026-09-05-h1-job-level-rls-backstop.md).
+  units                        Unit[]
+  bomRevisions                 BomRevision[]
+  bomItems                     BomItem[]
+  components                   Component[]
+  jobProcessEdges              JobProcessEdge[]
+  processPlans                 ProcessPlan[]
+  weldJointWelders             WeldJointWelder[]
+  ndtResults                   NdtResult[]
+  drawingRevisions             DrawingRevision[]
+  dispatchBatchUnits           DispatchBatchUnit[]
+  inspectionParties            InspectionParty[]
+  qcpItems                     QcpItem[]
+  componentOperations          ComponentOperation[]
+  componentOperationRejections ComponentOperationRejection[]
+  paintRecords                 PaintRecord[]
+  dftReadings                  DftReading[]
+  assemblySteps                AssemblyStep[]
+  assemblyStepRejections       AssemblyStepRejection[]
+  ncrs                         Ncr[]
+  qcpExecutions                QcpExecution[]
+  qcpItemProcesses             QcpItemProcess[]
+  qcpItemPartyCodes            QcpItemPartyCode[]
+  delayReasons                 DelayReason[]
+  stockLots                    StockLot[]
+  stockTxns                    StockTxn[]
+  procurementEvents            ProcurementEvent[]
+  materialIdentifications      MaterialIdentification[]
+  itemTests                    ItemTest[]
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
@@ -859,10 +913,14 @@ model Unit {
   equipmentId Int      @map("equipment_id")
   serialNo    String   @map("serial_no")
   packageId   Int?     @map("package_id")
+  /// H1 job-level RLS backstop: denormalized from equipment.jobId. Nullable
+  /// during migration only — backfilled by scripts/h1-backfill-job-ids.ts.
+  jobId       Int      @map("job_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
   equipment          Equipment           @relation(fields: [equipmentId], references: [id])
   package            Package?            @relation(fields: [packageId], references: [id])
+  job                Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
   qcpExecutions      QcpExecution[]
   processPlans       ProcessPlan[]
   components         Component[]
@@ -874,6 +932,7 @@ model Unit {
   @@unique([equipmentId, serialNo])
   @@index([equipmentId])
   @@index([packageId])
+  @@index([jobId])
   @@map("units")
 }
 
@@ -949,12 +1008,16 @@ model JobProcessEdge {
   predecessorId Int             @map("predecessor_id")
   type          ProcessEdgeType
   lagDays       Int             @map("lag_days")
+  /// H1 job-level RLS backstop: denormalized from process.jobId.
+  jobId         Int             @map("job_id")
 
   process     JobProcess @relation("JobEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
   predecessor JobProcess @relation("JobEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  job         Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([processId, predecessorId])
   @@index([predecessorId])
+  @@index([jobId])
   @@map("job_process_edges")
 }
 
@@ -1019,6 +1082,11 @@ model ProcessPlan {
   ownerDepartmentId Int               @map("owner_department_id")
   /// NULL = unassigned, sits in the department pool (Task 1.2's concern).
   assigneeUserId    Int?              @map("assignee_user_id")
+  /// H1 job-level RLS backstop: denormalized from jobProcess.jobId
+  /// (cross-checked against scheduleRun.jobId at backfill time — see
+  /// docs/superpowers/plans/2026-09-05-h1-job-level-rls-backstop.md's
+  /// dual-path note).
+  jobId             Int               @map("job_id")
 
   scheduleRun     ScheduleRun   @relation(fields: [scheduleRunId], references: [id], onDelete: Cascade)
   jobProcess      JobProcess    @relation(fields: [jobProcessId], references: [id])
@@ -1027,6 +1095,7 @@ model ProcessPlan {
   assignee        User?         @relation(fields: [assigneeUserId], references: [id])
   submitter       User?         @relation("ProcessPlanSubmittedBy", fields: [submittedBy], references: [id])
   verifier        User?         @relation("ProcessPlanVerifiedBy", fields: [verifiedBy], references: [id])
+  job             Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   delayReasons    DelayReason[]
 
   @@index([scheduleRunId])
@@ -1036,6 +1105,7 @@ model ProcessPlan {
   @@index([ownerDepartmentId, plannedFinish])
   @@index([status])
   @@index([assigneeUserId, status])
+  @@index([jobId])
   @@map("process_plans")
 }
 
@@ -1054,14 +1124,18 @@ model BomRevision {
   status      BomRevisionStatus @default(DRAFT)
   releasedAt  DateTime?         @map("released_at")
   createdBy   Int?              @map("created_by")
+  /// H1 job-level RLS backstop: denormalized from equipment.jobId.
+  jobId       Int               @map("job_id")
   createdAt   DateTime          @default(now()) @map("created_at")
 
   equipment Equipment @relation(fields: [equipmentId], references: [id])
   creator   User?     @relation(fields: [createdBy], references: [id])
+  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
   bomItems  BomItem[]
 
   @@unique([equipmentId, revisionNo])
   @@index([equipmentId])
+  @@index([jobId])
   @@map("bom_revisions")
 }
 
@@ -1098,10 +1172,13 @@ model BomItem {
   /// been the de-facto released BOM. A fresh import path setting this at
   /// write time is a later dispatch's job.
   bomRevisionId   Int?     @map("bom_revision_id")
+  /// H1 job-level RLS backstop: denormalized from equipment.jobId.
+  jobId           Int      @map("job_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   componentType           ComponentTypeRef?        @relation(fields: [componentTypeId], references: [id])
   bomRevision             BomRevision?             @relation(fields: [bomRevisionId], references: [id])
+  job                     Job                      @relation(fields: [jobId], references: [id], onDelete: Cascade)
   procurementEvents       ProcurementEvent[]
   materialIdentifications MaterialIdentification[]
   stockLots               StockLot[]
@@ -1120,6 +1197,7 @@ model BomItem {
   @@index([equipmentId])
   @@index([componentTypeId])
   @@index([parentBomItemId])
+  @@index([jobId])
   @@map("bom_items")
 }
 
@@ -1148,13 +1226,17 @@ model ProcurementEvent {
   /// this field is created fresh in this dispatch, so it gets the `@relation`
   /// immediately instead of deferring it.
   by        Int
+  /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
+  jobId     Int                  @map("job_id")
 
   bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
   actor     User       @relation(fields: [by], references: [id])
+  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
   stockLots StockLot[]
 
   @@index([bomItemId])
   @@index([bomItemId, at])
+  @@index([jobId])
   @@map("procurement_events")
 }
 
@@ -1176,13 +1258,17 @@ model MaterialIdentification {
   /// B8, Phase 4: how much of this heat went into this component — a
   /// traceability fact, distinct from `StockTxn`'s ledger-level quantity.
   qtyIssued   Decimal?   @map("qty_issued") @db.Decimal(12, 3)
+  /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
+  jobId       Int        @map("job_id")
 
   bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
   component Component? @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([bomItemId])
   @@index([componentId])
   @@index([heatNumber])
+  @@index([jobId])
   @@map("material_identifications")
 }
 
@@ -1203,13 +1289,17 @@ model StockLot {
   /// SERVER CLOCK ONLY (invariant #1)
   receivedAt               DateTime @default(now()) @map("received_at")
   sourceProcurementEventId Int?     @map("source_procurement_event_id")
+  /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
+  jobId                    Int      @map("job_id")
 
   bomItem                BomItem           @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
   sourceProcurementEvent ProcurementEvent? @relation(fields: [sourceProcurementEventId], references: [id])
+  job                    Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
   txns                   StockTxn[]
 
   @@index([bomItemId])
   @@index([sourceProcurementEventId])
+  @@index([jobId])
   @@map("stock_lots")
 }
 
@@ -1229,13 +1319,17 @@ model StockTxn {
   /// name one, and an ISSUE against general stock may not either).
   componentId Int?         @map("component_id")
   note        String?
+  /// H1 job-level RLS backstop: denormalized from stockLot.bomItem.equipment.jobId.
+  jobId       Int          @map("job_id")
 
   stockLot  StockLot   @relation(fields: [stockLotId], references: [id], onDelete: Cascade)
   actor     User       @relation(fields: [by], references: [id])
   component Component? @relation(fields: [componentId], references: [id])
+  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([stockLotId])
   @@index([componentId])
+  @@index([jobId])
   @@map("stock_txns")
 }
 
@@ -1329,6 +1423,8 @@ model Component {
   /// `startComponentOperation` succeeds in for a CUTTING operation — never
   /// client-supplied.
   builtToRevisionId  Int?   @map("built_to_revision_id")
+  /// H1 job-level RLS backstop: denormalized from equipment.jobId.
+  jobId              Int    @map("job_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   unit                    Unit?                    @relation(fields: [unitId], references: [id])
@@ -1337,6 +1433,7 @@ model Component {
   routeVersion            RouteTemplateVersion?    @relation(fields: [routeVersionId], references: [id])
   parent                  Component?               @relation("ComponentHierarchy", fields: [parentComponentId], references: [id])
   children                Component[]              @relation("ComponentHierarchy")
+  job                     Job                      @relation(fields: [jobId], references: [id], onDelete: Cascade)
   operations              ComponentOperation[]
   weldJoints              WeldJoint[]
   stockTxns               StockTxn[]
@@ -1362,6 +1459,7 @@ model Component {
   @@index([componentTypeId])
   @@index([governingDrawingId])
   @@index([builtToRevisionId])
+  @@index([jobId])
   @@map("components")
 }
 
@@ -1396,6 +1494,8 @@ model ComponentOperation {
   qtyPlanned          Int?
   qtyGood             Int?
   qtyRejected         Int?
+  /// H1 job-level RLS backstop: denormalized from component.jobId.
+  jobId               Int             @map("job_id")
 
   component         Component                     @relation(fields: [componentId], references: [id], onDelete: Cascade)
   operation         OperationRef                  @relation(fields: [operationId], references: [id])
@@ -1403,6 +1503,7 @@ model ComponentOperation {
   performedByUser   User?                         @relation(fields: [performedByUserId], references: [id])
   submitter         User?                         @relation("ComponentOperationSubmittedBy", fields: [submittedBy], references: [id])
   verifier          User?                         @relation("ComponentOperationVerifiedBy", fields: [verifiedBy], references: [id])
+  job               Job                           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   rejections        ComponentOperationRejection[]
   paintRecord       PaintRecord?
   dftReadings       DftReading[]
@@ -1413,6 +1514,7 @@ model ComponentOperation {
   @@index([status])
   @@index([performedByWelderId])
   @@index([performedByUserId])
+  @@index([jobId])
   @@map("component_operations")
 }
 
@@ -1428,14 +1530,18 @@ model ComponentOperationRejection {
   detail               String?
   rejectedBy           Int      @map("rejected_by")
   rejectedAt           DateTime @default(now()) @map("rejected_at")
+  /// H1 job-level RLS backstop: denormalized from componentOperation.jobId.
+  jobId                Int      @map("job_id")
 
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
   category           DelayCategoryRef   @relation(fields: [categoryId], references: [id])
   rejector           User               @relation(fields: [rejectedBy], references: [id])
+  job                Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
   ncr                Ncr?
 
   @@index([componentOperationId])
   @@index([categoryId])
+  @@index([jobId])
   @@map("component_operation_rejections")
 }
 
@@ -1447,9 +1553,13 @@ model PaintRecord {
   componentOperationId Int    @unique @map("component_operation_id")
   coatingSystem        String @map("coating_system")
   coatsPlanned         Int?   @map("coats_planned")
+  /// H1 job-level RLS backstop: denormalized from componentOperation.jobId.
+  jobId                Int    @map("job_id")
 
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
+  job                Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
+  @@index([jobId])
   @@map("paint_records")
 }
 
@@ -1467,11 +1577,15 @@ model DftReading {
   recordedBy           Int      @map("recorded_by")
   /// SERVER CLOCK ONLY (invariant #1)
   recordedAt           DateTime @default(now()) @map("recorded_at")
+  /// H1 job-level RLS backstop: denormalized from componentOperation.jobId.
+  jobId                Int      @map("job_id")
 
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
   recordedByUser     User               @relation(fields: [recordedBy], references: [id])
+  job                Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([componentOperationId])
+  @@index([jobId])
   @@map("dft_readings")
 }
 
@@ -1482,12 +1596,16 @@ model ItemTest {
   startDate  DateTime?  @map("start_date")
   endDate    DateTime?  @map("end_date")
   result     TestResult @default(PENDING)
+  /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
+  jobId      Int        @map("job_id")
 
   bomItem  BomItem     @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
   testType TestTypeRef @relation(fields: [testTypeId], references: [id])
+  job      Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([bomItemId])
   @@index([testTypeId])
+  @@index([jobId])
   @@map("item_tests")
 }
 
@@ -1562,14 +1680,18 @@ model WeldJoint {
 
 /// A joint may name more than one welder (spec: "welder(s)").
 model WeldJointWelder {
-  weldJointId Int @map("weld_joint_id")
-  welderId    Int @map("welder_id")
+  weldJointId Int  @map("weld_joint_id")
+  welderId    Int  @map("welder_id")
+  /// H1 job-level RLS backstop: denormalized from weldJoint.jobId.
+  jobId       Int  @map("job_id")
 
   weldJoint WeldJoint @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
   welder    Welder    @relation(fields: [welderId], references: [id])
+  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@id([weldJointId, welderId])
   @@index([welderId])
+  @@index([jobId])
   @@map("weld_joint_welders")
 }
 
@@ -1610,13 +1732,17 @@ model NdtResult {
   /// SERVER CLOCK ONLY (invariant #1)
   recordedAt  DateTime?  @map("recorded_at")
   createdAt   DateTime   @default(now()) @map("created_at")
+  /// H1 job-level RLS backstop: denormalized from weldJoint.jobId.
+  jobId       Int        @map("job_id")
 
   weldJoint WeldJoint   @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
   testType  TestTypeRef @relation(fields: [testTypeId], references: [id])
   recorder  User?       @relation(fields: [recordedBy], references: [id])
+  job       Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([weldJointId])
   @@index([testTypeId])
+  @@index([jobId])
   @@map("ndt_results")
 }
 
@@ -1734,6 +1860,8 @@ model AssemblyStep {
   /// already enforces, no change needed there).
   qcpItemId           Int?            @map("qcp_item_id")
   remarks             String?
+  /// H1 job-level RLS backstop: denormalized from unit.equipment.jobId.
+  jobId               Int             @map("job_id")
 
   unit              Unit                    @relation(fields: [unitId], references: [id])
   templateStep      AssemblyTemplateStep    @relation(fields: [templateStepId], references: [id])
@@ -1743,6 +1871,7 @@ model AssemblyStep {
   performedByUser   User?                   @relation(fields: [performedByUserId], references: [id])
   submitter         User?                   @relation("AssemblyStepSubmittedBy", fields: [submittedBy], references: [id])
   verifier          User?                   @relation("AssemblyStepVerifiedBy", fields: [verifiedBy], references: [id])
+  job               Job                     @relation(fields: [jobId], references: [id], onDelete: Cascade)
   rejections        AssemblyStepRejection[]
 
   @@unique([unitId, seq])
@@ -1753,6 +1882,7 @@ model AssemblyStep {
   @@index([qcpItemId])
   @@index([performedByWelderId])
   @@index([performedByUserId])
+  @@index([jobId])
   @@map("assembly_steps")
 }
 
@@ -1765,14 +1895,18 @@ model AssemblyStepRejection {
   detail         String?
   rejectedBy     Int      @map("rejected_by")
   rejectedAt     DateTime @default(now()) @map("rejected_at")
+  /// H1 job-level RLS backstop: denormalized from assemblyStep.jobId.
+  jobId          Int      @map("job_id")
 
   assemblyStep AssemblyStep     @relation(fields: [assemblyStepId], references: [id], onDelete: Cascade)
   category     DelayCategoryRef @relation(fields: [categoryId], references: [id])
   rejector     User             @relation(fields: [rejectedBy], references: [id])
+  job          Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
   ncr          Ncr?
 
   @@index([assemblyStepId])
   @@index([categoryId])
+  @@index([jobId])
   @@map("assembly_step_rejections")
 }
 
@@ -1800,14 +1934,19 @@ model Ncr {
   reworkFinishedAt              DateTime?       @map("rework_finished_at")
   closedBy                      Int?            @map("closed_by")
   closedAt                      DateTime?       @map("closed_at")
+  /// H1 job-level RLS backstop: denormalized from whichever of
+  /// componentOperationRejection/assemblyStepRejection's jobId is set (XOR).
+  jobId                         Int             @map("job_id")
 
   componentOperationRejection ComponentOperationRejection? @relation(fields: [componentOperationRejectionId], references: [id], onDelete: Cascade)
   assemblyStepRejection       AssemblyStepRejection?       @relation(fields: [assemblyStepRejectionId], references: [id], onDelete: Cascade)
   dispositionedByUser         User?                        @relation("NcrDispositionedBy", fields: [dispositionedBy], references: [id])
   reworkOwner                 User?                        @relation("NcrReworkOwner", fields: [reworkOwnerId], references: [id])
   closedByUser                User?                        @relation("NcrClosedBy", fields: [closedBy], references: [id])
+  job                         Job                          @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([status])
+  @@index([jobId])
   @@map("ncrs")
 }
 
@@ -1837,12 +1976,17 @@ model InspectionParty {
   qcpTemplateId Int     @map("qcp_template_id")
   code          String
   name          String?
+  /// H1 job-level RLS backstop: denormalized from qcpTemplate.jobId. Stays
+  /// null for library templates (qcpTemplate.jobId IS NULL) — never forced.
+  jobId         Int?    @map("job_id")
 
   qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
+  job         Job?               @relation(fields: [jobId], references: [id], onDelete: SetNull)
   itemCodes   QcpItemPartyCode[]
 
   @@unique([qcpTemplateId, code])
   @@index([qcpTemplateId])
+  @@index([jobId])
   @@map("inspection_parties")
 }
 
@@ -1851,21 +1995,30 @@ model InspectionParty {
 /// and the old unique constraint forced the seed to corrupt them into
 /// "4.8b"/"4.8c"/"4.8d".
 model QcpItem {
-  id                 Int         @id @default(autoincrement())
-  qcpTemplateId      Int         @map("qcp_template_id")
-  sequence           Int
-  srNo               String      @map("sr_no")
-  kind               QcpItemKind
-  section            String?
-  activity           String
-  characteristic     String?
-  extentOfCheck      String?     @map("extent_of_check")
-  applicableDocument String?     @map("applicable_document")
-  acceptanceCriteria String?     @map("acceptance_criteria")
-  record             String?
-  remarks            String?
+  id                  Int         @id @default(autoincrement())
+  qcpTemplateId       Int         @map("qcp_template_id")
+  sequence            Int
+  srNo                String      @map("sr_no")
+  kind                QcpItemKind
+  section             String?
+  activity            String
+  characteristic      String?
+  extentOfCheck       String?     @map("extent_of_check")
+  applicableDocument  String?     @map("applicable_document")
+  acceptanceCriteria  String?     @map("acceptance_criteria")
+  record              String?
+  remarks             String?
+  /// C7: for a LIBRARY item (its QcpTemplate.jobId is null) only — the raw
+  /// process-code strings (e.g. ["12", "16"]) this checkpoint is meant to
+  /// gate once cloned into a real job. Unused/ignored once the item belongs
+  /// to a job-owned template; real linkage there is via QcpItemProcess.
+  libraryProcessCodes String[]    @default([]) @map("library_process_codes")
+  /// H1 job-level RLS backstop: denormalized from qcpTemplate.jobId. Stays
+  /// null for library templates (qcpTemplate.jobId IS NULL) — never forced.
+  jobId               Int?        @map("job_id")
 
   qcpTemplate   QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
+  job           Job?               @relation(fields: [jobId], references: [id], onDelete: SetNull)
   partyCodes    QcpItemPartyCode[]
   executions    QcpExecution[]
   processLinks  QcpItemProcess[]
@@ -1873,34 +2026,46 @@ model QcpItem {
 
   @@unique([qcpTemplateId, sequence])
   @@index([qcpTemplateId])
+  @@index([jobId])
   @@map("qcp_items")
 }
 
 /// Real join table replacing the unenforced Int[] crosswalk.
 model QcpItemProcess {
-  qcpItemId    Int @map("qcp_item_id")
-  jobProcessId Int @map("job_process_id")
+  qcpItemId    Int  @map("qcp_item_id")
+  jobProcessId Int  @map("job_process_id")
+  /// H1 job-level RLS backstop: denormalized from qcpItem.jobId OR
+  /// jobProcess.jobId (whichever is non-null — see the plan's dual-path note).
+  jobId        Int  @map("job_id")
 
   qcpItem    QcpItem    @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   jobProcess JobProcess @relation(fields: [jobProcessId], references: [id], onDelete: Cascade)
+  job        Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@id([qcpItemId, jobProcessId])
   @@index([jobProcessId])
+  @@index([jobId])
   @@map("qcp_item_processes")
 }
 
 model QcpItemPartyCode {
-  qcpItemId         Int @map("qcp_item_id")
-  inspectionPartyId Int @map("inspection_party_id")
-  qcpCodeId         Int @map("qcp_code_id")
+  qcpItemId         Int  @map("qcp_item_id")
+  inspectionPartyId Int  @map("inspection_party_id")
+  qcpCodeId         Int  @map("qcp_code_id")
+  /// H1 job-level RLS backstop: denormalized from qcpItem.jobId. Nullable —
+  /// library rows (parent QcpItem.jobId IS NULL) have no job, same as QcpItem
+  /// and InspectionParty.
+  jobId             Int? @map("job_id")
 
   qcpItem         QcpItem         @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   inspectionParty InspectionParty @relation(fields: [inspectionPartyId], references: [id], onDelete: Cascade)
   qcpCode         QcpCodeRef      @relation(fields: [qcpCodeId], references: [id])
+  job             Job?            @relation(fields: [jobId], references: [id], onDelete: SetNull)
 
   @@id([qcpItemId, inspectionPartyId])
   @@index([inspectionPartyId])
   @@index([qcpCodeId])
+  @@index([jobId])
   @@map("qcp_item_party_codes")
 }
 
@@ -1922,16 +2087,22 @@ model QcpExecution {
   remarks           String?
   /// SERVER CLOCK ONLY (invariant #1)
   recordedAt        DateTime           @default(now()) @map("recorded_at")
+  /// H1 job-level RLS backstop: denormalized from unit.equipment.jobId
+  /// (cross-checked against qcpItem.jobId at backfill time when the item is
+  /// job-scoped — see the plan's dual-path note).
+  jobId             Int                @map("job_id")
 
   qcpItem QcpItem @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   unit    Unit    @relation(fields: [unitId], references: [id])
   clearer User?   @relation("QcpExecutionClearedBy", fields: [clearedBy], references: [id])
   waiver  User?   @relation("QcpExecutionWaiverApprovedBy", fields: [waiverApprovedBy], references: [id])
+  job     Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([qcpItemId, unitId, attemptNo])
   @@index([qcpItemId])
   @@index([unitId])
   @@index([result])
+  @@index([jobId])
   @@map("qcp_executions")
 }
 
@@ -1975,12 +2146,16 @@ model DrawingRevision {
   revisedAt         DateTime?     @map("revised_at")
   releasedAt        DateTime?     @map("released_at")
   createdAt         DateTime      @default(now()) @map("created_at")
+  /// H1 job-level RLS backstop: denormalized from assemblyDrawing.jobId.
+  jobId             Int           @map("job_id")
 
   assemblyDrawing   AssemblyDrawing @relation(fields: [assemblyDrawingId], references: [id], onDelete: Cascade)
+  job               Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
   builtByComponents Component[]     @relation("ComponentBuiltToRevision")
 
   @@unique([assemblyDrawingId, revisionNo])
   @@index([assemblyDrawingId])
+  @@index([jobId])
   @@map("drawing_revisions")
 }
 
@@ -2016,15 +2191,19 @@ model DispatchBatch {
 }
 
 model DispatchBatchUnit {
-  id              Int @id @default(autoincrement())
-  dispatchBatchId Int @map("dispatch_batch_id")
-  unitId          Int @map("unit_id")
+  id              Int  @id @default(autoincrement())
+  dispatchBatchId Int  @map("dispatch_batch_id")
+  unitId          Int  @map("unit_id")
+  /// H1 job-level RLS backstop: denormalized from dispatchBatch.jobId.
+  jobId           Int  @map("job_id")
 
   dispatchBatch DispatchBatch @relation(fields: [dispatchBatchId], references: [id], onDelete: Cascade)
   unit          Unit          @relation(fields: [unitId], references: [id])
+  job           Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@unique([dispatchBatchId, unitId])
   @@index([dispatchBatchId])
+  @@index([jobId])
   @@map("dispatch_batch_units")
 }
 
@@ -2039,15 +2218,19 @@ model DelayReason {
   filedAt       DateTime          @default(now()) @map("filed_at")
   reviewStatus  DelayReviewStatus @default(PENDING) @map("review_status")
   reviewedBy    Int?              @map("reviewed_by")
+  /// H1 job-level RLS backstop: denormalized from processPlan.jobId.
+  jobId         Int               @map("job_id")
 
   processPlan ProcessPlan      @relation(fields: [processPlanId], references: [id], onDelete: Cascade)
   category    DelayCategoryRef @relation(fields: [categoryId], references: [id])
   filer       User             @relation("DelayReasonFiledBy", fields: [filedBy], references: [id])
   reviewer    User?            @relation("DelayReasonReviewedBy", fields: [reviewedBy], references: [id])
+  job         Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([processPlanId])
   @@index([categoryId])
   @@index([reviewStatus])
+  @@index([jobId])
   @@map("delay_reasons")
 }
 

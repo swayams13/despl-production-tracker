@@ -83,7 +83,7 @@ describe.skipIf(!RUN_DB)("packing.service (DB-backed)", async () => {
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
     const user = await owner.user.create({
       data: {
         tenantId,
@@ -105,16 +105,16 @@ describe.skipIf(!RUN_DB)("packing.service (DB-backed)", async () => {
     const operation = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting" } });
     const equipment = await owner.equipment.findFirstOrThrow({ where: { jobId: job.id } });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
     });
     const componentOperation = await owner.componentOperation.create({
-      data: { componentId: component.id, seq: 1, operationId: operation.id },
+      data: { jobId: job.id, componentId: component.id, seq: 1, operationId: operation.id },
     });
     const category = await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } });
     const rejection = await owner.componentOperationRejection.create({
-      data: { componentOperationId: componentOperation.id, categoryId: category.id, rejectedBy: user.id },
+      data: { jobId: job.id, componentOperationId: componentOperation.id, categoryId: category.id, rejectedBy: user.id },
     });
-    await owner.ncr.create({ data: { componentOperationRejectionId: rejection.id, status: "OPEN" } });
+    await owner.ncr.create({ data: { jobId: job.id, componentOperationRejectionId: rejection.id, status: "OPEN" } });
   }
 
   /** S10 — a blocking QCP checkpoint on the fixture's job with no cleared

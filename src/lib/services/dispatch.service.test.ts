@@ -181,7 +181,7 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
     const user = await owner.user.create({
       data: {
         tenantId,
@@ -202,16 +202,16 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     const operation = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting" } });
     const equipment = await owner.equipment.findFirstOrThrow({ where: { jobId: job.id } });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
     });
     const componentOperation = await owner.componentOperation.create({
-      data: { componentId: component.id, seq: 1, operationId: operation.id },
+      data: { jobId: job.id, componentId: component.id, seq: 1, operationId: operation.id },
     });
     const category = await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } });
     const rejection = await owner.componentOperationRejection.create({
-      data: { componentOperationId: componentOperation.id, categoryId: category.id, rejectedBy: user.id },
+      data: { jobId: job.id, componentOperationId: componentOperation.id, categoryId: category.id, rejectedBy: user.id },
     });
-    await owner.ncr.create({ data: { componentOperationRejectionId: rejection.id, status: "OPEN" } });
+    await owner.ncr.create({ data: { jobId: job.id, componentOperationRejectionId: rejection.id, status: "OPEN" } });
   }
 
   /** S10 — a blocking QCP checkpoint on the given job with no cleared
@@ -254,6 +254,10 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
 
     const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
     await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+
+    // H1: addUnitToBatch populates jobId on the created DispatchBatchUnit.
+    const dbu = await owner.dispatchBatchUnit.findFirst({ where: { dispatchBatchId: batch.id, unitId: unit.id } });
+    expect(dbu?.jobId).toBe(batch.jobId);
 
     const released = await approveDispatchRelease(ph, { dispatchBatchId: batch.id, vehicleNo: "MH-01-AB-1234" });
     expect(released.releaseApprovedAt).not.toBeNull();
@@ -389,7 +393,7 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
       },
     });
     const otherEquipment = await owner.equipment.create({ data: { jobId: otherJob.id, name: "Air Receiver" } });
-    const otherUnit = await owner.unit.create({ data: { equipmentId: otherEquipment.id, serialNo: "01" } });
+    const otherUnit = await owner.unit.create({ data: { jobId: otherJob.id, equipmentId: otherEquipment.id, serialNo: "01" } });
     const otherPkg = await owner.package.create({
       data: { jobId: otherJob.id, packageNo: "PKG-B-X", createdBy: user.id },
     });
@@ -416,7 +420,7 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     // A second unit, packed and ready, but the batch has already moved past
     // PLANNED — must not be retroactively addable into the approved set.
     const equipment2 = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver 2" } });
-    const unit2 = await owner.unit.create({ data: { equipmentId: equipment2.id, serialNo: "02" } });
+    const unit2 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment2.id, serialNo: "02" } });
     await owner.unit.update({ where: { id: unit2.id }, data: { packageId: pkg.id } });
 
     await expectCode(

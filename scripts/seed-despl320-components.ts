@@ -102,6 +102,7 @@ async function main() {
 
       const component = await prisma.component.create({
         data: {
+          jobId: job.id,
           equipmentId: equipment.id,
           unitId: unit.id,
           bomItemId: null,
@@ -114,6 +115,7 @@ async function main() {
       if (routeVersion) {
         await prisma.componentOperation.createMany({
           data: routeVersion.steps.map((step) => ({
+            jobId: job.id,
             componentId: component.id,
             seq: step.seq,
             operationId: step.operationId,

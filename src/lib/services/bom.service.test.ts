@@ -87,12 +87,14 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
   // ── create / update happy path ──────────────────────────────────────────
 
   it("creates a BOM item by hand, then edits it (ADMIN)", async () => {
-    const { tenantId, equipment, user } = await fixture();
+    const { tenantId, job, equipment, user } = await fixture();
     const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
 
     const item = await createBomItem(actor, { equipmentId: equipment.id, itemNo: 1, partName: "Shell", sourceQty: "1 NOS" });
     expect(item.partName).toBe("Shell");
     expect(item.sourceQty).toBe("1 NOS");
+    // H1: createBomItem populates jobId.
+    expect(item.jobId).toBe(job.id);
 
     const updated = await updateBomItem(actor, item.id, { partName: "Shell — updated", material: "SA 516 Gr 70" });
     expect(updated.partName).toBe("Shell — updated");
@@ -118,9 +120,11 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
   // ── S21: @@unique([bomRevisionId, itemNo]) ────────────────────────────────
 
   it("S21: a duplicate itemNo within the SAME bomRevisionId is refused at the DB (P2002)", async () => {
-    const { tenantId, equipment, user } = await fixture();
+    const { tenantId, job, equipment, user } = await fixture();
     const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
     const revision = await createBomRevision(actor, { equipmentId: equipment.id, revisionNo: 1, status: "DRAFT" });
+    // H1: createBomRevision populates jobId.
+    expect(revision.jobId).toBe(job.id);
 
     await createBomItem(actor, {
       equipmentId: equipment.id,
@@ -295,7 +299,7 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
   // ── bulk import ──────────────────────────────────────────────────────────
 
   it("import: a malformed row reports which row failed and why, without dropping or blocking the good rows", async () => {
-    const { tenantId, equipment, user } = await fixture();
+    const { tenantId, job, equipment, user } = await fixture();
     const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
 
     const { created, failures } = await importBomItems(actor, {
@@ -309,6 +313,8 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
 
     expect(created).toHaveLength(2);
     expect(created.map((c) => c.partName).sort()).toEqual(["Nozzle", "Shell"]);
+    // H1: importBomItems populates jobId on every created row.
+    expect(created.every((c) => c.jobId === job.id)).toBe(true);
     expect(failures).toHaveLength(1);
     expect(failures[0].row).toBe(2);
     expect(failures[0].error).toBeTruthy();

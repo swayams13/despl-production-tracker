@@ -144,6 +144,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
   let planA = 0;
   let planB = 0;
   let planC = 0; // overdue, deptB — delay-block subject
+  let jobId = 0;
 
   const future = new Date(Date.now() + 30 * 864e5);
   const past = new Date(Date.now() - 30 * 864e5);
@@ -182,6 +183,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
         jobNumber: `JOB-${Date.now()}`,
       },
     });
+    jobId = job.id;
 
     const jpA = await owner.jobProcess.create({
       data: { jobId: job.id, seq: 10, code: "10", name: "A", departmentId: deptA.id },
@@ -193,7 +195,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
       data: { jobId: job.id, seq: 30, code: "30", name: "C", departmentId: deptB.id },
     });
     await owner.jobProcessEdge.create({
-      data: { processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 },
+      data: { jobId: job.id, processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 },
     });
 
     const run = await owner.scheduleRun.create({
@@ -209,6 +211,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     const mkPlan = (jobProcessId: number, departmentId: number, plannedFinish: Date) =>
       owner.processPlan.create({
         data: {
+          jobId: job.id,
           scheduleRunId: run.id,
           jobProcessId,
           unitId: null,
@@ -299,7 +302,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
       data: { tenantId, code: "MAT", name: "Material shortage" },
     });
     await owner.delayReason.create({
-      data: { processPlanId: planC, categoryId: cat.id, detail: "late plate", filedBy: supB.userId },
+      data: { jobId, processPlanId: planC, categoryId: cat.id, detail: "late plate", filedBy: supB.userId },
     });
 
     const started = await startProcess(supB, { processPlanId: planC });
@@ -414,10 +417,10 @@ describe.skipIf(!RUN_DB)("S1: excluded process does not deadlock its successor (
       data: { jobId: job.id, seq: 30, code: "30", name: "C", departmentId: dept.id },
     });
     await owner.jobProcessEdge.create({
-      data: { processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 },
+      data: { jobId: job.id, processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 },
     });
     await owner.jobProcessEdge.create({
-      data: { processId: jpC.id, predecessorId: jpB.id, type: "FINISH_TO_START", lagDays: 0 },
+      data: { jobId: job.id, processId: jpC.id, predecessorId: jpB.id, type: "FINISH_TO_START", lagDays: 0 },
     });
 
     const run = await owner.scheduleRun.create({
@@ -434,11 +437,11 @@ describe.skipIf(!RUN_DB)("S1: excluded process does not deadlock its successor (
     // No ProcessPlan is created for jpB — mirrors generateSchedule, which
     // never materialises a plan for an included:false JobProcess.
     await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpA.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpA.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
     });
     planC = (
       await owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jpC.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpC.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
       })
     ).id;
 
@@ -548,12 +551,12 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
   // Idempotent (upsert, not create): both tests below share the seed DB with
   // no per-test cleanup (matching the existing "no cleanup" pattern in this
   // file), and the suite must stay green on a rerun (Step 4 runs it twice).
-  async function clearHold(jobProcessId: number, unitId: number): Promise<void> {
+  async function clearHold(jobProcessId: number, unitId: number, jobId: number): Promise<void> {
     const itemIds = await blockingQcpItemIds(jobProcessId);
     for (const qcpItemId of itemIds) {
       await owner.qcpExecution.upsert({
         where: { qcpItemId_unitId_attemptNo: { qcpItemId, unitId, attemptNo: 1 } },
-        create: { qcpItemId, unitId, result: "ACCEPTED", attemptNo: 1 },
+        create: { qcpItemId, unitId, result: "ACCEPTED", attemptNo: 1, jobId },
         update: { result: "ACCEPTED" },
       });
     }
@@ -596,7 +599,7 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
 
     // P carries a real blocking checkpoint (seeded QcpItem 4); clear it for
     // unit A only so P can legitimately reach COMPLETE there.
-    await clearHold(pId, unitA.id);
+    await clearHold(pId, unitA.id, jobId);
 
     const maker = a;
     const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
@@ -665,7 +668,7 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
     // (F2S), 10<-7,8,9. seq 5 (Client Drawing Approval) and seq 6 (BOM & MTO
     // Finalization) are NOT on this path — skipped.
     const seq1Id = await procId(jobId, 1);
-    await clearHold(seq1Id, unit.id);
+    await clearHold(seq1Id, unit.id, jobId);
 
     for (const seq of [1, 2, 3, 4, 7, 8, 9]) {
       const id = await procId(jobId, seq);
@@ -688,8 +691,14 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
     // uses to clear a QCP hold point before proceeding.
     const blockedSubmit = await submitProcess(maker, { processPlanId: planId(seq10Id) }).catch((e) => e);
     expect(isAppError(blockedSubmit) && blockedSubmit.code).toBe(ERROR_CODES.COMPONENT_OPS_INCOMPLETE);
+    // Gate 3 fix: leadTimeProcessSeq is now family-scoped (OperationRefFamilySeq).
+    const job = await owner.job.findUniqueOrThrow({ where: { id: jobId }, select: { familyId: true } });
+    const seq10OperationRefIds = await owner.operationRefFamilySeq.findMany({
+      where: { familyId: job.familyId, leadTimeProcessSeq: 10 },
+      select: { operationRefId: true },
+    });
     await owner.componentOperation.updateMany({
-      where: { component: { unitId: unit.id }, operation: { leadTimeProcessSeq: 10 } },
+      where: { component: { unitId: unit.id }, operationId: { in: seq10OperationRefIds.map((r) => r.operationRefId) } },
       data: { status: "COMPLETE" },
     });
 
@@ -740,7 +749,7 @@ describe.skipIf(!RUN_DB)("submitProcess component-ops gate (Phase 3, R2, DB-back
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "SR01" } });
 
     // seq 12 mirrors the real spine's CUTTING slot — arbitrary here, just a
     // code the mapped OperationRef can point at.
@@ -749,20 +758,23 @@ describe.skipIf(!RUN_DB)("submitProcess component-ops gate (Phase 3, R2, DB-back
     });
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
     const operation = await owner.operationRef.create({
-      data: { tenantId, code: "CUTTING", name: "Cutting / Blanking", leadTimeProcessSeq: 12 },
+      data: { tenantId, code: "CUTTING", name: "Cutting / Blanking" },
+    });
+    await owner.operationRefFamilySeq.create({
+      data: { tenantId, operationRefId: operation.id, familyId: family.id, leadTimeProcessSeq: 12 },
     });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
     });
     const componentOp = await owner.componentOperation.create({
-      data: { componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
     });
 
     const run = await owner.scheduleRun.create({
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
     const plan = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     const user = await owner.user.create({
@@ -826,7 +838,7 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "SR01" } });
 
     // seq 13 is arbitrary here — just a code the mapped OperationRef can point at.
     const jobProcess = await owner.jobProcess.create({
@@ -834,13 +846,16 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
     });
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
     const operation = await owner.operationRef.create({
-      data: { tenantId, code: "WELDING", name: "Shell Welding", leadTimeProcessSeq: 13, defaultDepartmentId: dept.id },
+      data: { tenantId, code: "WELDING", name: "Shell Welding", defaultDepartmentId: dept.id },
+    });
+    await owner.operationRefFamilySeq.create({
+      data: { tenantId, operationRefId: operation.id, familyId: family.id, leadTimeProcessSeq: 13 },
     });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+      data: { jobId: job.id, equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
     });
     const componentOp = await owner.componentOperation.create({
-      data: { componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, componentId: component.id, seq: 1, operationId: operation.id, status: "NOT_STARTED" },
     });
     const rejectCategoryId = (
       await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })
@@ -850,7 +865,7 @@ describe.skipIf(!RUN_DB)("verifyProcess NCR gate (Phase 5, N3, DB-backed)", asyn
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
     const plan = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jobProcess.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     const userSup = await owner.user.create({
@@ -1005,7 +1020,7 @@ describe.skipIf(!RUN_DB)("verifyProcess evidence gate (Phase 5, D4, DB-backed)",
       },
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
-    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "SR01" } });
 
     const jpPacking = await owner.jobProcess.create({
       data: { jobId: job.id, templateProcessId: tpPacking.id, seq: 34, code: "34", name: "Packing & Preservation", departmentId: dept.id },
@@ -1021,13 +1036,13 @@ describe.skipIf(!RUN_DB)("verifyProcess evidence gate (Phase 5, D4, DB-backed)",
       data: { jobId: job.id, equipmentId: null, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
     const planPacking = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpPacking.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpPacking.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
     const planDispatch = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpDispatch.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpDispatch.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
     const planUntagged = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jpUntagged.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpUntagged.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
     });
 
     const userSup = await owner.user.create({

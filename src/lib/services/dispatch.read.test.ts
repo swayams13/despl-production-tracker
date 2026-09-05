@@ -99,8 +99,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("dispatch.read — loadDispatchPanel 
     const actor = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
 
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver" } });
-    const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
-    const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "02" } });
+    const unit1 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
+    const unit2 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "02" } });
     const pkg = await owner.package.create({
       data: { jobId: job.id, packageNo: "PKG-1", createdBy: user.id },
     });
@@ -110,7 +110,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("dispatch.read — loadDispatchPanel 
     const batch = await owner.dispatchBatch.create({
       data: { jobId: job.id, seq: 1, plannedDate: new Date("2026-09-10") },
     });
-    await owner.dispatchBatchUnit.create({ data: { dispatchBatchId: batch.id, unitId: unit1.id } });
+    await owner.dispatchBatchUnit.create({ data: { jobId: job.id, dispatchBatchId: batch.id, unitId: unit1.id } });
 
     const panel = await loadDispatchPanel(actor, job.id);
     expect(panel?.batches).toHaveLength(1);

@@ -49,9 +49,16 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     jobId = job.id;
 
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "PLATE", name: "Plate" } });
-    const cutting = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting", leadTimeProcessSeq: 12 } });
-    const forming = await owner.operationRef.create({ data: { tenantId, code: "FORMING", name: "Forming", leadTimeProcessSeq: 13 } });
-    const welding = await owner.operationRef.create({ data: { tenantId, code: "WELDING", name: "Welding", leadTimeProcessSeq: 16 } });
+    const cutting = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting" } });
+    const forming = await owner.operationRef.create({ data: { tenantId, code: "FORMING", name: "Forming" } });
+    const welding = await owner.operationRef.create({ data: { tenantId, code: "WELDING", name: "Welding" } });
+    await owner.operationRefFamilySeq.createMany({
+      data: [
+        { tenantId, operationRefId: cutting.id, familyId: family.id, leadTimeProcessSeq: 12 },
+        { tenantId, operationRefId: forming.id, familyId: family.id, leadTimeProcessSeq: 13 },
+        { tenantId, operationRefId: welding.id, familyId: family.id, leadTimeProcessSeq: 16 },
+      ],
+    });
 
     const routeTemplate = await owner.routeTemplate.create({ data: { tenantId, componentTypeId: componentType.id, name: "Plate route" } });
     const routeVersion = await owner.routeTemplateVersion.create({ data: { routeId: routeTemplate.id, version: 1 } });
@@ -65,10 +72,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
 
     const equipment = await owner.equipment.create({ data: { jobId, name: "Air Receiver", blockNo: 1 } });
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "1", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "1", componentTypeId: componentType.id },
     });
     const component = await owner.component.create({
-      data: { equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SHELL-1", componentTypeId: componentType.id, routeVersionId: routeVersion.id },
+      data: { jobId, equipmentId: equipment.id, bomItemId: bomItem.id, tag: "SHELL-1", componentTypeId: componentType.id, routeVersionId: routeVersion.id },
     });
     bomItemId = bomItem.id;
 
@@ -76,20 +83,20 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     // in received-order with the raw lot qty (not net-of-scrap; that arithmetic is
     // availableQty's job, not this list's).
     const lot1 = await owner.stockLot.create({
-      data: { bomItemId: bomItem.id, heatNumber: "H-100", location: "Yard A", qty: 10, receivedAt: new Date("2026-08-01") },
+      data: { jobId, bomItemId: bomItem.id, heatNumber: "H-100", location: "Yard A", qty: 10, receivedAt: new Date("2026-08-01") },
     });
     await owner.stockLot.create({
-      data: { bomItemId: bomItem.id, heatNumber: null, location: "Yard B", qty: 5, receivedAt: new Date("2026-08-05") },
+      data: { jobId, bomItemId: bomItem.id, heatNumber: null, location: "Yard B", qty: 5, receivedAt: new Date("2026-08-05") },
     });
     const scrapUser = await owner.user.create({
       data: { tenantId, email: `bomread-${Date.now()}@test.local`, username: `bomread-${Date.now()}`, passwordHash: "x", name: "Test User", themePreference: "SYSTEM" },
     });
-    await owner.stockTxn.create({ data: { stockLotId: lot1.id, type: "SCRAP", qty: 2, by: scrapUser.id } });
+    await owner.stockTxn.create({ data: { jobId, stockLotId: lot1.id, type: "SCRAP", qty: 2, by: scrapUser.id } });
     // Only the first route step has actually been tracked — Forming/Welding
     // have no ComponentOperation row yet, same as real live-CSV data where
     // future steps were never recorded.
     await owner.componentOperation.create({
-      data: { componentId: component.id, seq: 1, operationId: cutting.id, status: "COMPLETE" },
+      data: { jobId, componentId: component.id, seq: 1, operationId: cutting.id, status: "COMPLETE" },
     });
 
     const jobProcess = await owner.jobProcess.create({
@@ -99,20 +106,20 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     const qcpItem = await owner.qcpItem.create({
       data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1.1", kind: "CHECKPOINT", activity: "Visual weld inspection" },
     });
-    await owner.qcpItemProcess.create({ data: { qcpItemId: qcpItem.id, jobProcessId: jobProcess.id } });
+    await owner.qcpItemProcess.create({ data: { jobId, qcpItemId: qcpItem.id, jobProcessId: jobProcess.id } });
 
     // Two units with their own bomless (bomItemId: null) components — the
     // fanned-out-per-serial shape any job's sub-assembly register can take
     // once it has no BOM export yet (F2); generic fixture, not DESPL-320-specific.
-    const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "UNIT-1" } });
-    const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "UNIT-2" } });
+    const unit1 = await owner.unit.create({ data: { jobId, equipmentId: equipment.id, serialNo: "UNIT-1" } });
+    const unit2 = await owner.unit.create({ data: { jobId, equipmentId: equipment.id, serialNo: "UNIT-2" } });
     unit1Id = unit1.id;
     unit2Id = unit2.id;
     await owner.component.create({
-      data: { equipmentId: equipment.id, unitId: unit1.id, tag: "PART-A", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, unitId: unit1.id, tag: "PART-A", componentTypeId: componentType.id },
     });
     await owner.component.create({
-      data: { equipmentId: equipment.id, unitId: unit2.id, tag: "PART-A", componentTypeId: componentType.id },
+      data: { jobId, equipmentId: equipment.id, unitId: unit2.id, tag: "PART-A", componentTypeId: componentType.id },
     });
 
     actor = {
@@ -213,10 +220,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("BomItem.parentBomItemId (DB)", async
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
     const parent = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Skirt Assembly", sourceQty: "1" },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Skirt Assembly", sourceQty: "1" },
     });
     const child = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 2, partName: "Gusset Plate", sourceQty: "24", parentBomItemId: parent.id },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 2, partName: "Gusset Plate", sourceQty: "24", parentBomItemId: parent.id },
     });
 
     const childWithParent = await owner.bomItem.findUniqueOrThrow({ where: { id: child.id }, include: { parent: true } });
@@ -264,17 +271,18 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("requiredQty (DB)", async () => {
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
     await owner.unit.createMany({
       data: [
-        { equipmentId: equipment.id, serialNo: "SR01" },
-        { equipmentId: equipment.id, serialNo: "SR02" },
-        { equipmentId: equipment.id, serialNo: "SR03" },
+        { jobId: job.id, equipmentId: equipment.id, serialNo: "SR01" },
+        { jobId: job.id, equipmentId: equipment.id, serialNo: "SR02" },
+        { jobId: job.id, equipmentId: equipment.id, serialNo: "SR03" },
       ],
     });
 
     const top = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Skirt Assembly", sourceQty: "1", qtyPer: 1 },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Skirt Assembly", sourceQty: "1", qtyPer: 1 },
     });
     const nozzle = await owner.bomItem.create({
       data: {
+        jobId: job.id,
         equipmentId: equipment.id,
         itemNo: 2,
         partName: "Nozzle Assembly",
@@ -285,6 +293,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("requiredQty (DB)", async () => {
     });
     const bolt = await owner.bomItem.create({
       data: {
+        jobId: job.id,
         equipmentId: equipment.id,
         itemNo: 3,
         partName: "Nozzle Bolt",

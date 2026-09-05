@@ -169,7 +169,7 @@ export async function loadStageDetail(
             standardDays: p.durationMaxDays,
             submittedByName: plan.submittedBy != null ? (nameBySubmitter.get(plan.submittedBy) ?? null) : null,
             isGoverning: plan.id === view.governing_plan_id,
-            contributingOps: await loadMappedOps(tx, { jobProcessId: p.id, unitId }),
+            contributingOps: await loadMappedOps(tx, { jobProcessId: p.id, unitId, jobId }),
           };
         }),
     );

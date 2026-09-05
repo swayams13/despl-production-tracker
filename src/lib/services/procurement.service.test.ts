@@ -75,7 +75,7 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
     });
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver", blockNo: 1 } });
     const bomItem = await owner.bomItem.create({
-      data: { equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "1" },
+      data: { jobId: job.id, equipmentId: equipment.id, itemNo: 1, partName: "Shell Course 1", sourceQty: "1" },
     });
     const user = await owner.user.create({
       data: {
@@ -113,11 +113,13 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
   });
 
   it("succeeds for PRODUCTION_HEAD and is attributed to the actor", async () => {
-    const { tenantId, bomItem, user } = await fixture();
+    const { tenantId, job, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const event = await recordProcurementEvent(ph, { bomItemId: bomItem.id, type: "INDENT_RAISED", refNo: "IND-1" });
     expect(event.by).toBe(user.id);
     expect(event.refNo).toBe("IND-1");
+    // H1: recordProcurementEvent populates jobId.
+    expect(event.jobId).toBe(job.id);
   });
 
   it("qty is required on RECEIPT and forbidden on the other three types", async () => {
@@ -180,7 +182,7 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
     // qty is mandatory on this service's own RECEIPT path, but the backfilled
     // (pre-existing) data shape it stands in for allows a null qty directly
     // via a raw insert — assert the read side never collapses that into 0.
-    await owner.procurementEvent.create({ data: { bomItemId: bomItem.id, type: "RECEIPT", qty: null, by: user.id } });
+    await owner.procurementEvent.create({ data: { jobId: job.id, bomItemId: bomItem.id, type: "RECEIPT", qty: null, by: user.id } });
 
     const tree = await loadBomTree(ph, job.id, equipment.id);
     const row = tree!.groups.flatMap((g) => g.items).find((i) => i.id === bomItem.id)!;
@@ -195,7 +197,7 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
     // One backfilled-shaped unknown receipt (raw insert, mirrors
     // PARTIALLY_RECEIVED-with-no-recorded-qty data) plus one real, known
     // receipt of 8 logged through the actual writer.
-    await owner.procurementEvent.create({ data: { bomItemId: bomItem.id, type: "RECEIPT", qty: null, by: user.id } });
+    await owner.procurementEvent.create({ data: { jobId: job.id, bomItemId: bomItem.id, type: "RECEIPT", qty: null, by: user.id } });
     await recordProcurementEvent(ph, { bomItemId: bomItem.id, type: "RECEIPT", qty: 8 });
 
     const tree = await loadBomTree(ph, job.id, equipment.id);

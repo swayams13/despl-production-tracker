@@ -56,7 +56,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("admin.read — Employees table exten
         data: { jobId: job.id, seq: seq++, code: String(seq), name: "Test process", departmentId: dept.id },
       });
       return owner.processPlan.create({
-        data: { scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status, assigneeUserId },
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status, assigneeUserId },
       });
     };
 
@@ -92,7 +92,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("admin.read — Employees table exten
       data: { jobId: job.id, seq: seq++, code: String(seq), name: "Stale-run process", departmentId: dept.id },
     });
     await owner.processPlan.create({
-      data: { scheduleRunId: staleRun.id, jobProcessId: staleJp.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED", assigneeUserId: userD.id },
+      data: { jobId: job.id, scheduleRunId: staleRun.id, jobProcessId: staleJp.id, unitId: null, ownerDepartmentId: dept.id, status: "NOT_STARTED", assigneeUserId: userD.id },
     });
 
     admin = {

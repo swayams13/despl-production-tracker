@@ -8,7 +8,12 @@ import {
   setJobStatus,
   type CreateJobResult,
 } from "@/lib/services/job-intake.service";
-import { createClientRecord, createEquipmentType, updateEquipmentType } from "@/lib/services/admin.service";
+import {
+  createClientRecord,
+  createEquipmentType,
+  updateEquipmentType,
+  createProductFamily,
+} from "@/lib/services/admin.service";
 import { loadTemplateProcesses } from "@/lib/services/job-intake.read";
 import { generateSchedule } from "@/lib/services/schedule.service";
 import { isAppError } from "@/lib/shared/errors";
@@ -21,6 +26,7 @@ import type {
   CreateClientInput,
   CreateEquipmentTypeInput,
   UpdateEquipmentTypeInput,
+  CreateProductFamilyInput,
 } from "@/lib/shared/schemas";
 
 export type CreateJobActionResult = ActionResult & {
@@ -151,6 +157,20 @@ export async function createClientAction(input: CreateClientInput): Promise<Crea
   try {
     const client = await createClientRecord(await requireActor(), input);
     return { ok: true, clientId: client.id, name: client.name };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+export type CreateProductFamilyActionResult = ActionResult & { familyId?: number };
+
+export async function createProductFamilyAction(
+  input: CreateProductFamilyInput,
+): Promise<CreateProductFamilyActionResult> {
+  try {
+    const row = await createProductFamily(await requireActor(), input);
+    revalidatePath("/admin/families");
+    return { ok: true, familyId: row.id };
   } catch (e) {
     return toActionError(e);
   }

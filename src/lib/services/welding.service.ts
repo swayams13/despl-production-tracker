@@ -115,7 +115,7 @@ export async function createWeldJointTx(
       weldSize: fields.weldSize ?? null,
       wpsRef: fields.wpsRef ?? null,
       loggedBy: actor.userId,
-      welders: { create: fields.welderIds.map((welderId) => ({ welderId })) },
+      welders: { create: fields.welderIds.map((welderId) => ({ welderId, jobId })) },
     },
   });
 }
@@ -187,6 +187,7 @@ export async function recordNdtResultTx(
       recordedBy: actor.userId,
       // SERVER CLOCK ONLY (invariant #1).
       recordedAt: new Date(),
+      jobId: joint.jobId,
     },
   });
 }

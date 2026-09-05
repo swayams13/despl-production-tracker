@@ -30,7 +30,13 @@ async function main() {
     const revision =
       (await prisma.bomRevision.findFirst({ where: { equipmentId, revisionNo: 1 } })) ??
       (await prisma.bomRevision.create({
-        data: { equipmentId, revisionNo: 1, status: "RELEASED", releasedAt: new Date() },
+        data: {
+          jobId: (await prisma.equipment.findUniqueOrThrow({ where: { id: equipmentId }, select: { jobId: true } })).jobId,
+          equipmentId,
+          revisionNo: 1,
+          status: "RELEASED",
+          releasedAt: new Date(),
+        },
       }));
 
     const { count } = await prisma.bomItem.updateMany({

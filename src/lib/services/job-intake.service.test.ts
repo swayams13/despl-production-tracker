@@ -230,6 +230,17 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     }
   });
 
+  // H1 (Task 2A, Cluster 2): createJob populates jobId on every materialised Unit.
+  it("createJob populates jobId on every materialised Unit", async () => {
+    const refs = await seedRefs();
+    const r = await createJob(actor(), base({ jobNumber: "TEST-H1-UNIT-JOBID" }, refs));
+    created.push(r.jobId);
+
+    const units = await owner.unit.findMany({ where: { equipment: { jobId: r.jobId } } });
+    expect(units.length).toBeGreaterThan(0);
+    expect(units.every((u) => u.jobId === r.jobId)).toBe(true);
+  });
+
   it("copies durations, envelope offsets and provisional verbatim rather than defaulting them", async () => {
     const refs = await seedRefs();
     const r = await createJob(actor(), base({ jobNumber: "TEST-COPY-1" }, refs));
@@ -401,6 +412,14 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     expect(copy._count.items).toBe(sourceQcp._count.items);
     expect(copy._count.parties).toBe(sourceQcp._count.parties);
 
+    // H1: cloneQcpTemplate populates jobId on InspectionParty/QcpItem for a real-job clone.
+    const newParties = await owner.inspectionParty.findMany({ where: { qcpTemplateId: copy.id } });
+    expect(newParties.length).toBeGreaterThan(0);
+    expect(newParties.every((p) => p.jobId === r.jobId)).toBe(true);
+    const newItems = await owner.qcpItem.findMany({ where: { qcpTemplateId: copy.id } });
+    expect(newItems.length).toBeGreaterThan(0);
+    expect(newItems.every((i) => i.jobId === r.jobId)).toBe(true);
+
     // Links resolve against the NEW job's processes.
     const links = await owner.qcpItemProcess.findMany({
       where: { qcpItem: { qcpTemplateId: copy.id } },
@@ -408,6 +427,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     });
     expect(links.length).toBeGreaterThan(0);
     for (const l of links) expect(l.jobProcess.jobId).toBe(r.jobId);
+    // H1: cloneQcpTemplate populates jobId on QcpItemProcess too.
+    expect(links.every((l) => l.jobId === r.jobId)).toBe(true);
 
     // No execution results carried over.
     expect(
@@ -430,6 +451,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
 
     expect(r.bomItemCount).toBe(sourceEquipment._count.bomItems);
     const newEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+    // H1: copyBom populates jobId on every copied BomItem.
+    const newBomItems = await owner.bomItem.findMany({ where: { equipmentId: newEquipment.id } });
+    expect(newBomItems.length).toBeGreaterThan(0);
+    expect(newBomItems.every((b) => b.jobId === r.jobId)).toBe(true);
     expect(await owner.bomItem.count({ where: { equipmentId: newEquipment.id } })).toBe(
       sourceEquipment._count.bomItems,
     );
@@ -469,7 +494,12 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
       expect(c.bomItemId).not.toBeNull();
       expect(c.bomItem!.equipmentId).toBe(newEquipment.id); // not the source equipment's BomItem row
       expect(c.operations.length).toBeGreaterThan(0);
-      for (const op of c.operations) expect(op.status).toBe("NOT_STARTED");
+      // H1: materializeComponentsFromBomItems populates jobId on Component + ComponentOperation.
+      expect(c.jobId).toBe(r.jobId);
+      for (const op of c.operations) {
+        expect(op.status).toBe("NOT_STARTED");
+        expect(op.jobId).toBe(r.jobId);
+      }
     }
   });
 
@@ -506,6 +536,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
       include: { templateStep: true, qcpItem: true },
     });
     expect(newSteps.length).toBe(asmVersion.steps.length * 2);
+    // H1: materializeAssemblyStepsFromTemplate populates jobId on every created AssemblyStep.
+    expect(newSteps.every((s) => s.jobId === r.jobId)).toBe(true);
 
     const boundInspectionSteps = newSteps.filter((s) => s.templateStep.kind === "INSPECTION" && s.qcpItemId != null);
     expect(boundInspectionSteps.length).toBe(inspectionStepCount * 2); // every INSPECTION step resolves — 0 mismatches verified against real seed data
@@ -527,10 +559,11 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     const sourceEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: sourceJob.jobId } });
 
     const parent = await owner.bomItem.create({
-      data: { equipmentId: sourceEquipment.id, itemNo: 101, partName: "Sub-assembly", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
+      data: { jobId: sourceJob.jobId, equipmentId: sourceEquipment.id, itemNo: 101, partName: "Sub-assembly", sourceQty: "2 NOS.", qtyPer: 2, uom: "NOS." },
     });
     const child = await owner.bomItem.create({
       data: {
+        jobId: sourceJob.jobId,
         equipmentId: sourceEquipment.id,
         itemNo: 102,
         partName: "Bolt",
@@ -579,6 +612,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
       const jp = jobProcesses[i];
       await owner.processPlan.create({
         data: {
+          jobId,
           scheduleRunId: run.id,
           jobProcessId: jp.id,
           ownerDepartmentId: jp.departmentId,

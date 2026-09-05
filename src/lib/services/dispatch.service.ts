@@ -149,10 +149,12 @@ export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): 
     // this is a genuinely separate check, not a redundant re-run of
     // packing's own gate.
     await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
-    await assertUnitHasNoOpenNcr(tx, unit.id);
+    await assertUnitHasNoOpenNcr(tx, unit.id, unit.equipment.jobId);
 
     return audited(tx, actor, async () => {
-      const link = await tx.dispatchBatchUnit.create({ data: { dispatchBatchId: batch.id, unitId: unit.id } });
+      const link = await tx.dispatchBatchUnit.create({
+        data: { dispatchBatchId: batch.id, unitId: unit.id, jobId: batch.jobId },
+      });
       return {
         result: link,
         audit: {

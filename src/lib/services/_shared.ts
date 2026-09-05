@@ -292,6 +292,7 @@ export async function persistScheduleRun(
         create: input.plans.map((p) => {
           const prior = priorByKey.get(priorActualsKey(p.jobProcessId, p.unitId));
           return {
+            jobId: input.jobId,
             jobProcessId: p.jobProcessId,
             unitId: p.unitId,
             baselineStart: p.baselineStart,
@@ -379,6 +380,11 @@ export async function lockProcessPlanForUpdate(
     where: { id: processPlanId, ownerDepartment: { tenantId } },
   });
   if (!row) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessPlan", processPlanId });
+  // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
+  // to the plan's own (denormalized) job — no nested withJob (Prisma disallows
+  // nesting $transaction), just set_config on the already-open tx, same as
+  // withTenant's own pattern.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(row.jobId)}, true)`;
   const run = await tx.scheduleRun.findUnique({ where: { id: row.scheduleRunId }, select: { isCurrent: true } });
   if (!run?.isCurrent) throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProcessPlan", processPlanId });
   return row;
@@ -429,9 +435,11 @@ export async function assertNoUnfiledDelayBlock(
  */
 export async function assertNoOpenHoldPoint(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
   if (args.unitId == null) return;
+  // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
   const blockingItems = await tx.qcpItem.findMany({
     where: {
@@ -475,32 +483,58 @@ export interface MappedOp {
 }
 
 /**
+ * Gate 3 fix: `OperationRef.leadTimeProcessSeq` used to be one tenant-wide
+ * value, authored only for PRESSURE_VESSEL's numbering — a second family's
+ * `JobProcess.code` could silently match through it. `OperationRefFamilySeq`
+ * scopes the mapping per family; this resolves which `OperationRef` ids roll
+ * up into `seq` FOR THIS family specifically. Empty when the family has
+ * authored no mapping for this number — a SEAM, not an error, same
+ * convention as the non-numeric-`JobProcess.code` case below.
+ */
+async function resolveOperationRefIdsForFamilySeq(tx: Tx, familyId: number, seq: number): Promise<number[]> {
+  const rows = await tx.operationRefFamilySeq.findMany({
+    where: { familyId, leadTimeProcessSeq: seq },
+    select: { operationRefId: true },
+  });
+  return rows.map((r) => r.operationRefId);
+}
+
+/**
  * Every `ComponentOperation`/`AssemblyStep` on `unitId` that rolls up into
- * `jobProcessId`, joined by value (`OperationRef.leadTimeProcessSeq` /
- * `AssemblyTemplateStep.leadTimeProcessSeq` == `JobProcess.code` as a
- * number) — the same discipline `bom.read.ts`'s QCP-checkpoint lookup
- * already uses for the fabrication half. Empty when `unitId` is null
- * (job/equipment grain, no serial to roll up yet) or when this process has
- * no mapped operations at all — both are SEAM cases, not errors.
+ * `jobProcessId`, joined by value (`OperationRefFamilySeq`, scoped to the
+ * job's own family / `AssemblyTemplateStep.leadTimeProcessSeq` ==
+ * `JobProcess.code` as a number — the latter is already family-scoped via
+ * its own template/version chain, no additional filter needed) — the same
+ * discipline `bom.read.ts`'s QCP-checkpoint lookup already uses for the
+ * fabrication half. Empty when `unitId` is null (job/equipment grain, no
+ * serial to roll up yet) or when this process has no mapped operations at
+ * all — both are SEAM cases, not errors.
  */
 export async function loadMappedOps(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<MappedOp[]> {
   if (args.unitId == null) return [];
+  // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment. A
+  // unitId from a different job than jobId now returns zero rows (RLS),
+  // instead of silently rolling up another job's operations.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
   const jobProcess = await tx.jobProcess.findUnique({
     where: { id: args.jobProcessId },
-    select: { code: true },
+    select: { code: true, job: { select: { familyId: true } } },
   });
   if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return [];
   const seq = Number(jobProcess.code);
+  const operationRefIds = await resolveOperationRefIdsForFamilySeq(tx, jobProcess.job.familyId, seq);
 
   const [componentOps, assemblySteps] = await Promise.all([
-    tx.componentOperation.findMany({
-      where: { component: { unitId: args.unitId }, operation: { leadTimeProcessSeq: seq } },
-      select: { status: true, operation: { select: { name: true } } },
-    }),
+    operationRefIds.length === 0
+      ? []
+      : tx.componentOperation.findMany({
+          where: { component: { unitId: args.unitId }, operationId: { in: operationRefIds } },
+          select: { status: true, operation: { select: { name: true } } },
+        }),
     tx.assemblyStep.findMany({
       where: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
       select: { status: true, templateStep: { select: { activity: true } } },
@@ -520,7 +554,7 @@ export async function loadMappedOps(
  */
 export async function assertComponentOpsComplete(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
   const ops = await loadMappedOps(tx, args);
   const incomplete = ops.filter((o) => o.status !== "COMPLETE");
@@ -558,16 +592,19 @@ const OPEN_NCR_STATUSES = ["OPEN", "REWORK_IN_PROGRESS"] as const;
  */
 export async function assertNoOpenNcr(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
   if (args.unitId == null) return;
+  // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
   const jobProcess = await tx.jobProcess.findUnique({
     where: { id: args.jobProcessId },
-    select: { code: true },
+    select: { code: true, job: { select: { familyId: true } } },
   });
   if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return;
   const seq = Number(jobProcess.code);
+  const operationRefIds = await resolveOperationRefIdsForFamilySeq(tx, jobProcess.job.familyId, seq);
 
   const openNcrs = await tx.ncr.findMany({
     where: {
@@ -577,7 +614,7 @@ export async function assertNoOpenNcr(
           componentOperationRejection: {
             componentOperation: {
               component: { unitId: args.unitId },
-              operation: { leadTimeProcessSeq: seq },
+              operationId: { in: operationRefIds },
             },
           },
         },
@@ -627,7 +664,14 @@ export async function assertNoOpenNcr(
  * chain instead (Gate 3 owns replacing that chain's string/numeric joins
  * with a real FK — not touched here).
  */
-export async function assertUnitHasNoOpenNcr(tx: Tx, unitId: number): Promise<void> {
+export async function assertUnitHasNoOpenNcr(tx: Tx, unitId: number, jobId: number): Promise<void> {
+  // H1 job-level RLS backstop: this query reaches `ncrs` (job-scoped since
+  // H1) purely through a unitId-derived join, with no jobId filter of its
+  // own — unlike its sibling assertUnitHasNoOpenHoldPoint. Both real callers
+  // (packing/dispatch) already verify unitId's job matches before calling,
+  // but that safety was implicit (nothing here would catch a future caller
+  // that skips it). Make it structural: scope the transaction explicitly.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(jobId)}, true)`;
   const openNcrs = await tx.ncr.findMany({
     where: {
       status: { in: [...OPEN_NCR_STATUSES] },
@@ -857,7 +901,7 @@ export async function assertDrawingReleased(
 ): Promise<number | null> {
   const component = await tx.component.findFirst({
     where: { id: componentId, equipment: { job: { tenantId } } },
-    select: { governingDrawingId: true },
+    select: { governingDrawingId: true, jobId: true },
   });
   if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
   if (component.governingDrawingId == null) return null; // SEAM: no drawing link, nothing to check
@@ -866,11 +910,26 @@ export async function assertDrawingReleased(
     where: { id: component.governingDrawingId, job: { tenantId } },
     select: {
       drawingNo: true,
+      jobId: true,
       revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true, status: true } },
     },
   });
   if (!drawing) {
     throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId: component.governingDrawingId });
+  }
+
+  // H1: governingDrawingId is manually set (see the schema comment on
+  // Component.governingDrawingId) and not re-validated after linking — a
+  // stale or directly-written cross-job link must not silently pass this
+  // gate just because the tenant matches. linkGoverningDrawing itself
+  // already guards this at write time; this is the read-time backstop.
+  if (component.jobId !== drawing.jobId) {
+    throw new AppError(ERROR_CODES.DRAWING_NOT_RELEASED, {
+      componentId,
+      assemblyDrawingId: component.governingDrawingId,
+      drawingNo: drawing.drawingNo,
+      currentStatus: "CROSS_JOB_DRAWING",
+    });
   }
 
   const current = drawing.revisions[0];

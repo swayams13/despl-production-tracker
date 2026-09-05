@@ -66,6 +66,7 @@ async function main() {
 
     await prisma.bomItem.create({
       data: {
+        jobId: job.id,
         equipmentId: equipment.id,
         itemNo: item.itemNo,
         partName: item.partName,

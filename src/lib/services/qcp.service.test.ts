@@ -133,6 +133,8 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
       expect(exec.result).toBe("ACCEPTED");
       expect(exec.attemptNo).toBe(1);
       expect(exec.clearedBy).toBe(qcActor.userId);
+      // H1: recordQcpExecution populates jobId from the unit's own jobId.
+      expect(exec.jobId).toBe(jobId);
     }
 
     // GREEN: every blocking checkpoint is now ACCEPTED for this unit → verify succeeds.
@@ -158,6 +160,232 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
     await expectCode(
       recordQcpExecution(supervisor, { qcpItemId: 1, unitId: 1, result: "ACCEPTED" }),
       ERROR_CODES.FORBIDDEN,
+    );
+  });
+});
+
+// ── QCP template authoring (C7) ────────────────────────────────────────────
+
+function actor(over: Partial<Actor> = {}): Actor {
+  return {
+    userId: 1,
+    tenantId: 1,
+    clientId: null,
+    name: "Admin",
+    email: "admin@despl.test",
+    roles: [ROLES.ADMIN],
+    departmentIds: [],
+    mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
+    ...over,
+  };
+}
+
+describe("qcp.service — library authoring, pure refusals", () => {
+  it.each([
+    ["SUPERVISOR", ROLES.SUPERVISOR],
+    ["QC", ROLES.QC],
+    ["MANAGEMENT", ROLES.MANAGEMENT],
+  ])("createQcpTemplateLibrary refuses a %s caller", async (_label, role) => {
+    const { createQcpTemplateLibrary } = await import("./qcp.service");
+    await expectRejects(
+      createQcpTemplateLibrary(actor({ roles: [role] }), {
+        jobLabel: "X",
+        vessel: "Y",
+        parties: [{ code: "DESPL" }],
+      }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("createQcpTemplateLibrary refuses a client user before touching the DB", async () => {
+    const { createQcpTemplateLibrary } = await import("./qcp.service");
+    await expectRejects(
+      createQcpTemplateLibrary(actor({ clientId: 5, roles: [ROLES.CLIENT_VIEWER] }), {
+        jobLabel: "X",
+        vessel: "Y",
+        parties: [{ code: "DESPL" }],
+      }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it.each([
+    ["SUPERVISOR", ROLES.SUPERVISOR],
+    ["QC", ROLES.QC],
+  ])("addQcpItemToLibraryTemplate refuses a %s caller", async (_label, role) => {
+    const { addQcpItemToLibraryTemplate } = await import("./qcp.service");
+    await expectRejects(
+      addQcpItemToLibraryTemplate(actor({ roles: [role] }), {
+        qcpTemplateId: 1,
+        sequence: 1,
+        srNo: "1",
+        kind: "CHECKPOINT",
+        activity: "Inspect",
+        libraryProcessCodes: [],
+        partyCodes: [],
+      }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("addQcpItemToLibraryTemplate refuses a client user before touching the DB", async () => {
+    const { addQcpItemToLibraryTemplate } = await import("./qcp.service");
+    await expectRejects(
+      addQcpItemToLibraryTemplate(actor({ clientId: 5, roles: [ROLES.CLIENT_VIEWER] }), {
+        qcpTemplateId: 1,
+        sequence: 1,
+        srNo: "1",
+        kind: "CHECKPOINT",
+        activity: "Inspect",
+        libraryProcessCodes: [],
+        partyCodes: [],
+      }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+});
+
+async function expectRejects(p: Promise<unknown>, expected: string): Promise<void> {
+  let thrown: unknown;
+  try {
+    await p;
+  } catch (e) {
+    thrown = e;
+  }
+  const { isAppError } = await import("@/lib/shared/errors");
+  expect(isAppError(thrown) && thrown.code).toBe(expected);
+}
+
+describe.skipIf(!RUN_DB)("qcp.service — library authoring (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { createQcpTemplateLibrary, addQcpItemToLibraryTemplate } = await import("./qcp.service");
+  const { createJob } = await import("./job-intake.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  const createdJobIds: number[] = [];
+  const createdTemplateIds: number[] = [];
+
+  afterAll(async () => {
+    for (const id of createdJobIds) {
+      await owner.qcpTemplate.deleteMany({ where: { jobId: id } });
+      await owner.equipment.deleteMany({ where: { jobId: id } }).catch(() => {});
+      await owner.job.delete({ where: { id } }).catch(() => {});
+    }
+    for (const id of createdTemplateIds) {
+      await owner.qcpTemplate.delete({ where: { id } }).catch(() => {});
+    }
+    await owner.$disconnect();
+  });
+
+  it("authors a from-scratch library template + item, then clones it into a real job, producing a real QcpItemProcess linked to the new job's process coded 12", async () => {
+    const template = await createQcpTemplateLibrary(actor(), {
+      jobLabel: "C7 library QCP",
+      vessel: "Test Vessel",
+      parties: [{ code: "DESPL", name: "DESPL QC" }],
+    });
+    createdTemplateIds.push(template.id);
+    expect(template.jobId).toBeNull();
+
+    const item = await addQcpItemToLibraryTemplate(actor(), {
+      qcpTemplateId: template.id,
+      sequence: 1,
+      srNo: "1",
+      kind: "CHECKPOINT",
+      activity: "Dimensional check",
+      libraryProcessCodes: ["12"],
+      partyCodes: [{ partyCode: "DESPL", qcpCode: "H" }],
+    });
+    expect(item.libraryProcessCodes).toEqual(["12"]);
+
+    const stored = await owner.qcpItem.findUniqueOrThrow({ where: { id: item.id } });
+    expect(stored.libraryProcessCodes).toEqual(["12"]);
+    expect(await owner.qcpItemProcess.count({ where: { qcpItemId: item.id } })).toBe(0);
+
+    const version = await owner.processTemplateVersion.findFirstOrThrow({
+      where: { status: "PUBLISHED", template: { family: { code: "PRESSURE_VESSEL" } } },
+      orderBy: { version: "desc" },
+      include: { template: true },
+    });
+    const client = await owner.client.findFirstOrThrow({ where: { tenantId: 1 } });
+
+    // PRESSURE_VESSEL also has a PUBLISHED AssemblyTemplateVersion (S17), and
+    // createJob unconditionally tries to bind every INSPECTION step to a
+    // QcpItem sharing its srNo once ANY qcpTemplateId is cloned in — an
+    // orthogonal feature this test must satisfy to reach the QcpItemProcess
+    // assertion below, not something libraryProcessCodes changes.
+    //
+    // materializeAssemblyStepsFromTemplate's occurrence index is counted
+    // across EVERY step sharing an srNo (WORK steps included, not just
+    // INSPECTION ones) — so the stub QcpItems must be created one-per-step
+    // in that same srNo-bearing step order for the indices to line up, even
+    // though only the INSPECTION steps ever get resolved against them.
+    const asmVersion = await owner.assemblyTemplateVersion.findFirstOrThrow({
+      where: { template: { tenantId: 1, familyId: version.template.familyId }, status: "PUBLISHED" },
+      orderBy: { version: "desc" },
+      include: { steps: { orderBy: { seq: "asc" } } },
+    });
+    const srNoBearingSteps = asmVersion.steps.filter((s) => s.srNo);
+    await owner.qcpItem.createMany({
+      data: srNoBearingSteps.map((s, i) => ({
+        qcpTemplateId: template.id,
+        sequence: 1000 + i,
+        srNo: s.srNo!,
+        kind: "CHECKPOINT" as const,
+        activity: "Assembly inspection stub",
+      })),
+    });
+
+    const r = await createJob(actor(), {
+      clientId: client.id,
+      familyId: version.template.familyId,
+      templateVersionId: version.id,
+      calendarId: null,
+      jobNumber: `TEST-C7-QCP-${Date.now()}`,
+      clientOrderNo: null,
+      projectName: null,
+      poRef: null,
+      designCode: null,
+      orderDate: null,
+      committedDeliveryDate: null,
+      targetDispatchDate: null,
+      priority: "NORMAL",
+      remarks: null,
+      specs: null,
+      excludedProcessCodes: [],
+      equipments: [{ equipmentTypeId: null, name: "Vessel", blockNo: 1, remarks: null, serials: ["SR01"] }],
+      qcpTemplateSourceId: template.id,
+      copyBomFromEquipmentId: null,
+    });
+    createdJobIds.push(r.jobId);
+    expect(r.unmatchedQcpProcessCodes).toEqual([]);
+
+    const jobProcess12 = await owner.jobProcess.findFirstOrThrow({ where: { jobId: r.jobId, code: "12" } });
+    const clonedTemplate = await owner.qcpTemplate.findFirstOrThrow({ where: { jobId: r.jobId } });
+    const clonedItem = await owner.qcpItem.findFirstOrThrow({
+      where: { qcpTemplateId: clonedTemplate.id, activity: "Dimensional check" },
+    });
+
+    const link = await owner.qcpItemProcess.findUniqueOrThrow({
+      where: { qcpItemId_jobProcessId: { qcpItemId: clonedItem.id, jobProcessId: jobProcess12.id } },
+    });
+    expect(link.jobProcessId).toBe(jobProcess12.id);
+  });
+
+  it("refuses to add an item to a job-owned template — authoring is library-only", async () => {
+    const jobOwnedTemplate = await owner.qcpTemplate.findFirstOrThrow({ where: { jobId: { not: null } } });
+    await expectRejects(
+      addQcpItemToLibraryTemplate(actor(), {
+        qcpTemplateId: jobOwnedTemplate.id,
+        sequence: 999,
+        srNo: "999",
+        kind: "CHECKPOINT",
+        activity: "Should be refused",
+        libraryProcessCodes: [],
+        partyCodes: [],
+      }),
+      ERROR_CODES.VALIDATION_FAILED,
     );
   });
 });

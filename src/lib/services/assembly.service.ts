@@ -74,6 +74,10 @@ async function lockAssemblyStepForUpdate(
     include: { templateStep: { select: { seq: true, defaultDepartmentId: true, kind: true, jointRef: true } } },
   });
   if (!step) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyStep", assemblyStepId });
+  // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
+  // to the step's own (denormalized) job — same pattern as
+  // lockProcessPlanForUpdate in _shared.ts.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(step.jobId)}, true)`;
 
   const previousStep =
     step.templateStep.seq > 1
@@ -243,7 +247,7 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
       for (const ncr of openNcrs) {
-        await closeNcr(tx, actor, { ncrId: ncr.id });
+        await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
       }
       // A4: an INSPECTION step verifying IS the QCP checkpoint result — record
       // it so assertNoOpenHoldPoint and the QCP/hold-point view see the same
@@ -255,6 +259,7 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
           qcpItemId: step.qcpItemId,
           unitId: step.unitId,
           result: "ACCEPTED",
+          jobId: step.jobId,
         });
         await recordAudit(tx, actor, {
           action: "qcp.record",
@@ -315,10 +320,10 @@ export async function rejectAssemblyStep(actor: Actor, input: RejectAssemblyStep
         data: { status: to, submittedBy: null },
       });
       const rejection = await tx.assemblyStepRejection.create({
-        data: { assemblyStepId: step.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId },
+        data: { assemblyStepId: step.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId, jobId: step.jobId },
       });
       // N1 (Phase 5): every rejection opens exactly one Ncr for QC to disposition.
-      await tx.ncr.create({ data: { assemblyStepRejectionId: rejection.id } });
+      await tx.ncr.create({ data: { assemblyStepRejectionId: rejection.id, jobId: step.jobId } });
 
       // S14 — was silent. QC is who dispositions an Ncr (S11's disposition
       // UI), same transaction as the ncr.create above (a failed notify rolls
@@ -372,6 +377,7 @@ export async function rejectAssemblyStep(actor: Actor, input: RejectAssemblyStep
           unitId: step.unitId,
           result: "REJECTED",
           remarks: detail ?? null,
+          jobId: step.jobId,
         });
         await recordAudit(tx, actor, {
           action: "qcp.record",
@@ -502,12 +508,12 @@ export async function materializeAssemblyStepsFromTemplate(
 
   let stepCount = 0;
   let boundToQcp = 0;
-  const rows: { unitId: number; templateStepId: number; seq: number; qcpItemId: number | null }[] = [];
+  const rows: { unitId: number; templateStepId: number; seq: number; qcpItemId: number | null; jobId: number }[] = [];
   for (const unitId of unitIds) {
     for (const step of steps) {
       const qcpItemId = resolveQcpItemId(step);
       if (qcpItemId != null) boundToQcp++;
-      rows.push({ unitId, templateStepId: step.id, seq: step.seq, qcpItemId });
+      rows.push({ unitId, templateStepId: step.id, seq: step.seq, qcpItemId, jobId });
       stepCount++;
     }
   }

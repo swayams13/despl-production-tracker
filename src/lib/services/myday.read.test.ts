@@ -158,27 +158,27 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     // ── mine/pool/teamHeld partition fixtures ────────────────────────────
     const jp1 = await mkProcess(deptMine.id);
     planMine = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp1.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id, status: "NOT_STARTED", plannedFinish: istNoon(0) },
+      data: { jobId: jp1.jobId, scheduleRunId: run.id, jobProcessId: jp1.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id, status: "NOT_STARTED", plannedFinish: istNoon(0) },
     });
 
     const jp2 = await mkProcess(deptMine.id);
     planPool = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp2.id, ownerDepartmentId: deptMine.id, assigneeUserId: null, status: "NOT_STARTED", plannedFinish: istNoon(2) },
+      data: { jobId: jp2.jobId, scheduleRunId: run.id, jobProcessId: jp2.id, ownerDepartmentId: deptMine.id, assigneeUserId: null, status: "NOT_STARTED", plannedFinish: istNoon(2) },
     });
 
     const jp3 = await mkProcess(deptMine.id);
     planTeamHeld = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp3.id, ownerDepartmentId: deptMine.id, assigneeUserId: teammateUser.id, status: "IN_PROGRESS", plannedFinish: istNoon(1) },
+      data: { jobId: jp3.jobId, scheduleRunId: run.id, jobProcessId: jp3.id, ownerDepartmentId: deptMine.id, assigneeUserId: teammateUser.id, status: "IN_PROGRESS", plannedFinish: istNoon(1) },
     });
 
     const jp4 = await mkProcess(deptOther.id);
     planOtherPool = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp4.id, ownerDepartmentId: deptOther.id, assigneeUserId: null, status: "NOT_STARTED" },
+      data: { jobId: jp4.jobId, scheduleRunId: run.id, jobProcessId: jp4.id, ownerDepartmentId: deptOther.id, assigneeUserId: null, status: "NOT_STARTED" },
     });
 
     const jp5 = await mkProcess(deptOther.id);
     planMineOtherDept = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp5.id, ownerDepartmentId: deptOther.id, assigneeUserId: meUser.id, status: "NOT_STARTED", plannedFinish: istNoon(3) },
+      data: { jobId: jp5.jobId, scheduleRunId: run.id, jobProcessId: jp5.id, ownerDepartmentId: deptOther.id, assigneeUserId: meUser.id, status: "NOT_STARTED", plannedFinish: istNoon(3) },
     });
 
     // ── cross-job aggregation fixtures (job1 + job2) ──────────────────────
@@ -189,7 +189,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     const jpMineFuture = await mkProcess(deptMine.id);
     planMineFuture = await owner.processPlan.create({
       data: {
-        scheduleRunId: run.id, jobProcessId: jpMineFuture.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
+        jobId: jpMineFuture.jobId, scheduleRunId: run.id, jobProcessId: jpMineFuture.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
         status: "NOT_STARTED", plannedFinish: new Date(Date.now() + 10 * 24 * 3600 * 1000),
       },
     });
@@ -201,17 +201,17 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     const jp2Mine = await mkProcess(deptMine.id, job2.id);
     job2Mine = await owner.processPlan.create({
       data: {
-        scheduleRunId: run2.id, jobProcessId: jp2Mine.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
+        jobId: jp2Mine.jobId, scheduleRunId: run2.id, jobProcessId: jp2Mine.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
         status: "NOT_STARTED", plannedFinish: new Date(Date.now() - 10 * 24 * 3600 * 1000),
       },
     });
     const jp2Pool = await mkProcess(deptMine.id, job2.id);
     job2Pool = await owner.processPlan.create({
-      data: { scheduleRunId: run2.id, jobProcessId: jp2Pool.id, ownerDepartmentId: deptMine.id, assigneeUserId: null, status: "NOT_STARTED" },
+      data: { jobId: jp2Pool.jobId, scheduleRunId: run2.id, jobProcessId: jp2Pool.id, ownerDepartmentId: deptMine.id, assigneeUserId: null, status: "NOT_STARTED" },
     });
     const jp2Team = await mkProcess(deptMine.id, job2.id);
     job2TeamHeld = await owner.processPlan.create({
-      data: { scheduleRunId: run2.id, jobProcessId: jp2Team.id, ownerDepartmentId: deptMine.id, assigneeUserId: teammateUser.id, status: "IN_PROGRESS" },
+      data: { jobId: jp2Team.jobId, scheduleRunId: run2.id, jobProcessId: jp2Team.id, ownerDepartmentId: deptMine.id, assigneeUserId: teammateUser.id, status: "IN_PROGRESS" },
     });
 
     // ── scoreboard / clearedToday fixtures ───────────────────────────────
@@ -223,7 +223,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     planDoneMine = {
       ...(await owner.processPlan.create({
         data: {
-          scheduleRunId: run.id, jobProcessId: jp6.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
+          jobId: jp6.jobId, scheduleRunId: run.id, jobProcessId: jp6.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
           status: "COMPLETE", plannedFinish: done_actualFinish, actualStart: done_actualStart, actualFinish: done_actualFinish,
         },
       })),
@@ -239,7 +239,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     planCompleteLate = {
       ...(await owner.processPlan.create({
         data: {
-          scheduleRunId: run.id, jobProcessId: jp7.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
+          jobId: jp7.jobId, scheduleRunId: run.id, jobProcessId: jp7.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
           status: "COMPLETE", plannedFinish: late_plannedFinish, actualStart: late_actualStart, actualFinish: late_actualFinish,
         },
       })),
@@ -249,7 +249,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
 
     const jp8 = await mkProcess(deptMine.id);
     planSubmittedToday = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp8.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id, status: "SUBMITTED" },
+      data: { jobId: jp8.jobId, scheduleRunId: run.id, jobProcessId: jp8.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id, status: "SUBMITTED" },
     });
     await owner.domainEvent.create({
       data: { tenantId, aggregateType: "ProcessPlan", aggregateId: String(planSubmittedToday.id), type: "ProcessSubmitted", payload: {}, at: now },
@@ -257,7 +257,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
 
     const jp9 = await mkProcess(deptMine.id);
     planSubmittedStale = await owner.processPlan.create({
-      data: { scheduleRunId: run.id, jobProcessId: jp9.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id, status: "SUBMITTED" },
+      data: { jobId: jp9.jobId, scheduleRunId: run.id, jobProcessId: jp9.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id, status: "SUBMITTED" },
     });
     await owner.domainEvent.create({
       data: { tenantId, aggregateType: "ProcessPlan", aggregateId: String(planSubmittedStale.id), type: "ProcessSubmitted", payload: {}, at: new Date(now.getTime() - 3 * 24 * 3600 * 1000) },
@@ -491,7 +491,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read — QC cross-department v
     });
     const submittedElsewhere = await owner.processPlan.create({
       data: {
-        scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptOther.id,
+        jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptOther.id,
         assigneeUserId: makerUser.id, submittedBy: makerUser.id, status: "SUBMITTED",
       },
     });
@@ -570,7 +570,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read — QC cross-department v
     });
     const selfSubmitted = await owner.processPlan.create({
       data: {
-        scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptQc.id,
+        jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: deptQc.id,
         assigneeUserId: qcUser.id, submittedBy: qcUser.id, status: "SUBMITTED",
       },
     });

@@ -272,6 +272,10 @@ export type RecordProcurementEventInput = z.infer<typeof recordProcurementEventS
  */
 export const createDrawingRevisionSchema = z
   .object({
+    // H1: the caller's declared job — assertDrawingReleased/createDrawingRevision's
+    // own job-equality check needs this to refuse an assemblyDrawingId that
+    // belongs to a different job in the same tenant.
+    jobId: id,
     assemblyDrawingId: id,
     revisionNo: z.number().int().positive(),
     status: z.enum(["DRAFT", "RELEASED"]),
@@ -610,6 +614,19 @@ export const rejectSnapshotSchema = z.object({ jobId: id, reason }).strict();
 export type RejectSnapshotInput = z.infer<typeof rejectSnapshotSchema>;
 
 // ── Job intake: equipment catalog and clients ───────────────────────────
+
+/** UPPER_SNAKE, matching ProductFamily.code's schema comment (PRESSURE_VESSEL | HEAT_EXCHANGER | ...). Immutable after creation — templates/routes/QCPs reference it by value. */
+export const createProductFamilySchema = z
+  .object({
+    code: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z][A-Z0-9_]*$/, "Use UPPER_SNAKE_CASE, e.g. PIPE_SPOOL"),
+    name: z.string().trim().min(1, "A name is required"),
+  })
+  .strict();
+export type CreateProductFamilyInput = z.infer<typeof createProductFamilySchema>;
 
 export const createEquipmentTypeSchema = z
   .object({
@@ -961,3 +978,128 @@ export type ApproveDispatchReleaseInput = z.infer<typeof approveDispatchReleaseS
  * (invariant #1) — the schema structurally cannot accept a client-supplied one. */
 export const recordDispatchSchema = z.object({ dispatchBatchId: id }).strict();
 export type RecordDispatchInput = z.infer<typeof recordDispatchSchema>;
+
+// ── Component route authoring (C6) ──────────────────────────────────────
+
+/**
+ * One step of a `RouteTemplate` being authored. Exactly one of `operationId`
+ * (reuse an existing `OperationRef`) or `newOperation` (look-up-or-create by
+ * code) may be given — same mutual-exclusion shape as
+ * `submitAssemblyStepSchema`'s weldJointId/newJoint refine above.
+ */
+const routeStepInputSchema = z
+  .object({
+    seq: z.number().int().positive(),
+    printed: z.string().trim().min(1).optional(),
+    optional: z.boolean().default(false),
+    operationId: id.optional(),
+    newOperation: z
+      .object({
+        code: z.string().trim().toUpperCase().min(1, "A code is required"),
+        name: z.string().trim().min(1, "A name is required"),
+        defaultDepartmentId: id.optional(),
+        sourceColumn: z.string().trim().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine((v) => (v.operationId != null) !== (v.newOperation != null), {
+    message: "Provide either an existing operationId or newOperation fields, not both.",
+  });
+
+/**
+ * Create a new `RouteTemplate` for a (componentTypeId, familyId) pair, or
+ * revise an existing one into a new PUBLISHED version. `familyId: null`
+ * means the route applies to every family until overridden by a
+ * family-specific one (see `component.service.ts`'s
+ * `materializeComponentsFromBomItems`).
+ */
+export const createOrReviseRouteTemplateSchema = z
+  .object({
+    componentTypeId: id,
+    familyId: id.nullable(),
+    name: z.string().trim().min(1, "A name is required"),
+    printedRoute: z.string().trim().min(1).optional(),
+    steps: z.array(routeStepInputSchema).min(1, "A route needs at least one step"),
+  })
+  .strict();
+export type CreateOrReviseRouteTemplateInput = z.infer<typeof createOrReviseRouteTemplateSchema>;
+
+/**
+ * Sets which of a family's own published `TemplateProcess.seq` values an
+ * `OperationRef` rolls up into (Gate 3's `OperationRefFamilySeq`). Checked
+ * against that family's own published route in the service — never trust
+ * the number as-given.
+ */
+export const setOperationRefFamilySeqSchema = z
+  .object({
+    operationRefId: id,
+    familyId: id,
+    leadTimeProcessSeq: z.number().int().positive(),
+  })
+  .strict();
+export type SetOperationRefFamilySeqInput = z.infer<typeof setOperationRefFamilySeqSchema>;
+
+// ── QCP template authoring (C7) ──────────────────────────────────────────
+
+/**
+ * Author a brand-new library `QcpTemplate` (jobId: null) with no existing
+ * QCP to clone from. Items are added afterward, one at a time, via
+ * `addQcpItemToLibraryTemplateSchema`.
+ */
+export const createQcpTemplateLibrarySchema = z
+  .object({
+    jobLabel: z.string().trim().min(1, "A label is required"),
+    vessel: z.string().trim().min(1, "A vessel description is required"),
+    designCode: z.string().trim().min(1).optional(),
+    parties: z
+      .array(
+        z
+          .object({
+            code: z.string().trim().toUpperCase().min(1, "A code is required"),
+            name: z.string().trim().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1, "At least one inspecting party is required"),
+  })
+  .strict();
+export type CreateQcpTemplateLibraryInput = z.infer<typeof createQcpTemplateLibrarySchema>;
+
+/**
+ * Add one `QcpItem` to a library template. `libraryProcessCodes` stands in
+ * for `QcpItemProcess` (which needs a real `JobProcess` to point at, and a
+ * library template has none) — resolved against the cloning job's own
+ * processes by `cloneQcpTemplate`. `partyCodes[].partyCode` is looked up
+ * (or authored inline) against the template's own `InspectionParty` rows;
+ * `qcpCode` must already exist in the tenant's `QcpCodeRef` catalog.
+ */
+export const addQcpItemToLibraryTemplateSchema = z
+  .object({
+    qcpTemplateId: id,
+    sequence: z.number().int().positive(),
+    srNo: z.string().trim().min(1, "A sr. no. is required"),
+    kind: z.enum(["SECTION", "CHECKPOINT"]),
+    section: z.string().trim().min(1).optional(),
+    activity: z.string().trim().min(1, "An activity is required"),
+    characteristic: z.string().trim().min(1).optional(),
+    extentOfCheck: z.string().trim().min(1).optional(),
+    applicableDocument: z.string().trim().min(1).optional(),
+    acceptanceCriteria: z.string().trim().min(1).optional(),
+    record: z.string().trim().min(1).optional(),
+    remarks: z.string().trim().min(1).optional(),
+    libraryProcessCodes: z.array(z.string().trim().min(1)).default([]),
+    partyCodes: z
+      .array(
+        z
+          .object({
+            partyCode: z.string().trim().toUpperCase().min(1, "A party code is required"),
+            qcpCode: z.string().trim().min(1, "A QCP code is required"),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .strict();
+export type AddQcpItemToLibraryTemplateInput = z.infer<typeof addQcpItemToLibraryTemplateSchema>;

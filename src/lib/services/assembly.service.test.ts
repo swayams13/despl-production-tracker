@@ -89,6 +89,7 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
+  let jobId = 0;
   let supA: Actor; // supervisor+QC in deptA (maker)
   let qc: Actor; // QC only, different user (checker)
   let supB: Actor; // supervisor in a DIFFERENT department (wrong-department attempt)
@@ -128,9 +129,10 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
         jobNumber: `JOB-ASM-${Date.now()}`,
       },
     });
+    jobId = job.id;
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
-    const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
-    const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "02" } });
+    const unit1 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
+    const unit2 = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "02" } });
 
     const asmTemplate = await owner.assemblyTemplate.create({ data: { tenantId, familyId: family.id, name: "A-Q" } });
     const asmVersion = await owner.assemblyTemplateVersion.create({
@@ -208,13 +210,13 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
       },
     });
 
-    step1 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts1.id, seq: 1 } })).id;
-    step2 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts2.id, seq: 2 } })).id;
-    step3 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts3.id, seq: 3 } })).id;
-    step4 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts4.id, seq: 4, qcpItemId } })).id;
-    step5 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts5.id, seq: 5 } })).id;
+    step1 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts1.id, seq: 1, jobId } })).id;
+    step2 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts2.id, seq: 2, jobId } })).id;
+    step3 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts3.id, seq: 3, jobId } })).id;
+    step4 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts4.id, seq: 4, qcpItemId, jobId } })).id;
+    step5 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts5.id, seq: 5, jobId } })).id;
     unit1Id = unit1.id;
-    unit2Step1 = (await owner.assemblyStep.create({ data: { unitId: unit2.id, templateStepId: ts1.id, seq: 1 } })).id;
+    unit2Step1 = (await owner.assemblyStep.create({ data: { unitId: unit2.id, templateStepId: ts1.id, seq: 1, jobId } })).id;
 
     rejectCategoryId = (await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })).id;
     testTypeId = (await owner.testTypeRef.create({ data: { tenantId, code: "PAUT", name: "PAUT" } })).id;
@@ -325,6 +327,8 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     const rejections = await owner.assemblyStepRejection.findMany({ where: { assemblyStepId: step2 } });
     expect(rejections).toHaveLength(1);
     expect(rejections[0]).toMatchObject({ categoryId: rejectCategoryId, detail: "PAUT indication", rejectedBy: qc.userId });
+    // H1: rejectAssemblyStep populates jobId on the rejection and the Ncr it opens.
+    expect(rejections[0].jobId).toBe(jobId);
 
     const ndt = await owner.ndtResult.findMany({ where: { weldJointId: rejected.weldJointId! } });
     expect(ndt).toHaveLength(1);
@@ -333,6 +337,7 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     // N1 (Phase 5): reject opens exactly one Ncr, linked to that rejection.
     const ncr = await owner.ncr.findUniqueOrThrow({ where: { assemblyStepRejectionId: rejections[0].id } });
     expect(ncr.status).toBe("OPEN");
+    expect(ncr.jobId).toBe(jobId);
 
     // Rejected work restarts from the SAME step — must be resubmittable.
     const resubmitted = await submitAssemblyStep(supA, { assemblyStepId: step2 });
@@ -432,5 +437,60 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
       outdoorMode: false,
     };
     await expectCode(startAssemblyStep(intruder, { assemblyStepId: unit2Step1 }), ERROR_CODES.NOT_FOUND);
+  });
+
+  it("H1 job-level RLS backstop: verifyAssemblyStep's openNcrs lookup, scoped only by assemblyStepId (never jobId in the query itself), no longer reaches an Ncr row mistagged with a DIFFERENT job's jobId — the fix is app.job_id being set from the step's OWN jobId by lockAssemblyStepForUpdate, not an application-level filter", async () => {
+    // Real reject → real AssemblyStepRejection → real (correctly job-scoped)
+    // Ncr, exactly like rejectAssemblyStep's own code path. Then corrupt that
+    // one row's jobId to a different, real job in the SAME tenant — not
+    // reachable via any app write (same "not reachable via app writes"
+    // convention as component.service.test.ts's kitCrossTenantOp/
+    // kitCrossJobOp), simulating the exact "wrong job_id snuck onto a row"
+    // class of bug this whole plan defends against. Before this task's fix,
+    // verifyAssemblyStep's openNcrs findMany has no jobId in its where clause
+    // at all — it would find and close this mistagged Ncr regardless. After
+    // the fix, app.job_id is set to this step's own job for the rest of the
+    // transaction, and job_isolation RLS (Task 4) makes the mistagged row
+    // invisible to that same findMany — so it survives, unclosed.
+    const otherJob = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-asm-rls-${Date.now()}`,
+        clientId: (await owner.client.create({ data: { tenantId, name: "RLS Client" } })).id,
+        familyId: (await owner.productFamily.findFirstOrThrow({ where: { tenantId } })).id,
+        templateVersionId: (
+          await owner.processTemplateVersion.findFirstOrThrow({ where: { template: { tenantId } } })
+        ).id,
+        jobNumber: `JOB-ASM-RLS-${Date.now()}`,
+      },
+    });
+
+    const step1Row = await owner.assemblyStep.findUniqueOrThrow({ where: { id: step1 }, select: { unitId: true, templateStepId: true } });
+    const rlsUnitEquipment = await owner.unit.findUniqueOrThrow({ where: { id: step1Row.unitId }, select: { equipmentId: true } });
+    const rlsUnit = await owner.unit.create({ data: { jobId, equipmentId: rlsUnitEquipment.equipmentId, serialNo: "RLS-1" } });
+    // Reuse step1's own templateStep (seq 1, deptA, no jointRef — no
+    // previous-step gate, no joint-binding requirement) so this fixture
+    // needs nothing beyond a fresh unit.
+    const rlsStep = await owner.assemblyStep.create({
+      data: { unitId: rlsUnit.id, templateStepId: step1Row.templateStepId, seq: 1, jobId },
+    });
+
+    await startAssemblyStep(supA, { assemblyStepId: rlsStep.id });
+    await submitAssemblyStep(supA, { assemblyStepId: rlsStep.id });
+    await rejectAssemblyStep(qc, { assemblyStepId: rlsStep.id, categoryId: rejectCategoryId });
+
+    const rejection = await owner.assemblyStepRejection.findFirstOrThrow({ where: { assemblyStepId: rlsStep.id } });
+    const ncr = await owner.ncr.findFirstOrThrow({ where: { assemblyStepRejectionId: rejection.id } });
+    expect(ncr.status).not.toBe("CLOSED");
+    // Corrupt: point this real Ncr at a DIFFERENT job in the same tenant.
+    await owner.ncr.update({ where: { id: ncr.id }, data: { jobId: otherJob.id } });
+
+    // reject already left the step IN_PROGRESS (its "to" state) — no second
+    // start needed, just resubmit and verify.
+    await submitAssemblyStep(supA, { assemblyStepId: rlsStep.id });
+    await verifyAssemblyStep(qc, { assemblyStepId: rlsStep.id });
+
+    const afterVerify = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(afterVerify.status).not.toBe("CLOSED");
   });
 });
