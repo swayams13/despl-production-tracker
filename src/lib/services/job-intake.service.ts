@@ -209,6 +209,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       // that function's own comment calls this invariant #10 territory.
       await tx.jobProcessEdge.createMany({
         data: version.edges.map((e) => ({
+          jobId: job.id,
           processId: jpIdByCode.get(tpCodeById.get(e.processId)!)!,
           predecessorId: jpIdByCode.get(tpCodeById.get(e.predecessorId)!)!,
           type: e.type,
