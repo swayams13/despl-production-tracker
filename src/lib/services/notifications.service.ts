@@ -13,10 +13,13 @@ import type { ProcessPlan } from "@/generated/prisma/client";
  * existing mutation transaction (item submitted → QC, reject → maker — see
  * process.service.ts) via `notify()`. The other three have no natural
  * mutation moment to hang off (a plan crossing its due date, a hold point
- * aging, a digest being published) and are reconciled lazily instead of via a
- * cron (CLAUDE.md: cron only if load demands it) — digest-published fires
- * from the reports "Send now" action; the other two run from `syncNotifications`,
- * called opportunistically on every authenticated page load ((app)/layout.tsx).
+ * aging, a digest being published): `digest-published` fires from the
+ * reports "Send now" action (and now also from the daily cron, see
+ * cron.service.ts); the other two (`syncOverdueStageNotifications` /
+ * `syncHoldPointAgedNotifications`) are called from `cron.service.ts`'s
+ * hourly `runAlertReconciliation()`, one call per tenant — they used to run
+ * opportunistically on every authenticated page load ((app)/layout.tsx)
+ * until that became a measurable per-request cost (Gate 4, Sep 2026).
  */
 
 export interface NotifySpec {
@@ -122,14 +125,8 @@ export async function markAllNotificationsRead(actor: Actor): Promise<void> {
  * most once, keyed by (type, entityType, entityId[, unitId in payload]), so
  * repeated calls across many page loads never duplicate a row.
  */
-export async function syncNotifications(actor: Actor): Promise<void> {
-  // Independent transactions — run concurrently rather than paying their
-  // latency twice on every page load.
-  await Promise.all([syncOverdueStageNotifications(actor), syncHoldPointAgedNotifications(actor)]);
-}
-
-async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
-  await withTenant(actor.tenantId, async (tx) => {
+export async function syncOverdueStageNotifications(tenantId: number): Promise<void> {
+  await withTenant(tenantId, async (tx) => {
     // ProcessPlan carries no tenant_id of its own (child-table reachability
     // pattern, see the RLS migration's ponytail note) — an unscoped scan here
     // would span every tenant in a shared DB (caught by a DB-test failure:
@@ -142,7 +139,7 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
         status: { not: "COMPLETE" },
         plannedFinish: { lt: istCalendarDayMarker() },
         scheduleRun: { isCurrent: true },
-        jobProcess: { job: { tenantId: actor.tenantId } },
+        jobProcess: { job: { tenantId } },
       },
       select: { id: true, jobProcessId: true, unitId: true, ownerDepartmentId: true, assigneeUserId: true, scheduleRunId: true, status: true, baselineStart: true, baselineFinish: true, plannedStart: true, plannedFinish: true, submittedBy: true, verifiedBy: true, actualStart: true, actualFinish: true },
     });
@@ -156,13 +153,13 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
     const pending = overduePlans.filter((p) => !notifiedIds.has(p.id));
     if (pending.length === 0) return;
 
-    const productionHeadIds = await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD);
+    const productionHeadIds = await userIdsWithRole(tx, tenantId, ROLES.PRODUCTION_HEAD);
 
     // One batched lookup for every distinct owning department instead of one
     // query per plan.
     const deptIds = [...new Set(pending.map((p) => p.ownerDepartmentId))];
     const supervisorRows = await tx.user.findMany({
-      where: { tenantId: actor.tenantId, active: true, departments: { some: { departmentId: { in: deptIds } } } },
+      where: { tenantId, active: true, departments: { some: { departmentId: { in: deptIds } } } },
       select: { id: true, departments: { select: { departmentId: true } } },
     });
     const supervisorsByDept = new Map<number, number[]>();
@@ -185,7 +182,7 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
         ? []
         : (
             await tx.user.findMany({
-              where: { tenantId: actor.tenantId, id: { in: assigneeIds }, active: true },
+              where: { tenantId, id: { in: assigneeIds }, active: true },
               select: { id: true },
             })
           ).map((u) => u.id),
@@ -205,7 +202,7 @@ async function syncOverdueStageNotifications(actor: Actor): Promise<void> {
       const ctx = await loadPlanNotifyContext(tx, plan as ProcessPlan);
       await notify(
         tx,
-        actor.tenantId,
+        tenantId,
         recipients.map((recipientId) => ({
           recipientId,
           type: "STAGE_OVERDUE",
@@ -286,15 +283,28 @@ export async function nudgeQc(actor: Actor, planId: number, ageDays: number): Pr
   });
 }
 
-async function syncHoldPointAgedNotifications(actor: Actor): Promise<void> {
-  // Its own withTenant transaction (loadQcCockpit) — never nested inside another.
-  const cockpit = await loadQcCockpit(actor);
+export async function syncHoldPointAgedNotifications(tenantId: number): Promise<void> {
+  // loadQcCockpit only ever reads `.tenantId` off the actor it's given
+  // (confirmed by reading its body) — this synthetic actor exists purely to
+  // satisfy that parameter's type. It is never persisted or audited.
+  const cockpit = await loadQcCockpit({
+    userId: 0,
+    tenantId,
+    clientId: null,
+    name: "system",
+    email: "system@internal",
+    roles: [],
+    departmentIds: [],
+    mustChangePassword: false,
+    themePreference: "SYSTEM",
+    outdoorMode: false,
+  });
   const aged = cockpit.holdPoints.filter((h) => h.ageDays > HOLD_POINT_AGE_ALERT_DAYS);
   if (aged.length === 0) return;
 
-  await withTenant(actor.tenantId, async (tx) => {
+  await withTenant(tenantId, async (tx) => {
     const recipients = [
-      ...new Set([...(await userIdsWithRole(tx, actor.tenantId, ROLES.QC)), ...(await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD))]),
+      ...new Set([...(await userIdsWithRole(tx, tenantId, ROLES.QC)), ...(await userIdsWithRole(tx, tenantId, ROLES.PRODUCTION_HEAD))]),
     ];
     if (recipients.length === 0) return;
 
@@ -310,7 +320,7 @@ async function syncHoldPointAgedNotifications(actor: Actor): Promise<void> {
       if (notifiedKeys.has(`${h.qcpItemId}:${h.unitId}`)) continue;
       await notify(
         tx,
-        actor.tenantId,
+        tenantId,
         recipients.map((recipientId) => ({
           recipientId,
           type: "HOLD_POINT_AGED",

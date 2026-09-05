@@ -13,7 +13,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { generateSchedule } = await import("./schedule.service");
   const { startProcess, submitProcess, rejectProcess } = await import("./process.service");
-  const { syncNotifications, nudgeQc } = await import("./notifications.service");
+  const { syncOverdueStageNotifications, nudgeQc } = await import("./notifications.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   afterAll(async () => {
@@ -82,7 +82,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
   // ── idempotency: an isolated throwaway job/plan, never touched by any ──
   // other DB test file's generateSchedule() calls flipping `is_current`
   // elsewhere (same parallel-safety reasoning as spine.read.test.ts).
-  describe("syncNotifications idempotency (isolated fixture)", () => {
+  describe("syncOverdueStageNotifications idempotency (isolated fixture)", () => {
     const REF = { tenant: 1, client: 1, family: 1, templateVersion: 1, dept: 1 };
     const JOB_NUMBER = "NOTIFY-SYNC-TEST";
     let jobId = 0;
@@ -126,13 +126,11 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
     afterAll(teardown);
 
     it("never duplicates the STAGE_OVERDUE row for the same plan across repeated calls", async () => {
-      const ph = actor(REF.tenant, 1, [ROLES.PRODUCTION_HEAD]);
-
-      await syncNotifications(ph);
+      await syncOverdueStageNotifications(REF.tenant);
       const first = await owner.notification.count({ where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: planId } });
       expect(first).toBeGreaterThan(0);
 
-      await syncNotifications(ph);
+      await syncOverdueStageNotifications(REF.tenant);
       const second = await owner.notification.count({ where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: planId } });
 
       expect(second).toBe(first);
@@ -218,8 +216,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
     });
 
     it("an assigned overdue plan notifies the assignee + PH only, not other dept members", async () => {
-      const ph = actor(tenantId, phUserId, [ROLES.PRODUCTION_HEAD]);
-      await syncNotifications(ph);
+      await syncOverdueStageNotifications(tenantId);
 
       const notifs = await owner.notification.findMany({
         where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: assignedPlanId },
@@ -228,8 +225,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
     });
 
     it("an unassigned overdue plan falls back to all dept members + PH (unchanged behavior)", async () => {
-      const ph = actor(tenantId, phUserId, [ROLES.PRODUCTION_HEAD]);
-      await syncNotifications(ph);
+      await syncOverdueStageNotifications(tenantId);
 
       const notifs = await owner.notification.findMany({
         where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: unassignedPlanId },
@@ -242,8 +238,7 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
     // replaced. A deactivated assignee can't log in, so notifying only them
     // (+ PH) leaves dept supervisors — who COULD act on it — never notified.
     it("an overdue plan assigned to an INACTIVE user falls back to active dept members + PH, not just PH", async () => {
-      const ph = actor(tenantId, phUserId, [ROLES.PRODUCTION_HEAD]);
-      await syncNotifications(ph);
+      await syncOverdueStageNotifications(tenantId);
 
       const notifs = await owner.notification.findMany({
         where: { type: "STAGE_OVERDUE", entityType: "ProcessPlan", entityId: inactiveAssigneePlanId },
