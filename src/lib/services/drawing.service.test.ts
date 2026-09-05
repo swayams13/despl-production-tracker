@@ -89,14 +89,14 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
   }
 
   it("creates Rev A as RELEASED, then Rev B supersedes it — both remain queryable (PRODUCTION_HEAD)", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
 
-    const revA = await createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
+    const revA = await createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
     expect(revA.status).toBe("RELEASED");
     expect(revA.releasedAt).toBeInstanceOf(Date);
 
-    const revB = await createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 2, status: "RELEASED" });
+    const revB = await createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 2, status: "RELEASED" });
     expect(revB.status).toBe("RELEASED");
 
     const all = await owner.drawingRevision.findMany({
@@ -111,11 +111,11 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
   });
 
   it("issuing a new DRAFT revision still supersedes a prior RELEASED one (unconditional per the brief: any new revision flips a prior RELEASED row), leaving the CUTTING gate correctly refusing until the new one releases (ADMIN)", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
 
-    await createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
-    await createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 2, status: "DRAFT" });
+    await createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
+    await createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 2, status: "DRAFT" });
 
     const all = await owner.drawingRevision.findMany({
       where: { assemblyDrawingId: drawing.id },
@@ -128,7 +128,7 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
   });
 
   it("cross-tenant: another tenant's actor cannot issue a revision against this drawing by id (NOT_FOUND)", async () => {
-    const { drawing } = await fixture();
+    const { job, drawing } = await fixture();
     const otherOrg = await owner.organization.create({ data: { code: `TEST-DWG-XT-${Date.now()}`, name: "Other tenant" } });
     createdOrgIds.push(otherOrg.id);
     const otherUser = await owner.user.create({
@@ -145,19 +145,19 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
     // the NOT_FOUND path (cross-tenant lookup) is what's under test here.
     const intruder: Actor = { ...actorBase(otherOrg.id, otherUser.id), roles: [ROLES.ADMIN] };
     await expectCode(
-      createDrawingRevision(intruder, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
+      createDrawingRevision(intruder, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
       ERROR_CODES.NOT_FOUND,
     );
   });
 
   it("client user cannot issue a revision — read-only, no exceptions (#1 access rule)", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     // roles: [ADMIN] so the ONLY thing that can throw FORBIDDEN is
     // assertNotClientUser, not the role gate (same isolation as
     // mtc.service.test.ts's clientActor convention).
     const clientActor: Actor = { ...actorBase(tenantId, user.id), clientId: 1, roles: [ROLES.ADMIN] };
     await expectCode(
-      createDrawingRevision(clientActor, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
+      createDrawingRevision(clientActor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
       ERROR_CODES.FORBIDDEN,
     );
   });
@@ -165,19 +165,19 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
   // ── Task review Critical: role gate ─────────────────────────────────────
 
   it("role gate: a supervisor (no ADMIN/PRODUCTION_HEAD role) cannot issue a revision — the gate must not be self-clearing by the party it constrains (FORBIDDEN)", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     const supervisor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.SUPERVISOR] };
     await expectCode(
-      createDrawingRevision(supervisor, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
+      createDrawingRevision(supervisor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
       ERROR_CODES.FORBIDDEN,
     );
   });
 
   it("role gate: QC alone (no ADMIN/PRODUCTION_HEAD) cannot issue a revision either — not a QC action", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     const qc: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.QC] };
     await expectCode(
-      createDrawingRevision(qc, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
+      createDrawingRevision(qc, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
       ERROR_CODES.FORBIDDEN,
     );
   });
@@ -185,26 +185,26 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
   it("role gate: ADMIN succeeds", async () => {
     const { tenantId, job, drawing, user } = await fixture();
     const admin: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
-    const rev = await createDrawingRevision(admin, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
+    const rev = await createDrawingRevision(admin, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
     expect(rev.status).toBe("RELEASED");
     // H1: createDrawingRevision populates jobId.
     expect(rev.jobId).toBe(job.id);
   });
 
   it("role gate: PRODUCTION_HEAD succeeds", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
-    const rev = await createDrawingRevision(ph, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
+    const rev = await createDrawingRevision(ph, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
     expect(rev.status).toBe("RELEASED");
   });
 
   // ── Task review Important: revisionNo monotonicity ──────────────────────
 
   it("monotonicity: a revisionNo not strictly greater than the drawing's current highest is refused, with a recoverable error naming the current highest", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
 
-    await createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 5, status: "RELEASED" });
+    await createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 5, status: "RELEASED" });
 
     // A typo'd lower number (e.g. 3) must not silently create a row that
     // would make Rev 5 stop being "current" (max(revisionNo)) — no
@@ -212,7 +212,7 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
     // what to do instead.
     let thrown: unknown;
     try {
-      await createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 3, status: "RELEASED" });
+      await createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 3, status: "RELEASED" });
     } catch (e) {
       thrown = e;
     }
@@ -221,16 +221,40 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
 
     // Duplicate of the current highest is refused too, not silently accepted.
     await expectCode(
-      createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 5, status: "RELEASED" }),
+      createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 5, status: "RELEASED" }),
       ERROR_CODES.DRAWING_REVISION_NOT_INCREASING,
     );
 
     // Rev 5 is still RELEASED — the failed attempts never touched it.
-    const current = await owner.drawingRevision.findFirst({ where: { assemblyDrawingId: drawing.id, revisionNo: 5 } });
+    const current = await owner.drawingRevision.findFirst({ where: { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 5 } });
     expect(current?.status).toBe("RELEASED");
 
     // A genuinely higher number still works.
-    const revSix = await createDrawingRevision(actor, { assemblyDrawingId: drawing.id, revisionNo: 6, status: "RELEASED" });
+    const revSix = await createDrawingRevision(actor, { jobId: job.id, assemblyDrawingId: drawing.id, revisionNo: 6, status: "RELEASED" });
     expect(revSix.status).toBe("RELEASED");
+  });
+
+  // ── H1: job-equality assertion ──────────────────────────────────────────
+
+  it("createDrawingRevision refuses when assemblyDrawingId belongs to a different job than the caller's declared jobId (NOT_FOUND)", async () => {
+    const { tenantId, job, drawing, user } = await fixture();
+    // A second job in the SAME tenant, with its own drawing.
+    const otherJob = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-dwg-xj-${Date.now()}`,
+        clientId: job.clientId,
+        familyId: job.familyId,
+        templateVersionId: job.templateVersionId,
+        jobNumber: `DE-DWG-XJ-${Date.now()}`,
+      },
+    });
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+    // `drawing` belongs to the original job; declaring `otherJob.id` must be
+    // refused rather than silently issuing the revision under the wrong job.
+    await expectCode(
+      createDrawingRevision(actor, { jobId: otherJob.id, assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" }),
+      ERROR_CODES.NOT_FOUND,
+    );
   });
 });

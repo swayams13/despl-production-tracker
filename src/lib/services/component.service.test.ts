@@ -155,6 +155,9 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   let drawingReleasedRevisionId = 0;
   let drawingSeamCuttingOp = 0; // governingDrawingId null (SEAM) → allowed, no stamp
   let drawingGatedNonCuttingOp = 0; // RECEIPT (not CUTTING) on a component whose drawing is unreleased → allowed, gate is CUTTING-specific
+  // H1 — governingDrawingId pointed (directly, bypassing linkGoverningDrawing)
+  // at a DIFFERENT job's RELEASED drawing → assertDrawingReleased must still refuse.
+  let drawingCrossJobCuttingOp = 0;
   // S18 — linkGoverningDrawing fixtures.
   let linkComponentId = 0; // fresh Component, governingDrawingId starts null
   let linkDrawingId = 0; // AssemblyDrawing belonging to the same job
@@ -497,6 +500,24 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     linkOtherJobDrawingId = (
       await owner.assemblyDrawing.create({
         data: { jobId: otherJobForLink.id, drawingTypeId: drawingType.id, drawingNo: "GA-OTHER-JOB" },
+      })
+    ).id;
+
+    // H1 — a RELEASED revision on the OTHER job's drawing, so the cross-job
+    // test below proves the job-equality check itself, not just the SEAM/
+    // DRAFT path assertDrawingReleased already covers.
+    await owner.drawingRevision.create({
+      data: { jobId: otherJobForLink.id, assemblyDrawingId: linkOtherJobDrawingId, revisionNo: 1, status: "RELEASED", releasedAt: new Date() },
+    });
+    const componentCrossJobDrawing = await owner.component.create({
+      // governingDrawingId set directly here (bypassing linkGoverningDrawing's
+      // own job-equality guard) to simulate the stale/cross-job link H1 exists
+      // to backstop against.
+      data: { jobId, equipmentId: equipment.id, tag: "DWG-CROSS-JOB", componentTypeId: componentType.id, governingDrawingId: linkOtherJobDrawingId },
+    });
+    drawingCrossJobCuttingOp = (
+      await owner.componentOperation.create({
+        data: { jobId, componentId: componentCrossJobDrawing.id, seq: 1, operationId: opCutting.id },
       })
     ).id;
 
@@ -880,6 +901,16 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   it("drawing gate is CUTTING-specific: a non-CUTTING operation (RECEIPT) on a component with an unreleased governing drawing is NOT blocked (violation case 4)", async () => {
     const started = await startComponentOperation(supA, { componentOperationId: drawingGatedNonCuttingOp });
     expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  // ── H1: assertDrawingReleased refuses a cross-job governingDrawingId,
+  // even when that other job's drawing IS RELEASED ────────────────────────
+
+  it("drawing gate: assertDrawingReleased refuses when the component's job and the governing drawing's job disagree, even though the other job's drawing is RELEASED", async () => {
+    await expectCode(
+      startComponentOperation(supA, { componentOperationId: drawingCrossJobCuttingOp }),
+      ERROR_CODES.DRAWING_NOT_RELEASED,
+    );
   });
 
   // ── S18: linkGoverningDrawing — the write assertDrawingReleased's gate depends on ────

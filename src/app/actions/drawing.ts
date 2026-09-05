@@ -11,7 +11,7 @@ export async function createDrawingRevisionAction(
   status: "DRAFT" | "RELEASED",
 ): Promise<ActionResult> {
   try {
-    await createDrawingRevision(await requireActor(), { assemblyDrawingId, revisionNo, status });
+    await createDrawingRevision(await requireActor(), { jobId, assemblyDrawingId, revisionNo, status });
     revalidatePath(`/jobs/${jobId}`);
     return { ok: true };
   } catch (e) {

@@ -272,6 +272,10 @@ export type RecordProcurementEventInput = z.infer<typeof recordProcurementEventS
  */
 export const createDrawingRevisionSchema = z
   .object({
+    // H1: the caller's declared job — assertDrawingReleased/createDrawingRevision's
+    // own job-equality check needs this to refuse an assemblyDrawingId that
+    // belongs to a different job in the same tenant.
+    jobId: id,
     assemblyDrawingId: id,
     revisionNo: z.number().int().positive(),
     status: z.enum(["DRAFT", "RELEASED"]),

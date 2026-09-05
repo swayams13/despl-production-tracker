@@ -894,7 +894,7 @@ export async function assertDrawingReleased(
 ): Promise<number | null> {
   const component = await tx.component.findFirst({
     where: { id: componentId, equipment: { job: { tenantId } } },
-    select: { governingDrawingId: true },
+    select: { governingDrawingId: true, jobId: true },
   });
   if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
   if (component.governingDrawingId == null) return null; // SEAM: no drawing link, nothing to check
@@ -903,11 +903,26 @@ export async function assertDrawingReleased(
     where: { id: component.governingDrawingId, job: { tenantId } },
     select: {
       drawingNo: true,
+      jobId: true,
       revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true, status: true } },
     },
   });
   if (!drawing) {
     throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId: component.governingDrawingId });
+  }
+
+  // H1: governingDrawingId is manually set (see the schema comment on
+  // Component.governingDrawingId) and not re-validated after linking — a
+  // stale or directly-written cross-job link must not silently pass this
+  // gate just because the tenant matches. linkGoverningDrawing itself
+  // already guards this at write time; this is the read-time backstop.
+  if (component.jobId !== drawing.jobId) {
+    throw new AppError(ERROR_CODES.DRAWING_NOT_RELEASED, {
+      componentId,
+      assemblyDrawingId: component.governingDrawingId,
+      drawingNo: drawing.drawingNo,
+      currentStatus: "CROSS_JOB_DRAWING",
+    });
   }
 
   const current = drawing.revisions[0];
