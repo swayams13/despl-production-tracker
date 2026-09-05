@@ -115,7 +115,7 @@ Update at the end of every session, before `/clear`.
 |---|---|---|---|
 | — | Delivery channel decided (WhatsApp vs email) | ☐ | decide before building the scheduler |
 | — | Scheduler + digest + alert reconciliation | ☐ | v3 §9 |
-| — | Job-level RLS · `tenant_id` on child tables | ☐ | hard-blocking before tenant #2 |
+| H1 | Job-level RLS · `tenant_id` on child tables | ☑ | 5 Sep: PR #37 merged (`d925d8a`) and applied to production, same session. `jobId` denormalized onto 28 job-child tables, fail-open `job_isolation` RLS policy (mirrors `tenant_isolation`'s mechanism, opposite fail-open/closed direction, permanently), 8 named risk-area call sites now assert job equality not just tenant membership, 7-case cross-job independence suite passing. Full account in `progress.md`'s "H1: job-level RLS backstop" session log — plan grew 3x from real findings during execution (creation-path population, a genuine Postgres RLS cast defect, 2 more gaps from adversarial code review), plus an unrelated concurrent-session migration incident caught and resolved with no data loss before the real production apply. Rehearsed via `MERGE-RUNBOOK.md`, applied watched, verified: `migrate diff --exit-code` → 0, real browser login pass, clean deploy/build/HTTP logs, `/api/health` + `/login` → 200. |
 | — | Pagination + the three page-load N+1s | ☐ | |
 | — | KPI consolidation | ☐ | start with cycle-time — two calendars, wrong number |
 | — | Cutover · training · refusal guide · sign-off | ☐ | the highest-risk unplanned work in the project |
