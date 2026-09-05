@@ -961,3 +961,65 @@ export type ApproveDispatchReleaseInput = z.infer<typeof approveDispatchReleaseS
  * (invariant #1) — the schema structurally cannot accept a client-supplied one. */
 export const recordDispatchSchema = z.object({ dispatchBatchId: id }).strict();
 export type RecordDispatchInput = z.infer<typeof recordDispatchSchema>;
+
+// ── Component route authoring (C6) ──────────────────────────────────────
+
+/**
+ * One step of a `RouteTemplate` being authored. Exactly one of `operationId`
+ * (reuse an existing `OperationRef`) or `newOperation` (look-up-or-create by
+ * code) may be given — same mutual-exclusion shape as
+ * `submitAssemblyStepSchema`'s weldJointId/newJoint refine above.
+ */
+const routeStepInputSchema = z
+  .object({
+    seq: z.number().int().positive(),
+    printed: z.string().trim().min(1).optional(),
+    optional: z.boolean().default(false),
+    operationId: id.optional(),
+    newOperation: z
+      .object({
+        code: z.string().trim().toUpperCase().min(1, "A code is required"),
+        name: z.string().trim().min(1, "A name is required"),
+        defaultDepartmentId: id.optional(),
+        sourceColumn: z.string().trim().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .refine((v) => (v.operationId != null) !== (v.newOperation != null), {
+    message: "Provide either an existing operationId or newOperation fields, not both.",
+  });
+
+/**
+ * Create a new `RouteTemplate` for a (componentTypeId, familyId) pair, or
+ * revise an existing one into a new PUBLISHED version. `familyId: null`
+ * means the route applies to every family until overridden by a
+ * family-specific one (see `component.service.ts`'s
+ * `materializeComponentsFromBomItems`).
+ */
+export const createOrReviseRouteTemplateSchema = z
+  .object({
+    componentTypeId: id,
+    familyId: id.nullable(),
+    name: z.string().trim().min(1, "A name is required"),
+    printedRoute: z.string().trim().min(1).optional(),
+    steps: z.array(routeStepInputSchema).min(1, "A route needs at least one step"),
+  })
+  .strict();
+export type CreateOrReviseRouteTemplateInput = z.infer<typeof createOrReviseRouteTemplateSchema>;
+
+/**
+ * Sets which of a family's own published `TemplateProcess.seq` values an
+ * `OperationRef` rolls up into (Gate 3's `OperationRefFamilySeq`). Checked
+ * against that family's own published route in the service — never trust
+ * the number as-given.
+ */
+export const setOperationRefFamilySeqSchema = z
+  .object({
+    operationRefId: id,
+    familyId: id,
+    leadTimeProcessSeq: z.number().int().positive(),
+  })
+  .strict();
+export type SetOperationRefFamilySeqInput = z.infer<typeof setOperationRefFamilySeqSchema>;

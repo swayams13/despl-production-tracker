@@ -225,3 +225,175 @@ export async function loadTemplateProcesses(
     }));
   });
 }
+
+// ── Component route authoring (C6) ──────────────────────────────────────
+
+export interface RouteStepAdminRow {
+  seq: number;
+  operationCode: string;
+  operationName: string;
+  printed: string | null;
+  optional: boolean;
+}
+
+export interface RouteTemplateVersionAdminRow {
+  id: number;
+  version: number;
+  status: string;
+  printedRoute: string | null;
+  stepCount: number;
+  steps: RouteStepAdminRow[];
+  /** Component rows pinned to this exact version (`Component.routeVersionId`). */
+  jobCount: number;
+}
+
+export interface RouteTemplateAdminRow {
+  id: number;
+  name: string;
+  versions: RouteTemplateVersionAdminRow[];
+}
+
+export interface ComponentTypeRouteAdminRow {
+  componentTypeId: number;
+  componentTypeCode: string;
+  componentTypeName: string;
+  /** The familyId: null route for this component type, if one exists. */
+  shared: RouteTemplateAdminRow | null;
+  /** Family-specific routes, which take precedence over `shared` at intake time. */
+  families: Array<{ familyId: number; familyName: string; route: RouteTemplateAdminRow }>;
+}
+
+export interface OperationRefFamilySeqAdminRow {
+  operationRefId: number;
+  operationCode: string;
+  operationName: string;
+  mappings: Array<{ familyId: number; familyName: string; leadTimeProcessSeq: number }>;
+}
+
+export interface RouteTemplateAdmin {
+  componentTypes: ComponentTypeRouteAdminRow[];
+  /** Every OperationRef used by any route in this tenant, with its per-family lead-time-seq mappings. */
+  operationFamilySeqs: OperationRefFamilySeqAdminRow[];
+  /** Every ProductFamily — for the family picker in the author/revise dialog. */
+  families: Array<{ id: number; name: string }>;
+  /** The full OperationRef catalog — for the step editor's "existing operation" picker. */
+  operations: Array<{ id: number; code: string; name: string; defaultDepartmentId: number | null }>;
+  departments: Array<{ id: number; name: string }>;
+}
+
+/**
+ * Everything the route-authoring admin screen needs in one round trip: every
+ * `ComponentTypeRef`'s routes (shared + per-family), each version's steps,
+ * every referenced `OperationRef`'s current `OperationRefFamilySeq` mappings
+ * (so the UI can show e.g. "CUTTING → PRESSURE_VESSEL: seq 12, PIPE_SPOOL:
+ * (not set)"), and the plain option lists (families, the full operation
+ * catalog, departments) the author/revise dialog needs for its pickers.
+ */
+export async function loadRouteTemplateAdmin(actor: Actor): Promise<RouteTemplateAdmin> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const [componentTypes, families, operations, departments] = await Promise.all([
+      tx.componentTypeRef.findMany({
+        where: { tenantId: actor.tenantId },
+        orderBy: { name: "asc" },
+      }),
+      tx.productFamily.findMany({
+        where: { tenantId: actor.tenantId, active: true },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+      tx.operationRef.findMany({
+        where: { tenantId: actor.tenantId },
+        orderBy: { name: "asc" },
+        select: { id: true, code: true, name: true, defaultDepartmentId: true },
+      }),
+      tx.department.findMany({
+        where: { tenantId: actor.tenantId },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+    ]);
+
+    const routes = await tx.routeTemplate.findMany({
+      where: { tenantId: actor.tenantId },
+      include: {
+        family: { select: { id: true, name: true } },
+        versions: {
+          orderBy: { version: "desc" },
+          include: {
+            steps: { orderBy: { seq: "asc" }, include: { operation: { select: { code: true, name: true } } } },
+            _count: { select: { components: true } },
+          },
+        },
+      },
+    });
+
+    const routesByComponentType = new Map<number, typeof routes>();
+    for (const r of routes) {
+      const list = routesByComponentType.get(r.componentTypeId) ?? [];
+      list.push(r);
+      routesByComponentType.set(r.componentTypeId, list);
+    }
+
+    const toRouteRow = (r: (typeof routes)[number]): RouteTemplateAdminRow => ({
+      id: r.id,
+      name: r.name,
+      versions: r.versions.map((v) => ({
+        id: v.id,
+        version: v.version,
+        status: v.status,
+        printedRoute: v.printedRoute,
+        stepCount: v.steps.length,
+        steps: v.steps.map((s) => ({
+          seq: s.seq,
+          operationCode: s.operation.code,
+          operationName: s.operation.name,
+          printed: s.printed,
+          optional: s.optional,
+        })),
+        jobCount: v._count.components,
+      })),
+    });
+
+    const componentTypeRows: ComponentTypeRouteAdminRow[] = componentTypes.map((ct) => {
+      const forType = routesByComponentType.get(ct.id) ?? [];
+      const shared = forType.find((r) => r.familyId == null);
+      const familyRoutes = forType
+        .filter((r) => r.familyId != null)
+        .map((r) => ({ familyId: r.familyId!, familyName: r.family!.name, route: toRouteRow(r) }));
+      return {
+        componentTypeId: ct.id,
+        componentTypeCode: ct.code,
+        componentTypeName: ct.name,
+        shared: shared ? toRouteRow(shared) : null,
+        families: familyRoutes,
+      };
+    });
+
+    const operationRefIds = [
+      ...new Set(routes.flatMap((r) => r.versions.flatMap((v) => v.steps.map((s) => s.operationId)))),
+    ];
+    const usedOperations =
+      operationRefIds.length === 0
+        ? []
+        : await tx.operationRef.findMany({
+            where: { id: { in: operationRefIds } },
+            include: { familySeqMappings: { include: { family: { select: { id: true, name: true } } } } },
+          });
+
+    const operationFamilySeqs: OperationRefFamilySeqAdminRow[] = usedOperations.map((o) => ({
+      operationRefId: o.id,
+      operationCode: o.code,
+      operationName: o.name,
+      mappings: o.familySeqMappings.map((m) => ({
+        familyId: m.familyId,
+        familyName: m.family.name,
+        leadTimeProcessSeq: m.leadTimeProcessSeq,
+      })),
+    }));
+
+    return { componentTypes: componentTypeRows, operationFamilySeqs, families, operations, departments };
+  });
+}

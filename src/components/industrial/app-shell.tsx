@@ -204,6 +204,7 @@ export function AppShell({
       ? [
           { href: "/admin/equipment-types", label: "Equipment types", icon: icons.admin },
           { href: "/admin/templates", label: "Process routes", icon: icons.admin },
+          { href: "/admin/routes", label: "Component routes", icon: icons.admin },
         ]
       : []),
     ...(userRoles.includes("ADMIN") || userRoles.includes("MANAGEMENT")
