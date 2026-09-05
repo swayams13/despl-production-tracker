@@ -187,4 +187,59 @@ describe.skipIf(!RUN_DB)("dispositionNcr (DB-backed)", async () => {
     expect(closed.reworkFinishedAt).toBeInstanceOf(Date);
     expect(closed.reworkFinishedAt!.getTime()).toBeGreaterThanOrEqual(closed.reworkStartedAt!.getTime());
   });
+
+  it("closeNcr refuses an ncrId belonging to a different job in the same tenant", async () => {
+    const { withTenant } = await import("@/lib/db");
+    const { closeNcr } = await import("./ncr.service");
+
+    // Job A: the fixture job/op/rejection/Ncr from beforeAll (ncrId, already CLOSED
+    // by the previous test, but closeNcr's job filter is checked before the
+    // state-transition check so a wrong jobId still throws NOT_FOUND first).
+    const ncrRow = await owner.ncr.findUniqueOrThrow({ where: { id: ncrId } });
+    const jobAId = ncrRow.jobId;
+
+    // Job B: a second, real job in the SAME tenant with its own open Ncr, so
+    // this is a same-tenant cross-job attempt, not a cross-tenant one.
+    const client = await owner.client.create({ data: { tenantId, name: "Client B" } });
+    const family = await owner.productFamily.findFirstOrThrow({ where: { tenantId } });
+    const version = await owner.processTemplateVersion.findFirstOrThrow({ where: { template: { tenantId } } });
+    const jobB = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-ncr-b-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-NCR-B-${Date.now()}`,
+      },
+    });
+    const equipmentB = await owner.equipment.create({ data: { jobId: jobB.id, name: "Vessel B" } });
+    const componentTypeB = await owner.componentTypeRef.findFirstOrThrow({ where: { tenantId } });
+    const opRefB = await owner.operationRef.findFirstOrThrow({ where: { tenantId } });
+    const componentB = await owner.component.create({
+      data: { jobId: jobB.id, equipmentId: equipmentB.id, tag: "N1B", componentTypeId: componentTypeB.id },
+    });
+    const opB = await owner.componentOperation.create({
+      data: { jobId: jobB.id, componentId: componentB.id, seq: 1, operationId: opRefB.id },
+    });
+    const rejectCategory = await owner.delayCategoryRef.findFirstOrThrow({ where: { tenantId } });
+    const supB: Actor = { ...supA, departmentIds: supA.departmentIds };
+    await startComponentOperation(supB, { componentOperationId: opB.id });
+    await submitComponentOperation(supB, { componentOperationId: opB.id });
+    await rejectComponentOperation(qc, { componentOperationId: opB.id, categoryId: rejectCategory.id, detail: "b" });
+    const rejectionB = await owner.componentOperationRejection.findFirstOrThrow({ where: { componentOperationId: opB.id } });
+    const ncrB = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejectionB.id } });
+    expect(ncrB.jobId).toBe(jobB.id);
+
+    // Calling context scoped to Job A's own ncrId, but passing Job B's jobId
+    // — must be refused, not silently succeed against the wrong job.
+    await expectCode(
+      withTenant(tenantId, (tx) => closeNcr(tx, qc, { ncrId: ncrB.id, jobId: jobAId })),
+      ERROR_CODES.NOT_FOUND,
+    );
+
+    // Sanity: the correct jobId for that same ncrId succeeds.
+    const closedB = await withTenant(tenantId, (tx) => closeNcr(tx, qc, { ncrId: ncrB.id, jobId: ncrB.jobId }));
+    expect(closedB.status).toBe("CLOSED");
+  });
 });

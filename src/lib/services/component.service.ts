@@ -405,7 +405,7 @@ export async function verifyComponentOperation(
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
       for (const ncr of openNcrs) {
-        await closeNcr(tx, actor, { ncrId: ncr.id });
+        await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
       }
       return {
         result: updated,

@@ -247,7 +247,7 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
         data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
       });
       for (const ncr of openNcrs) {
-        await closeNcr(tx, actor, { ncrId: ncr.id });
+        await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
       }
       // A4: an INSPECTION step verifying IS the QCP checkpoint result — record
       // it so assertNoOpenHoldPoint and the QCP/hold-point view see the same

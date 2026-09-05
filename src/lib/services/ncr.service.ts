@@ -58,6 +58,10 @@ async function lockNcrForUpdate(tx: Tx, ncrId: number, tenantId: number): Promis
     },
   });
   if (!ncr) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Ncr", ncrId });
+  // H1 job-level RLS backstop: scope every subsequent query in THIS
+  // transaction to the Ncr's own (denormalized) jobId, same pattern as
+  // lockProcessPlanForUpdate/lockAssemblyStepForUpdate.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(ncr.jobId)}, true)`;
   return ncr;
 }
 
@@ -122,16 +126,14 @@ export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): 
  * Stamps `reworkFinishedAt` in the same write when rework was in progress —
  * that pairing IS "elapsed rework time" (dashboard aggregation reads both).
  *
- * NOT a trust boundary — the `ncrId` lookup below carries no tenant filter of
- * its own. Safe today because every caller (verifyComponentOperation,
- * verifyAssemblyStep) already resolved the operation/step tenant-scoped
- * before finding these `ncrId`s. Do not call this directly from a Server
- * Action or route handler with a client-supplied ncrId — go through
- * `dispositionNcr` (which does tenant-check) or add a tenant filter here
- * first.
+ * H1 job-level RLS backstop: takes an explicit `jobId` and filters on it —
+ * a real tenant+job filter, not just RLS as a silent backstop for a
+ * known-bad query shape. Both callers (verifyComponentOperation,
+ * verifyAssemblyStep) already have a job-scoped Ncr row in hand at the call
+ * site (from their own `tx.ncr.findMany`) and pass its own `.jobId`.
  */
-export async function closeNcr(tx: Tx, actor: Actor, input: { ncrId: number }): Promise<Ncr> {
-  const ncr = await tx.ncr.findFirst({ where: { id: input.ncrId } });
+export async function closeNcr(tx: Tx, actor: Actor, input: { ncrId: number; jobId: number }): Promise<Ncr> {
+  const ncr = await tx.ncr.findFirst({ where: { id: input.ncrId, jobId: input.jobId } });
   if (!ncr) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Ncr", ncrId: input.ncrId });
   const to = assertNcrTransition("close", ncr.status);
 
