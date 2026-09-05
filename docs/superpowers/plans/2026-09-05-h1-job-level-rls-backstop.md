@@ -762,6 +762,74 @@ git commit -m "feat(H1): add withJob() wrapper extending withTenant with job-lev
 
 ---
 
+## Task 5B: Fix `job_isolation`'s empty-string cast defect (found running Task 6, 5 Sep 2026)
+
+**Real bug found in the Task 4 migration, not a sequencing issue this time.** A Postgres custom GUC like `app.job_id`, once set via `set_config('app.job_id', 'X', true)` (transaction-local) on a pooled/reused connection, does not revert to unset/NULL after that transaction ends — it resets to the empty string `''`. The `job_isolation` policy's guard (`current_setting('app.job_id', true) = ''` as a short-circuit before the cast) does NOT reliably protect the `::int` cast: on any job-scoped table with a btree index on `job_id` (most of them, added by Task 3/4), Postgres's query planner can evaluate `job_id = current_setting(...)::int` as a candidate index condition at PLANNING time, independent of the OR's other branches — so the cast of the literal `''` throws `invalid input syntax for type integer: ""` before the query ever runs. Confirmed by direct `psql` reproduction as `despl_web` (the RLS-subject role — testing as the `postgres` superuser bypasses RLS entirely and hides this). Task 6 is the first real code path that sets `app.job_id` broadly enough (every process start/submit/verify/reject/hold/resume/delay-file call) to hit this at scale across the DB-gated suite; Task 5's own narrow test never exercised enough connections to surface it.
+
+**The fix is a standard, well-known Postgres idiom for exactly this failure mode — not a design decision:** wrap the value in `NULLIF(..., '')` BEFORE casting, so the cast target is either a real digit string or SQL `NULL` — never the literal `''`. `NULLIF(current_setting('app.job_id', true), '')::int` can never throw on empty string, because `NULLIF` converts `''` to `NULL` first, and `NULL::int` is always valid (produces `NULL`, satisfied by the earlier `OR ... IS NULL` branch).
+
+**Files:**
+- Create: `prisma/migrations/<timestamp>_h1_job_isolation_rls_nullif_fix/migration.sql` (a NEW forward-only migration — `20260905090000_h1_job_isolation_rls` from Task 4 is already committed and applied to `despl_test`; per this repo's "never edit an applied migration" convention, fix it forward, don't edit that file in place)
+
+- [ ] **Step 1: Hand-write the corrective migration**
+
+```sql
+-- H1 — job-level RLS backstop, fixup: the job_isolation policy from
+-- 20260905090000 could throw "invalid input syntax for type integer: ''"
+-- when app.job_id has reset to the empty string (a pooled-connection GUC
+-- reset artifact, not an unset value) on any indexed job_id column, because
+-- Postgres's planner can evaluate the ::int cast at plan time independent of
+-- the OR's other branches. Fix: NULLIF before cast, so the cast target is
+-- never the literal ''.
+DO $$
+DECLARE
+  t text;
+  job_tables text[] := ARRAY[
+    'units', 'bom_revisions', 'bom_items', 'components',
+    'job_process_edges', 'process_plans', 'weld_joint_welders',
+    'ndt_results', 'drawing_revisions', 'dispatch_batch_units',
+    'inspection_parties', 'qcp_items', 'component_operations',
+    'component_operation_rejections', 'paint_records', 'dft_readings',
+    'assembly_steps', 'assembly_step_rejections', 'ncrs',
+    'qcp_executions', 'qcp_item_processes', 'qcp_item_party_codes',
+    'delay_reasons', 'stock_lots', 'stock_txns', 'procurement_events',
+    'material_identifications', 'item_tests'
+  ];
+BEGIN
+  FOREACH t IN ARRAY job_tables LOOP
+    EXECUTE format('DROP POLICY IF EXISTS job_isolation ON %I', t);
+    EXECUTE format($f$
+      CREATE POLICY job_isolation ON %I
+        USING (
+          job_id IS NULL
+          OR NULLIF(current_setting('app.job_id', true), '') IS NULL
+          OR job_id = NULLIF(current_setting('app.job_id', true), '')::int
+        )
+        WITH CHECK (
+          job_id IS NULL
+          OR NULLIF(current_setting('app.job_id', true), '') IS NULL
+          OR job_id = NULLIF(current_setting('app.job_id', true), '')::int
+        )
+    $f$, t);
+  END LOOP;
+END
+$$;
+```
+
+- [ ] **Step 2: Apply to `despl_test`, re-run Task 6's full regression**
+
+Run: `pnpm prisma migrate deploy` against `despl_test`, then re-run `pnpm test:db` (the full suite, not filtered) to confirm the `invalid input syntax for type integer: ""` errors are gone across every file that surfaced them.
+Expected: clean (or only the plan's own documented pre-existing flakes — the `process.service.test.ts` hold-point flake and a `portfolio.read.test.ts` timeout already confirmed present before this task's changes).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add prisma/migrations/
+git commit -m "fix(H1): job_isolation policy — NULLIF before cast, empty-string GUC reset no longer throws"
+```
+
+---
+
 ## Task 6: Convert `_shared.ts`'s cross-parameter gates (`loadMappedOps`, `assertNoOpenNcr`, `assertNoOpenHoldPoint`, `lockProcessPlanForUpdate`)
 
 **Files:**
