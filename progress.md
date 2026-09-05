@@ -5206,3 +5206,17 @@ Almost everything below is **latent** — the engine and the auth primitives are
 **Verified:** `pnpm typecheck`/`lint`/`test` clean (598/598, up from 595 — the 3 new pure `stageLabel` cases). `pnpm test:db` 973/973 minus the same 2 pre-existing unrelated failures every session this week has hit (`myday.read.test.ts`'s date-window test, `process.service.test.ts`'s hold-point test) — both new B9 DB cases pass.
 
 **Not built:** the process-grain spine rewrite the older execution-playbook doc describes — explicitly declined by Swayam as out of scope for B9; the existing family-agnostic-by-construction mechanism (now correctly named per B7/B8) already satisfies the "a family may opt out" acceptance criterion.
+
+## Session — B11/B12/B13: close out Phase B's remaining docs items, 5 Sep 2026
+
+**Item:** the last three Phase B items — B11 (record `specs.ts`'s per-family field map as a deliberate, accepted code-change point), B12 (fix `CLAUDE.md`'s stale client-portal claim), B13 (commit `docs/mos-blueprint/` + `docs/DESPL_MOS_FORENSIC_AUDIT.md`). Docs-only, committed directly to `main`.
+
+**Checked B12/B13 before doing anything — both were already done:**
+- B12: `CLAUDE.md` already reads "Built, not deferred: TPI/client portal. Shipped 19 Aug 2026" — `git log -S"Built, not deferred" -- CLAUDE.md` traces it to `776c0f3` ("[B1][B2] Correct three false claims in project documentation"), from before this week's sessions.
+- B13: `docs/mos-blueprint/` (28 files) and `docs/DESPL_MOS_FORENSIC_AUDIT.md` are both tracked — `75301c3` ("chore(hygiene): add .env.test.example; track the 34 MOS planning documents").
+
+**B11 — the one real change:** every prior audit (`DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`) flagged `src/lib/shared/specs.ts:30`'s hardcoded `SPEC_FIELDS` per-family map alongside genuine literal violations — `admin.read.ts`'s hardcoded family, `stage-names.ts`'s hardcoded stage table, `welding.service.ts`'s hardcoded department code (all now fixed: B4, B7–B9, B5) — as if adding a family's design-spec fields belonged in the same "kill this hardcode" bucket. It doesn't, and nothing had said so in writing until now. Added a new section to `docs/ADR-product-family-agnostic-platform-v1.md`, right after its "standing acceptance test" (*"if we won an identical heat exchanger tomorrow, what code changes?"* — answer must be "none"): **"Accepted exception: `specs.ts`'s per-family field map (B11)"**, explaining why this one deliberately answers "yes, this file" rather than "none" — the values are display/reference-only (never read by scheduling/gating, `validateSpecs()` enforces it), and the field set only grows once per new-family launch, a rare event already bundled with real route/QCP authoring work. States explicitly: don't re-flag `specs.ts` as a literal to eliminate in a future audit without re-litigating this decision first.
+
+**Verified:** docs-only change; no code touched, no test run needed beyond confirming the git history claims above with `git log`/`git ls-files`.
+
+**Phase B (B1–B13) is now fully closed** per `docs/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`'s own item list.

@@ -101,6 +101,33 @@ and a `QcpTemplate` as data, and the job runs on the existing mechanism. Apply t
 phase gate, per `docs/PHASE-PROMPTS.md` §0 rule 5 — if a phase's design makes the answer anything
 other than "none", the design is wrong, and that should be said before implementing it, not after.
 
+### Accepted exception: `specs.ts`'s per-family field map (B11)
+
+`src/lib/shared/specs.ts`'s `SPEC_FIELDS` is a hardcoded `Record<familyCode, SpecField[]>` — adding a
+family's design-spec fields (e.g. a heat exchanger's TEMA type, shell/tube-side design pressure,
+tube count) means editing this file. By the standing acceptance test above, that is a code change,
+not a template/route/QCP data-authoring step — and every prior audit of this codebase (see
+`docs/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`) has flagged it alongside the real
+violations (`admin.read.ts`'s hardcoded family, `stage-names.ts`'s hardcoded stage table,
+`welding.service.ts`'s hardcoded department code — all since fixed, B4/B5/B7–B9) as if it belonged
+in the same bucket.
+
+**It does not, and this ADR now says so explicitly so it stops being rediscovered as a gap.** The
+distinction: `specs.ts`'s own values are DISPLAY AND REFERENCE DATA ONLY — its doc comment already
+states that nothing in `lib/schedule/` or the gating path may read them, and `validateSpecs()`
+enforces that by dropping anything not declared for the family. A field set that grows once per
+product-family launch (a rare, deliberate event, always accompanied by real engineering work to
+support the new family's routes/QCP/BOM anyway) does not carry the same cost as a business-logic
+literal evaluated on every request. Making it data (an EAV table, a JSON schema-of-schemas) would
+buy configurability nobody has asked for, at the cost of losing TypeScript's exhaustiveness/type
+checking on `SpecField`'s `type` union — a worse tradeoff for a file that already reads cleanly as
+"the one place a new family's intake form fields are declared."
+
+**Accepted as a deliberate code-change point, not a bug.** A future family's fields are added here,
+same file, same shape as `PRESSURE_VESSEL`'s entry — that is the intended extension mechanism, not
+a violation of "no family-specific branch in the code." Do not re-flag `specs.ts` as a literal to
+eliminate in a future audit without re-litigating this decision first.
+
 ---
 
 ## Consequences
