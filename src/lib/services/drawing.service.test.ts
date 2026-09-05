@@ -183,10 +183,12 @@ describe.skipIf(!RUN_DB)("drawing.service (DB-backed)", async () => {
   });
 
   it("role gate: ADMIN succeeds", async () => {
-    const { tenantId, drawing, user } = await fixture();
+    const { tenantId, job, drawing, user } = await fixture();
     const admin: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
     const rev = await createDrawingRevision(admin, { assemblyDrawingId: drawing.id, revisionNo: 1, status: "RELEASED" });
     expect(rev.status).toBe("RELEASED");
+    // H1: createDrawingRevision populates jobId.
+    expect(rev.jobId).toBe(job.id);
   });
 
   it("role gate: PRODUCTION_HEAD succeeds", async () => {
