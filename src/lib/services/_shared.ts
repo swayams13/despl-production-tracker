@@ -475,13 +475,32 @@ export interface MappedOp {
 }
 
 /**
+ * Gate 3 fix: `OperationRef.leadTimeProcessSeq` used to be one tenant-wide
+ * value, authored only for PRESSURE_VESSEL's numbering — a second family's
+ * `JobProcess.code` could silently match through it. `OperationRefFamilySeq`
+ * scopes the mapping per family; this resolves which `OperationRef` ids roll
+ * up into `seq` FOR THIS family specifically. Empty when the family has
+ * authored no mapping for this number — a SEAM, not an error, same
+ * convention as the non-numeric-`JobProcess.code` case below.
+ */
+async function resolveOperationRefIdsForFamilySeq(tx: Tx, familyId: number, seq: number): Promise<number[]> {
+  const rows = await tx.operationRefFamilySeq.findMany({
+    where: { familyId, leadTimeProcessSeq: seq },
+    select: { operationRefId: true },
+  });
+  return rows.map((r) => r.operationRefId);
+}
+
+/**
  * Every `ComponentOperation`/`AssemblyStep` on `unitId` that rolls up into
- * `jobProcessId`, joined by value (`OperationRef.leadTimeProcessSeq` /
- * `AssemblyTemplateStep.leadTimeProcessSeq` == `JobProcess.code` as a
- * number) — the same discipline `bom.read.ts`'s QCP-checkpoint lookup
- * already uses for the fabrication half. Empty when `unitId` is null
- * (job/equipment grain, no serial to roll up yet) or when this process has
- * no mapped operations at all — both are SEAM cases, not errors.
+ * `jobProcessId`, joined by value (`OperationRefFamilySeq`, scoped to the
+ * job's own family / `AssemblyTemplateStep.leadTimeProcessSeq` ==
+ * `JobProcess.code` as a number — the latter is already family-scoped via
+ * its own template/version chain, no additional filter needed) — the same
+ * discipline `bom.read.ts`'s QCP-checkpoint lookup already uses for the
+ * fabrication half. Empty when `unitId` is null (job/equipment grain, no
+ * serial to roll up yet) or when this process has no mapped operations at
+ * all — both are SEAM cases, not errors.
  */
 export async function loadMappedOps(
   tx: Tx,
@@ -491,16 +510,19 @@ export async function loadMappedOps(
 
   const jobProcess = await tx.jobProcess.findUnique({
     where: { id: args.jobProcessId },
-    select: { code: true },
+    select: { code: true, job: { select: { familyId: true } } },
   });
   if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return [];
   const seq = Number(jobProcess.code);
+  const operationRefIds = await resolveOperationRefIdsForFamilySeq(tx, jobProcess.job.familyId, seq);
 
   const [componentOps, assemblySteps] = await Promise.all([
-    tx.componentOperation.findMany({
-      where: { component: { unitId: args.unitId }, operation: { leadTimeProcessSeq: seq } },
-      select: { status: true, operation: { select: { name: true } } },
-    }),
+    operationRefIds.length === 0
+      ? []
+      : tx.componentOperation.findMany({
+          where: { component: { unitId: args.unitId }, operationId: { in: operationRefIds } },
+          select: { status: true, operation: { select: { name: true } } },
+        }),
     tx.assemblyStep.findMany({
       where: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
       select: { status: true, templateStep: { select: { activity: true } } },
@@ -564,10 +586,11 @@ export async function assertNoOpenNcr(
 
   const jobProcess = await tx.jobProcess.findUnique({
     where: { id: args.jobProcessId },
-    select: { code: true },
+    select: { code: true, job: { select: { familyId: true } } },
   });
   if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return;
   const seq = Number(jobProcess.code);
+  const operationRefIds = await resolveOperationRefIdsForFamilySeq(tx, jobProcess.job.familyId, seq);
 
   const openNcrs = await tx.ncr.findMany({
     where: {
@@ -577,7 +600,7 @@ export async function assertNoOpenNcr(
           componentOperationRejection: {
             componentOperation: {
               component: { unitId: args.unitId },
-              operation: { leadTimeProcessSeq: seq },
+              operationId: { in: operationRefIds },
             },
           },
         },

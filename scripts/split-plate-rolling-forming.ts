@@ -65,9 +65,27 @@ async function main() {
       name: rollingDef.label,
       defaultDepartmentId: dept.id,
       sourceColumn: rollingDef.csvColumn,
-      leadTimeProcessSeq: rollingDef.leadTimeProcess ?? null,
     },
   });
+  // Gate 3 fix: leadTimeProcessSeq is now family-scoped (OperationRefFamilySeq)
+  // rather than a bare column on OperationRef — PLATE's route predates any
+  // other family having real components, so PRESSURE_VESSEL is the only
+  // family this mapping applies to today.
+  if (rollingDef.leadTimeProcess != null) {
+    const pressureVessel = await prisma.productFamily.findFirstOrThrow({
+      where: { tenantId: org.id, code: "PRESSURE_VESSEL" },
+    });
+    await prisma.operationRefFamilySeq.upsert({
+      where: { operationRefId_familyId: { operationRefId: rolling.id, familyId: pressureVessel.id } },
+      update: { leadTimeProcessSeq: rollingDef.leadTimeProcess },
+      create: {
+        tenantId: org.id,
+        operationRefId: rolling.id,
+        familyId: pressureVessel.id,
+        leadTimeProcessSeq: rollingDef.leadTimeProcess,
+      },
+    });
+  }
 
   // 2. Find PLATE's RouteTemplate and current PUBLISHED version.
   const componentType = await prisma.componentTypeRef.findFirstOrThrow({

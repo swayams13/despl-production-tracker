@@ -49,9 +49,16 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     jobId = job.id;
 
     const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "PLATE", name: "Plate" } });
-    const cutting = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting", leadTimeProcessSeq: 12 } });
-    const forming = await owner.operationRef.create({ data: { tenantId, code: "FORMING", name: "Forming", leadTimeProcessSeq: 13 } });
-    const welding = await owner.operationRef.create({ data: { tenantId, code: "WELDING", name: "Welding", leadTimeProcessSeq: 16 } });
+    const cutting = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting" } });
+    const forming = await owner.operationRef.create({ data: { tenantId, code: "FORMING", name: "Forming" } });
+    const welding = await owner.operationRef.create({ data: { tenantId, code: "WELDING", name: "Welding" } });
+    await owner.operationRefFamilySeq.createMany({
+      data: [
+        { tenantId, operationRefId: cutting.id, familyId: family.id, leadTimeProcessSeq: 12 },
+        { tenantId, operationRefId: forming.id, familyId: family.id, leadTimeProcessSeq: 13 },
+        { tenantId, operationRefId: welding.id, familyId: family.id, leadTimeProcessSeq: 16 },
+      ],
+    });
 
     const routeTemplate = await owner.routeTemplate.create({ data: { tenantId, componentTypeId: componentType.id, name: "Plate route" } });
     const routeVersion = await owner.routeTemplateVersion.create({ data: { routeId: routeTemplate.id, version: 1 } });

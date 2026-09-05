@@ -238,7 +238,7 @@ interface RawComponentForSummary {
     revisions: { id: number; revisionNo: number; status: string; releasedAt: Date | null }[];
   } | null;
   routeVersion: {
-    steps: { seq: number; operation: { id: number; name: string; leadTimeProcessSeq: number | null } }[];
+    steps: { seq: number; operation: { id: number; name: string } }[];
   } | null;
   operations: {
     id: number;
@@ -252,22 +252,27 @@ interface RawComponentForSummary {
     performedByWelder: { name: string } | null;
     performedByUser: { name: string } | null;
     rejections: { detail: string | null; category: { name: string } }[];
-    operation: { id: number; name: string; leadTimeProcessSeq: number | null };
+    operation: { id: number; name: string };
   }[];
 }
 
 /** Shared projection from a raw `Component` row (however it was reached — via
  * `BomItem.components` or directly by equipment) into the route-aware summary
- * shape both the BOM-item-linked path and the bomless sub-assembly path render. */
+ * shape both the BOM-item-linked path and the bomless sub-assembly path render.
+ * `familySeqByOperationId` is the job's own family's `OperationRefFamilySeq`
+ * mapping (Gate 3 fix) — an operation with no row in it renders with a null
+ * `leadTimeProcessSeq` (no QCP-checkpoint match), rather than borrowing
+ * another family's number. */
 function buildComponentSummary(
   c: RawComponentForSummary,
   checkpointsByProcessCode: Map<string, BomQcpCheckpoint[]>,
+  familySeqByOperationId: Map<number, number>,
 ): BomComponentSummary {
   const routeSteps: RouteStepDef[] = (c.routeVersion?.steps ?? []).map((s) => ({
     seq: s.seq,
     operationId: s.operation.id,
     operationName: s.operation.name,
-    leadTimeProcessSeq: s.operation.leadTimeProcessSeq,
+    leadTimeProcessSeq: familySeqByOperationId.get(s.operation.id) ?? null,
   }));
   const actualOps: ActualOp[] = c.operations.map((o) => ({
     id: o.id,
@@ -276,7 +281,7 @@ function buildComponentSummary(
     status: o.status,
     startedAt: o.startedAt?.toISOString() ?? null,
     finishedAt: o.finishedAt?.toISOString() ?? null,
-    leadTimeProcessSeq: o.operation.leadTimeProcessSeq,
+    leadTimeProcessSeq: familySeqByOperationId.get(o.operation.id) ?? null,
     performedByWelderName: o.performedByWelder?.name ?? null,
     performedByUserName: o.performedByUser?.name ?? null,
     remarks: o.remarks,
@@ -309,9 +314,18 @@ export async function loadBomTree(
   unitId?: number,
 ): Promise<BomTree | null> {
   return withTenant(actor.tenantId, async (tx) => {
-    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
+    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true, familyId: true } });
     if (!job) return null;
     assertClientScope(actor, job.clientId);
+
+    // Gate 3 fix: OperationRef.leadTimeProcessSeq used to be one tenant-wide
+    // value (PRESSURE_VESSEL-only); resolve this job's own family's mapping
+    // once and thread it through buildComponentSummary below.
+    const familySeqRows = await tx.operationRefFamilySeq.findMany({
+      where: { familyId: job.familyId },
+      select: { operationRefId: true, leadTimeProcessSeq: true },
+    });
+    const familySeqByOperationId = new Map(familySeqRows.map((r) => [r.operationRefId, r.leadTimeProcessSeq]));
 
     const equipments = await tx.equipment.findMany({
       where: { jobId },
@@ -380,7 +394,7 @@ export async function loadBomTree(
               select: {
                 steps: {
                   orderBy: { seq: "asc" },
-                  select: { seq: true, operation: { select: { id: true, name: true, leadTimeProcessSeq: true } } },
+                  select: { seq: true, operation: { select: { id: true, name: true } } },
                 },
               },
             },
@@ -402,7 +416,7 @@ export async function loadBomTree(
                   take: 1,
                   select: { detail: true, category: { select: { name: true } } },
                 },
-                operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
+                operation: { select: { id: true, name: true } },
               },
             },
           },
@@ -433,7 +447,7 @@ export async function loadBomTree(
           select: {
             steps: {
               orderBy: { seq: "asc" },
-              select: { seq: true, operation: { select: { id: true, name: true, leadTimeProcessSeq: true } } },
+              select: { seq: true, operation: { select: { id: true, name: true } } },
             },
           },
         },
@@ -455,7 +469,7 @@ export async function loadBomTree(
               take: 1,
               select: { detail: true, category: { select: { name: true } } },
             },
-            operation: { select: { id: true, name: true, leadTimeProcessSeq: true } },
+            operation: { select: { id: true, name: true } },
           },
         },
       },
@@ -478,7 +492,7 @@ export async function loadBomTree(
       checkpointsByProcessCode.set(link.jobProcess.code, list);
     }
 
-    const subAssemblyComponents = bomlessComponents.map((c) => buildComponentSummary(c, checkpointsByProcessCode));
+    const subAssemblyComponents = bomlessComponents.map((c) => buildComponentSummary(c, checkpointsByProcessCode, familySeqByOperationId));
 
     // B6, Phase 4: required/available/shortage, computed inline (same
     // transaction, already-loaded data) rather than by calling the separate
@@ -521,7 +535,7 @@ export async function loadBomTree(
         parentBomItemId: it.parentBomItemId,
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING", componentId: m.componentId })),
         procurement: summarizeProcurement(it.procurementEvents),
-        components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode)),
+        components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode, familySeqByOperationId)),
         requiredQty: required?.toNumber() ?? null,
         availableQty: available?.toNumber() ?? null,
         shortage: shortageVal?.toNumber() ?? null,

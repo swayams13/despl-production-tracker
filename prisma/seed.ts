@@ -559,7 +559,6 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
           name: meta.label,
           defaultDepartmentId: deptIdByCode.get(meta.dept)!,
           sourceColumn: meta.csvColumn,
-          leadTimeProcessSeq: meta.leadTimeProcess,
           requiresDftGate: meta.requiresDftGate ?? false,
         })),
       });
@@ -673,6 +672,22 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
       const families = await tx.productFamily.findMany({ where: { tenantId } });
       const familyIdByCode = new Map(families.map((f) => [f.code, f.id]));
       stats.productFamilies = families.length;
+
+      // Gate 3 fix: leadTimeProcessSeq is family-scoped (OperationRefFamilySeq),
+      // not a bare column on OperationRef — component-routes.json's
+      // canonicalOperations mapping was authored only for PRESSURE_VESSEL's
+      // 36-process spine, so that's the only family seeded here.
+      const pressureVesselId = familyIdByCode.get("PRESSURE_VESSEL")!;
+      await tx.operationRefFamilySeq.createMany({
+        data: Object.entries(routesFile.canonicalOperations)
+          .filter(([, meta]) => meta.leadTimeProcess != null)
+          .map(([code, meta]) => ({
+            tenantId,
+            operationRefId: operationIdByCode.get(code)!,
+            familyId: pressureVesselId,
+            leadTimeProcessSeq: meta.leadTimeProcess,
+          })),
+      });
 
       // ── 6a. Work-order stage names (B7) — PRESSURE_VESSEL only; other
       // families have no stage crosswalk yet (TemplateProcess.workOrderStages

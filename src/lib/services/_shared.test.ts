@@ -8,6 +8,7 @@ import {
   assertUnitHasNoOpenNcr,
   assertUnitHasNoOpenHoldPoint,
   loadPredecessorStates,
+  loadMappedOps,
   loadJobSpine,
   persistScheduleRun,
   lockProcessPlanForUpdate,
@@ -260,6 +261,91 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPredecessorStates — per-unit i
 
       expect(statesA.find((s) => s.predecessorId === edge.predecessorId)?.status).toBe("COMPLETE");
       expect(statesB.find((s) => s.predecessorId === edge.predecessorId)?.status).toBe("NOT_STARTED");
+    });
+  });
+});
+
+/**
+ * Gate 3 fix: `OperationRef.leadTimeProcessSeq` used to be one tenant-wide
+ * value — a physical operation (e.g. CUTTING) shared by two families could
+ * only mean ONE lead-time-process number, silently wrong for whichever
+ * family didn't author it. `OperationRefFamilySeq` makes the mapping
+ * family-scoped. This test builds the adversarial case directly: one shared
+ * `OperationRef`, mapped to a DIFFERENT number for each of two families —
+ * proving `loadMappedOps` resolves strictly through the calling job's own
+ * family, never the other one's number.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadMappedOps — family-scoped numeric join (Gate 3, DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { withTenant } = await import("@/lib/db");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("a family's mapped ComponentOperation is found only under its own leadTimeProcessSeq, never the other family's", async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-FAMILYSEQ-${Date.now()}`, name: "Family-scoped seq test" },
+    });
+    const tenantId = org.id;
+    const dept = await owner.department.create({ data: { tenantId, code: "F", name: "Fabrication" } });
+    const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+
+    const familyA = await owner.productFamily.create({ data: { tenantId, code: "FAMILY_A", name: "Family A" } });
+    const familyB = await owner.productFamily.create({ data: { tenantId, code: "FAMILY_B", name: "Family B" } });
+
+    // One physical operation, shared by both families — the exact scenario
+    // the old bare-column design couldn't represent correctly.
+    const cutting = await owner.operationRef.create({ data: { tenantId, code: "CUTTING", name: "Cutting" } });
+    await owner.operationRefFamilySeq.createMany({
+      data: [
+        { tenantId, operationRefId: cutting.id, familyId: familyA.id, leadTimeProcessSeq: 5 },
+        { tenantId, operationRefId: cutting.id, familyId: familyB.id, leadTimeProcessSeq: 9 },
+      ],
+    });
+
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: familyA.id, name: "A template" } });
+    const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-familyseq-${Date.now()}`,
+        clientId: client.id,
+        familyId: familyA.id,
+        templateVersionId: version.id,
+        jobNumber: `JOB-FAMILYSEQ-${Date.now()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+    const unit = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "SR01" } });
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+    const component = await owner.component.create({
+      data: { equipmentId: equipment.id, unitId: unit.id, tag: "SHELL-1", componentTypeId: componentType.id },
+    });
+    await owner.componentOperation.create({
+      data: { componentId: component.id, seq: 1, operationId: cutting.id, status: "IN_PROGRESS" },
+    });
+
+    // A JobProcess coded "9" — family B's real CUTTING number, NOT family
+    // A's (5). Before this fix, the bare-column join would have matched the
+    // shared OperationRef here regardless of family; the fix must find
+    // nothing, because family A's own mapping for CUTTING is 5, not 9.
+    const wrongCodeProcess = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 9, code: "9", name: "Wrong-family code", departmentId: dept.id },
+    });
+    // family A's real CUTTING number.
+    const rightCodeProcess = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 5, code: "5", name: "Cutting", departmentId: dept.id },
+    });
+
+    await withTenant(tenantId, async (tx) => {
+      const wrongMatch = await loadMappedOps(tx, { jobProcessId: wrongCodeProcess.id, unitId: unit.id });
+      expect(wrongMatch).toEqual([]);
+
+      const rightMatch = await loadMappedOps(tx, { jobProcessId: rightCodeProcess.id, unitId: unit.id });
+      expect(rightMatch).toHaveLength(1);
+      expect(rightMatch[0]).toMatchObject({ source: "fabrication", label: "Cutting", status: "IN_PROGRESS" });
     });
   });
 });
