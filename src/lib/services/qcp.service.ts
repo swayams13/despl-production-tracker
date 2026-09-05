@@ -22,7 +22,7 @@ import type { QcpExecution, QcpExecutionResult, QcpItem, QcpTemplate } from "@/g
 export async function recordQcpExecutionTx(
   tx: Tx,
   actor: Actor,
-  args: { qcpItemId: number; unitId: number; result: QcpExecutionResult; remarks?: string | null },
+  args: { qcpItemId: number; unitId: number; result: QcpExecutionResult; remarks?: string | null; jobId?: number | null },
 ): Promise<QcpExecution> {
   // Next attempt number for this (item, unit) — re-inspection after rejection.
   const prior = await tx.qcpExecution.aggregate({
@@ -39,6 +39,7 @@ export async function recordQcpExecutionTx(
       result: args.result,
       clearedBy: actor.userId,
       remarks: args.remarks ?? null,
+      jobId: args.jobId ?? null,
       // recordedAt: DB default now() (invariant #1).
     },
   });
@@ -73,7 +74,7 @@ export async function recordQcpExecution(
     if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
 
     return audited(tx, actor, async () => {
-      const exec = await recordQcpExecutionTx(tx, actor, { qcpItemId, unitId, result, remarks });
+      const exec = await recordQcpExecutionTx(tx, actor, { qcpItemId, unitId, result, remarks, jobId: unit.jobId });
       return {
         result: exec,
         audit: {
@@ -185,6 +186,9 @@ export async function addQcpItemToLibraryTemplate(
         (await tx.inspectionParty.findFirst({
           where: { qcpTemplateId: template.id, code: pc.partyCode },
         })) ??
+        // H1: library-authoring path (template.jobId === null, asserted
+        // above) — leave jobId unset. InspectionParty stays nullable in
+        // Task 3 for exactly this reason; do not backfill a job id here.
         (await tx.inspectionParty.create({
           data: { qcpTemplateId: template.id, code: pc.partyCode, name: null },
         }));
@@ -198,6 +202,9 @@ export async function addQcpItemToLibraryTemplate(
     }
 
     return audited(tx, actor, async () => {
+      // H1: library-authoring path (template.jobId === null, asserted
+      // above) — leave jobId unset. QcpItem stays nullable in Task 3 for
+      // exactly this reason; do not backfill a job id here.
       const created = await tx.qcpItem.create({
         data: {
           qcpTemplateId: template.id,

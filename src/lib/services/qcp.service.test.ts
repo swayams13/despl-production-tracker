@@ -133,6 +133,8 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
       expect(exec.result).toBe("ACCEPTED");
       expect(exec.attemptNo).toBe(1);
       expect(exec.clearedBy).toBe(qcActor.userId);
+      // H1: recordQcpExecution populates jobId from the unit's own jobId.
+      expect(exec.jobId).toBe(jobId);
     }
 
     // GREEN: every blocking checkpoint is now ACCEPTED for this unit → verify succeeds.
