@@ -5,7 +5,7 @@ import { ROLES, type Actor } from "@/lib/authz";
  * §6 notifications, DB-gated (needs a real seeded ProcessPlan/User/Role
  * chain — nothing here is pure). Two things pinned: the event-driven writes
  * that ride inside process.service's own transaction (submit → QC, reject →
- * maker), and syncNotifications' idempotency.
+ * maker), and syncOverdueStageNotifications' idempotency.
  */
 const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
