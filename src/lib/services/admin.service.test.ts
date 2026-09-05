@@ -1,7 +1,14 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES, isAppError } from "@/lib/shared/errors";
-import { createEmployee, setUserActive, updateUserRolesDepts, createEquipmentType, createClientRecord } from "./admin.service";
+import {
+  createEmployee,
+  setUserActive,
+  updateUserRolesDepts,
+  createEquipmentType,
+  createClientRecord,
+  createProductFamily,
+} from "./admin.service";
 
 function actor(over: Partial<Actor> = {}): Actor {
   return {
@@ -99,6 +106,27 @@ describe("admin.service — pure refusals", () => {
     await expect(
       createClientRecord(actor({ roles: [ROLES.QC] }), { name: "Acme", code: null }),
     ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("createProductFamily refuses a PRODUCTION_HEAD caller — ADMIN-only, unlike the other catalog writers", async () => {
+    await expect(
+      createProductFamily(actor({ roles: [ROLES.PRODUCTION_HEAD] }), { code: "PIPE_SPOOL", name: "Pipe Spool" }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("createProductFamily refuses a client user", async () => {
+    await expect(
+      createProductFamily(actor({ clientId: 7, roles: [ROLES.CLIENT_VIEWER] }), {
+        code: "PIPE_SPOOL",
+        name: "Pipe Spool",
+      }),
+    ).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+  });
+
+  it("createProductFamily refuses a lowercase or hyphenated code before touching the DB", async () => {
+    await expect(
+      createProductFamily(actor(), { code: "pipe-spool", name: "Pipe Spool" }),
+    ).rejects.toThrow();
   });
 });
 
@@ -226,6 +254,60 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
     expect(auditRow).toBeTruthy();
     expect(auditRow?.before).toBeFalsy();
     expect(auditRow?.after).toBeFalsy();
+  });
+});
+
+/**
+ * C1 (route-authoring bootstrap): DB coverage for createProductFamily —
+ * uniqueness on (tenantId, code), the audit row, and the code being
+ * uppercased on write (input is lowercase, stored code is upper).
+ *
+ * // ponytail: no cleanup — disposable test DB, per-run org code.
+ */
+describe.skipIf(!RUN_DB)("admin.service createProductFamily (DB-backed)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  let tenantId = 0;
+  let admin: Actor;
+
+  beforeAll(async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-FAMILY-${Date.now()}`, name: "Product family svc test" },
+    });
+    tenantId = org.id;
+    await owner.role.create({ data: { tenantId, code: "ADMIN", name: "Admin" } });
+
+    admin = {
+      userId: 1,
+      tenantId,
+      clientId: null,
+      name: "Test Admin",
+      email: "admin@test.local",
+      roles: [ROLES.ADMIN],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+  });
+
+  it("creates a family, uppercasing the code, and writes an audit row", async () => {
+    const family = await createProductFamily(admin, { code: "pipe_spool", name: "Pipe Spool" });
+    expect(family.code).toBe("PIPE_SPOOL");
+    expect(family.active).toBe(true);
+
+    const auditRow = await owner.auditLog.findFirst({
+      where: { tenantId, entityType: "ProductFamily", entityId: String(family.id), action: "admin.createProductFamily" },
+      orderBy: { id: "desc" },
+    });
+    expect(auditRow).toBeTruthy();
+  });
+
+  it("rejects a duplicate code within the same tenant with a clean AppError", async () => {
+    await expect(
+      createProductFamily(admin, { code: "PIPE_SPOOL", name: "Pipe Spool Again" }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });
 });
 

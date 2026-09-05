@@ -611,6 +611,19 @@ export type RejectSnapshotInput = z.infer<typeof rejectSnapshotSchema>;
 
 // ── Job intake: equipment catalog and clients ───────────────────────────
 
+/** UPPER_SNAKE, matching ProductFamily.code's schema comment (PRESSURE_VESSEL | HEAT_EXCHANGER | ...). Immutable after creation — templates/routes/QCPs reference it by value. */
+export const createProductFamilySchema = z
+  .object({
+    code: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^[A-Z][A-Z0-9_]*$/, "Use UPPER_SNAKE_CASE, e.g. PIPE_SPOOL"),
+    name: z.string().trim().min(1, "A name is required"),
+  })
+  .strict();
+export type CreateProductFamilyInput = z.infer<typeof createProductFamilySchema>;
+
 export const createEquipmentTypeSchema = z
   .object({
     familyId: id,

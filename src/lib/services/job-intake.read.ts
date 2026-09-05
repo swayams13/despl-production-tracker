@@ -183,6 +183,35 @@ export async function loadEquipmentTypeAdmin(actor: Actor): Promise<EquipmentTyp
   });
 }
 
+export interface ProductFamilyAdminRow {
+  id: number;
+  code: string;
+  name: string;
+  active: boolean;
+  jobCount: number;
+}
+
+/** C1: the plain family list — readiness (has a published route/QCP) is C8, not here. */
+export async function loadProductFamilyAdmin(actor: Actor): Promise<ProductFamilyAdminRow[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const rows = await tx.productFamily.findMany({
+      where: { tenantId: actor.tenantId },
+      orderBy: { name: "asc" },
+      include: { _count: { select: { jobs: true } } },
+    });
+    return rows.map((f) => ({
+      id: f.id,
+      code: f.code,
+      name: f.name,
+      active: f.active,
+      jobCount: f._count.jobs,
+    }));
+  });
+}
+
 /** The process list for step 2's include/exclude checkboxes. */
 export async function loadTemplateProcesses(
   actor: Actor,

@@ -17,6 +17,7 @@ import {
   createEquipmentTypeSchema,
   updateEquipmentTypeSchema,
   createClientSchema,
+  createProductFamilySchema,
   type CreateUserInput,
   type ResetPasswordInput,
   type CreateDelayCategoryInput,
@@ -28,8 +29,9 @@ import {
   type CreateEquipmentTypeInput,
   type UpdateEquipmentTypeInput,
   type CreateClientInput,
+  type CreateProductFamilyInput,
 } from "@/lib/shared/schemas";
-import type { User, DelayCategoryRef, ProcessTemplateVersion, EquipmentTypeRef, Client } from "@/generated/prisma/client";
+import type { User, DelayCategoryRef, ProcessTemplateVersion, EquipmentTypeRef, Client, ProductFamily } from "@/generated/prisma/client";
 import { copyVersionContents } from "./template-copy";
 
 /**
@@ -640,6 +642,52 @@ export async function bulkImportEmployees(actor: Actor, rows: unknown[]): Promis
  * PRODUCTION_HEAD is allowed here alongside ADMIN, unlike the delay-category
  * pair: the catalog is production's own vocabulary, not a system setting.
  */
+/**
+ * C1 (route-authoring bootstrap): the one write path missing before this —
+ * ProductFamily rows could only come from prisma/seed.ts. Code is immutable
+ * once created (no updateProductFamily exists) — templates, routes and
+ * QcpTemplates all reference it by value, not id alone, so renaming the code
+ * out from under them would be a silent data-integrity break.
+ */
+export async function createProductFamily(
+  actor: Actor,
+  input: CreateProductFamilyInput,
+): Promise<ProductFamily> {
+  const { code, name } = createProductFamilySchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const existing = await tx.productFamily.findFirst({
+      where: { tenantId: actor.tenantId, code },
+    });
+    if (existing) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { code },
+        "A product family with this code already exists.",
+      );
+    }
+
+    return audited(tx, actor, async () => {
+      const row = await tx.productFamily.create({
+        data: { tenantId: actor.tenantId, code, name },
+      });
+      return {
+        result: row,
+        audit: {
+          action: "admin.createProductFamily",
+          entityType: "ProductFamily",
+          entityId: row.id,
+          after: { code, name },
+          eventType: "ProductFamilyCreated",
+          eventPayload: { familyId: row.id, code },
+        },
+      };
+    });
+  });
+}
+
 export async function createEquipmentType(
   actor: Actor,
   input: CreateEquipmentTypeInput,
