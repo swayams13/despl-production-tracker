@@ -239,6 +239,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPredecessorStates — per-unit i
 
       await tx.processPlan.create({
         data: {
+          jobId: job.id,
           scheduleRunId: run.id,
           jobProcessId: predProcess.id,
           unitId: unitA.id,
@@ -248,6 +249,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPredecessorStates — per-unit i
       });
       await tx.processPlan.create({
         data: {
+          jobId: job.id,
           scheduleRunId: run.id,
           jobProcessId: predProcess.id,
           unitId: unitB.id,

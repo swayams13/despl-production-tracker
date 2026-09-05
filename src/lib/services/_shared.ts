@@ -292,6 +292,7 @@ export async function persistScheduleRun(
         create: input.plans.map((p) => {
           const prior = priorByKey.get(priorActualsKey(p.jobProcessId, p.unitId));
           return {
+            jobId: input.jobId,
             jobProcessId: p.jobProcessId,
             unitId: p.unitId,
             baselineStart: p.baselineStart,

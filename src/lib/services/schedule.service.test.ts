@@ -107,6 +107,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
     expect(run2.processPlans.length).toBe(includedProcessCount);
     for (const p of run2.processPlans) {
       expect(p.unitId).toBeNull();
+      // H1: persistScheduleRun populates jobId on every created ProcessPlan.
+      expect(p.jobId).toBe(job.id);
     }
 
     // Exactly one audit row per generateSchedule call. Scoped to these two run
