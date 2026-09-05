@@ -1023,3 +1023,66 @@ export const setOperationRefFamilySeqSchema = z
   })
   .strict();
 export type SetOperationRefFamilySeqInput = z.infer<typeof setOperationRefFamilySeqSchema>;
+
+// ── QCP template authoring (C7) ──────────────────────────────────────────
+
+/**
+ * Author a brand-new library `QcpTemplate` (jobId: null) with no existing
+ * QCP to clone from. Items are added afterward, one at a time, via
+ * `addQcpItemToLibraryTemplateSchema`.
+ */
+export const createQcpTemplateLibrarySchema = z
+  .object({
+    jobLabel: z.string().trim().min(1, "A label is required"),
+    vessel: z.string().trim().min(1, "A vessel description is required"),
+    designCode: z.string().trim().min(1).optional(),
+    parties: z
+      .array(
+        z
+          .object({
+            code: z.string().trim().toUpperCase().min(1, "A code is required"),
+            name: z.string().trim().min(1).optional(),
+          })
+          .strict(),
+      )
+      .min(1, "At least one inspecting party is required"),
+  })
+  .strict();
+export type CreateQcpTemplateLibraryInput = z.infer<typeof createQcpTemplateLibrarySchema>;
+
+/**
+ * Add one `QcpItem` to a library template. `libraryProcessCodes` stands in
+ * for `QcpItemProcess` (which needs a real `JobProcess` to point at, and a
+ * library template has none) — resolved against the cloning job's own
+ * processes by `cloneQcpTemplate`. `partyCodes[].partyCode` is looked up
+ * (or authored inline) against the template's own `InspectionParty` rows;
+ * `qcpCode` must already exist in the tenant's `QcpCodeRef` catalog.
+ */
+export const addQcpItemToLibraryTemplateSchema = z
+  .object({
+    qcpTemplateId: id,
+    sequence: z.number().int().positive(),
+    srNo: z.string().trim().min(1, "A sr. no. is required"),
+    kind: z.enum(["SECTION", "CHECKPOINT"]),
+    section: z.string().trim().min(1).optional(),
+    activity: z.string().trim().min(1, "An activity is required"),
+    characteristic: z.string().trim().min(1).optional(),
+    extentOfCheck: z.string().trim().min(1).optional(),
+    applicableDocument: z.string().trim().min(1).optional(),
+    acceptanceCriteria: z.string().trim().min(1).optional(),
+    record: z.string().trim().min(1).optional(),
+    remarks: z.string().trim().min(1).optional(),
+    libraryProcessCodes: z.array(z.string().trim().min(1)).default([]),
+    partyCodes: z
+      .array(
+        z
+          .object({
+            partyCode: z.string().trim().toUpperCase().min(1, "A party code is required"),
+            qcpCode: z.string().trim().min(1, "A QCP code is required"),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .strict();
+export type AddQcpItemToLibraryTemplateInput = z.infer<typeof addQcpItemToLibraryTemplateSchema>;

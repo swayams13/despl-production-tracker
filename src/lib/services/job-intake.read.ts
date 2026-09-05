@@ -397,3 +397,111 @@ export async function loadRouteTemplateAdmin(actor: Actor): Promise<RouteTemplat
     return { componentTypes: componentTypeRows, operationFamilySeqs, families, operations, departments };
   });
 }
+
+// ── QCP template authoring (C7) ──────────────────────────────────────────
+
+export interface QcpTemplateItemAdminRow {
+  id: number;
+  sequence: number;
+  srNo: string;
+  kind: string;
+  section: string | null;
+  activity: string;
+  characteristic: string | null;
+  extentOfCheck: string | null;
+  applicableDocument: string | null;
+  acceptanceCriteria: string | null;
+  record: string | null;
+  remarks: string | null;
+  /** For a library item: the process codes it will resolve to once cloned. */
+  libraryProcessCodes: string[];
+  partyCodes: Array<{ partyCode: string; qcpCode: string; blocksCompletion: boolean; waivable: boolean }>;
+}
+
+export interface QcpTemplateLibraryAdminRow {
+  id: number;
+  jobLabel: string;
+  vessel: string;
+  revision: number;
+  designCode: string | null;
+  parties: Array<{ id: number; code: string; name: string | null }>;
+  items: QcpTemplateItemAdminRow[];
+}
+
+/**
+ * Every library `QcpTemplate` (jobId null) with its parties and items, for
+ * the from-scratch authoring admin screen (list + detail). Same missing-
+ * tenant-anchor caveat as `cloneQcpTemplate`/`loadIntakeOptions` — a
+ * library row genuinely has no tenantId column to scope by.
+ */
+export async function loadQcpTemplateLibraryAdmin(actor: Actor): Promise<QcpTemplateLibraryAdminRow[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const templates = await tx.qcpTemplate.findMany({
+      where: { jobId: null },
+      orderBy: { jobLabel: "asc" },
+      include: {
+        parties: { orderBy: { code: "asc" } },
+        items: {
+          orderBy: { sequence: "asc" },
+          include: { partyCodes: { include: { inspectionParty: true, qcpCode: true } } },
+        },
+      },
+    });
+
+    return templates.map((t) => ({
+      id: t.id,
+      jobLabel: t.jobLabel,
+      vessel: t.vessel,
+      revision: t.revision,
+      designCode: t.designCode,
+      parties: t.parties.map((p) => ({ id: p.id, code: p.code, name: p.name })),
+      items: t.items.map((i) => ({
+        id: i.id,
+        sequence: i.sequence,
+        srNo: i.srNo,
+        kind: i.kind,
+        section: i.section,
+        activity: i.activity,
+        characteristic: i.characteristic,
+        extentOfCheck: i.extentOfCheck,
+        applicableDocument: i.applicableDocument,
+        acceptanceCriteria: i.acceptanceCriteria,
+        record: i.record,
+        remarks: i.remarks,
+        libraryProcessCodes: i.libraryProcessCodes,
+        partyCodes: i.partyCodes.map((pc) => ({
+          partyCode: pc.inspectionParty.code,
+          qcpCode: pc.qcpCode.code,
+          blocksCompletion: pc.qcpCode.blocksCompletion,
+          waivable: pc.qcpCode.waivable,
+        })),
+      })),
+    }));
+  });
+}
+
+export interface QcpCodeRefOption {
+  code: string;
+  label: string;
+  blocksCompletion: boolean;
+  waivable: boolean;
+}
+
+/** The tenant's QcpCodeRef catalog, for the party-code picker in the C7
+ * item-authoring form — `addQcpItemToLibraryTemplate` refuses any `qcpCode`
+ * not already in this list. */
+export async function loadQcpCodeRefOptions(actor: Actor): Promise<QcpCodeRefOption[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const rows = await tx.qcpCodeRef.findMany({
+      where: { tenantId: actor.tenantId },
+      orderBy: { code: "asc" },
+    });
+    return rows.map((r) => ({ code: r.code, label: r.label, blocksCompletion: r.blocksCompletion, waivable: r.waivable }));
+  });
+}

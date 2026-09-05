@@ -1888,6 +1888,11 @@ model QcpItem {
   acceptanceCriteria String?     @map("acceptance_criteria")
   record             String?
   remarks            String?
+  /// C7: for a LIBRARY item (its QcpTemplate.jobId is null) only — the raw
+  /// process-code strings (e.g. ["12", "16"]) this checkpoint is meant to
+  /// gate once cloned into a real job. Unused/ignored once the item belongs
+  /// to a job-owned template; real linkage there is via QcpItemProcess.
+  libraryProcessCodes String[] @default([]) @map("library_process_codes")
 
   qcpTemplate   QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
   partyCodes    QcpItemPartyCode[]

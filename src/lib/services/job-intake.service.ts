@@ -561,6 +561,14 @@ async function cloneQcpTemplate(
       },
     });
 
+    // C7: a from-scratch-authored library item has no real processLinks yet
+    // (there was no Job/JobProcess to link against at authoring time) — it
+    // carries libraryProcessCodes instead. Falls back to those ONLY when
+    // processLinks is empty, so a cloned-from-a-real-job item (today's only
+    // path) is completely unaffected.
+    const codes =
+      item.processLinks.length > 0 ? item.processLinks.map((l) => l.jobProcess.code) : item.libraryProcessCodes;
+
     for (const pc of item.partyCodes) {
       const newPartyId = partyIdMap.get(pc.inspectionPartyId);
       if (newPartyId == null) continue;
@@ -573,8 +581,7 @@ async function cloneQcpTemplate(
       });
     }
 
-    for (const link of item.processLinks) {
-      const code = link.jobProcess.code;
+    for (const code of codes) {
       const newJobProcessId = jpIdByCode.get(code);
       if (newJobProcessId == null) {
         unmatched.add(code);
