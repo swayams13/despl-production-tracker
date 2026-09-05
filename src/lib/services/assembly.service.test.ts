@@ -89,6 +89,7 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
+  let jobId = 0;
   let supA: Actor; // supervisor+QC in deptA (maker)
   let qc: Actor; // QC only, different user (checker)
   let supB: Actor; // supervisor in a DIFFERENT department (wrong-department attempt)
@@ -128,6 +129,7 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
         jobNumber: `JOB-ASM-${Date.now()}`,
       },
     });
+    jobId = job.id;
     const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
     const unit1 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "01" } });
     const unit2 = await owner.unit.create({ data: { equipmentId: equipment.id, serialNo: "02" } });
@@ -208,13 +210,13 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
       },
     });
 
-    step1 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts1.id, seq: 1 } })).id;
-    step2 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts2.id, seq: 2 } })).id;
-    step3 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts3.id, seq: 3 } })).id;
-    step4 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts4.id, seq: 4, qcpItemId } })).id;
-    step5 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts5.id, seq: 5 } })).id;
+    step1 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts1.id, seq: 1, jobId } })).id;
+    step2 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts2.id, seq: 2, jobId } })).id;
+    step3 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts3.id, seq: 3, jobId } })).id;
+    step4 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts4.id, seq: 4, qcpItemId, jobId } })).id;
+    step5 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts5.id, seq: 5, jobId } })).id;
     unit1Id = unit1.id;
-    unit2Step1 = (await owner.assemblyStep.create({ data: { unitId: unit2.id, templateStepId: ts1.id, seq: 1 } })).id;
+    unit2Step1 = (await owner.assemblyStep.create({ data: { unitId: unit2.id, templateStepId: ts1.id, seq: 1, jobId } })).id;
 
     rejectCategoryId = (await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })).id;
     testTypeId = (await owner.testTypeRef.create({ data: { tenantId, code: "PAUT", name: "PAUT" } })).id;
@@ -325,6 +327,8 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     const rejections = await owner.assemblyStepRejection.findMany({ where: { assemblyStepId: step2 } });
     expect(rejections).toHaveLength(1);
     expect(rejections[0]).toMatchObject({ categoryId: rejectCategoryId, detail: "PAUT indication", rejectedBy: qc.userId });
+    // H1: rejectAssemblyStep populates jobId on the rejection and the Ncr it opens.
+    expect(rejections[0].jobId).toBe(jobId);
 
     const ndt = await owner.ndtResult.findMany({ where: { weldJointId: rejected.weldJointId! } });
     expect(ndt).toHaveLength(1);
@@ -333,6 +337,7 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     // N1 (Phase 5): reject opens exactly one Ncr, linked to that rejection.
     const ncr = await owner.ncr.findUniqueOrThrow({ where: { assemblyStepRejectionId: rejections[0].id } });
     expect(ncr.status).toBe("OPEN");
+    expect(ncr.jobId).toBe(jobId);
 
     // Rejected work restarts from the SAME step — must be resubmittable.
     const resubmitted = await submitAssemblyStep(supA, { assemblyStepId: step2 });
