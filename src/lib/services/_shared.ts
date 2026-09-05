@@ -380,6 +380,11 @@ export async function lockProcessPlanForUpdate(
     where: { id: processPlanId, ownerDepartment: { tenantId } },
   });
   if (!row) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessPlan", processPlanId });
+  // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
+  // to the plan's own (denormalized) job — no nested withJob (Prisma disallows
+  // nesting $transaction), just set_config on the already-open tx, same as
+  // withTenant's own pattern.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(row.jobId)}, true)`;
   const run = await tx.scheduleRun.findUnique({ where: { id: row.scheduleRunId }, select: { isCurrent: true } });
   if (!run?.isCurrent) throw new AppError(ERROR_CODES.STALE_WRITE, { entity: "ProcessPlan", processPlanId });
   return row;
@@ -430,9 +435,11 @@ export async function assertNoUnfiledDelayBlock(
  */
 export async function assertNoOpenHoldPoint(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
   if (args.unitId == null) return;
+  // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
   const blockingItems = await tx.qcpItem.findMany({
     where: {
@@ -505,9 +512,13 @@ async function resolveOperationRefIdsForFamilySeq(tx: Tx, familyId: number, seq:
  */
 export async function loadMappedOps(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<MappedOp[]> {
   if (args.unitId == null) return [];
+  // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment. A
+  // unitId from a different job than jobId now returns zero rows (RLS),
+  // instead of silently rolling up another job's operations.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
   const jobProcess = await tx.jobProcess.findUnique({
     where: { id: args.jobProcessId },
@@ -543,7 +554,7 @@ export async function loadMappedOps(
  */
 export async function assertComponentOpsComplete(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
   const ops = await loadMappedOps(tx, args);
   const incomplete = ops.filter((o) => o.status !== "COMPLETE");
@@ -581,9 +592,11 @@ const OPEN_NCR_STATUSES = ["OPEN", "REWORK_IN_PROGRESS"] as const;
  */
 export async function assertNoOpenNcr(
   tx: Tx,
-  args: { jobProcessId: number; unitId: number | null },
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
   if (args.unitId == null) return;
+  // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
   const jobProcess = await tx.jobProcess.findUnique({
     where: { id: args.jobProcessId },

@@ -342,12 +342,97 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadMappedOps — family-scoped nume
     });
 
     await withTenant(tenantId, async (tx) => {
-      const wrongMatch = await loadMappedOps(tx, { jobProcessId: wrongCodeProcess.id, unitId: unit.id });
+      const wrongMatch = await loadMappedOps(tx, { jobProcessId: wrongCodeProcess.id, unitId: unit.id, jobId: job.id });
       expect(wrongMatch).toEqual([]);
 
-      const rightMatch = await loadMappedOps(tx, { jobProcessId: rightCodeProcess.id, unitId: unit.id });
+      const rightMatch = await loadMappedOps(tx, { jobProcessId: rightCodeProcess.id, unitId: unit.id, jobId: job.id });
       expect(rightMatch).toHaveLength(1);
       expect(rightMatch[0]).toMatchObject({ source: "fabrication", label: "Cutting", status: "IN_PROGRESS" });
     });
+  });
+});
+
+/**
+ * H1 job-level RLS backstop: `loadMappedOps` takes `jobProcessId` and
+ * `unitId` as two independently-supplied params — nothing before this fix
+ * verified they actually belong to the same job. A caller that (by bug)
+ * passes a `unitId` from a DIFFERENT job than its own `jobProcessId`/`jobId`
+ * context used to get that OTHER job's operations rolled up silently
+ * (correct tenant, wrong job). This proves the fix: RLS scoped to the
+ * declared `jobId` returns zero rows for a mismatched `unitId`, rather than
+ * either throwing (there's no natural "job mismatch" business error here —
+ * the tenant-only join was simply wrong) or leaking Job B's data into Job A's
+ * process gate.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadMappedOps — job-level RLS backstop (H1)", () => {
+  it("returns nothing when unitId belongs to a different job than jobId/jobProcessId", async () => {
+    const { PrismaClient } = await import("@/generated/prisma/client");
+    const { withTenant } = await import("@/lib/db");
+    const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+    try {
+      const org = await owner.organization.create({
+        data: { code: `TEST-JOBRLS-${Date.now()}`, name: "Job-level RLS test" },
+      });
+      const tenantId = org.id;
+      const dept = await owner.department.create({ data: { tenantId, code: "F", name: "Fabrication" } });
+      const client = await owner.client.create({ data: { tenantId, name: "Client" } });
+      const family = await owner.productFamily.create({ data: { tenantId, code: "FAMILY_RLS", name: "Family RLS" } });
+
+      const cutting = await owner.operationRef.create({ data: { tenantId, code: "CUT-RLS", name: "Cutting RLS" } });
+      await owner.operationRefFamilySeq.create({
+        data: { tenantId, operationRefId: cutting.id, familyId: family.id, leadTimeProcessSeq: 5 },
+      });
+
+      const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "RLS template" } });
+      const version = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+
+      const makeJob = async (jobNumber: string) => {
+        const job = await owner.job.create({
+          data: {
+            tenantId,
+            publicId: `pub-${jobNumber}-${Date.now()}`,
+            clientId: client.id,
+            familyId: family.id,
+            templateVersionId: version.id,
+            jobNumber,
+          },
+        });
+        const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Vessel" } });
+        const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "SR01" } });
+        const jobProcess = await owner.jobProcess.create({
+          data: { jobId: job.id, seq: 5, code: "5", name: "Cutting", departmentId: dept.id },
+        });
+        return { job, unit, jobProcess };
+      };
+
+      const jobA = await makeJob(`JOB-RLS-A-${Date.now()}`);
+      const jobB = await makeJob(`JOB-RLS-B-${Date.now()}`);
+
+      const componentType = await owner.componentTypeRef.create({ data: { tenantId, code: "SHELL", name: "Shell" } });
+      const componentB = await owner.component.create({
+        data: {
+          jobId: jobB.job.id,
+          equipmentId: jobB.unit.equipmentId,
+          unitId: jobB.unit.id,
+          tag: "SHELL-1",
+          componentTypeId: componentType.id,
+        },
+      });
+      await owner.componentOperation.create({
+        data: { jobId: jobB.job.id, componentId: componentB.id, seq: 1, operationId: cutting.id, status: "IN_PROGRESS" },
+      });
+
+      await withTenant(tenantId, async (tx) => {
+        const opsFromWrongJob = await loadMappedOps(tx, {
+          jobProcessId: jobA.jobProcess.id,
+          unitId: jobB.unit.id, // deliberately mismatched — Job B's unit under Job A's context
+          jobId: jobA.job.id,
+        });
+        expect(opsFromWrongJob).toEqual([]);
+      });
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });
