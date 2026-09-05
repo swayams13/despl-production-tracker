@@ -11,7 +11,7 @@ import { jwtVerify } from "jose";
  * lib/services/ via lib/authz, and must never be skipped on the assumption
  * that middleware already checked (CLAUDE.md invariant #8).
  */
-const PUBLIC_PATHS = ["/login", "/api/health"];
+const PUBLIC_PATHS = ["/login", "/api/health", "/api/cron"];
 
 // A failure is only findable in logs "by request id" (Phase 0 acceptance) if
 // every request has one before it reaches a route handler — stamped here,
