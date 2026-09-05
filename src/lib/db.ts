@@ -82,3 +82,35 @@ export async function withTenant<T>(
     opts?.timeoutMs ? { timeout: opts.timeoutMs } : undefined,
   );
 }
+
+/**
+ * Run work with BOTH tenant and job-level isolation enforced by the
+ * database. Same transaction-local set_config discipline as withTenant —
+ * see that function's doc comment for why set_config must run inside the
+ * $transaction callback.
+ *
+ * Use this instead of withTenant only when the operation is genuinely
+ * scoped to ONE job (component-operation/assembly-step/NCR/stock mutations,
+ * process-plan gating, drawing linking, delay filing). Cross-job reads
+ * (dashboard, portfolio, job list, my-day, command-center, notifications)
+ * must keep using withTenant — the job_isolation RLS policy is fail-open
+ * when app.job_id is unset, which is exactly what keeps those working.
+ */
+export async function withJob<T>(
+  tenantId: number,
+  jobId: number,
+  fn: (tx: Tx) => Promise<T>,
+  opts?: { timeoutMs?: number },
+): Promise<T> {
+  if (!Number.isInteger(jobId) || jobId <= 0) {
+    throw new Error(`withJob: invalid jobId ${jobId}`);
+  }
+  return withTenant(
+    tenantId,
+    async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.job_id', ${String(jobId)}, true)`;
+      return fn(tx);
+    },
+    opts,
+  );
+}
