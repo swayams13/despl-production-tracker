@@ -664,7 +664,14 @@ export async function assertNoOpenNcr(
  * chain instead (Gate 3 owns replacing that chain's string/numeric joins
  * with a real FK — not touched here).
  */
-export async function assertUnitHasNoOpenNcr(tx: Tx, unitId: number): Promise<void> {
+export async function assertUnitHasNoOpenNcr(tx: Tx, unitId: number, jobId: number): Promise<void> {
+  // H1 job-level RLS backstop: this query reaches `ncrs` (job-scoped since
+  // H1) purely through a unitId-derived join, with no jobId filter of its
+  // own — unlike its sibling assertUnitHasNoOpenHoldPoint. Both real callers
+  // (packing/dispatch) already verify unitId's job matches before calling,
+  // but that safety was implicit (nothing here would catch a future caller
+  // that skips it). Make it structural: scope the transaction explicitly.
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${String(jobId)}, true)`;
   const openNcrs = await tx.ncr.findMany({
     where: {
       status: { in: [...OPEN_NCR_STATUSES] },

@@ -162,6 +162,40 @@ describe.skipIf(!RUN_DB)("mtc.service (DB-backed)", async () => {
     );
   });
 
+  it("H1: a componentId from a different job in the SAME tenant is refused, not silently accepted", async () => {
+    const { tenantId, bomItem, user } = await fixture();
+    // A second job in the same tenant, its own equipment/component chain.
+    const client = await owner.client.create({ data: { tenantId, name: "ACME 2", code: `ACME2-${Date.now()}` } });
+    const family = await owner.productFamily.findFirstOrThrow({ where: { tenantId } });
+    const tv = await owner.processTemplateVersion.findFirstOrThrow({ where: { template: { tenantId } } });
+    const jobB = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-mtc-b-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DE-MTC-B-${Date.now()}`,
+      },
+    });
+    const equipmentB = await owner.equipment.create({ data: { jobId: jobB.id, name: "Air Receiver B", blockNo: 1 } });
+    const componentType = await owner.componentTypeRef.findFirstOrThrow({ where: { tenantId } });
+    const bomItemB = await owner.bomItem.create({
+      data: { jobId: jobB.id, equipmentId: equipmentB.id, itemNo: 1, partName: "Shell B", sourceQty: "1" },
+    });
+    const componentB = await owner.component.create({
+      data: { jobId: jobB.id, equipmentId: equipmentB.id, bomItemId: bomItemB.id, tag: "JOBB-SHELL", componentTypeId: componentType.id },
+    });
+    const qc: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.QC] };
+    // bomItem belongs to Job A, componentB belongs to Job B — same tenant, different job.
+    await expectCode(
+      recordMtc(qc, { bomItemId: bomItem.id, componentId: componentB.id, heatNumber: "H-CROSS-JOB", pmiResult: "ACCEPT" }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+    const rows = await owner.materialIdentification.findMany({ where: { heatNumber: "H-CROSS-JOB" } });
+    expect(rows).toHaveLength(0);
+  });
+
   it("heatTrace / componentHeats: one heat recorded against two components traces forward and back", async () => {
     const { tenantId, bomItem, componentA, componentB, user } = await fixture();
     const qc: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.QC] };

@@ -96,7 +96,7 @@ export async function assignUnitToPackage(actor: Actor, input: AssignUnitToPacka
     // uncleared blocking hold point is refused at the earliest point it
     // could otherwise be sealed into a shippable crate.
     await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
-    await assertUnitHasNoOpenNcr(tx, unit.id);
+    await assertUnitHasNoOpenNcr(tx, unit.id, unit.equipment.jobId);
 
     return audited(tx, actor, async () => {
       const updated = await tx.unit.update({ where: { id: unit.id }, data: { packageId: pkg.id } });

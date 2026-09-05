@@ -50,6 +50,13 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
         select: { equipment: { select: { job: { select: { clientId: true, id: true } } } } },
       });
       if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+      // H1: bomItemId and componentId are two independently-supplied ids —
+      // same discipline as B8's clientId check above, extended to jobId. A
+      // component from a different job than the bomItem's must not silently
+      // stand in; the created row's bomItemId/jobId would otherwise disagree.
+      if (component.equipment.job.id !== jobId) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { entity: "Component", componentId, bomItemId });
+      }
       clientId = component.equipment.job.clientId;
       jobId = component.equipment.job.id;
     }
