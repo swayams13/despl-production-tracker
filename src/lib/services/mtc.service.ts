@@ -38,24 +38,26 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
     // is created.
     const bomItem = await tx.bomItem.findFirst({
       where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
-      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+      select: { equipment: { select: { job: { select: { clientId: true, id: true } } } } },
     });
     if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
     let clientId = bomItem.equipment.job.clientId;
+    let jobId = bomItem.equipment.job.id;
 
     if (componentId != null) {
       const component = await tx.component.findFirst({
         where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
-        select: { equipment: { select: { job: { select: { clientId: true } } } } },
+        select: { equipment: { select: { job: { select: { clientId: true, id: true } } } } },
       });
       if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
       clientId = component.equipment.job.clientId;
+      jobId = component.equipment.job.id;
     }
     assertClientScope(actor, clientId);
 
     return audited(tx, actor, async () => {
       const record = await tx.materialIdentification.create({
-        data: { bomItemId, componentId: componentId ?? null, heatNumber, mtcRef: mtcRef ?? null, pmiResult, qtyIssued: qtyIssued ?? null },
+        data: { bomItemId, componentId: componentId ?? null, heatNumber, mtcRef: mtcRef ?? null, pmiResult, qtyIssued: qtyIssued ?? null, jobId },
       });
       return {
         result: record,

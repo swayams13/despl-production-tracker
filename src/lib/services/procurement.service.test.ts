@@ -113,11 +113,13 @@ describe.skipIf(!RUN_DB)("procurement.service (DB-backed)", async () => {
   });
 
   it("succeeds for PRODUCTION_HEAD and is attributed to the actor", async () => {
-    const { tenantId, bomItem, user } = await fixture();
+    const { tenantId, job, bomItem, user } = await fixture();
     const ph: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.PRODUCTION_HEAD] };
     const event = await recordProcurementEvent(ph, { bomItemId: bomItem.id, type: "INDENT_RAISED", refNo: "IND-1" });
     expect(event.by).toBe(user.id);
     expect(event.refNo).toBe("IND-1");
+    // H1: recordProcurementEvent populates jobId.
+    expect(event.jobId).toBe(job.id);
   });
 
   it("qty is required on RECEIPT and forbidden on the other three types", async () => {

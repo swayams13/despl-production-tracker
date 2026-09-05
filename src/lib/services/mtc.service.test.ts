@@ -100,15 +100,17 @@ describe.skipIf(!RUN_DB)("mtc.service (DB-backed)", async () => {
   }
 
   it("bomItemId-only path (legacy) still works unchanged", async () => {
-    const { tenantId, bomItem, user } = await fixture();
+    const { tenantId, job, bomItem, user } = await fixture();
     const qc: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.QC] };
     const record = await recordMtc(qc, { bomItemId: bomItem.id, heatNumber: "H-100", pmiResult: "ACCEPT" });
     expect(record.bomItemId).toBe(bomItem.id);
     expect(record.componentId).toBeNull();
+    // H1: recordMtc populates jobId via the bomItemId branch.
+    expect(record.jobId).toBe(job.id);
   });
 
   it("componentId path anchors correctly and stores qtyIssued", async () => {
-    const { tenantId, bomItem, componentA, user } = await fixture();
+    const { tenantId, job, bomItem, componentA, user } = await fixture();
     const qc: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.QC] };
     const record = await recordMtc(qc, {
       bomItemId: bomItem.id,
@@ -118,6 +120,8 @@ describe.skipIf(!RUN_DB)("mtc.service (DB-backed)", async () => {
       qtyIssued: 12.5,
     });
     expect(record.componentId).toBe(componentA.id);
+    // H1: recordMtc populates jobId via the componentId branch.
+    expect(record.jobId).toBe(job.id);
     expect(record.qtyIssued?.toString()).toBe("12.5");
   });
 

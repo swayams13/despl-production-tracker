@@ -27,7 +27,7 @@ export async function recordProcurementEvent(
   return withTenant(actor.tenantId, async (tx) => {
     const bomItem = await tx.bomItem.findFirst({
       where: { id: bomItemId, equipment: { job: { tenantId: actor.tenantId } } },
-      select: { equipment: { select: { job: { select: { clientId: true } } } } },
+      select: { equipment: { select: { job: { select: { clientId: true, id: true } } } } },
     });
     if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
     // Consistency with every sibling service (mtc/stock/drawing) — a no-op
@@ -37,7 +37,7 @@ export async function recordProcurementEvent(
 
     return audited(tx, actor, async () => {
       const record = await tx.procurementEvent.create({
-        data: { bomItemId, type, qty: qty ?? null, refNo: refNo ?? null, by: actor.userId },
+        data: { bomItemId, type, qty: qty ?? null, refNo: refNo ?? null, by: actor.userId, jobId: bomItem.equipment.job.id },
       });
       return {
         result: record,
