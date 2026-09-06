@@ -21,19 +21,28 @@ function fmtWhen(iso: string | null): string {
   return fmtDate(iso);
 }
 
-export default async function JobsList() {
+const PAGE_SIZE = 50;
+
+export default async function JobsList({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const actor = await getActor();
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
 
-  const jobs = await loadJobs(actor);
+  const { page: pageParam } = await searchParams;
+  const page = Math.max(1, Number(pageParam) || 1);
+  const { items: jobs, total } = await loadJobs(actor, { page, pageSize: PAGE_SIZE });
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const canCreate = hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return (
     <>
       <div className="page-h">
         <h1>Jobs</h1>
-        <span className="sub">{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
+        <span className="sub">{total} job{total === 1 ? "" : "s"}</span>
         {canCreate && (
           <Link href="/jobs/new" className="btn btn-accent" style={{ marginLeft: "auto" }}>+ New job</Link>
         )}
@@ -117,6 +126,19 @@ export default async function JobsList() {
             }
             cards={jobs.map((j) => <JobCardView key={j.id} job={j} />)}
           />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 16 }}>
+            {page > 1 ? (
+              <Link href={`?page=${page - 1}`} className="btn">Previous</Link>
+            ) : (
+              <span />
+            )}
+            <span className="sub">Page {page} of {totalPages}</span>
+            {page < totalPages ? (
+              <Link href={`?page=${page + 1}`} className="btn">Next</Link>
+            ) : (
+              <span />
+            )}
+          </div>
         </div>
       )}
     </>

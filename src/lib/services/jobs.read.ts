@@ -54,11 +54,28 @@ interface PercentRow {
   percent: string | number;
 }
 
-export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
-  const base = await withTenant(actor.tenantId, async (tx) => {
+/** Pre-serialization row shape (dates still `Date`, not ISO strings) — used only to type the empty-jobs early return so it unifies with `mapped`'s inferred type instead of `JobListItem[]`'s (string dates). */
+type JobRow = Omit<JobListItem, "committedDeliveryDate" | "forecastDispatch" | "lastActivityAt"> & {
+  committedDeliveryDate: Date | null;
+  forecastDispatch: Date | null;
+  lastActivityAt: Date | null;
+};
+
+export async function loadJobs(actor: Actor): Promise<JobListItem[]>;
+export async function loadJobs(
+  actor: Actor,
+  opts: { page: number; pageSize: number },
+): Promise<{ items: JobListItem[]; total: number; page: number; pageSize: number }>;
+export async function loadJobs(
+  actor: Actor,
+  opts?: { page: number; pageSize: number },
+): Promise<JobListItem[] | { items: JobListItem[]; total: number; page: number; pageSize: number }> {
+  const { base, total } = await withTenant(actor.tenantId, async (tx) => {
+    // Client-scoped users see only their own client's jobs; staff see all.
+    const where = actor.clientId != null ? { clientId: actor.clientId } : undefined;
+    const total = opts ? await tx.job.count({ where }) : 0;
     const jobs = await tx.job.findMany({
-      // Client-scoped users see only their own client's jobs; staff see all.
-      where: actor.clientId != null ? { clientId: actor.clientId } : undefined,
+      where,
       select: {
         id: true,
         jobNumber: true,
@@ -69,8 +86,9 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
         equipments: { select: { _count: { select: { units: true } } } },
       },
       orderBy: { jobNumber: "asc" },
+      ...(opts ? { skip: (opts.page - 1) * opts.pageSize, take: opts.pageSize } : {}),
     });
-    if (jobs.length === 0) return [];
+    if (jobs.length === 0) return { base: [] as JobRow[], total };
 
     const jobIds = jobs.map((j) => j.id);
     const tallies = await tx.$queryRaw<TallyRow[]>`
@@ -126,7 +144,7 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
       if (!prev || a.last_at > prev) activityByJob.set(a.job_id, a.last_at);
     }
 
-    return jobs.map((j) => {
+    const mapped = jobs.map((j) => {
       const t = tallyByJob.get(j.id);
       const total = t?.total ?? 0;
       const complete = t?.complete ?? 0;
@@ -150,8 +168,9 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
         lastActivityAt: activityByJob.get(j.id) ?? null,
       };
     });
+    return { base: mapped, total };
   });
-  if (base.length === 0) return [];
+  if (base.length === 0) return opts ? { items: [], total, page: opts.page, pageSize: opts.pageSize } : [];
 
   // Per-job extras (hold points, spine rollup), batched into 2 grouped
   // queries total instead of 2 per job — Gate 4 N+1 fix.
@@ -170,7 +189,7 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
     ]),
   );
 
-  return base.map((j) => {
+  const items: JobListItem[] = base.map((j) => {
     const extra = extrasByJob.get(j.id)!;
     return {
       ...j,
@@ -181,4 +200,5 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
       unitRollup: extra.unitRollup,
     };
   });
+  return opts ? { items, total, page: opts.page, pageSize: opts.pageSize } : items;
 }
