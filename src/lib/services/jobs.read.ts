@@ -1,7 +1,7 @@
 import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
-import { loadJobSpines, rollupJobSpine } from "./spine.read";
-import { loadOpenHoldPoints } from "./workspace.read";
+import { loadUnitSpinesBatch, rollupJobSpine } from "./spine.read";
+import { loadOpenHoldPointsBatch } from "./workspace.read";
 import type { StageSegment } from "@/components/industrial/stage-status";
 
 /**
@@ -153,16 +153,22 @@ export async function loadJobs(actor: Actor): Promise<JobListItem[]> {
   });
   if (base.length === 0) return [];
 
-  // Per-job extras that open their own transaction (hold points, spine rollup)
-  // — called sequentially-after the main tx above, never nested inside it.
-  const extras = await Promise.all(
-    base.map(async (j) => ({
-      jobId: j.id,
-      openHoldPoints: (await loadOpenHoldPoints(actor, j.id)).length,
-      unitRollup: rollupJobSpine((await loadJobSpines(actor, j.id)) ?? []),
-    })),
+  // Per-job extras (hold points, spine rollup), batched into 2 grouped
+  // queries total instead of 2 per job — Gate 4 N+1 fix.
+  const jobIds = base.map((j) => j.id);
+  const [holdPointsByJob, unitSpinesByJob] = await Promise.all([
+    loadOpenHoldPointsBatch(actor, jobIds),
+    loadUnitSpinesBatch(actor, jobIds),
+  ]);
+  const extrasByJob = new Map(
+    base.map((j) => [
+      j.id,
+      {
+        openHoldPoints: (holdPointsByJob.get(j.id) ?? []).length,
+        unitRollup: rollupJobSpine(unitSpinesByJob.get(j.id) ?? []),
+      },
+    ]),
   );
-  const extrasByJob = new Map(extras.map((e) => [e.jobId, e]));
 
   return base.map((j) => {
     const extra = extrasByJob.get(j.id)!;
