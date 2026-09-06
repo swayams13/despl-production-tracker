@@ -1,7 +1,7 @@
 import { withTenant, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
-import { workingDaysBetween, DEFAULT_CALENDAR } from "@/lib/schedule";
-import type { WorkCalendarInput } from "@/lib/schedule";
+import { workingDaysBetween } from "@/lib/schedule";
+import { resolveCalendarsForJobs } from "./_shared";
 import { isOverdue, isOnTime } from "@/lib/shared/business-day";
 
 /**
@@ -101,11 +101,6 @@ function toReworkItem(row: DeptNcrRow): DeptReworkItem {
     reworkOwnerId: row.reworkOwnerId,
     reworkDueDate: row.reworkDueDate ? row.reworkDueDate.toISOString() : null,
   };
-}
-
-async function resolveCalendar(tx: Tx): Promise<WorkCalendarInput> {
-  const cal = await tx.workCalendar.findFirst({ where: { isDefault: true }, include: { holidays: true } });
-  return cal ? { weekOffDays: cal.weekOffDays, holidays: cal.holidays.map((h) => h.date) } : DEFAULT_CALENDAR;
 }
 
 export async function loadDepartmentCards(actor: Actor): Promise<DeptCard[]> {
@@ -217,7 +212,7 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
         actualStart: true,
         actualFinish: true,
         unit: { select: { id: true, serialNo: true } },
-        jobProcess: { select: { id: true, name: true, durationMaxDays: true, workOrderStages: true, job: { select: { id: true, jobNumber: true } } } },
+        jobProcess: { select: { id: true, name: true, durationMaxDays: true, workOrderStages: true, job: { select: { id: true, jobNumber: true, calendarId: true } } } },
       },
     });
 
@@ -237,12 +232,15 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
       }))
       .sort((a, b) => (a.plannedFinish ?? "").localeCompare(b.plannedFinish ?? ""));
 
-    const calendar = await resolveCalendar(tx);
+    const jobsForCalendar = [...new Map(plans.map((p) => [p.jobProcess.job.id, p.jobProcess.job])).values()];
+    const calendarByJob = await resolveCalendarsForJobs(tx, jobsForCalendar);
     const cycleByProcess = new Map<number, { name: string; standard: number; deltas: number[] }>();
     for (const p of plans) {
       if (p.status !== "COMPLETE" || !p.actualStart || !p.actualFinish) continue;
       const standard = p.jobProcess.durationMaxDays;
       if (standard == null) continue;
+      const calendar = calendarByJob.get(p.jobProcess.job.id);
+      if (!calendar) continue; // job missing/invisible — shouldn't happen since it's the same tenant-scoped tx
       const actualDays = workingDaysBetween(p.actualStart, p.actualFinish, calendar);
       const entry = cycleByProcess.get(p.jobProcess.id) ?? { name: p.jobProcess.name, standard, deltas: [] };
       entry.deltas.push(actualDays - standard);
