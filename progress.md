@@ -2,6 +2,50 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Gate 4: 13 department demo accounts provisioned + login-verified, 6 Sep 2026
+
+Swayam wants to demo the app to the team before feeding in real employee names, so this session
+provisioned one clean demo login per department using memorable `<dept>@despl.local` addresses,
+for the team demo — not the real named-person accounts `CUTOVER-PLAN.md` §3 calls for at actual
+cutover.
+
+**Found first**: every one of the 13 departments already had a seeded Supervisor account from
+earlier work, but under `sup.<dept>@despl.local` addresses (e.g. `sup.projects@despl.local`), not
+the clean `<dept>@despl.local` style wanted for a demo — confirmed via a direct superuser DB query
+(`select username, email, name from users`) since `/admin`'s own table only displays `username`,
+not `email`, and the two differ. QC was the one exception: its existing `qc@despl.local` (QC/QA
+role, already used in the Gate 2 exit test) already matched exactly what was wanted, so it was
+reused as-is, untouched.
+
+**Created 12 new accounts** via the real `/admin` → "Add employee" dialog (not a script, not a DB
+write) — one per remaining department, Supervisor role, correct department checkbox, explicit
+email set to match username: `engineering@`, `planning@`, `procurement@`, `stores@`,
+`fabricationprep@`, `machineshop@`, `fabrication@`, `heattreatment@`, `surfacepaint@`, `dispatch@`,
+`documentation@`, `pmo@` (all `@despl.local`). Each got a real one-time generated temp credential
+from the app itself.
+
+**Deactivated the 12 now-redundant `sup.<dept>` accounts** (`sup.qc` deliberately left alone,
+paired with `qc@despl.local` same as before) so the employee list doesn't carry two Supervisor
+logins per department into the demo.
+
+**Login-verified all 12 new accounts for real** — real `/login`, forced `mustChangePassword` fired
+and was completed for each, landed on a correctly-scoped `/my-day` (right name, right department,
+right pool count), signed out via the real Sign-out control between each. Set a single shared demo
+password (`DesplDemo2026!`) across all 12 so whoever runs the demo doesn't need 12 different
+temp strings. QC (`qc@despl.local`) was not touched — already real-login-verified in the Gate 2
+exit test session, no need to re-verify or reset its password for this pass.
+
+**Temp/demo credentials** (shared password `DesplDemo2026!` for all 12 below):
+`pmo@`, `engineering@`, `planning@`, `procurement@`, `stores@`, `fabricationprep@`,
+`machineshop@`, `fabrication@`, `heattreatment@`, `surfacepaint@`, `dispatch@`,
+`documentation@` — all `@despl.local`.
+
+**Not done, deliberately**: no actual department-specific gate was walked live this session
+(material shortage, drawing release, maker-checker, hold points, etc.) — Swayam chose the "quick
+login check" option over the "one real end-to-end job" option when asked. If the team demo wants
+to show gates firing, not just logins, that's the next thing to script and run, on the same
+disposable-job pattern as `TRAINING-PROJECTS-PMO.md`.
+
 ## Session — Gate 4: provisioning flow live-verified end to end, 6 Sep 2026
 
 Ran a real dry run of `CUTOVER-PLAN.md` §3's individual-login provisioning model, through the real
