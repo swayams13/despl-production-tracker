@@ -343,6 +343,20 @@ export async function getCurrentScheduleRun(
   });
 }
 
+/** Batched sibling of getCurrentScheduleRun — one query for every job's current run, grouped by jobId. */
+export async function getCurrentScheduleRunsBatch(
+  tx: Tx,
+  jobIds: number[],
+  equipmentId?: number | null,
+): Promise<Map<number, ScheduleRunWithPlans>> {
+  if (jobIds.length === 0) return new Map();
+  const runs = await tx.scheduleRun.findMany({
+    where: { jobId: { in: jobIds }, equipmentId: equipmentId ?? null, isCurrent: true },
+    include: { processPlans: true },
+  });
+  return new Map(runs.map((r) => [r.jobId, r]));
+}
+
 // ── Row locking ──────────────────────────────────────────────────────────
 
 /**

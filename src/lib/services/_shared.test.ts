@@ -13,6 +13,7 @@ import {
   persistScheduleRun,
   lockProcessPlanForUpdate,
   getCurrentScheduleRun,
+  getCurrentScheduleRunsBatch,
 } from "./_shared";
 import {
   generateScheduleSchema,
@@ -434,5 +435,28 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadMappedOps — job-level RLS back
     } finally {
       await owner.$disconnect();
     }
+  });
+});
+
+describe.skipIf(!process.env.RUN_DB_TESTS)("getCurrentScheduleRunsBatch (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  it("keys each job's current run to that job, not another job's", async () => {
+    const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+    const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+    if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+
+    const map = await owner.$transaction(async (tx) => getCurrentScheduleRunsBatch(tx, [jobA.id, jobB.id], null));
+
+    const runA = await owner.scheduleRun.findFirst({ where: { jobId: jobA.id, equipmentId: null, isCurrent: true } });
+    const runB = await owner.scheduleRun.findFirst({ where: { jobId: jobB.id, equipmentId: null, isCurrent: true } });
+
+    expect(map.get(jobA.id)?.id).toBe(runA?.id);
+    expect(map.get(jobB.id)?.id).toBe(runB?.id);
+    // The two jobs' runs must not be the same row, or the assertions above are vacuous.
+    expect(runA?.id).not.toBe(runB?.id);
+
+    await owner.$disconnect();
   });
 });
