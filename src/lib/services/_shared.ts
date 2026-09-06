@@ -199,6 +199,30 @@ export async function loadJobSpine(tx: Tx, jobId: number): Promise<JobSpine> {
  * from the returned map — callers source jobIds from loadJobs()'s output,
  * which only ever lists jobs that exist and are visible.
  */
+/**
+ * Batch calendar resolution: Job.calendarId → tenant-default calendar → the
+ * engine's DEFAULT_CALENDAR, one lookup per distinct explicit calendarId plus
+ * one shared tenant-default fetch — never one query per job. The single
+ * source of truth for this resolution order; every caller that needs a job's
+ * calendar (not just loadJobSpine/loadJobSpinesBatch) should go through this
+ * rather than re-deriving it (a re-derived copy that forgets the calendarId
+ * override is exactly how department cycle-time went stale against a job's
+ * own calendar).
+ */
+export async function resolveCalendarsForJobs(tx: Tx, jobs: { id: number; calendarId: number | null }[]): Promise<Map<number, WorkCalendarInput>> {
+  const calendarIds = [...new Set(jobs.map((j) => j.calendarId).filter((id): id is number => id != null))];
+  const explicitCalendars = calendarIds.length
+    ? await tx.workCalendar.findMany({ where: { id: { in: calendarIds } }, include: { holidays: true } })
+    : [];
+  const explicitCalendarById = new Map(explicitCalendars.map((c) => [c.id, c]));
+  const defaultCalendar = await tx.workCalendar.findFirst({ where: { isDefault: true }, include: { holidays: true } });
+
+  const toCalendarInput = (cal: (typeof explicitCalendars)[number] | null): WorkCalendarInput =>
+    cal ? { weekOffDays: cal.weekOffDays, holidays: cal.holidays.map((h) => h.date) } : DEFAULT_CALENDAR;
+
+  return new Map(jobs.map((j) => [j.id, toCalendarInput((j.calendarId != null ? explicitCalendarById.get(j.calendarId) : null) ?? defaultCalendar)]));
+}
+
 export async function loadJobSpinesBatch(tx: Tx, jobIds: number[]): Promise<Map<number, JobSpine>> {
   if (jobIds.length === 0) return new Map();
 
@@ -227,19 +251,7 @@ export async function loadJobSpinesBatch(tx: Tx, jobIds: number[]): Promise<Map<
     else edgesByJob.set(jobId, [e]);
   }
 
-  // Calendar resolution, batched: one lookup per distinct explicit calendarId,
-  // plus one shared tenant-default fetch — never one query per job.
-  const calendarIds = [...new Set(jobs.map((j) => j.calendarId).filter((id): id is number => id != null))];
-  const explicitCalendars = calendarIds.length
-    ? await tx.workCalendar.findMany({ where: { id: { in: calendarIds } }, include: { holidays: true } })
-    : [];
-  const explicitCalendarById = new Map(explicitCalendars.map((c) => [c.id, c]));
-  const defaultCalendar = await tx.workCalendar.findFirst({ where: { isDefault: true }, include: { holidays: true } });
-
-  const resolveCalendar = (job: (typeof jobs)[number]): WorkCalendarInput => {
-    const cal = (job.calendarId != null ? explicitCalendarById.get(job.calendarId) : null) ?? defaultCalendar;
-    return cal ? { weekOffDays: cal.weekOffDays, holidays: cal.holidays.map((h) => h.date) } : DEFAULT_CALENDAR;
-  };
+  const calendarByJob = await resolveCalendarsForJobs(tx, jobs);
 
   const out = new Map<number, JobSpine>();
   for (const jobId of jobIds) {
@@ -250,7 +262,7 @@ export async function loadJobSpinesBatch(tx: Tx, jobIds: number[]): Promise<Map<
       job,
       processes: rawProcessesForJob.map(jobProcessToScheduleProcess),
       edges: (edgesByJob.get(jobId) ?? []).map(jobEdgeToScheduleEdge),
-      calendar: resolveCalendar(job),
+      calendar: calendarByJob.get(jobId) ?? DEFAULT_CALENDAR,
       rawProcesses: rawProcessesForJob,
     });
   }
