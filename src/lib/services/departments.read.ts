@@ -3,6 +3,7 @@ import type { Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
 import { resolveCalendarsForJobs } from "./_shared";
 import { isOverdue, isOnTime } from "@/lib/shared/business-day";
+import { pctOf } from "@/lib/shared/metrics";
 
 /**
  * `/departments` + `/departments/[id]` (§4.6) — cross-job, like `/qc`.
@@ -148,7 +149,7 @@ export async function loadDepartmentCards(actor: Actor): Promise<DeptCard[]> {
         representative: repByDept.get(d.id) ?? null,
         openCount: b.open,
         overdueCount: b.overdue,
-        onTimePct: b.onTimeTotal > 0 ? Math.round((b.onTime / b.onTimeTotal) * 100) : null,
+        onTimePct: pctOf(b.onTime, b.onTimeTotal),
         openReworkCount: reworkCountByDept.get(d.id) ?? 0,
       };
     });
