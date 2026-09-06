@@ -2,6 +2,20 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Gate 4: KPI consolidation shipped (two PRs), merged to `main`, 6 Sep 2026
+
+Followed systematic debugging on the ledger's own "start with cycle-time — two calendars, wrong number" note before touching anything: traced every `workingDaysBetween` call site and found `departments.read.ts:106` had its own `resolveCalendar()` that only ever fetched the tenant-wide default `WorkCalendar`, ignoring `Job.calendarId` — every other consumer (`workspace.read.ts`'s cycle-time offenders, `myday.read.ts`, `stage-detail.read.ts`) already resolved per-job via `_shared.ts`'s `loadJobSpine`/`loadJobSpinesBatch`. A job created with a non-default calendar (settable at intake, `job-intake.service.ts`) would show a different working-day count — and therefore a different avg-actual/delta — for the identical completed process, depending on whether you looked at `/departments/[id]` or `/dashboard`.
+
+**Root-cause fix, TDD'd**: wrote a DB-gated test first (`departments.read.test.ts`) — a disposable job on a custom Sat+Sun-off calendar, one COMPLETE `ProcessPlan` spanning a week, asserting the department detail's `avgActualDays` matches the *job's own* calendar's working-day count. Confirmed it failed against the old code (6 vs. expected 5). Extracted the correct batch-resolution logic already living inside `loadJobSpinesBatch` into a new exported `resolveCalendarsForJobs(tx, jobs)` in `_shared.ts` (`loadJobSpinesBatch` now calls it too — no behavior change there, confirmed by its own existing test staying green), wired `departments.read.ts`'s cycle-time loop to resolve per-job instead of tenant-wide. `fix/gate4-department-cycle-time-calendar` → PR #40 merged to `main` (`6766aeb`), CI green.
+
+**Second piece, the rest of the ledger's "KPI consolidation" scope** per `docs/mos-blueprint/reference/14_DESPL_MOS_MANAGEMENT_KPI_ALERT_MODEL.md` §3: grepped every `Math.round((x/y)*100)` shape across `src/lib/services/` and found the identical "count/total, rounded, null-if-empty" formula independently re-implemented five times — `departments.read.ts` (`onTimePct`), `myday.read.ts` (`onTimePct30d`), `workspace.read.ts` (deptMatrix `onTimePct` **and** `firstPassYieldPct`), `qc-cockpit.read.ts` (`yieldPct`) — kept aligned only by convention, exactly the blueprint's flagged gap. `welding.read.ts`'s repair-rate-vs-team-average is a *different* shape (can go negative) and was correctly left alone. New `pctOf(count, total)` in `src/lib/shared/metrics.ts` with its own unit test now backs all five sites — a pure refactor, identical formula and null behavior, no new abstraction beyond the one function the blueprint actually asked for. `feat/kpi-consolidation-pct-helper` → PR #41 merged to `main` (`2a6b51c`), CI green.
+
+**Verify, both PRs**: `pnpm typecheck`/`lint`/`test` clean throughout; targeted `pnpm test:db` runs green on every touched read service (`departments`/`_shared` 92/92 for PR #40; `departments`/`myday`/`workspace`/`qc-cockpit` 32/32 for PR #41, confirming zero behavior change from the refactor). Neither PR touched the schema — nothing to apply to production beyond the next Railway deploy from `main`.
+
+`docs/mos-execution/LEDGER.md`'s KPI consolidation row is now ☑ (`a9fe549`).
+
+**Gate 4 status**: delivery channel ☑, scheduler+digest+alerts ☑, H1 ☑, pagination+N+1s ☑, KPI consolidation ☑ (this session). Still open: cutover/training/refusal-guide/sign-off, and the Gate 4 exit row itself ("13 departments off spreadsheets").
+
 ## Session — Gate 4: pagination + all 4 page-load N+1s fixed, merged to `main`, 6 Sep 2026
 
 **Ticked the stale Gate 4 ledger row first**: `progress.md`'s own 6 Sep entries had already confirmed both Gate 4 crons (`cron-alerts`/`cron-digest`) fully working end-to-end, but `docs/mos-execution/LEDGER.md` still showed `◐` — corrected to `☑` with the real evidence summarized.
