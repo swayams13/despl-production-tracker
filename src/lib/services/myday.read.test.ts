@@ -416,6 +416,53 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
   });
 });
 
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadMyDay — batched fan-out (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("rows are attributed to the correct job's own jobNumber for every active job (real seeded data)", async () => {
+    const jobs = await owner.job.findMany({ where: { status: "ACTIVE" } });
+    if (jobs.length < 2) throw new Error("need >=2 ACTIVE jobs seeded to exercise the batch path meaningfully");
+    const tenantId = jobs[0].tenantId;
+
+    // loadMyDay (unlike loadCommandCenter) partitions rows by the actor's OWN
+    // departmentIds/assignments — a PRODUCTION_HEAD with no department
+    // membership gets nothing. The seed's "reviewer@despl.local" account
+    // (prisma/seed.ts §12) holds every role AND every department, so it's the
+    // one seeded actor guaranteed to see pool/teamHeld rows across every
+    // department + job without depending on who happens to be assigned what.
+    const seededUser = await owner.user.findFirst({ where: { tenantId, active: true, clientId: null, email: "reviewer@despl.local" } });
+    if (!seededUser) throw new Error("seed missing reviewer@despl.local for the seeded tenant — run pnpm db:seed");
+    const memberships = await owner.userDepartment.findMany({ where: { userId: seededUser.id }, select: { departmentId: true } });
+
+    const seededActor: Actor = {
+      userId: seededUser.id,
+      tenantId,
+      clientId: null,
+      name: seededUser.name,
+      email: seededUser.email,
+      roles: [ROLES.PRODUCTION_HEAD],
+      departmentIds: memberships.map((m) => m.departmentId),
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+
+    const view = await loadMyDay(seededActor);
+
+    const jobNumberById = new Map(jobs.map((j) => [j.id, j.jobNumber]));
+    const allRows = [...view.mine, ...view.pool, ...view.teamHeld, ...view.completed];
+    expect(allRows.length).toBeGreaterThan(0);
+    for (const row of allRows) {
+      expect(row.jobNumber).toBe(jobNumberById.get(row.jobId));
+    }
+  });
+});
+
 /**
  * Regression: found by Task 2.4's real browser click-through (a supervisor
  * submitted a Planning-department plan for QC, then logging in as
