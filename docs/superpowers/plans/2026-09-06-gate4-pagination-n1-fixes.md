@@ -129,21 +129,23 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadJobSpinesBatch (DB)", async () =
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   it("each job's spine has only that job's own processes", async () => {
-    const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
-    const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
-    if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+    try {
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
 
-    const map = await owner.$transaction(async (tx) => loadJobSpinesBatch(tx, [jobA.id, jobB.id]));
+      const map = await owner.$transaction(async (tx) => loadJobSpinesBatch(tx, [jobA.id, jobB.id]));
 
-    const rawA = await owner.jobProcess.findMany({ where: { jobId: jobA.id } });
-    const rawB = await owner.jobProcess.findMany({ where: { jobId: jobB.id } });
+      const rawA = await owner.jobProcess.findMany({ where: { jobId: jobA.id } });
+      const rawB = await owner.jobProcess.findMany({ where: { jobId: jobB.id } });
 
-    expect(map.get(jobA.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawA.map((p) => p.id).sort());
-    expect(map.get(jobB.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawB.map((p) => p.id).sort());
-    expect(rawA.length).toBeGreaterThan(0);
-    expect(rawB.length).toBeGreaterThan(0);
-
-    await owner.$disconnect();
+      expect(map.get(jobA.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawA.map((p) => p.id).sort());
+      expect(map.get(jobB.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawB.map((p) => p.id).sort());
+      expect(rawA.length).toBeGreaterThan(0);
+      expect(rawB.length).toBeGreaterThan(0);
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });
 ```
@@ -271,24 +273,26 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadUnitSpinesBatch (DB)", async () 
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   it("each job's unit spines belong to that job's own units, not another job's", async () => {
-    const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
-    const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
-    if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+    try {
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
 
-    const map = await loadUnitSpinesBatch(actor({ tenantId: jobA.tenantId }), [jobA.id, jobB.id]);
+      const map = await loadUnitSpinesBatch(actor({ tenantId: jobA.tenantId }), [jobA.id, jobB.id]);
 
-    const unitsA = await owner.unit.findMany({ where: { equipment: { jobId: jobA.id } }, select: { id: true } });
-    const unitsB = await owner.unit.findMany({ where: { equipment: { jobId: jobB.id } }, select: { id: true } });
+      const unitsA = await owner.unit.findMany({ where: { equipment: { jobId: jobA.id } }, select: { id: true } });
+      const unitsB = await owner.unit.findMany({ where: { equipment: { jobId: jobB.id } }, select: { id: true } });
 
-    const unitIdsA = new Set(unitsA.map((u) => u.id));
-    const unitIdsB = new Set(unitsB.map((u) => u.id));
+      const unitIdsA = new Set(unitsA.map((u) => u.id));
+      const unitIdsB = new Set(unitsB.map((u) => u.id));
 
-    for (const spine of map.get(jobA.id) ?? []) expect(unitIdsA.has(spine.unitId)).toBe(true);
-    for (const spine of map.get(jobB.id) ?? []) expect(unitIdsB.has(spine.unitId)).toBe(true);
-    // Sanity: the two jobs' unit sets don't overlap, or the assertions above are vacuous.
-    expect([...unitIdsA].some((id) => unitIdsB.has(id))).toBe(false);
-
-    await owner.$disconnect();
+      for (const spine of map.get(jobA.id) ?? []) expect(unitIdsA.has(spine.unitId)).toBe(true);
+      for (const spine of map.get(jobB.id) ?? []) expect(unitIdsB.has(spine.unitId)).toBe(true);
+      // Sanity: the two jobs' unit sets don't overlap, or the assertions above are vacuous.
+      expect([...unitIdsA].some((id) => unitIdsB.has(id))).toBe(false);
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });
 ```
@@ -413,22 +417,24 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadOpenHoldPointsBatch (DB)", async
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   it("agrees with the singular loadOpenHoldPoints, per job, not cross-attributed", async () => {
-    const { loadOpenHoldPoints } = await import("./workspace.read");
-    const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
-    const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
-    if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+    try {
+      const { loadOpenHoldPoints } = await import("./workspace.read");
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
 
-    const a = actor({ tenantId: jobA.tenantId });
-    const [singleA, singleB] = await Promise.all([loadOpenHoldPoints(a, jobA.id), loadOpenHoldPoints(a, jobB.id)]);
-    const map = await loadOpenHoldPointsBatch(a, [jobA.id, jobB.id]);
+      const a = actor({ tenantId: jobA.tenantId });
+      const [singleA, singleB] = await Promise.all([loadOpenHoldPoints(a, jobA.id), loadOpenHoldPoints(a, jobB.id)]);
+      const map = await loadOpenHoldPointsBatch(a, [jobA.id, jobB.id]);
 
-    const norm = (list: { qcpItemId: number; unitId: number; status: string }[]) =>
-      list.map((x) => `${x.qcpItemId}:${x.unitId}:${x.status}`).sort();
+      const norm = (list: { qcpItemId: number; unitId: number; status: string }[]) =>
+        list.map((x) => `${x.qcpItemId}:${x.unitId}:${x.status}`).sort();
 
-    expect(norm(map.get(jobA.id) ?? [])).toEqual(norm(singleA));
-    expect(norm(map.get(jobB.id) ?? [])).toEqual(norm(singleB));
-
-    await owner.$disconnect();
+      expect(norm(map.get(jobA.id) ?? [])).toEqual(norm(singleA));
+      expect(norm(map.get(jobB.id) ?? [])).toEqual(norm(singleB));
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });
 ```
@@ -623,22 +629,24 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadJobs — batched extras (DB)", a
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   it("openHoldPoints/unitRollup are attributed to the right job for every job in the tenant", async () => {
-    const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
-    const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
-    if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+    try {
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
 
-    const list = await loadJobs(actor({ tenantId: jobA.tenantId }));
-    const rowA = list.find((j) => j.id === jobA.id);
-    const rowB = list.find((j) => j.id === jobB.id);
-    expect(rowA).toBeDefined();
-    expect(rowB).toBeDefined();
+      const list = await loadJobs(actor({ tenantId: jobA.tenantId }));
+      const rowA = list.find((j) => j.id === jobA.id);
+      const rowB = list.find((j) => j.id === jobB.id);
+      expect(rowA).toBeDefined();
+      expect(rowB).toBeDefined();
 
-    // Cross-check against real DB state, not just "field exists": openHoldPoints
-    // for job A must equal the count of A's own units' open blocking points.
-    const unitsA = await owner.unit.findMany({ where: { equipment: { jobId: jobA.id } }, select: { id: true } });
-    expect(rowA!.unitRollup.length === 0 || unitsA.length > 0).toBe(true); // spine exists only if units exist
-
-    await owner.$disconnect();
+      // Cross-check against real DB state, not just "field exists": openHoldPoints
+      // for job A must equal the count of A's own units' open blocking points.
+      const unitsA = await owner.unit.findMany({ where: { equipment: { jobId: jobA.id } }, select: { id: true } });
+      expect(rowA!.unitRollup.length === 0 || unitsA.length > 0).toBe(true); // spine exists only if units exist
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });
 ```
@@ -750,24 +758,26 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — batched fan-ou
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   it("rows are attributed to the correct job's own jobNumber for every active job", async () => {
-    const dept = await owner.department.findFirst();
-    if (!dept) throw new Error("seed missing a department — run pnpm db:seed");
-    const jobs = await owner.job.findMany({ where: { status: "ACTIVE" } });
-    if (jobs.length < 2) throw new Error("need >=2 ACTIVE jobs seeded to exercise the batch path meaningfully");
+    try {
+      const dept = await owner.department.findFirst();
+      if (!dept) throw new Error("seed missing a department — run pnpm db:seed");
+      const jobs = await owner.job.findMany({ where: { status: "ACTIVE" } });
+      if (jobs.length < 2) throw new Error("need >=2 ACTIVE jobs seeded to exercise the batch path meaningfully");
 
-    const view = await loadCommandCenter(
-      { userId: 1, tenantId: jobs[0].tenantId, clientId: null, name: "T", email: "t@despl.local", roles: [ROLES.PRODUCTION_HEAD], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM", outdoorMode: false },
-      dept.id,
-      "X",
-      dept.name,
-    );
+      const view = await loadCommandCenter(
+        { userId: 1, tenantId: jobs[0].tenantId, clientId: null, name: "T", email: "t@despl.local", roles: [ROLES.PRODUCTION_HEAD], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM", outdoorMode: false },
+        dept.id,
+        "X",
+        dept.name,
+      );
 
-    const jobNumberById = new Map(jobs.map((j) => [j.id, j.jobNumber]));
-    for (const row of [...view.own, ...view.waitingOnOthers]) {
-      expect(row.jobNumber).toBe(jobNumberById.get(row.jobId));
+      const jobNumberById = new Map(jobs.map((j) => [j.id, j.jobNumber]));
+      for (const row of [...view.own, ...view.waitingOnOthers]) {
+        expect(row.jobNumber).toBe(jobNumberById.get(row.jobId));
+      }
+    } finally {
+      await owner.$disconnect();
     }
-
-    await owner.$disconnect();
   });
 });
 ```
@@ -927,25 +937,27 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadClientPortalView — batched sna
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   it("each job's hasUpdate/asOf reflect that job's own latest VERIFIED snapshot", async () => {
-    const client = await owner.client.findFirst({ where: { jobs: { some: {} } } });
-    if (!client) throw new Error("seed missing a client with jobs — run pnpm db:seed");
-    const jobs = await owner.job.findMany({ where: { clientId: client.id } });
-    if (jobs.length === 0) throw new Error("client has no jobs");
+    try {
+      const client = await owner.client.findFirst({ where: { jobs: { some: {} } } });
+      if (!client) throw new Error("seed missing a client with jobs — run pnpm db:seed");
+      const jobs = await owner.job.findMany({ where: { clientId: client.id } });
+      if (jobs.length === 0) throw new Error("client has no jobs");
 
-    const { loadClientPortalView } = await import("./client-snapshot.read");
-    const views = await loadClientPortalView({
-      userId: 1, tenantId: client.tenantId, clientId: client.id, name: "T", email: "t@despl.local",
-      roles: [], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM", outdoorMode: false,
-    });
+      const { loadClientPortalView } = await import("./client-snapshot.read");
+      const views = await loadClientPortalView({
+        userId: 1, tenantId: client.tenantId, clientId: client.id, name: "T", email: "t@despl.local",
+        roles: [], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM", outdoorMode: false,
+      });
 
-    for (const job of jobs) {
-      const latest = await owner.progressSnapshot.findFirst({ where: { jobId: job.id, status: "VERIFIED" }, orderBy: { asOf: "desc" } });
-      const view = views.find((v) => v.jobId === job.id)!;
-      expect(view.hasUpdate).toBe(latest != null);
-      if (latest) expect(view.asOf === null || new Date(view.asOf!).getTime() === latest.asOf.getTime()).toBe(true);
+      for (const job of jobs) {
+        const latest = await owner.progressSnapshot.findFirst({ where: { jobId: job.id, status: "VERIFIED" }, orderBy: { asOf: "desc" } });
+        const view = views.find((v) => v.jobId === job.id)!;
+        expect(view.hasUpdate).toBe(latest != null);
+        if (latest) expect(view.asOf === null || new Date(view.asOf!).getTime() === latest.asOf.getTime()).toBe(true);
+      }
+    } finally {
+      await owner.$disconnect();
     }
-
-    await owner.$disconnect();
   });
 });
 ```
@@ -1071,24 +1083,26 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadJobs — pagination (DB)", async
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   it("paginated call returns only pageSize items and the correct total", async () => {
-    const tenantJob = await owner.job.findFirst();
-    if (!tenantJob) throw new Error("seed missing any job — run pnpm db:seed");
-    const a = actor({ tenantId: tenantJob.tenantId });
+    try {
+      const tenantJob = await owner.job.findFirst();
+      if (!tenantJob) throw new Error("seed missing any job — run pnpm db:seed");
+      const a = actor({ tenantId: tenantJob.tenantId });
 
-    const full = await loadJobs(a);
-    const paged = await loadJobs(a, { page: 1, pageSize: 1 });
+      const full = await loadJobs(a);
+      const paged = await loadJobs(a, { page: 1, pageSize: 1 });
 
-    expect(Array.isArray(paged)).toBe(false);
-    if (Array.isArray(paged)) throw new Error("unreachable");
-    expect(paged.items.length).toBe(Math.min(1, full.length));
-    expect(paged.total).toBe(full.length);
-    expect(paged.page).toBe(1);
-    expect(paged.pageSize).toBe(1);
-    // Page 1's one item must be the same job the unpaginated call lists first
-    // (both order by jobNumber asc) — proves take/skip didn't reorder anything.
-    if (full.length > 0) expect(paged.items[0].id).toBe(full[0].id);
-
-    await owner.$disconnect();
+      expect(Array.isArray(paged)).toBe(false);
+      if (Array.isArray(paged)) throw new Error("unreachable");
+      expect(paged.items.length).toBe(Math.min(1, full.length));
+      expect(paged.total).toBe(full.length);
+      expect(paged.page).toBe(1);
+      expect(paged.pageSize).toBe(1);
+      // Page 1's one item must be the same job the unpaginated call lists first
+      // (both order by jobNumber asc) — proves take/skip didn't reorder anything.
+      if (full.length > 0) expect(paged.items[0].id).toBe(full[0].id);
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });
 ```
