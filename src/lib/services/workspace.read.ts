@@ -180,6 +180,137 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
   });
 }
 
+/** Batched sibling of loadOpenHoldPoints — same blocking/latest-attempt logic, grouped by jobId. */
+export async function loadOpenHoldPointsBatch(actor: Actor, jobIds: number[]): Promise<Map<number, OpenHoldPoint[]>> {
+  if (jobIds.length === 0) return new Map();
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const jobs = await tx.job.findMany({ where: { id: { in: jobIds } }, select: { id: true, clientId: true } });
+    for (const job of jobs) assertClientScope(actor, job.clientId);
+    const visibleJobIds = jobs.map((j) => j.id);
+
+    const units = await tx.unit.findMany({
+      where: { equipment: { jobId: { in: visibleJobIds } } },
+      select: { id: true, serialNo: true, equipment: { select: { jobId: true } } },
+    });
+    if (units.length === 0) return new Map();
+    const jobIdByUnit = new Map(units.map((u) => [u.id, u.equipment.jobId]));
+
+    const blockingItems = await tx.qcpItem.findMany({
+      where: {
+        processLinks: { some: { jobProcess: { jobId: { in: visibleJobIds } } } },
+        partyCodes: { some: { qcpCode: { blocksCompletion: true } } },
+      },
+      select: {
+        id: true,
+        srNo: true,
+        activity: true,
+        partyCodes: { where: { qcpCode: { blocksCompletion: true } }, select: { qcpCode: { select: { code: true, requiresCall: true } } } },
+        // Earliest-by-seq linked process PER JOB — a template-level QcpItem can
+        // link to more than one job's own JobProcess rows, so this can't be a
+        // single take:1 across jobs the way the singular per-job query gets it
+        // for free; every link is fetched, then reduced to earliest-per-job below.
+        processLinks: {
+          select: { jobProcess: { select: { id: true, seq: true, jobId: true } } },
+          orderBy: { jobProcess: { seq: "asc" } },
+        },
+      },
+    });
+    if (blockingItems.length === 0) return new Map();
+
+    // Earliest-linked process per (item, job) — replaces the singular version's take:1.
+    const linkedProcessByItemJob = new Map<string, number>();
+    for (const item of blockingItems) {
+      for (const link of item.processLinks) {
+        const key = `${item.id}:${link.jobProcess.jobId}`;
+        if (!linkedProcessByItemJob.has(key)) linkedProcessByItemJob.set(key, link.jobProcess.id);
+      }
+    }
+
+    const itemIds = blockingItems.map((i) => i.id);
+    const unitIds = units.map((u) => u.id);
+    const execs = await tx.qcpExecution.findMany({
+      where: { unitId: { in: unitIds }, qcpItemId: { in: itemIds } },
+      orderBy: { attemptNo: "desc" },
+      select: { qcpItemId: true, unitId: true, result: true, recordedAt: true },
+    });
+    const latestByKey = new Map<string, { result: string; recordedAt: Date }>();
+    for (const e of execs) {
+      const k = `${e.qcpItemId}:${e.unitId}`;
+      if (!latestByKey.has(k)) latestByKey.set(k, { result: e.result, recordedAt: e.recordedAt });
+    }
+
+    const allLinkedProcessIds = [...new Set([...linkedProcessByItemJob.values()])];
+    const plans = await tx.processPlan.findMany({
+      where: { unitId: { in: unitIds }, jobProcessId: { in: allLinkedProcessIds }, scheduleRun: { isCurrent: true } },
+      select: { jobProcessId: true, unitId: true, plannedStart: true },
+    });
+    const plannedStartByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p.plannedStart]));
+
+    const itemById = new Map(blockingItems.map((i) => [i.id, i]));
+    const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
+    const now = new Date();
+
+    const out = new Map<number, OpenHoldPoint[]>();
+    for (const jobId of visibleJobIds) out.set(jobId, []);
+
+    const unitsByJob = new Map<number, number[]>();
+    for (const u of units) {
+      const bucket = unitsByJob.get(jobIdByUnit.get(u.id)!);
+      if (bucket) bucket.push(u.id);
+      else unitsByJob.set(jobIdByUnit.get(u.id)!, [u.id]);
+    }
+
+    for (const jobId of visibleJobIds) {
+      const jobUnitIds = unitsByJob.get(jobId) ?? [];
+      if (jobUnitIds.length === 0) continue;
+      const open: OpenHoldPoint[] = [];
+      for (const itemId of itemIds) {
+        const jpId = linkedProcessByItemJob.get(`${itemId}:${jobId}`);
+        if (jpId == null) continue; // this blocking item has no link on this job
+        const item = itemById.get(itemId)!;
+        const blockingCode = item.partyCodes[0]?.qcpCode;
+        const classCode = blockingCode?.code ?? "?";
+        const requiresCall = blockingCode?.requiresCall ?? false;
+
+        for (const unitId of jobUnitIds) {
+          const attempt = latestByKey.get(`${itemId}:${unitId}`);
+          const r = attempt?.result;
+          if (r === "ACCEPTED" || r === "NA") continue;
+
+          let status: string;
+          let ageRef: Date | null;
+          if (!attempt) {
+            status = requiresCall ? "Awaiting TPI" : "Pending";
+            ageRef = plannedStartByKey.get(`${jpId}:${unitId}`) ?? null;
+          } else if (r === "REJECTED") {
+            status = "Reinspect";
+            ageRef = attempt.recordedAt;
+          } else {
+            status = "QC review";
+            ageRef = attempt.recordedAt;
+          }
+          const ageDays = ageRef ? Math.max(0, Math.floor((now.getTime() - ageRef.getTime()) / 864e5)) : 0;
+
+          open.push({
+            qcpItemId: itemId,
+            activity: item.activity,
+            unitId,
+            serialNo: serialByUnit.get(unitId)!,
+            srNo: item.srNo,
+            classCode,
+            awaitingTpi: status === "Awaiting TPI",
+            status,
+            ageDays,
+          });
+        }
+      }
+      out.set(jobId, open);
+    }
+    return out;
+  });
+}
+
 // ── Workspace view (§4.4) — per-process cards + QC queue ─────────────────
 
 export interface WsUnitRow {
