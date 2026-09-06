@@ -20,6 +20,13 @@ describe.skipIf(!RUN_DB)("cron.service (DB-backed)", async () => {
 
   const past = new Date(Date.now() - 20 * 864e5);
 
+  // Fixed reference "today" for the digest tests below — a known Wednesday,
+  // never the real system clock. `runDailyDigest()` defaults `asOf` to
+  // `new Date()` specifically so callers (this test included) can pin it;
+  // using the real date here would make "on a working day" fail every time
+  // the suite happens to run on a Sunday or a real calendar holiday.
+  const FIXED_WEEKDAY = new Date(Date.UTC(2026, 0, 7));
+
   async function makeOrgWithOverduePlan(suffix: string): Promise<{ tenantId: number; planId: number }> {
     const org = await owner.organization.create({ data: { code: `CRON-ALERTS-${suffix}-${Date.now()}`, name: "Cron alerts test" } });
     const dept = await owner.department.create({ data: { tenantId: org.id, code: "PROD", name: "Production" } });
@@ -85,7 +92,10 @@ describe.skipIf(!RUN_DB)("cron.service (DB-backed)", async () => {
 
     const cal = await owner.workCalendar.create({ data: { tenantId: org.id, code: "DEFAULT", name: "Default", weekOffDays: [7], isDefault: true } });
     if (holidayToday) {
-      await owner.holiday.create({ data: { calendarId: cal.id, date: new Date(), name: "Test holiday" } });
+      // Same fixed reference date the test passes as `asOf` — isWorkingDay
+      // compares them for exact equality, so a real `new Date()` here would
+      // only line up with FIXED_WEEKDAY by coincidence.
+      await owner.holiday.create({ data: { calendarId: cal.id, date: FIXED_WEEKDAY, name: "Test holiday" } });
     }
     return org.id;
   }
@@ -96,7 +106,7 @@ describe.skipIf(!RUN_DB)("cron.service (DB-backed)", async () => {
     "runs the digest and audits it as the tenant's admin, on a working day",
     async () => {
       const tenantId = await makeOrgWithAdminAndCalendar("workday", false);
-      const results = await runDailyDigest();
+      const results = await runDailyDigest(FIXED_WEEKDAY);
       const r = results.find((x) => x.tenantId === tenantId);
       expect(r?.ok).toBe(true);
       expect(r?.skipped).toBeFalsy();
@@ -113,7 +123,7 @@ describe.skipIf(!RUN_DB)("cron.service (DB-backed)", async () => {
     "skips a tenant whose calendar marks today as a holiday",
     async () => {
       const tenantId = await makeOrgWithAdminAndCalendar("holiday", true);
-      const results = await runDailyDigest();
+      const results = await runDailyDigest(FIXED_WEEKDAY);
       const r = results.find((x) => x.tenantId === tenantId);
       expect(r?.ok).toBe(true);
       expect(r?.skipped).toBe(true);
@@ -131,7 +141,7 @@ describe.skipIf(!RUN_DB)("cron.service (DB-backed)", async () => {
       await owner.workCalendar.create({ data: { tenantId: org.id, code: "DEFAULT", name: "Default", weekOffDays: [7], isDefault: true } });
       const workingTenant = await makeOrgWithAdminAndCalendar("sibling", false);
 
-      const results = await runDailyDigest();
+      const results = await runDailyDigest(FIXED_WEEKDAY);
       const failed = results.find((x) => x.tenantId === org.id);
       const succeeded = results.find((x) => x.tenantId === workingTenant);
 
