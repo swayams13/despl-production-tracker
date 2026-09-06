@@ -15,6 +15,7 @@ import {
   type BomImportRow,
 } from "@/lib/shared/schemas";
 import type { BomItem, BomRevision } from "@/generated/prisma/client";
+import { materializeComponentsFromBomItems } from "./component.service";
 
 /**
  * B4, Phase 4 — manual BOM authoring (`createBomItem`/`updateBomItem`) and
@@ -83,7 +84,7 @@ async function assertParentValid(
 async function loadEquipment(tx: Tx, actor: Actor, equipmentId: number) {
   const equipment = await tx.equipment.findFirst({
     where: { id: equipmentId, job: { tenantId: actor.tenantId } },
-    select: { job: { select: { clientId: true, id: true } } },
+    select: { job: { select: { clientId: true, id: true, familyId: true } } },
   });
   if (!equipment) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Equipment", equipmentId });
   assertClientScope(actor, equipment.job.clientId);
@@ -206,6 +207,8 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof BomImportRow> = {
   remarks: "remarks",
   notes: "remarks",
   parentbomitemid: "parentBomItemId",
+  componenttype: "componentType",
+  componenttypecode: "componentType",
 };
 
 function normalizeImportRow(raw: unknown): Record<string, unknown> {
@@ -234,6 +237,8 @@ export interface BomImportFailure {
 export interface ImportBomItemsResult {
   created: BomItem[];
   failures: BomImportFailure[];
+  /** Components auto-materialised from rows carrying a resolvable `componentType` code. */
+  componentCount: number;
 }
 
 /**
@@ -262,6 +267,29 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
       const equipment = await loadEquipment(tx, actor, equipmentId);
       if (bomRevisionId != null) await assertBomRevisionValid(tx, equipmentId, bomRevisionId);
 
+      // Every `componentType` code must resolve before anything is created —
+      // unlike other row-level validation failures (which skip just that row
+      // and let the rest of the batch land), a bad component-type code fails
+      // the whole import. Materialization runs once at the end of this
+      // function; discovering a bad code after some rows already
+      // materialized Components would leave a partial, confusing result.
+      const codes = [...new Set(rows.map((r) => normalizeImportRow(r).componentType).filter((c): c is string => typeof c === "string"))];
+      const componentTypesByCode = new Map(
+        codes.length > 0
+          ? (await tx.componentTypeRef.findMany({ where: { tenantId: actor.tenantId, code: { in: codes } } })).map((c) => [c.code, c.id])
+          : [],
+      );
+      const unresolvedRows = rows
+        .map((r, i) => ({ row: i + 1, code: normalizeImportRow(r).componentType }))
+        .filter((r): r is { row: number; code: string } => typeof r.code === "string" && !componentTypesByCode.has(r.code));
+      if (unresolvedRows.length > 0) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { unresolvedRows },
+          `Unrecognized Component Type code${unresolvedRows.length > 1 ? "s" : ""}: ${unresolvedRows.map((r) => `row ${r.row} ("${r.code}")`).join(", ")}. Nothing was imported.`,
+        );
+      }
+
       const created: BomItem[] = [];
       const failures: BomImportFailure[] = [];
 
@@ -272,7 +300,14 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
           failures.push({ row: rowNo, error: parsedRow.error.issues.map((iss) => iss.message).join("; ") });
           continue;
         }
-        const data = { ...parsedRow.data, equipmentId, bomRevisionId: bomRevisionId ?? null, jobId: equipment.job.id };
+        const { componentType, ...rowFields } = parsedRow.data;
+        const data = {
+          ...rowFields,
+          equipmentId,
+          bomRevisionId: bomRevisionId ?? null,
+          jobId: equipment.job.id,
+          componentTypeId: componentType != null ? (componentTypesByCode.get(componentType) ?? null) : null,
+        };
 
         try {
           if (data.parentBomItemId != null) {
@@ -298,7 +333,15 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
         }
       }
 
-      return { created, failures };
+      const { componentCount } = await materializeComponentsFromBomItems(
+        tx,
+        equipment.job.familyId,
+        equipmentId,
+        created.map((c) => c.id),
+        equipment.job.id,
+      );
+
+      return { created, failures, componentCount };
     },
     // Task review Important #4: a real 200-300 row import (2 round-trips per
     // row: create + audit insert, plus a findMany for any row with a parent)

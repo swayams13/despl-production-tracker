@@ -19,10 +19,17 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
   const createdOrgIds: number[] = [];
 
   async function deleteOrgAndChildren(tenantId: number) {
+    await owner.componentOperation.deleteMany({ where: { component: { equipment: { job: { tenantId } } } } });
+    await owner.component.deleteMany({ where: { equipment: { job: { tenantId } } } });
     await owner.bomItem.deleteMany({ where: { equipment: { job: { tenantId } } } });
     await owner.bomRevision.deleteMany({ where: { equipment: { job: { tenantId } } } });
     await owner.equipment.deleteMany({ where: { job: { tenantId } } });
     await owner.job.deleteMany({ where: { tenantId } });
+    await owner.routeStep.deleteMany({ where: { routeVersion: { route: { tenantId } } } });
+    await owner.routeTemplateVersion.deleteMany({ where: { route: { tenantId } } });
+    await owner.routeTemplate.deleteMany({ where: { tenantId } });
+    await owner.componentTypeRef.deleteMany({ where: { tenantId } });
+    await owner.operationRef.deleteMany({ where: { tenantId } });
     await owner.processTemplateVersion.deleteMany({ where: { template: { tenantId } } });
     await owner.processTemplate.deleteMany({ where: { tenantId } });
     await owner.productFamily.deleteMany({ where: { tenantId } });
@@ -382,6 +389,72 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
       importBomItems(supervisor, { equipmentId: equipment.id, rows: [{ itemNo: 1, partName: "A", sourceQty: "1 NOS" }] }),
       ERROR_CODES.FORBIDDEN,
     );
+  });
+
+  // ── template import: componentType column + auto-materialization ────────
+
+  async function seedRoute(tenantId: number, familyId: number, code: string) {
+    const componentType = await owner.componentTypeRef.create({ data: { tenantId, code, name: code } });
+    const operation = await owner.operationRef.create({ data: { tenantId, code: `${code}-OP`, name: `${code} op` } });
+    const route = await owner.routeTemplate.create({ data: { tenantId, componentTypeId: componentType.id, familyId: null, name: `${code} route` } });
+    const version = await owner.routeTemplateVersion.create({ data: { routeId: route.id, version: 1, status: "PUBLISHED" } });
+    await owner.routeStep.create({ data: { routeVersionId: version.id, seq: 1, operationId: operation.id } });
+    return componentType;
+  }
+
+  it("import: a row with a recognized Component Type code auto-materialises a Component + its route", async () => {
+    const { tenantId, job, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+    const componentType = await seedRoute(tenantId, job.familyId, "NOZZLE");
+
+    const { created, failures, componentCount } = await importBomItems(actor, {
+      equipmentId: equipment.id,
+      rows: [{ itemNo: 1, partName: "Nozzle N1", sourceQty: "1 NOS", componentType: "NOZZLE" }],
+    });
+
+    expect(failures).toHaveLength(0);
+    expect(created).toHaveLength(1);
+    expect(created[0].componentTypeId).toBe(componentType.id);
+    expect(componentCount).toBe(1);
+
+    const components = await owner.component.findMany({ where: { bomItemId: created[0].id }, include: { operations: true } });
+    expect(components).toHaveLength(1);
+    expect(components[0].jobId).toBe(job.id);
+    expect(components[0].operations).toHaveLength(1);
+  });
+
+  it("import: an unrecognized Component Type code aborts the WHOLE batch, creating nothing", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+
+    await expectCode(
+      importBomItems(actor, {
+        equipmentId: equipment.id,
+        rows: [
+          { itemNo: 1, partName: "Shell", sourceQty: "1 NOS" },
+          { itemNo: 2, partName: "Nozzle N1", sourceQty: "1 NOS", componentType: "NOT-A-REAL-CODE" },
+        ],
+      }),
+      ERROR_CODES.VALIDATION_FAILED,
+    );
+
+    const persisted = await owner.bomItem.findMany({ where: { equipmentId: equipment.id } });
+    expect(persisted).toHaveLength(0);
+  });
+
+  it("import: rows with no Component Type column behave exactly as before (no materialization attempted)", async () => {
+    const { tenantId, equipment, user } = await fixture();
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+
+    const { created, failures, componentCount } = await importBomItems(actor, {
+      equipmentId: equipment.id,
+      rows: [{ itemNo: 1, partName: "Shell", sourceQty: "1 NOS" }],
+    });
+
+    expect(failures).toHaveLength(0);
+    expect(created).toHaveLength(1);
+    expect(created[0].componentTypeId).toBeNull();
+    expect(componentCount).toBe(0);
   });
 
   it("import: cross-tenant equipmentId is refused before any row is processed", async () => {

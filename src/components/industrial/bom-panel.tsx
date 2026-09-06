@@ -420,7 +420,8 @@ function ImportBomControl({ jobId, equipmentId }: { jobId: number; equipmentId: 
         return;
       }
       if (r.failures.length === 0) {
-        toast.success(`Imported ${r.createdCount} item${r.createdCount === 1 ? "" : "s"}.`);
+        const componentNote = r.componentCount > 0 ? ` (${r.componentCount} auto-routed)` : "";
+        toast.success(`Imported ${r.createdCount} item${r.createdCount === 1 ? "" : "s"}${componentNote}.`);
       } else {
         toast.error(
           `Imported ${r.createdCount} item${r.createdCount === 1 ? "" : "s"}; ${r.failures.length} row${r.failures.length === 1 ? "" : "s"} failed: ` +
@@ -433,6 +434,28 @@ function ImportBomControl({ jobId, equipmentId }: { jobId: number; equipmentId: 
     } finally {
       setPending(false);
     }
+  };
+
+  const downloadTemplate = async () => {
+    const XLSX = await import("xlsx");
+    const headers = [
+      "Item No",
+      "Block No",
+      "Part Name",
+      "Description",
+      "Material",
+      "Qty",
+      "Qty Per Unit",
+      "UOM",
+      "Unit",
+      "Remarks",
+      "Parent Item No",
+      "Component Type",
+    ];
+    const sheet = XLSX.utils.aoa_to_sheet([headers]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "BOM");
+    XLSX.writeFile(workbook, "despl-bom-template.xlsx");
   };
 
   return (
@@ -448,6 +471,9 @@ function ImportBomControl({ jobId, equipmentId }: { jobId: number; equipmentId: 
           if (file) void onFile(file);
         }}
       />
+      <button className="btn btn-ghost" onClick={() => void downloadTemplate()}>
+        Download template
+      </button>
       <button className="btn" disabled={pending} onClick={() => inputRef.current?.click()}>
         {pending ? "Importing…" : "Import…"}
       </button>

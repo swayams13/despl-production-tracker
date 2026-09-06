@@ -898,6 +898,10 @@ export const bomImportRowSchema = z.object({
   unit: z.string().trim().min(1).optional(),
   remarks: z.string().trim().min(1).optional(),
   parentBomItemId: z.coerce.number().int().positive().optional(),
+  /** `ComponentTypeRef.code`, not its numeric id — the template's own column
+   * header is human-typeable. Resolved to `componentTypeId` in the service;
+   * an unresolvable code fails the whole import (see `importBomItems`). */
+  componentType: z.string().trim().min(1).optional(),
 });
 export type BomImportRow = z.infer<typeof bomImportRowSchema>;
 
