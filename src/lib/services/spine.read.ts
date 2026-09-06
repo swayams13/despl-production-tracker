@@ -26,6 +26,10 @@ interface Row {
   governing_plan_id: number | null;
 }
 
+interface BatchRow extends Row {
+  job_id: number;
+}
+
 export async function loadJobSpines(actor: Actor, jobId: number): Promise<UnitSpine[] | null> {
   return withTenant(actor.tenantId, async (tx) => {
     const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true, familyId: true } });
@@ -64,6 +68,64 @@ export async function loadJobSpines(actor: Actor, jobId: number): Promise<UnitSp
       });
     }
     return Array.from(byUnit.values());
+  });
+}
+
+/**
+ * Batched sibling of loadJobSpines. A job invisible to the actor or with no
+ * v_unit_stage_status rows is simply absent from the map — callers replace
+ * today's `(await loadJobSpines(...)) ?? []` with `map.get(id) ?? []`.
+ */
+export async function loadUnitSpinesBatch(actor: Actor, jobIds: number[]): Promise<Map<number, UnitSpine[]>> {
+  if (jobIds.length === 0) return new Map();
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const jobs = await tx.job.findMany({ where: { id: { in: jobIds } }, select: { id: true, clientId: true, familyId: true } });
+    for (const job of jobs) assertClientScope(actor, job.clientId);
+    const familyIdByJob = new Map(jobs.map((j) => [j.id, j.familyId]));
+
+    // Stage names are keyed by family, not job — one call per distinct family.
+    const distinctFamilyIds = [...new Set(jobs.map((j) => j.familyId))];
+    const stageNamesByFamily = new Map(
+      await Promise.all(distinctFamilyIds.map(async (familyId) => [familyId, await loadWorkOrderStageNames(tx, actor.tenantId, familyId)] as const)),
+    );
+
+    const visibleJobIds = jobs.map((j) => j.id);
+    const rows = await tx.$queryRaw<BatchRow[]>`
+      SELECT v.job_id, v.unit_id, u.serial_no, v.stage_no, v.fill_status,
+             v.is_overdue, v.is_rejected, v.governing_plan_id
+      FROM v_unit_stage_status v
+      JOIN units u ON u.id = v.unit_id
+      WHERE v.job_id = ANY(${visibleJobIds}::int[])
+      ORDER BY v.job_id, u.serial_no, v.stage_no
+    `;
+
+    const byJob = new Map<number, Map<number, UnitSpine>>();
+    for (const r of rows) {
+      const stageNames = stageNamesByFamily.get(familyIdByJob.get(r.job_id)!) ?? new Map();
+      let byUnit = byJob.get(r.job_id);
+      if (!byUnit) {
+        byUnit = new Map();
+        byJob.set(r.job_id, byUnit);
+      }
+      let spine = byUnit.get(r.unit_id);
+      if (!spine) {
+        spine = { unitId: r.unit_id, serialNo: r.serial_no, segments: [] };
+        byUnit.set(r.unit_id, spine);
+      }
+      spine.segments.push({
+        stageNo: r.stage_no,
+        stageName: workOrderStageName(stageNames, r.stage_no),
+        status: r.fill_status,
+        overdue: r.is_overdue,
+        rejected: r.is_rejected,
+        governingPlanId: r.governing_plan_id ?? undefined,
+      });
+    }
+
+    const out = new Map<number, UnitSpine[]>();
+    for (const [jobId, byUnit] of byJob) out.set(jobId, Array.from(byUnit.values()));
+    return out;
   });
 }
 
