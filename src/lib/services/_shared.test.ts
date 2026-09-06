@@ -10,6 +10,7 @@ import {
   loadPredecessorStates,
   loadMappedOps,
   loadJobSpine,
+  loadJobSpinesBatch,
   persistScheduleRun,
   lockProcessPlanForUpdate,
   getCurrentScheduleRun,
@@ -458,5 +459,30 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("getCurrentScheduleRunsBatch (DB)", a
     expect(runA?.id).not.toBe(runB?.id);
 
     await owner.$disconnect();
+  });
+});
+
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadJobSpinesBatch (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  it("each job's spine has only that job's own processes", async () => {
+    try {
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+
+      const map = await owner.$transaction(async (tx) => loadJobSpinesBatch(tx, [jobA.id, jobB.id]));
+
+      const rawA = await owner.jobProcess.findMany({ where: { jobId: jobA.id } });
+      const rawB = await owner.jobProcess.findMany({ where: { jobId: jobB.id } });
+
+      expect(map.get(jobA.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawA.map((p) => p.id).sort());
+      expect(map.get(jobB.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawB.map((p) => p.id).sort());
+      expect(rawA.length).toBeGreaterThan(0);
+      expect(rawB.length).toBeGreaterThan(0);
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });

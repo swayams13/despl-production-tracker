@@ -193,6 +193,70 @@ export async function loadJobSpine(tx: Tx, jobId: number): Promise<JobSpine> {
   };
 }
 
+/**
+ * Batched sibling of loadJobSpine. Unlike the singular version (which throws
+ * NOT_FOUND for a missing job), a job missing from `jobIds` is simply absent
+ * from the returned map — callers source jobIds from loadJobs()'s output,
+ * which only ever lists jobs that exist and are visible.
+ */
+export async function loadJobSpinesBatch(tx: Tx, jobIds: number[]): Promise<Map<number, JobSpine>> {
+  if (jobIds.length === 0) return new Map();
+
+  const jobs = await tx.job.findMany({ where: { id: { in: jobIds } } });
+  const jobById = new Map(jobs.map((j) => [j.id, j]));
+
+  // orderBy jobId first so each job's bucket keeps loadJobSpine's own
+  // seq-ascending order after grouping (audit 0.9's tie-break requirement).
+  const rawProcesses = await tx.jobProcess.findMany({
+    where: { jobId: { in: jobIds } },
+    orderBy: [{ jobId: "asc" }, { seq: "asc" }],
+  });
+  const rawEdges = await tx.jobProcessEdge.findMany({ where: { process: { jobId: { in: jobIds } } }, include: { process: { select: { jobId: true } } } });
+
+  const processesByJob = new Map<number, typeof rawProcesses>();
+  for (const p of rawProcesses) {
+    const bucket = processesByJob.get(p.jobId);
+    if (bucket) bucket.push(p);
+    else processesByJob.set(p.jobId, [p]);
+  }
+  const edgesByJob = new Map<number, typeof rawEdges>();
+  for (const e of rawEdges) {
+    const jobId = e.process.jobId;
+    const bucket = edgesByJob.get(jobId);
+    if (bucket) bucket.push(e);
+    else edgesByJob.set(jobId, [e]);
+  }
+
+  // Calendar resolution, batched: one lookup per distinct explicit calendarId,
+  // plus one shared tenant-default fetch — never one query per job.
+  const calendarIds = [...new Set(jobs.map((j) => j.calendarId).filter((id): id is number => id != null))];
+  const explicitCalendars = calendarIds.length
+    ? await tx.workCalendar.findMany({ where: { id: { in: calendarIds } }, include: { holidays: true } })
+    : [];
+  const explicitCalendarById = new Map(explicitCalendars.map((c) => [c.id, c]));
+  const defaultCalendar = await tx.workCalendar.findFirst({ where: { isDefault: true }, include: { holidays: true } });
+
+  const resolveCalendar = (job: (typeof jobs)[number]): WorkCalendarInput => {
+    const cal = (job.calendarId != null ? explicitCalendarById.get(job.calendarId) : null) ?? defaultCalendar;
+    return cal ? { weekOffDays: cal.weekOffDays, holidays: cal.holidays.map((h) => h.date) } : DEFAULT_CALENDAR;
+  };
+
+  const out = new Map<number, JobSpine>();
+  for (const jobId of jobIds) {
+    const job = jobById.get(jobId);
+    if (!job) continue; // missing/invisible job — omitted, not thrown (see doc comment)
+    const rawProcessesForJob = processesByJob.get(jobId) ?? [];
+    out.set(jobId, {
+      job,
+      processes: rawProcessesForJob.map(jobProcessToScheduleProcess),
+      edges: (edgesByJob.get(jobId) ?? []).map(jobEdgeToScheduleEdge),
+      calendar: resolveCalendar(job),
+      rawProcesses: rawProcessesForJob,
+    });
+  }
+  return out;
+}
+
 // ── ScheduleRun persistence ──────────────────────────────────────────────
 
 /** One ProcessPlan to write; unitId null = job/equipment grain, else per-serial. */
