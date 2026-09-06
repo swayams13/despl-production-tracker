@@ -1,7 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { hasRole, ROLES, type Actor } from "@/lib/authz";
 import { computeCpm } from "@/lib/schedule";
-import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
+import { getCurrentScheduleRunsBatch, loadJobSpinesBatch } from "./_shared";
 import { prioritize, compareRankedPlans, type RankedPlan, type PlanState } from "./prioritizer";
 import { loadJobs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
@@ -217,19 +217,36 @@ export async function loadCommandCenter(
     const departments = await tx.department.findMany({ select: { id: true, name: true } });
     const deptNameById = new Map(departments.map((d) => [d.id, d.name]));
 
+    const jobIds = jobs.map((j) => j.id);
+    const [runsByJob, spinesByJob] = await Promise.all([
+      getCurrentScheduleRunsBatch(tx, jobIds, null),
+      loadJobSpinesBatch(tx, jobIds),
+    ]);
+    const allUnits = await tx.unit.findMany({
+      where: { equipment: { jobId: { in: jobIds } } },
+      select: { id: true, serialNo: true, equipment: { select: { jobId: true } } },
+    });
+    const unitsByJob = new Map<number, typeof allUnits>();
+    for (const u of allUnits) {
+      const bucket = unitsByJob.get(u.equipment.jobId);
+      if (bucket) bucket.push(u);
+      else unitsByJob.set(u.equipment.jobId, [u]);
+    }
+
     for (const job of jobs) {
-      const run = await getCurrentScheduleRun(tx, job.id, null);
+      const run = runsByJob.get(job.id);
       if (!run) continue;
       activeRunIds.push(run.id);
 
-      const spine = await loadJobSpine(tx, job.id);
+      const spine = spinesByJob.get(job.id);
+      if (!spine) continue;
       const cpm = computeCpm(spine.processes, spine.edges);
       const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
       const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
       const procMeta = new Map(
         spine.rawProcesses.map((p) => [p.id, { name: p.name, stageLabel: stageLabel(p.workOrderStages), stageNo: p.workOrderStages[0] ?? 0 }]),
       );
-      const units = await tx.unit.findMany({ where: { equipment: { jobId: job.id } }, select: { id: true, serialNo: true } });
+      const units = unitsByJob.get(job.id) ?? [];
       const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
 
       const rankedByDept = prioritize({
