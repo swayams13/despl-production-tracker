@@ -5,6 +5,7 @@ import { loadJobSpine, getCurrentScheduleRun, computeOrRefuse } from "./_shared"
 import { prioritize, type PlanState, type RankedPlan } from "./prioritizer";
 import type { Department, DelayCategoryRef, ProcessPlan } from "@/generated/prisma/client";
 import { isOnTime, istCalendarDayMarker } from "@/lib/shared/business-day";
+import { pctOf } from "@/lib/shared/metrics";
 
 /**
  * The current run's per-department prioritized view — the shared read behind
@@ -801,7 +802,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
         departmentId: deptId,
         department: deptNameById.get(deptId) ?? `#${deptId}`,
         counts,
-        onTimePct: ot && ot.total > 0 ? Math.round((ot.onTime / ot.total) * 100) : null,
+        onTimePct: pctOf(ot?.onTime ?? 0, ot?.total ?? 0),
       };
     });
 
@@ -839,7 +840,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     const ec = eventCounts[0];
     const submittedEver = ec?.submitted_ever ?? 0;
     const rejectedEver = ec?.rejected_ever ?? 0;
-    const firstPassYieldPct = submittedEver > 0 ? Math.round(((submittedEver - rejectedEver) / submittedEver) * 100) : null;
+    const firstPassYieldPct = pctOf(submittedEver - rejectedEver, submittedEver);
     const stagesVerified7d = ec?.verified_7d ?? 0;
     const stagesVerified7dDelta = stagesVerified7d - (ec?.verified_prior_7d ?? 0);
 

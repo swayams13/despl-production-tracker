@@ -1,5 +1,6 @@
 import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
+import { pctOf } from "@/lib/shared/metrics";
 
 /**
  * `/qc` — cross-job QC cockpit (§4.8): the QC user's home surface. Everything
@@ -235,7 +236,7 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
       weekStart: w.week_start.toISOString(),
       submitted: w.submitted,
       rejected: w.rejected,
-      yieldPct: w.submitted > 0 ? Math.round(((w.submitted - w.rejected) / w.submitted) * 100) : null,
+      yieldPct: pctOf(w.submitted - w.rejected, w.submitted),
     }));
 
     // ── Rejects by checkpoint activity (real categorical proxy — see progress.md:

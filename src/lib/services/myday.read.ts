@@ -6,6 +6,7 @@ import { prioritize, compareRankedPlans, type RankedPlan } from "./prioritizer";
 import { loadJobs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
 import { isOnTime } from "@/lib/shared/business-day";
+import { pctOf } from "@/lib/shared/metrics";
 
 /**
  * `/my-day` (personal dashboards v1, SPEC §6.1) — the personalized read every
@@ -387,7 +388,7 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   completed.sort((a, b) => (b.ranked.plan.actualFinish?.getTime() ?? 0) - (a.ranked.plan.actualFinish?.getTime() ?? 0));
 
   const scoreboard: MyDayScoreboard = {
-    onTimePct30d: onTimeTotal > 0 ? Math.round((onTimeCount / onTimeTotal) * 100) : null,
+    onTimePct30d: pctOf(onTimeCount, onTimeTotal),
     doneThisWeek,
     avgCycleVsStdDays:
       cycleDeltas.length > 0
