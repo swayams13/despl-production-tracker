@@ -10,9 +10,11 @@ import {
   loadPredecessorStates,
   loadMappedOps,
   loadJobSpine,
+  loadJobSpinesBatch,
   persistScheduleRun,
   lockProcessPlanForUpdate,
   getCurrentScheduleRun,
+  getCurrentScheduleRunsBatch,
 } from "./_shared";
 import {
   generateScheduleSchema,
@@ -431,6 +433,67 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadMappedOps — job-level RLS back
         });
         expect(opsFromWrongJob).toEqual([]);
       });
+    } finally {
+      await owner.$disconnect();
+    }
+  });
+});
+
+describe.skipIf(!process.env.RUN_DB_TESTS)("getCurrentScheduleRunsBatch (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  it("keys each job's current run to that job, not another job's", async (ctx) => {
+    try {
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+
+      const runA = await owner.scheduleRun.findFirst({ where: { jobId: jobA.id, equipmentId: null, isCurrent: true } });
+      const runB = await owner.scheduleRun.findFirst({ where: { jobId: jobB.id, equipmentId: null, isCurrent: true } });
+
+      // `prisma/seed.ts` creates both jobs but never schedules them — that's the
+      // one-off `pnpm db:bootstrap <jobNumber>` (same gotcha as
+      // portfolio.read.test.ts's "classifies DE0463 and DE0467 as delayed once
+      // scheduled"). A fresh `migrate deploy && seed` (CI's own setup) legitimately
+      // has no run for either job — skip rather than assert on two undefineds.
+      if (!runA || !runB) {
+        const msg = "DE0463/DE0467 have no schedule — run `pnpm db:bootstrap DE0463` and `pnpm db:bootstrap DE0467` to cover this case";
+        console.warn(`[skip] ${msg}`);
+        ctx.skip(msg);
+      }
+
+      const map = await owner.$transaction(async (tx) => getCurrentScheduleRunsBatch(tx, [jobA.id, jobB.id], null));
+
+      expect(map.get(jobA.id)?.id).toBe(runA?.id);
+      expect(map.get(jobB.id)?.id).toBe(runB?.id);
+      // The two jobs' runs must not be the same row, or the assertions above are vacuous.
+      expect(runA?.id).not.toBe(runB?.id);
+    } finally {
+      await owner.$disconnect();
+    }
+  });
+});
+
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadJobSpinesBatch (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  it("each job's spine has only that job's own processes", async () => {
+    try {
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+
+      const map = await owner.$transaction(async (tx) => loadJobSpinesBatch(tx, [jobA.id, jobB.id]));
+
+      const rawA = await owner.jobProcess.findMany({ where: { jobId: jobA.id } });
+      const rawB = await owner.jobProcess.findMany({ where: { jobId: jobB.id } });
+
+      expect(map.get(jobA.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawA.map((p) => p.id).sort());
+      expect(map.get(jobB.id)?.rawProcesses.map((p) => p.id).sort()).toEqual(rawB.map((p) => p.id).sort());
+      expect(rawA.length).toBeGreaterThan(0);
+      expect(rawB.length).toBeGreaterThan(0);
     } finally {
       await owner.$disconnect();
     }

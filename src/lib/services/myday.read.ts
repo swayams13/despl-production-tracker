@@ -1,7 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { hasRole, ROLES, type Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
-import { loadJobSpine, getCurrentScheduleRun, computeCpmSafe } from "./_shared";
+import { getCurrentScheduleRunsBatch, loadJobSpinesBatch, computeCpmSafe } from "./_shared";
 import { prioritize, compareRankedPlans, type RankedPlan } from "./prioritizer";
 import { loadJobs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
@@ -171,14 +171,32 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
     const departments = await tx.department.findMany({ select: { id: true, name: true } });
     const deptNameById = new Map(departments.map((d) => [d.id, d.name]));
 
+    const jobIds = jobs.map((j) => j.id);
+    const [runsByJob, spinesByJob] = await Promise.all([
+      getCurrentScheduleRunsBatch(tx, jobIds, null),
+      loadJobSpinesBatch(tx, jobIds),
+    ]);
+    const allUnits = await tx.unit.findMany({
+      where: { equipment: { jobId: { in: jobIds } } },
+      select: { id: true, serialNo: true, equipment: { select: { jobId: true } } },
+    });
+    const unitsByJob = new Map<number, typeof allUnits>();
+    for (const u of allUnits) {
+      const bucket = unitsByJob.get(u.equipment.jobId);
+      if (bucket) bucket.push(u);
+      else unitsByJob.set(u.equipment.jobId, [u]);
+    }
+
     for (const job of jobs) {
-      const run = await getCurrentScheduleRun(tx, job.id, null);
+      const run = runsByJob.get(job.id);
       if (!run) continue;
 
-      const spine = await loadJobSpine(tx, job.id);
-      // A malformed spine (cycle, dangling edge, excluded provisional process
-      // with no confirmed duration) on ANY one job must not 500 My Day for the
-      // whole tenant — skip just this job's contribution (audit H2/0.10).
+      // A batch omission (job with no spine — cycle, dangling edge, etc.) or
+      // a malformed spine (excluded provisional process with no confirmed
+      // duration) on ANY one job must not 500 My Day for the whole tenant —
+      // skip just this job's contribution (audit H2/0.10).
+      const spine = spinesByJob.get(job.id);
+      if (!spine) continue;
       const cpm = computeCpmSafe(spine.processes, spine.edges);
       if (!cpm) continue;
       activeRunIds.push(run.id);
@@ -190,7 +208,7 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       const procMeta = new Map(
         spine.rawProcesses.map((p) => [p.id, { name: p.name, stageLabel: stageLabel(p.workOrderStages), stageNo: p.workOrderStages[0] ?? 0 }]),
       );
-      const units = await tx.unit.findMany({ where: { equipment: { jobId: job.id } }, select: { id: true, serialNo: true } });
+      const units = unitsByJob.get(job.id) ?? [];
       const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
 
       const rankedByDept = prioritize({

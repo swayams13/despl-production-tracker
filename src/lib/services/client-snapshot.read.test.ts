@@ -191,3 +191,33 @@ describe.skipIf(!RUN_DB)("client-snapshot.read (DB-backed)", async () => {
     }
   });
 });
+
+// ── Task 8: batched snapshot lookup preserves per-job attribution ───────
+describe.skipIf(!RUN_DB)("loadClientPortalView — batched snapshot lookup (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  it("each job's hasUpdate/asOf reflect that job's own latest VERIFIED snapshot", async () => {
+    try {
+      const client = await owner.client.findFirst({ where: { jobs: { some: {} } } });
+      if (!client) throw new Error("seed missing a client with jobs — run pnpm db:seed");
+      const jobs = await owner.job.findMany({ where: { clientId: client.id } });
+      if (jobs.length === 0) throw new Error("client has no jobs");
+
+      const { loadClientPortalView } = await import("./client-snapshot.read");
+      const views = await loadClientPortalView({
+        userId: 1, tenantId: client.tenantId, clientId: client.id, name: "T", email: "t@despl.local",
+        roles: [], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM", outdoorMode: false,
+      });
+
+      for (const job of jobs) {
+        const latest = await owner.progressSnapshot.findFirst({ where: { jobId: job.id, status: "VERIFIED" }, orderBy: { asOf: "desc" } });
+        const view = views.find((v) => v.jobId === job.id)!;
+        expect(view.hasUpdate).toBe(latest != null);
+        if (latest && view.hasUpdate) expect(view.asOf === null || new Date(view.asOf).getTime() === latest.asOf.getTime()).toBe(true);
+      }
+    } finally {
+      await owner.$disconnect();
+    }
+  });
+});

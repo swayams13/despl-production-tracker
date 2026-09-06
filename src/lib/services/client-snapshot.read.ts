@@ -113,30 +113,50 @@ export async function loadClientPortalView(actor: Actor): Promise<ClientJobView[
     const showDates = policy?.showDates ?? true;
     const showQcp = policy?.showQcp ?? true;
 
+    const jobIds = jobs.map((j) => j.id);
+    const latestRows = jobIds.length
+      ? await tx.$queryRaw<{ job_id: number; as_of: Date }[]>`
+          SELECT DISTINCT ON (job_id) job_id, as_of
+          FROM progress_snapshots
+          WHERE job_id = ANY(${jobIds}::int[]) AND status = 'VERIFIED'
+          ORDER BY job_id, as_of DESC
+        `
+      : [];
+    const latestByJob = new Map(latestRows.map((r) => [r.job_id, r.as_of]));
+
+    const allRows = jobIds.length
+      ? await tx.progressSnapshot.findMany({
+          where: {
+            status: "VERIFIED",
+            OR: latestRows.map((r) => ({ jobId: r.job_id, asOf: r.as_of })),
+          },
+        })
+      : [];
+    const rowsByJob = new Map<number, typeof allRows>();
+    for (const r of allRows) {
+      const bucket = rowsByJob.get(r.jobId);
+      if (bucket) bucket.push(r);
+      else rowsByJob.set(r.jobId, [r]);
+    }
+
     const views: ClientJobView[] = [];
     for (const job of jobs) {
-      const latestVerified = await tx.progressSnapshot.findFirst({
-        where: { jobId: job.id, status: "VERIFIED" },
-        orderBy: { asOf: "desc" },
-        select: { asOf: true },
-      });
+      const latestAsOf = latestByJob.get(job.id);
       const equipmentName = job.equipments[0]?.name ?? null;
 
-      if (!latestVerified) {
+      if (!latestAsOf) {
         views.push({ jobId: job.id, jobNumber: job.jobNumber, equipmentName, hasUpdate: false });
         continue;
       }
 
-      const rows = await tx.progressSnapshot.findMany({
-        where: { jobId: job.id, asOf: latestVerified.asOf, status: "VERIFIED" },
-      });
+      const rows = rowsByJob.get(job.id) ?? [];
       const units = rowsToUnits(rows);
       views.push({
         jobId: job.id,
         jobNumber: job.jobNumber,
         equipmentName,
         hasUpdate: true,
-        asOf: showDates ? latestVerified.asOf.toISOString() : null,
+        asOf: showDates ? latestAsOf.toISOString() : null,
         overallPct: showProgress ? overallFromUnits(units) : null,
         forecastDispatch: showDates ? (job.committedDeliveryDate?.toISOString() ?? null) : null,
         units,

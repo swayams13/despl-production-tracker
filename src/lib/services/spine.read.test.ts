@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { loadUnitSpinesBatch } from "./spine.read";
+import { ROLES, type Actor } from "@/lib/authz";
 
 /**
  * `v_unit_stage_status` (the canonical §11.2 fill ladder) is pure SQL — its only
@@ -168,5 +170,41 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ladder (DB-backed, isolated fixtur
       update: { result: "REJECTED" },
     });
     expect((await fill()).is_rejected).toBe(true);
+  });
+});
+
+function actor(over: Partial<Actor> = {}): Actor {
+  return {
+    userId: 1, tenantId: 1, clientId: null, name: "Test", email: "t@despl.local",
+    roles: [ROLES.ADMIN], departmentIds: [], mustChangePassword: false,
+    themePreference: "SYSTEM", outdoorMode: false, ...over,
+  };
+}
+
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadUnitSpinesBatch (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  it("each job's unit spines belong to that job's own units, not another job's", async () => {
+    try {
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+
+      const map = await loadUnitSpinesBatch(actor({ tenantId: jobA.tenantId }), [jobA.id, jobB.id]);
+
+      const unitsA = await owner.unit.findMany({ where: { equipment: { jobId: jobA.id } }, select: { id: true } });
+      const unitsB = await owner.unit.findMany({ where: { equipment: { jobId: jobB.id } }, select: { id: true } });
+
+      const unitIdsA = new Set(unitsA.map((u) => u.id));
+      const unitIdsB = new Set(unitsB.map((u) => u.id));
+
+      for (const spine of map.get(jobA.id) ?? []) expect(unitIdsA.has(spine.unitId)).toBe(true);
+      for (const spine of map.get(jobB.id) ?? []) expect(unitIdsB.has(spine.unitId)).toBe(true);
+      // Sanity: the two jobs' unit sets don't overlap, or the assertions above are vacuous.
+      expect([...unitIdsA].some((id) => unitIdsB.has(id))).toBe(false);
+    } finally {
+      await owner.$disconnect();
+    }
   });
 });

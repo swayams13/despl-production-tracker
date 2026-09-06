@@ -157,3 +157,43 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — cross-departme
     expect(row.ranked.reasonText).toContain("Material receipt");
   });
 });
+
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — batched fan-out (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("rows are attributed to the correct job's own jobNumber for every active job", async () => {
+    const jobs = await owner.job.findMany({ where: { status: "ACTIVE" } });
+    if (jobs.length < 2) throw new Error("need >=2 ACTIVE jobs seeded to exercise the batch path meaningfully");
+    const dept = await owner.department.findFirst({ where: { tenantId: jobs[0].tenantId, isOfficeDept: true } });
+    if (!dept) throw new Error("seed missing an office department for the seeded tenant — run pnpm db:seed");
+
+    const view = await loadCommandCenter(
+      {
+        userId: 1,
+        tenantId: jobs[0].tenantId,
+        clientId: null,
+        name: "T",
+        email: "t@despl.local",
+        roles: [ROLES.PRODUCTION_HEAD],
+        departmentIds: [],
+        mustChangePassword: false,
+        themePreference: "SYSTEM",
+        outdoorMode: false,
+      },
+      dept.id,
+      dept.code,
+      dept.name,
+    );
+
+    const jobNumberById = new Map(jobs.map((j) => [j.id, j.jobNumber]));
+    const allRows = [...view.decideToday, ...view.waitingOnOthers, ...view.blocking, ...view.pipeline.flatMap((c) => c.rows)];
+    for (const row of allRows) {
+      expect(row.jobNumber).toBe(jobNumberById.get(row.jobId));
+    }
+  });
+});
