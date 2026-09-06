@@ -219,11 +219,20 @@ export async function loadOpenHoldPointsBatch(actor: Actor, jobIds: number[]): P
     if (blockingItems.length === 0) return new Map();
 
     // Earliest-linked process per (item, job) — replaces the singular version's take:1.
+    // QcpItem is job-scoped (via processLinks -> jobProcess -> jobId), so a batched call
+    // must bucket each item under only the jobs it actually links to — otherwise the
+    // output loop below would scan every batched job's items for every job (quadratic).
     const linkedProcessByItemJob = new Map<string, number>();
+    const itemIdsByJob = new Map<number, number[]>();
     for (const item of blockingItems) {
       for (const link of item.processLinks) {
         const key = `${item.id}:${link.jobProcess.jobId}`;
-        if (!linkedProcessByItemJob.has(key)) linkedProcessByItemJob.set(key, link.jobProcess.id);
+        if (!linkedProcessByItemJob.has(key)) {
+          linkedProcessByItemJob.set(key, link.jobProcess.id);
+          const bucket = itemIdsByJob.get(link.jobProcess.jobId);
+          if (bucket) bucket.push(item.id);
+          else itemIdsByJob.set(link.jobProcess.jobId, [item.id]);
+        }
       }
     }
 
@@ -265,9 +274,11 @@ export async function loadOpenHoldPointsBatch(actor: Actor, jobIds: number[]): P
       const jobUnitIds = unitsByJob.get(jobId) ?? [];
       if (jobUnitIds.length === 0) continue;
       const open: OpenHoldPoint[] = [];
-      for (const itemId of itemIds) {
-        const jpId = linkedProcessByItemJob.get(`${itemId}:${jobId}`);
-        if (jpId == null) continue; // this blocking item has no link on this job
+      for (const itemId of itemIdsByJob.get(jobId) ?? []) {
+        // Every itemId here came from itemIdsByJob, which is only populated
+        // alongside linkedProcessByItemJob for this exact (itemId, jobId) pair,
+        // so a link is guaranteed to exist.
+        const jpId = linkedProcessByItemJob.get(`${itemId}:${jobId}`)!;
         const item = itemById.get(itemId)!;
         const blockingCode = item.partyCodes[0]?.qcpCode;
         const classCode = blockingCode?.code ?? "?";
