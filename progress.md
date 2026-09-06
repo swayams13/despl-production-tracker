@@ -2,6 +2,25 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Gate 4: provisioning flow live-verified end to end, 6 Sep 2026
+
+Ran a real dry run of `CUTOVER-PLAN.md` §3's individual-login provisioning model, through the real
+`/admin` UI, real `/login`, no forged sessions. Logged in as `admin@despl.local`, used the real
+"Add employee" dialog to create a disposable `Cutover Dry-Run Test` account (Supervisor role,
+Projects / PMO department) — got a real one-time credential slip, matching D3/D4's rotation
+mechanism. Signed out, logged in as the new account for real: `mustChangePassword` fired exactly
+as designed (a "Set your password" screen, current + new password, 10-char minimum), completed
+the change, landed on `/my-day` correctly scoped — greeting, role, and department all read back
+correctly, sidebar correctly hid every Admin-only nav item for a Supervisor login. Signed back in
+as admin and confirmed the new account's `lastLogin` timestamp was recorded server-side (not just
+client state), then deactivated the test account (`INACTIVE` in the employee table, `0 open items`
+so no orphaned work).
+
+**Confirms the whole login-model decision from the prior session actually works in the running
+app**, not just on paper. No code changes — this was operational rehearsal, not a build item. The
+same flow is now ready to run for real for Projects/PMO's actual named people whenever their
+roster is available.
+
 ## Session — Gate 4's cutover plan: last two open decisions closed, 6 Sep 2026
 
 `docs/mos-execution/CUTOVER-PLAN.md` had 2 of its 4 planning decisions still open (cutover order,
