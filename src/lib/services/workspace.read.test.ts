@@ -239,19 +239,25 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadOpenHoldPointsBatch (DB)", async
 
   it("agrees with the singular loadOpenHoldPoints, per job, not cross-attributed", async () => {
     try {
-      const jobA = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
-      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
-      if (!jobA || !jobB) throw new Error("seed missing DE0463/DE0467 — run pnpm db:seed");
+      // DESPL-320 has real open hold points (QcpItem 8/9 on seq 10, per the
+      // loadOpenHoldPoints (DB) test above) — proves the batched per-(item,job)
+      // reduction produces correct NON-EMPTY output, not just [] === [].
+      // DE0463 has none — proves DESPL-320's hold points don't bleed into
+      // DE0463's bucket when both are fetched in the same batch call.
+      const jobA = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
+      const jobB = await owner.job.findFirst({ where: { jobNumber: "DE0463" } });
+      if (!jobA || !jobB) throw new Error("seed missing DESPL-320/DE0463 — run pnpm db:seed");
 
       const a = actor({ tenantId: jobA.tenantId });
-      const [singleA, singleB] = await Promise.all([loadOpenHoldPoints(a, jobA.id), loadOpenHoldPoints(a, jobB.id)]);
+      const singleA = await loadOpenHoldPoints(a, jobA.id);
       const map = await loadOpenHoldPointsBatch(a, [jobA.id, jobB.id]);
 
       const norm = (list: { qcpItemId: number; unitId: number; status: string }[]) =>
         list.map((x) => `${x.qcpItemId}:${x.unitId}:${x.status}`).sort();
 
+      expect(singleA.length).toBeGreaterThan(0); // sanity: real data, not a vacuous [] === [] check
       expect(norm(map.get(jobA.id) ?? [])).toEqual(norm(singleA));
-      expect(norm(map.get(jobB.id) ?? [])).toEqual(norm(singleB));
+      expect(map.get(jobB.id) ?? []).toEqual([]);
     } finally {
       await owner.$disconnect();
     }
