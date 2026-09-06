@@ -1,6 +1,15 @@
 import { route } from "../_lib";
 import { loadJobs } from "@/lib/services/jobs.read";
 
+const MAX_PAGE_SIZE = 200;
+
+/** Clamp to [1, MAX_PAGE_SIZE] — an uncapped pageSize would let a caller force
+ * loadJobs's batched-extras pipeline over the whole tenant in one request,
+ * defeating the point of paginating it. */
+export function resolvePageSize(pageSizeParam: string | null): number {
+  return Math.min(MAX_PAGE_SIZE, Math.max(1, Number(pageSizeParam) || 50));
+}
+
 export const GET = route(async (actor, req) => {
   const url = new URL(req.url);
   const pageParam = url.searchParams.get("page");
@@ -11,6 +20,6 @@ export const GET = route(async (actor, req) => {
     return { jobs: await loadJobs(actor) };
   }
   const page = Math.max(1, Number(pageParam) || 1);
-  const pageSize = Math.max(1, Number(pageSizeParam) || 50);
+  const pageSize = resolvePageSize(pageSizeParam);
   return await loadJobs(actor, { page, pageSize });
 });

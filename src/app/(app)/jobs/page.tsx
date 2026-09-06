@@ -23,6 +23,17 @@ function fmtWhen(iso: string | null): string {
 
 const PAGE_SIZE = 50;
 
+/**
+ * A requested page beyond the last real page (bookmarked URL, stale link,
+ * hand-typed) must not render the empty state while jobs actually exist —
+ * `loadJobs` still reports the true `total` regardless of `skip`/`take`, so
+ * `totalPages` here is always accurate even when `page` itself overshot it.
+ * Returns the page to redirect to, or `null` if `page` is already in range.
+ */
+export function outOfRangePage(page: number, totalPages: number): number | null {
+  return totalPages > 0 && page > totalPages ? totalPages : null;
+}
+
 export default async function JobsList({
   searchParams,
 }: {
@@ -36,6 +47,8 @@ export default async function JobsList({
   const page = Math.max(1, Number(pageParam) || 1);
   const { items: jobs, total } = await loadJobs(actor, { page, pageSize: PAGE_SIZE });
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const redirectTo = outOfRangePage(page, totalPages);
+  if (redirectTo !== null) redirect(`/jobs?page=${redirectTo}`);
   const canCreate = hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return (
