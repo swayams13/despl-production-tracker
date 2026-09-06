@@ -2,6 +2,24 @@
 
 > Living build log. Update at the end of every working session (see CLAUDE.md → Session discipline).
 
+## Session — Gate 4's cutover plan: last two open decisions closed, 6 Sep 2026
+
+`docs/mos-execution/CUTOVER-PLAN.md` had 2 of its 4 planning decisions still open (cutover order,
+feedback mechanism) from the drafting session earlier the same day. Asked Swayam directly:
+**cutover order stays as drafted** (QC 9th, after Stores/Fab Prep/Machine Shop/Fabrication —
+dependency order over giving QC a longer solo runway before shop-floor departments start hitting
+refusals); **feedback log stays a plain markdown file**, not a build-item in-app button. Created
+`docs/mos-execution/CUTOVER-FEEDBACK.md` (empty log, per §5's own spec) and updated both
+`CUTOVER-PLAN.md` and `LEDGER.md` to reflect all four decisions closed.
+
+**What's actually left for Gate 4 exit is not code.** Everything plannable is planned
+(`CUTOVER-PLAN.md`, `TRAINING-PLAN.md`, `TRAINING-PROJECTS-PMO.md`, `docs/USER-GUIDE-WHY-WAS-I-REFUSED.md`,
+all written and — for Projects/PMO specifically — live-verified 6 Sep). The remaining work is real
+people at DESPL: provisioning individual logins per department, running 5 training sessions ×
+13 departments, and walking each department through cutover day → 3-day check-in → sign-off. An
+agent cannot manufacture a department head's sign-off or sit a real person through training — this
+is Swayam's/DESPL's execution from here, tracked in `CUTOVER-PLAN.md`'s tracking table.
+
 ## Session — Gate 4: KPI consolidation shipped (two PRs), merged to `main`, 6 Sep 2026
 
 Followed systematic debugging on the ledger's own "start with cycle-time — two calendars, wrong number" note before touching anything: traced every `workingDaysBetween` call site and found `departments.read.ts:106` had its own `resolveCalendar()` that only ever fetched the tenant-wide default `WorkCalendar`, ignoring `Job.calendarId` — every other consumer (`workspace.read.ts`'s cycle-time offenders, `myday.read.ts`, `stage-detail.read.ts`) already resolved per-job via `_shared.ts`'s `loadJobSpine`/`loadJobSpinesBatch`. A job created with a non-default calendar (settable at intake, `job-intake.service.ts`) would show a different working-day count — and therefore a different avg-actual/delta — for the identical completed process, depending on whether you looked at `/departments/[id]` or `/dashboard`.
