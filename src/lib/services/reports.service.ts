@@ -14,11 +14,17 @@ function dateEntityId(date: string): number {
  * this is SJ deciding the digest is ready to publish, not a self-serve
  * management action.
  */
-export async function publishDigest(actor: Actor, date: string): Promise<number> {
+export async function publishDigest(actor: Actor, date: string, opts?: { auto?: boolean }): Promise<number> {
   assertNotClientUser(actor);
   requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   return withTenant(actor.tenantId, async (tx) => {
+    const alreadyPublished = await tx.notification.findFirst({
+      where: { type: "DIGEST_PUBLISHED", entityType: "Digest", entityId: dateEntityId(date) },
+      select: { id: true },
+    });
+    if (alreadyPublished) return 0;
+
     const managementIds = await userIdsWithRole(tx, actor.tenantId, "MANAGEMENT");
 
     return audited(tx, actor, async () => {
@@ -31,7 +37,7 @@ export async function publishDigest(actor: Actor, date: string): Promise<number>
           entityType: "Digest",
           entityId: dateEntityId(date),
           title: `Daily digest published — ${date}`,
-          body: `Sent by ${actor.name}`,
+          body: opts?.auto ? "Sent automatically" : `Sent by ${actor.name}`,
           payload: { date },
         })),
       );

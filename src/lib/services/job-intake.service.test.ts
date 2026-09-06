@@ -156,7 +156,12 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
 
   async function seedRefs() {
     const version = await owner.processTemplateVersion.findFirstOrThrow({
-      where: { status: "PUBLISHED", template: { family: { code: "PRESSURE_VESSEL" } } },
+      // Scoped to tenant 1 — every actor() in this file defaults to
+      // tenantId: 1, and this query has no other tenant boundary of its
+      // own. Unscoped, it can pick a different tenant's PRESSURE_VESSEL
+      // template (a real failure mode once other DB-gated test files
+      // accumulate their own throwaway PRESSURE_VESSEL fixtures).
+      where: { status: "PUBLISHED", template: { tenantId: 1, family: { code: "PRESSURE_VESSEL" } } },
       orderBy: { version: "desc" },
       include: { template: true },
     });
@@ -303,7 +308,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
 
   it("refuses a DRAFT template version even though the dropdown would have hidden it", async () => {
     const refs = await seedRefs();
-    const draft = await owner.processTemplateVersion.findFirst({ where: { status: "DRAFT" } });
+    const draft = await owner.processTemplateVersion.findFirst({
+      where: { status: "DRAFT", template: { tenantId: 1 } },
+    });
     if (!draft) return; // seed has a DRAFT pipe-spool version; skip if that changes
     await expect(
       createJob(actor(), base({ jobNumber: "TEST-DRAFT-1", templateVersionId: draft.id }, refs)),
@@ -439,7 +446,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
   it("copies BOM lines but no procurement or traceability records", async () => {
     const refs = await seedRefs();
     const sourceEquipment = await owner.equipment.findFirstOrThrow({
-      where: { bomItems: { some: {} } },
+      // Scoped to tenant 1 (via job) — unscoped, this can pick another
+      // tenant's fixture equipment out of the shared DB-gated test database.
+      where: { job: { tenantId: 1 }, bomItems: { some: {} } },
       include: { _count: { select: { bomItems: true } } },
     });
 
@@ -471,7 +480,12 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     // Any BomItem with a componentTypeId that has a PUBLISHED RouteTemplateVersion —
     // the seeded route library (prisma/seed.ts §8) applies to every family (familyId: null).
     const typedBomItem = await owner.bomItem.findFirstOrThrow({
-      where: { componentTypeId: { not: null } },
+      // Scoped to tenant 1 (via job) — unscoped, this can pick a BomItem
+      // belonging to some other DB-gated test file's fixture tenant, which
+      // `createJob(actor() /* tenantId: 1 */, ...)` then can't see, causing
+      // a NOT_FOUND on Equipment inside copyBom (the exact failure this
+      // scoping fixes — real, observed, not hypothetical).
+      where: { job: { tenantId: 1 }, componentTypeId: { not: null } },
       include: { equipment: { include: { _count: { select: { bomItems: true } } } } },
     });
     const sourceEquipment = typedBomItem.equipment;

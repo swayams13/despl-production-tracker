@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import { AppShell } from "@/components/industrial/app-shell";
 import { ThemeRoot } from "@/components/industrial/theme-root";
@@ -8,7 +7,6 @@ import { getActor } from "@/lib/authz";
 import { loadMyOverdueCount } from "@/lib/services/workspace.read";
 import { loadJobs } from "@/lib/services/jobs.read";
 import { loadNotifications } from "@/lib/services/notifications.read";
-import { syncNotifications } from "@/lib/services/notifications.service";
 import { toasterTheme } from "@/lib/theme";
 
 /**
@@ -20,10 +18,10 @@ import { toasterTheme } from "@/lib/theme";
  * Individual pages own their own unauthenticated redirect (each does
  * `if (!actor) redirect("/login")`) — this layout doesn't duplicate that, it
  * only needs the actor's identity + the two cross-cutting shell reads: the
- * sidebar's overdue badge and the bell's notifications. `syncNotifications`
- * (§9.8) is the lazy reconciliation for the two notification triggers with no
- * natural mutation moment (stage crossed due date, hold point aged) — run
- * best-effort on every authenticated page load rather than a cron.
+ * sidebar's overdue badge and the bell's notifications. Overdue-stage/aged-hold-point reconciliation
+ * (§9.8) used to run here on every page load; it's now an hourly cron
+ * (`/api/cron/alerts`, see cron.service.ts) instead, so this layout only
+ * reads already-written Notification rows, it doesn't compute them.
  *
  * `mustChangePassword` interstitial (Task 1.3): a user who has not yet set
  * their own password can reach NOTHING under this route group — every page
@@ -39,10 +37,6 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };
   let jobs: Awaited<ReturnType<typeof loadJobs>> = [];
   if (actor) {
-    await syncNotifications(actor).catch(async (e) => {
-      const requestId = (await headers()).get("x-request-id") ?? "unknown";
-      console.error("[notifications] sync failed", { requestId, error: e });
-    });
     [overdueCount, notifications, jobs] = await Promise.all([
       loadMyOverdueCount(actor),
       loadNotifications(actor),
