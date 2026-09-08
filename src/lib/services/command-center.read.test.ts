@@ -156,6 +156,75 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — cross-departme
     const row = procurementView.waitingOnOthers.find((r) => r.ranked.plan.id === blockedPlan.id)!;
     expect(row.ranked.reasonText).toContain("Material receipt");
   });
+
+  it("team roster groups a department's open plans by assignee, overdue-first, and excludes unassigned/DONE plans (Phase 4)", async () => {
+    const org = await owner.organization.create({ data: { code: `CC-TEAM-${Date.now()}`, name: "Command Center team test" } });
+    const tenantId = org.id;
+    const dept = await owner.department.create({ data: { tenantId, code: "STORES", name: "Stores" } });
+
+    const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-CC-TEAM-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PV", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-cc-team-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-CCTEAM-${Date.now()}`,
+      },
+    });
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    // ProcessPlan has a unique (scheduleRunId, jobProcessId) constraint — one
+    // jobProcess per plan below, all job-grain (no unitId), matching how
+    // office-department processes already work elsewhere in this file.
+    const mkProcess = (seq: number, code: string) =>
+      owner.jobProcess.create({
+        data: { jobId: job.id, seq, code, name: "Material receipt", departmentId: dept.id, durationMinDays: 1, durationMaxDays: 2 },
+      });
+    const [jp1, jp2, jp3, jp4] = await Promise.all([mkProcess(1, "P1"), mkProcess(2, "P2"), mkProcess(3, "P3"), mkProcess(4, "P4")]);
+
+    const member = await owner.user.create({
+      data: { tenantId, email: `member-${Date.now()}@x`, username: `member-${Date.now()}`, name: "Roster Member", passwordHash: "x" },
+    });
+    const otherDeptMember = await owner.user.create({
+      data: { tenantId, email: `other-${Date.now()}@x`, username: `other-${Date.now()}`, name: "Other Dept Member", passwordHash: "x" },
+    });
+    await owner.userDepartment.create({ data: { userId: member.id, departmentId: dept.id } });
+
+    const overduePastDate = new Date(Date.now() - 5 * 864e5);
+    // Assigned to a real roster member, overdue -> should show in their roster row.
+    const overduePlan = await owner.processPlan.create({
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp1.id, ownerDepartmentId: dept.id, status: "NOT_STARTED", assigneeUserId: member.id, plannedFinish: overduePastDate },
+    });
+    // Assigned to that same member but already COMPLETE -> excluded from the open-workload roster.
+    await owner.processPlan.create({
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp2.id, ownerDepartmentId: dept.id, status: "COMPLETE", assigneeUserId: member.id, actualStart: new Date(), actualFinish: new Date() },
+    });
+    // Unclaimed (no assignee) -> not attributed to any roster row.
+    await owner.processPlan.create({ data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp3.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" } });
+    // Assigned to a user who is NOT a member of this department -> silently excluded from its roster.
+    await owner.processPlan.create({
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp4.id, ownerDepartmentId: dept.id, status: "NOT_STARTED", assigneeUserId: otherDeptMember.id },
+    });
+
+    const viewer: Actor = {
+      userId: 1, tenantId, clientId: null, name: "PH", email: "ph@despl.test",
+      roles: [ROLES.PRODUCTION_HEAD], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM", outdoorMode: false,
+    };
+    const view = await loadCommandCenter(viewer, dept.id, "STORES", "Stores");
+
+    expect(view.team.map((t) => t.userId)).toEqual([member.id]);
+    const row = view.team[0];
+    expect(row.name).toBe("Roster Member");
+    expect(row.openCount).toBe(1);
+    expect(row.overdueCount).toBe(1);
+    expect(row.items.map((r) => r.ranked.plan.id)).toEqual([overduePlan.id]);
+  });
 });
 
 describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — batched fan-out (DB)", async () => {

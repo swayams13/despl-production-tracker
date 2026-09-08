@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { loadCommandCenter, classifyDeptCode, resolveCommandCenterAccess } from "@/lib/services/command-center.read";
+import { PageHeader } from "@/components/industrial/page-header";
 import { CommandCenterClient } from "./_client";
 
 /**
@@ -45,13 +46,15 @@ export default async function CommandCenter({ params }: { params: Promise<{ dept
 
   return (
     <>
-      <div className="page-h">
-        <h1>{department.name}</h1>
-        <span className="sub">
-          {actor.name} · {today} · cleared today: <span className="mono">{view.clearedToday}</span>
-          {!canAct && " · read only"}
-        </span>
-      </div>
+      <PageHeader
+        title={department.name}
+        subtitle={
+          <>
+            {actor.name} · {today} · cleared today: <span className="mono">{view.clearedToday}</span>
+            {!canAct && " · read only"}
+          </>
+        }
+      />
 
       <CommandCenterClient view={view} canAct={canAct} />
     </>

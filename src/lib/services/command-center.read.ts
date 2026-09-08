@@ -176,6 +176,20 @@ export interface CommandCenterPipelineColumn {
   rows: CommandCenterRow[];
 }
 
+/** One active department member's open workload — Supervisor Team's roster
+ * grouping (Phase 4, Round 1 mockup `03`/Round 2 mockup `05`: "whose work
+ * needs a decision", grouped by employee rather than by state-bucket like
+ * decideToday/pipeline are). Built from the SAME `ownRows` this function
+ * already computes for decideToday/pipeline — no second CPM/prioritizer
+ * pass. */
+export interface TeamMemberRow {
+  userId: number;
+  name: string;
+  openCount: number;
+  overdueCount: number;
+  items: CommandCenterRow[];
+}
+
 export interface CommandCenterView {
   deptId: number;
   deptCode: string;
@@ -198,6 +212,10 @@ export interface CommandCenterView {
   /** SPEC §6.3 SQL-view rule: the exact row `/departments` already computes
    * for this dept via `loadDepartmentCards` — never recomputed here. */
   kpi: DeptCard;
+  /** Active members of this department, each with their own open workload —
+   * Supervisor Team's roster (Phase 4). Sorted overdue-first, then by open
+   * count, so "whose work needs a decision" reads top-to-bottom. */
+  team: TeamMemberRow[];
 }
 
 export async function loadCommandCenter(
@@ -213,7 +231,7 @@ export async function loadCommandCenter(
   const blockingRows: CommandCenterRow[] = [];
   const activeRunIds: number[] = [];
 
-  const { clearedToday } = await withTenant(actor.tenantId, async (tx) => {
+  const { clearedToday, team } = await withTenant(actor.tenantId, async (tx) => {
     const departments = await tx.department.findMany({ select: { id: true, name: true } });
     const deptNameById = new Map(departments.map((d) => [d.id, d.name]));
 
@@ -322,7 +340,34 @@ export async function loadCommandCenter(
             AND de.at >= ${todayStart} AND de.at < ${todayEnd}
         `
       : [];
-    return { clearedToday: completedTodayCount + (submittedTodayRows[0]?.n ?? 0) };
+
+    // Team roster (Phase 4): every active member of this department, with
+    // their own open-plan slice of `ownRows` (already computed above, no
+    // second CPM/prioritizer pass). An assignee no longer an active member
+    // (left the department, deactivated) is silently dropped from the
+    // roster — their items still show up in decideToday/pipeline above,
+    // just not attributed to a roster row here.
+    const memberRows = await tx.userDepartment.findMany({
+      where: { departmentId: deptId, user: { active: true, clientId: null } },
+      select: { user: { select: { id: true, name: true } } },
+    });
+    const byUser = new Map<number, TeamMemberRow>(
+      memberRows.map((m) => [m.user.id, { userId: m.user.id, name: m.user.name, openCount: 0, overdueCount: 0, items: [] }]),
+    );
+    for (const row of ownRows) {
+      if (row.ranked.state === "DONE") continue;
+      const uid = row.ranked.plan.assigneeUserId;
+      const entry = uid != null ? byUser.get(uid) : undefined;
+      if (!entry) continue;
+      entry.items.push(row);
+      entry.openCount++;
+      if (row.ranked.overdue) entry.overdueCount++;
+    }
+    const team = [...byUser.values()].sort(
+      (a, b) => b.overdueCount - a.overdueCount || b.openCount - a.openCount || a.name.localeCompare(b.name),
+    );
+
+    return { clearedToday: completedTodayCount + (submittedTodayRows[0]?.n ?? 0), team };
   });
 
   // decideToday (ruling 2d): top-5, prioritizer order, viewer's own items
@@ -382,5 +427,5 @@ export async function loadCommandCenter(
   const kpi = (await loadDepartmentCards(actor)).find((d) => d.id === deptId);
   if (!kpi) throw new Error(`loadDepartmentCards returned no row for department ${deptId}`);
 
-  return { deptId, deptCode, deptName, clearedToday, decideToday, week, pipeline, blocking: blockingRows, waitingOnOthers, kpi };
+  return { deptId, deptCode, deptName, clearedToday, decideToday, week, pipeline, blocking: blockingRows, waitingOnOthers, kpi, team };
 }

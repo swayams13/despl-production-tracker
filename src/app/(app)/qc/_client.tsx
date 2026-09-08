@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { ResponsiveTable } from "@/components/industrial/responsive-table";
+import { PageHeader } from "@/components/industrial/page-header";
+import { clickableRowProps } from "@/components/industrial/data-table";
 import { recordQcpAction } from "@/app/actions/qcp";
 import { dispositionNcrAction } from "@/app/actions/ncr";
 import type { ActionResult } from "@/app/actions/_action";
@@ -130,7 +132,7 @@ const CHIP: Record<string, string> = {
  * 6-column table — same open-stage-sheet onClick as the table row. */
 function QueueRowCard({ row, onOpen }: { row: QcQueueRow; onOpen: () => void }) {
   return (
-    <div className="rt-card" onClick={onOpen} style={{ cursor: "pointer" }}>
+    <div className="rt-card" {...clickableRowProps(onOpen)}>
       <div className="rt-card-top">
         <b className="mono">{row.jobNumber}</b>
         <span className="mono" style={{ color: "var(--muted)", fontSize: 12 }}>{row.serialNo}</span>
@@ -181,10 +183,7 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
 
   return (
     <>
-      <div className="page-h">
-        <h1>QC &amp; Hold Points</h1>
-        <span className="sub">Cross-job QC cockpit · everything actionable here</span>
-      </div>
+      <PageHeader title="QC & Hold Points" subtitle="Cross-job QC cockpit · everything actionable here" />
 
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd">
@@ -200,7 +199,7 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
                 <thead><tr><th>Job</th><th>Unit</th><th>Process</th><th>Department</th><th>Submitted by</th><th className="num">When</th></tr></thead>
                 <tbody>
                   {cockpit.queue.map((q) => (
-                    <tr key={q.planId} className="row" onClick={() => openStage(q.jobId, q.unitId, q.stageNo)} style={{ cursor: "pointer" }}>
+                    <tr key={q.planId} className="row" {...clickableRowProps(() => openStage(q.jobId, q.unitId, q.stageNo))}>
                       <td className="mono">{q.jobNumber}</td>
                       <td className="mono" style={{ color: "var(--muted)" }}>{q.serialNo}</td>
                       <td>{q.processName}</td>
@@ -236,8 +235,8 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
                   <span className="mono" style={{ color: "var(--muted)" }}>{h.srNo}</span>
                   <span className="hclass">{h.classCode}</span>
                   <span
+                    {...clickableRowProps(() => openStage(h.jobId, h.unitId, h.stageNo))}
                     style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: "pointer" }}
-                    onClick={() => openStage(h.jobId, h.unitId, h.stageNo)}
                   >
                     {h.activity} · <span className="mono">{h.jobNumber}</span> · Unit {h.serialNo}
                   </span>
@@ -312,7 +311,7 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
                 <div className="b" key={i}>
                   <i style={{ height: w.yieldPct != null ? `${w.yieldPct}%` : "2%", background: w.yieldPct == null ? "var(--s-idle)" : undefined }} title={w.yieldPct != null ? `${w.yieldPct}% first-pass yield` : "No submissions"} />
                   <span>{w.yieldPct != null ? `${w.yieldPct}%` : "—"}</span>
-                  <span style={{ fontSize: 9 }}>{fmtWeek(w.weekStart)}</span>
+                  <span>{fmtWeek(w.weekStart)}</span>
                 </div>
               ))}
             </div>

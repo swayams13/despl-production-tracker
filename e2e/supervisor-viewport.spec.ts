@@ -37,6 +37,29 @@ test.beforeEach(({}, testInfo) => {
   test.skip(!["phone", "tablet", "desktop"].includes(testInfo.project.name), "this spec targets only the phone/tablet/desktop viewport-matrix projects");
 });
 
+// ROOT CAUSE of a CI-only, deterministic-on-CI-but-never-locally red streak
+// (traced 8 Sep 2026 — see progress.md "real finding" entries around b0df6db):
+// every route under (app)/ with a loading.tsx (e.g. my-day/loading.tsx) is a
+// real Suspense boundary — Next streams the `.skel` placeholder shell first
+// and patches in the real content once the page's data fetch resolves,
+// inside the SAME navigation. `page.goto()`'s `load` event does not wait for
+// that patch to land — only for the response to finish downloading — so an
+// assertion made immediately after `goto` can observe the skeleton instead
+// of the final DOM. Confirmed by injecting an artificial 2.5s delay into
+// my-day's data fetch locally: it reproduced this file's exact CI failures
+// (queue-first view false/false, the tablet touch-target test.fail()
+// "expected to fail, but passed") on a machine where they never occur
+// otherwise. CI's shared, more contended runner loses this race consistently;
+// a local dev machine's warm `pnpm start` effectively never does — which is
+// exactly why this was misread as a real product/CSS regression (b0df6db)
+// before being traced. Not a product bug: the breakpoint CSS is correct once
+// content actually lands. Used wherever a test asserts on streamed content
+// right after navigating.
+async function gotoReady(page: Page, path: string) {
+  await page.goto(path);
+  await expect(page.locator(".skel")).toHaveCount(0);
+}
+
 // Real shell pages reachable by the seeded SUPERVISOR fixture (sup.fabrication@
 // despl.local — task-7-brief.md §2). /dashboard and /admin are handled
 // separately below: this actor never sees their actual content, only their
@@ -122,7 +145,7 @@ for (const path of SHELL_PAGES) {
       "my-day/tablet: row N's Claim and row N+1's Assign-to select are 1px apart " +
         "(need 8px, SPEC §8 assertion 3) — measured in CI, tracked in LEDGER.md",
     );
-    await page.goto(path);
+    await gotoReady(page, path);
 
     // Scoped to what this codebase's own coarse-pointer sizing contract
     // actually promises: the density layer (globals.css `@media
@@ -445,7 +468,7 @@ test("/dashboard and /admin redirect this supervisor to /my-day, not a dead end"
 // wrong side of the breakpoint (both branches always render, only one is
 // display:none, matching <ResponsiveTable>'s own established pattern).
 test("/my-day: queue-first view below 640px, tabbed view at and above", async ({ page }, testInfo) => {
-  await page.goto("/my-day");
+  await gotoReady(page, "/my-day");
   const queueVisible = await page.locator(".day-queue").isVisible();
   const standardVisible = await page.locator(".day-standard").isVisible();
   if (testInfo.project.name === "phone") {
@@ -604,11 +627,11 @@ test.describe.serial("AA contrast (assertion 6) — chips, KPI values, spine", (
   );
 });
 
-// Known, pre-existing, DISCLOSED shortfalls — not introduced by this task and
+// Known, pre-existing, DISCLOSED shortfall — not introduced by this task and
 // not fixable within it (task-7-brief.md global constraint #1: test
-// infrastructure only, no src/ changes). Both were measured and reported by
-// Task 6's own AA audit before this task existed. test.fixme() (not silence,
-// not a weakened assertion) is the record that they're known and tracked.
+// infrastructure only, no src/ changes). Measured and reported by Task 6's
+// own AA audit before this task existed. test.fixme() (not silence, not a
+// weakened assertion) is the record that it's known and tracked.
 test.fixme(
   "AA contrast: light theme .c-hold chip text is 4.45:1 against --surface (need 4.5) — " +
     "known, disclosed, pre-existing shortfall. task-6-report.md 'Residual, per your ruling' " +
@@ -618,14 +641,14 @@ test.fixme(
   async () => {},
 );
 
-test.fixme(
-  "AA contrast: dark theme's spine idle fill (--s-idle on --surface) is 2.20:1 against the 3:1 " +
-    "non-text minimum — known, pre-existing, deliberately frozen. task-6-report.md §4 DARK table " +
-    "('spine fill --s-idle | 2.20 | 3 | pre-existing fail'). The dark palette is frozen by design " +
-    "('must render identically to main', task-6-brief.md constraint #4), so this cannot be fixed " +
-    "from any task, including this one.",
-  async () => {},
-);
+// The dark theme's spine-idle contrast fixme that used to sit here (--s-idle
+// at 2.20:1 against the 3:1 non-text minimum, "deliberately frozen" per
+// task-6-brief.md constraint #4) is gone: audit/18_DESIGN_SYSTEM.md (AUD-066)
+// had the controller lift that freeze, and globals.css's --s-idle moved to
+// #606670 (3.13:1 against --surface, verified with this file's own
+// wcag-contrast.ts helper). The general "needs a deterministic all-statuses
+// spine fixture" fixme above (line ~600) still covers exercising this for
+// real once /kit's replacement exists.
 
 // ── Assertions 4, 5, 7 — R2/R3 content that doesn't exist in this codebase
 // yet (controller ruling, task-7-brief.md). Real describe/test structure now;

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import { StageSheet } from "./stage-sheet";
 import { StatusChip } from "./status-chip";
@@ -283,6 +284,13 @@ export function StageSheetLauncher({
                 rejectReason={rejectReason}
                 setRejectReason={setRejectReason}
               />
+              {/* Phase 4: Activity Detail (a real page — content + right rail
+                  side by side — RESPONSIVE_GUIDELINES.md's spec for this
+                  screen can't be done in a 460px drawer) lives one click away
+                  from every stage reference that already opens this sheet. */}
+              <Link href={`/jobs/${d.jobId}/activity/${d.unitId}/${d.stageNo}`} className="sub" style={{ display: "block", marginTop: 8, textAlign: "right" }}>
+                Open full detail →
+              </Link>
             </div>
           </>
         )

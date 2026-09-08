@@ -25,6 +25,7 @@ export interface StageBackingPlan {
   actualStart: string | null;
   actualFinish: string | null;
   standardDays: number | null;
+  submittedBy: number | null;
   submittedByName: string | null;
   isGoverning: boolean;
   /** Fabrication/assembly operations rolling up into this process on this unit (Phase 3, R4). Empty when nothing is mapped. */
@@ -64,6 +65,11 @@ export interface StageDetail {
   unitId: number;
   serialNo: string;
   deptName: string;
+  /** Governing process's department — Activity Detail's Reassign action needs
+   * this to load that department's members (Reassign wasn't a StageSheet
+   * consumer before Phase 4, so this id was fetched internally but never
+   * surfaced). */
+  deptId: number | null;
   status: StageDisplayStatus;
   overduePip: boolean;
   rejectedMarker: boolean;
@@ -123,6 +129,7 @@ export async function loadStageDetail(
         id: true,
         name: true,
         durationMaxDays: true,
+        departmentId: true,
         department: { select: { name: true } },
       },
     });
@@ -167,6 +174,7 @@ export async function loadStageDetail(
             actualStart: plan.actualStart?.toISOString() ?? null,
             actualFinish: plan.actualFinish?.toISOString() ?? null,
             standardDays: p.durationMaxDays,
+            submittedBy: plan.submittedBy,
             submittedByName: plan.submittedBy != null ? (nameBySubmitter.get(plan.submittedBy) ?? null) : null,
             isGoverning: plan.id === view.governing_plan_id,
             contributingOps: await loadMappedOps(tx, { jobProcessId: p.id, unitId, jobId }),
@@ -299,6 +307,7 @@ export async function loadStageDetail(
       unitId,
       serialNo: unit.serialNo,
       deptName: governingProcess?.department.name ?? "—",
+      deptId: governingProcess?.departmentId ?? null,
       status: view.fill_status,
       overduePip: view.is_overdue && view.fill_status !== "overdue",
       rejectedMarker: view.is_rejected,

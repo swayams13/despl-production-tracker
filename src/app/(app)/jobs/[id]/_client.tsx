@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { StageSpine } from "@/components/industrial/stage-spine";
 import { StatusChip } from "@/components/industrial/status-chip";
-import { STAGE_STATUS, showsOverduePip, showsRejectedMarker, type StageSegment } from "@/components/industrial/stage-status";
+import { STAGE_STATUS, showsOverduePip, showsRejectedMarker, type StageSegment, type StageDisplayStatus } from "@/components/industrial/stage-status";
 import { JobGantt } from "@/components/industrial/job-gantt";
 import { BomPanel } from "@/components/industrial/bom-panel";
 import { AssemblyPanel } from "@/components/industrial/assembly-panel";
@@ -12,6 +12,7 @@ import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { PackingPanel } from "@/components/industrial/packing-panel";
 import { DispatchPanel } from "@/components/industrial/dispatch-panel";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
+import { clickableRowProps } from "@/components/industrial/data-table";
 import { ClientPortalView } from "@/components/industrial/client-portal-view";
 import { ClientReviewBanner } from "@/components/industrial/client-review-banner";
 import { JobDateEditor } from "@/components/industrial/job-date-editor";
@@ -230,7 +231,7 @@ export function JobDetailClient({
                       <tr>
                         <td className="ulab" />
                         {unitSpines[0].segments.map((s) => (
-                          <td key={s.stageNo} style={{ textAlign: "center", color: "#565b63", fontSize: 9 }} className="mono">
+                          <td key={s.stageNo} style={{ textAlign: "center", color: "#565b63", fontSize: 11 }} className="mono">
                             {s.stageNo}
                           </td>
                         ))}
@@ -258,21 +259,7 @@ export function JobDetailClient({
               )}
             </div>
 
-            <div className="card">
-              <div className="hd"><h3>Activity</h3></div>
-              {events.length === 0 ? (
-                <p className="note" style={{ margin: "16px 0" }}>No activity yet.</p>
-              ) : (
-                <div>
-                  {events.slice(0, 5).map((e) => (
-                    <ActivityRow key={e.id} e={e} />
-                  ))}
-                  <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)" }}>
-                    <Link href={`/jobs/${jobId}?tab=activity`} className="btn btn-ghost">Open full activity →</Link>
-                  </div>
-                </div>
-              )}
-            </div>
+            <ExceptionsCard unitSpines={unitSpines} onOpenStage={openStageInJob} />
           </div>
         </>
       ) : (
@@ -288,6 +275,79 @@ export function JobDetailClient({
 
       <StageSheetLauncher sheet={sheet} onOpenChange={closeSheet} onChanged={refreshStage} />
     </>
+  );
+}
+
+interface Exception {
+  unitId: number;
+  serialNo: string;
+  stageNo: number;
+  stageName: string;
+  status: StageDisplayStatus;
+  rejected?: boolean;
+}
+
+/** Every segment across this job's units that needs a decision — overdue,
+ * on hold, or carrying a rejected marker. Computed from `unitSpines` (already
+ * loaded for the stage spine/matrix above), no new query. */
+function computeExceptions(unitSpines: UnitSpine[]): Exception[] {
+  const out: Exception[] = [];
+  for (const u of unitSpines) {
+    for (const s of u.segments) {
+      if (s.status === "overdue" || s.status === "hold" || s.rejected) {
+        out.push({ unitId: u.unitId, serialNo: u.serialNo, stageNo: s.stageNo, stageName: s.stageName, status: s.status, rejected: s.rejected });
+      }
+    }
+  }
+  return out.sort((a, b) => Number(b.rejected) - Number(a.rejected) || Number(a.status !== "overdue") - Number(b.status !== "overdue"));
+}
+
+/**
+ * Project Control Centre's real second panel per the Round 2 mockup (`01`) —
+ * "Exceptions", not an activity log. UX_FINAL_REVIEW.md's own screen review
+ * documents this: "Activity-level table deliberately absent — exceptions
+ * list links out instead." The full event log is still one click away via
+ * the existing "Activity" tab; this replaces what used to be a *duplicate*
+ * preview of it on Overview, not a removal of activity history.
+ */
+function ExceptionsCard({
+  unitSpines,
+  onOpenStage,
+}: {
+  unitSpines: UnitSpine[];
+  onOpenStage: (unitId: number | undefined, stageNo: number) => void;
+}) {
+  const exceptions = computeExceptions(unitSpines);
+  return (
+    <div className="card">
+      <div className="hd">
+        <h3>Exceptions</h3>
+        <span className="chip c-overdue" style={{ marginLeft: "auto" }}><i />{exceptions.length}</span>
+      </div>
+      {exceptions.length === 0 ? (
+        <p className="note" style={{ margin: "16px 0" }}>No exceptions — every stage is on track.</p>
+      ) : (
+        <div>
+          {exceptions.slice(0, 8).map((ex) => (
+            <div
+              key={`${ex.unitId}-${ex.stageNo}`}
+              className="feed-row"
+              {...clickableRowProps(() => onOpenStage(ex.unitId, ex.stageNo), `Unit ${ex.serialNo}, ${ex.stageName}`)}
+            >
+              <StatusChip status={ex.status} label={ex.rejected ? "Rejected" : undefined} />
+              <div>
+                <b style={{ fontWeight: 500 }}>{ex.stageName}</b> — Unit <span className="mono">{ex.serialNo}</span>
+              </div>
+            </div>
+          ))}
+          {exceptions.length > 8 && (
+            <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
+              +{exceptions.length - 8} more — see the stage spine and matrix above
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

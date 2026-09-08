@@ -124,13 +124,13 @@ End every session by updating `progress.md`: what shipped, decisions made, block
 
 ## Frontend & Design System
 
-> Frontend/demo-ready build guide (merged from the design pack, 15 Aug 2026). The invariants and conventions above are still binding — this section governs the visual/UX layer only. `docs/DESIGN_SPEC.md` is the full execution contract; `design/despl-tracker-mockup.html` is the pixel reference.
+> Frontend/demo-ready build guide (merged from the design pack, 15 Aug 2026; pixel/spec reference updated 8 Sep 2026 — see below). The invariants and conventions above are still binding — this section governs the visual/UX layer only.
 
-**Current milestone: DEMO ROLLOUT.** The whole team will click through this build and give feedback. Therefore: every module reachable from the sidebar must be FUNCTIONAL — real data, real actions that persist. Judgment call rule: a smaller number of fully working modules beats a larger number of half-working ones, but the target is all of them per DESIGN_SPEC.md.
+**Current milestone: DEMO ROLLOUT.** The whole team will click through this build and give feedback. Therefore: every module reachable from the sidebar must be FUNCTIONAL — real data, real actions that persist. Judgment call rule: a smaller number of fully working modules beats a larger number of half-working ones, but the target is all of them per the design handoff below.
 
-### Pixel reference
+### Pixel reference *(superseded 8 Sep 2026)*
 
-`design/despl-tracker-mockup.html` (the approved v2 mockup) is the visual source of truth. When in doubt about spacing, color, density, or an interaction, open the mockup and match it. Do not "improve" the approved design without being asked.
+`design_handoff_phase4/` is the current implementation spec — it supersedes `docs/DESIGN_SPEC.md` §9's build order and `design/despl-tracker-mockup.html` as the pixel reference (both predate this handoff; the latter is stale but left in place, not deleted). Read `design_handoff_phase4/README.md` first, then all 5 docs it points to (`DESIGN_SYSTEM.md`, `COMPONENT_INVENTORY.md`, `RESPONSIVE_GUIDELINES.md`, `ACCESSIBILITY_AUDIT.md`, `UX_FINAL_REVIEW.md`) before touching any screen — they are the actual spec, not the `mockups/*.dc.html` files (design references only; recreate in this codebase's real components/data layer, don't port the HTML). Build order and screen→route mapping (which design-doc screen maps to which existing route, or "no existing route") are logged in `progress.md`'s "Phase 4 design-handoff implementation" session. When in doubt about spacing, color, density, or an interaction, open the matching `.dc.html` mockup and match it — do not "improve" the approved design without being asked.
 
 ### Functional-first rules (demo mandate)
 
@@ -188,8 +188,8 @@ Browser-default serif · raw enums in UI · dev commentary in UI · N identical 
 
 ### Workflow for the agent (Antigravity / Claude Code)
 
-- Read `DESIGN_SPEC.md` fully before any session; it is the execution contract. Use the `frontend-design` skill for any new visual surface.
-- Work in the session order in DESIGN_SPEC.md §9. One module per session. Do not start a new module until the previous one passes its acceptance checks.
+- Read `design_handoff_phase4/README.md` and its 5 docs fully before any session; they are the execution contract *(updated 8 Sep 2026 — supersedes `docs/DESIGN_SPEC.md` as the primary reference; that file may still hold non-visual product context not covered by the handoff)*. Use the `frontend-design` skill for any new visual surface.
+- Work through the build order logged in `progress.md`'s Phase 4 session (canonical components → My Day → Activity Detail → Supervisor Team → Management Dashboard → Project Control Centre → remaining screens). One module per session. Do not start a new module until the previous one passes its acceptance checks.
 - End every session by: (1) running the app and clicking every control you built, (2) checking the Demo Readiness checklist items for that module (§8), (3) listing which hard bans you verified.
 - Never invent schema — extend the existing Postgres schema via migrations, keep RLS intact, and keep all writes going through API routes with server-side role checks.
 - If mockup and spec conflict, the spec wins; note the conflict in your summary.

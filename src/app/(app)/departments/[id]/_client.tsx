@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { StatusChip } from "@/components/industrial/status-chip";
+import { PageHeader } from "@/components/industrial/page-header";
+import { clickableRowProps } from "@/components/industrial/data-table";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { DeptDetail } from "@/lib/services/departments.read";
 
@@ -35,18 +37,20 @@ export function DepartmentDetailClient({ dept, commandCenterCode }: { dept: Dept
 
   return (
     <>
-      <div className="page-h">
-        <h1>{dept.name}</h1>
-        <span className="sub">{dept.representative ?? "No supervisor assigned"} · representative</span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 14, alignItems: "center" }}>
-          {commandCenterCode && (
-            <Link href={`/command/${commandCenterCode}`} className="sub">
-              Command Center →
-            </Link>
-          )}
-          <Link href="/departments" className="btn btn-ghost">← All departments</Link>
-        </div>
-      </div>
+      <PageHeader
+        title={dept.name}
+        subtitle={`${dept.representative ?? "No supervisor assigned"} · representative`}
+        actions={
+          <>
+            {commandCenterCode && (
+              <Link href={`/command/${commandCenterCode}`} className="sub">
+                Command Center →
+              </Link>
+            )}
+            <Link href="/departments" className="btn btn-ghost">← All departments</Link>
+          </>
+        }
+      />
 
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd">
@@ -63,8 +67,7 @@ export function DepartmentDetailClient({ dept, commandCenterCode }: { dept: Dept
                 <tr
                   key={it.planId}
                   className="row"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => openStage(it.jobId, it.unitId, it.stageNo)}
+                  {...clickableRowProps(() => openStage(it.jobId, it.unitId, it.stageNo))}
                 >
                   <td className="mono">{it.jobNumber}</td>
                   <td className="mono" style={{ color: "var(--muted)" }}>{it.serialNo}</td>

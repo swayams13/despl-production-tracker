@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { clickableRowProps } from "./data-table";
 
 /**
  * QueueCard (R2 Task 1, SPEC-supervisor-ui-v3.md §3 + P3-03/P3-04): one
@@ -28,7 +29,7 @@ export function QueueCard({
   onClick?: () => void;
 }) {
   return (
-    <div className={`queue-card${top ? " top" : ""}`} onClick={onClick} style={onClick ? { cursor: "pointer" } : undefined}>
+    <div className={`queue-card${top ? " top" : ""}`} {...clickableRowProps(onClick, typeof title === "string" ? title : undefined)}>
       {top && (
         <div className="queue-ribbon">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">

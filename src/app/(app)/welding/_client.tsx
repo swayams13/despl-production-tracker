@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { logWeldJointAction, recordNdtResultAction } from "@/app/actions/welding";
 import { createWelderAction, updateWelderAction } from "@/app/actions/welder";
+import { PageHeader } from "@/components/industrial/page-header";
 import type { WeldingView, WeldJointOption, WelderRegistryRow } from "@/lib/services/welding.read";
 
 function fmtDate(iso: string | null): string {
@@ -38,29 +39,31 @@ export function WeldingClient({
 
   return (
     <>
-      <div className="page-h">
-        <h1>Welding</h1>
-        <span className="sub">Butt-weld joints tracked per welder · NDT linked</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 16, alignItems: "center" }} className="sub">
-          <span>
-            Team avg <b className="mono" style={{ color: "var(--text)" }}>{view.teamAvgJoints}</b> joints
-          </span>
-          <span>
-            repair rate{" "}
-            <b className="mono" style={{ color: "var(--text)" }}>
-              {view.teamRepairRatePct == null ? "—" : `${view.teamRepairRatePct}%`}
-            </b>
-          </span>
-          {canManageWelders && (
-            <button className="btn" onClick={() => setManaging((v) => !v)}>
-              {managing ? "Close registry" : "Manage welders…"}
+      <PageHeader
+        title="Welding"
+        subtitle="Butt-weld joints tracked per welder · NDT linked"
+        actions={
+          <>
+            <span className="sub">
+              Team avg <b className="mono" style={{ color: "var(--text)" }}>{view.teamAvgJoints}</b> joints
+            </span>
+            <span className="sub">
+              repair rate{" "}
+              <b className="mono" style={{ color: "var(--text)" }}>
+                {view.teamRepairRatePct == null ? "—" : `${view.teamRepairRatePct}%`}
+              </b>
+            </span>
+            {canManageWelders && (
+              <button className="btn" onClick={() => setManaging((v) => !v)}>
+                {managing ? "Close registry" : "Manage welders…"}
+              </button>
+            )}
+            <button className="btn btn-accent" onClick={() => setLogging((v) => !v)}>
+              {logging ? "Cancel" : "Log joint…"}
             </button>
-          )}
-          <button className="btn btn-accent" onClick={() => setLogging((v) => !v)}>
-            {logging ? "Cancel" : "Log joint…"}
-          </button>
-        </span>
-      </div>
+          </>
+        }
+      />
 
       {managing && canManageWelders && (
         <WelderRegistryPanel welders={view.welderRegistry} departments={view.departments} />

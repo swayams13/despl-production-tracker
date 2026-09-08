@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { loadDepartmentCards } from "@/lib/services/departments.read";
+import { PageHeader } from "@/components/industrial/page-header";
 
 function onTimeColor(pct: number | null): string {
   if (pct == null) return "var(--muted)";
@@ -19,10 +20,7 @@ export default async function Departments() {
 
   return (
     <>
-      <div className="page-h">
-        <h1>Departments</h1>
-        <span className="sub">{departments.length} departments · load, on-time performance, overdue</span>
-      </div>
+      <PageHeader title="Departments" subtitle={`${departments.length} departments · load, on-time performance, overdue`} />
       <div className="dept-grid">
         {departments.map((d) => (
           <Link href={`/departments/${d.id}`} className="dept-card" key={d.id}>

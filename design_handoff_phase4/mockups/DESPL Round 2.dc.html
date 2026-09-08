@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0b0c0e;-webkit-font-smoothing:antialiased}
+a{color:#ff7a1a;text-decoration:none}
+a:hover{color:#ffa05e}
+*{box-sizing:border-box}
+button{font-family:inherit}
+</style>
+</helmet>
+
+<div style="padding:20px;background:#1a1b1d;display:flex;justify-content:center">
+<div style="width:1280px;flex:none;background:#0b0c0e;color:#e7e9ec;font:400 13px/1.45 Inter,system-ui,sans-serif;border:1px solid #2e3034;border-radius:8px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5)">
+
+<div style="display:flex;align-items:center;gap:14px;padding:9px 18px;background:#141619;border-bottom:1px solid #262a30;flex-wrap:wrap">
+<span style="font:700 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#ff7a1a">ROUND 2</span>
+<span style="font-size:11.5px;color:#8b919a">Operational workflows · continues the approved Round 1 IA · terminology from the shipped app</span>
+<div style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap">
+<sc-for list="{{ tabs }}" as="t" hint-placeholder-count="11">
+<button onClick="{{ t.go }}" style="border:1px solid;border-radius:4px;padding:5px 9px;font-size:11px;font-weight:500;cursor:pointer;background:{{ t.bg }};color:{{ t.fg }};border-color:{{ t.bd }}">{{ t.label }}</button>
+</sc-for>
+</div>
+</div>
+
+<sc-if value="{{ chromeOn }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;align-items:stretch;min-height:820px">
+
+<aside style="width:236px;min-width:236px;border-right:1px solid #262a30;background:#0b0c0e;display:flex;flex-direction:column">
+<div style="padding:16px;border-bottom:1px solid #262a30">
+<b style="font-size:15px;letter-spacing:.5px">DESPL</b>
+<span style="display:block;color:#8b919a;font-size:10.5px;margin-top:2px;text-transform:uppercase;letter-spacing:1px">Production Tracker</span>
+</div>
+<div style="padding:8px 8px 3px">
+<sc-for list="{{ nav }}" as="n" hint-placeholder-count="10">
+<div>
+<sc-if value="{{ n.isHead }}" hint-placeholder-val="{{ false }}">
+<h6 style="font:600 10px Inter;color:#8b919a;text-transform:uppercase;letter-spacing:1.2px;padding:12px 10px 6px;margin:0">{{ n.label }}</h6>
+</sc-if>
+<sc-if value="{{ n.isItem }}" hint-placeholder-val="{{ true }}">
+<div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:9px;padding:7px 10px;font-weight:500;cursor:pointer;font-size:13px;border-radius:{{ n.r }};background:{{ n.bg }};color:{{ n.fg }};border-left:2px solid {{ n.bd }}" style-hover="background:#141619">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="{{ n.icon }}"></path></svg>{{ n.label }}
+<sc-if value="{{ n.hasBadge }}" hint-placeholder-val="{{ false }}">
+<span style="margin-left:auto;background:{{ n.badgeBg }};color:{{ n.badgeFg }};font:600 10.5px 'JetBrains Mono',monospace;padding:1px 6px;border-radius:8px">{{ n.badge }}</span>
+</sc-if>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<div style="margin-top:auto;border-top:1px solid #262a30;padding:12px 14px;display:flex;gap:10px;align-items:center">
+<div style="width:28px;height:28px;border-radius:6px;background:#1c1f24;display:flex;align-items:center;justify-content:center;font:600 11px 'JetBrains Mono',monospace;color:#ff7a1a;flex:none">{{ userIni }}</div>
+<div style="min-width:0">
+<b style="font-weight:500;display:block;font-size:12.5px">{{ userName }}</b>
+<small style="display:block;color:#8b919a;font-size:10.5px">{{ userRole }}</small>
+</div>
+</div>
+</aside>
+
+<div style="flex:1;min-width:0;display:flex;flex-direction:column">
+<div style="height:48px;min-height:48px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:14px;padding:0 20px;background:rgba(11,12,14,.92)">
+<span style="color:#8b919a;font-size:12.5px">{{ crumbRoot }} / <b style="color:#e7e9ec;font-weight:500">{{ crumbLeaf }}</b></span>
+<div style="margin-left:auto;display:flex;gap:12px;align-items:center">
+<span style="font:500 11px 'JetBrains Mono',monospace;color:#8b919a">MON 07 SEPT</span>
+<div style="position:relative;color:#8b919a;padding:4px;display:flex">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 01-3.4 0"></path></svg>
+<em style="position:absolute;top:-2px;right:-3px;background:#ff7a1a;color:#000;font-style:normal;font:700 9px Inter;border-radius:7px;padding:0 4px">4</em>
+</div>
+</div>
+</div>
+
+<div style="padding:22px 24px 48px;flex:1;background:#0b0c0e;min-width:0">
+
+<sc-if value="{{ isPcc }}" hint-placeholder-val="{{ true }}">
+<div data-screen-label="01 Project Control Centre">
+<div style="display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;margin-bottom:16px">
+<div style="flex:1 1 340px;min-width:0">
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<h1 style="font:600 20px 'JetBrains Mono',monospace;margin:0;letter-spacing:.5px">DESPL-320</h1>
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.5px;background:rgba(240,82,77,.12);color:#f0524d"><i style="width:5px;height:5px;border-radius:50%;background:#f0524d;display:block"></i>At risk</span>
+</div>
+<div style="color:#8b919a;font-size:12.5px;margin-top:4px">Pressure vessel · HP air receiver · 9 units · 225 scheduled stages · promised 30 Nov 26</div>
+</div>
+<div style="display:flex;gap:22px;align-items:flex-end">
+<div><div style="font:600 24px 'JetBrains Mono',monospace;line-height:1">82<span style="font-size:14px;color:#8b919a">%</span></div><div style="color:#8b919a;font-size:11px;margin-top:4px">actual</div></div>
+<div><div style="font:600 24px 'JetBrains Mono',monospace;line-height:1;color:#8b919a">88<span style="font-size:14px">%</span></div><div style="color:#8b919a;font-size:11px;margin-top:4px">planned</div></div>
+<div><div style="font:600 24px 'JetBrains Mono',monospace;line-height:1;color:#f0524d">−6<span style="font-size:14px;color:#8b919a">%</span></div><div style="color:#8b919a;font-size:11px;margin-top:4px">variance</div></div>
+</div>
+</div>
+
+<div style="display:flex;gap:2px;border-bottom:1px solid #262a30;margin-bottom:18px;overflow-x:auto">
+<sc-for list="{{ pTabs }}" as="t" hint-placeholder-count="9">
+<div onClick="{{ t.go }}" style="padding:8px 12px;font-size:12.5px;white-space:nowrap;cursor:pointer;border-bottom:2px solid {{ t.bd }};color:{{ t.fg }};font-weight:{{ t.fw }}" style-hover="color:#e7e9ec">{{ t.label }}</div>
+</sc-for>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:12px;margin-bottom:12px">
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:14px">Schedule health</div>
+<div style="position:relative;height:10px;border-radius:2px;background:#1c1f24;overflow:visible;margin-bottom:8px">
+<i style="position:absolute;left:0;top:0;bottom:0;width:82%;background:#3fb950;border-radius:2px;display:block"></i>
+<i style="position:absolute;left:88%;top:-4px;bottom:-4px;width:2px;background:#e7e9ec;display:block"></i>
+</div>
+<div style="display:flex;justify-content:space-between;font-size:11px;color:#8b919a;margin-bottom:16px"><span>184 of 225 stages complete</span><span>plan line 88%</span></div>
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px">
+<div><div style="color:#8b919a;font-size:11px;margin-bottom:3px">Promised</div><div style="font:500 13px 'JetBrains Mono',monospace">30 Nov 26</div></div>
+<div><div style="color:#8b919a;font-size:11px;margin-bottom:3px">Forecast (CPM)</div><div style="font:500 13px 'JetBrains Mono',monospace;color:#f0524d">08 Dec 26 · +6d</div></div>
+<div><div style="color:#8b919a;font-size:11px;margin-bottom:3px">Critical path</div><div style="font-size:12.5px">Weld NDE → Attachments → Hydro test</div></div>
+<div><div style="color:#8b919a;font-size:11px;margin-bottom:3px">Last schedule run</div><div style="font-size:12.5px">04 Sept · S. Jadeja</div></div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-left:2px solid #ff7a1a;border-radius:6px;padding:15px 17px;display:flex;flex-direction:column">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#ff7a1a">Current bottleneck</div>
+<span style="margin-left:auto;font:500 11px 'JetBrains Mono',monospace;color:#8b919a">5 days in queue</span>
+</div>
+<div style="font:600 16px Inter;margin-bottom:4px">Weld NDE</div>
+<div style="color:#8b919a;font-size:12.5px;margin-bottom:12px">Quality Control / QA · 5 units awaiting verification · submitted by Fabrication / Welding</div>
+<div style="background:#1c1f24;border-radius:4px;padding:10px 12px;font-size:12.5px;line-height:1.55;margin-bottom:14px">Holding <b style="font-weight:600">Internal &amp; External Attachments</b> on 5 units, and PWHT on 2. Every day here moves the promised date.</div>
+<div style="display:flex;gap:8px;margin-top:auto">
+<button onClick="{{ goQc }}" style="background:#ff7a1a;border:1px solid #ff7a1a;color:#000;border-radius:4px;height:38px;padding:0 16px;font:600 12.5px Inter;cursor:pointer" style-hover="filter:brightness(1.12)">Open QC queue</button>
+<button onClick="{{ goSched }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:38px;padding:0 14px;font:500 12.5px Inter;cursor:pointer" style-hover="border-color:#3a3f47">See it on the schedule</button>
+</div>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:12px;margin-bottom:12px">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Exceptions</h3>
+<span style="color:#8b919a;font-size:11.5px">Things that will not clear themselves</span>
+</div>
+<div onClick="{{ goAct }}" style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<span style="font:600 15px 'JetBrains Mono',monospace;color:#f0524d;width:22px">4</span>
+<div style="min-width:0;flex:1"><div style="font-size:12.5px;font-weight:500">Overdue stages</div><div style="color:#8b919a;font-size:11px;margin-top:2px">3 have no delay reason filed — progress writes are blocked</div></div>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+</div>
+<div style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<span style="font:600 15px 'JetBrains Mono',monospace;color:#d9a62e;width:22px">7</span>
+<div style="min-width:0;flex:1"><div style="font-size:12.5px;font-weight:500">Blocked by a predecessor</div><div style="color:#8b919a;font-size:11px;margin-top:2px">5 waiting on Weld NDE · 2 waiting on PWHT</div></div>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+</div>
+<div onClick="{{ goQc }}" style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<span style="font:600 15px 'JetBrains Mono',monospace;color:#d9a62e;width:22px">2</span>
+<div style="min-width:0;flex:1"><div style="font-size:12.5px;font-weight:500">Hold points awaiting TPI</div><div style="color:#8b919a;font-size:11px;margin-top:2px">Hydrostatic test · client witness 12 days late</div></div>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+</div>
+<div onClick="{{ goQc }}" style="display:flex;align-items:center;gap:12px;padding:11px 16px;cursor:pointer" style-hover="background:#1c1f24">
+<span style="font:600 15px 'JetBrains Mono',monospace;color:#f0524d;width:22px">1</span>
+<div style="min-width:0;flex:1"><div style="font-size:12.5px;font-weight:500">Rejected — open NCR</div><div style="color:#8b919a;font-size:11px;margin-top:2px">Weld NDE 320SR02 · awaiting disposition 2 days</div></div>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Upcoming milestones</h3>
+</div>
+<sc-for list="{{ milestones }}" as="m" hint-placeholder-count="4">
+<div style="display:grid;grid-template-columns:78px minmax(0,1fr) auto;gap:12px;align-items:center;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6)">
+<div style="font:500 12px 'JetBrains Mono',monospace;color:#8b919a">{{ m.date }}</div>
+<div style="min-width:0"><div style="font-size:12.5px;font-weight:500">{{ m.name }}</div><div style="color:#8b919a;font-size:11px;margin-top:2px">{{ m.sub }}</div></div>
+<span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:{{ m.chipBg }};color:{{ m.chipFg }}"><i style="width:5px;height:5px;border-radius:50%;display:block;background:{{ m.chipFg }}"></i>{{ m.state }}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Departments on this project</h3>
+<span style="color:#8b919a;font-size:11.5px">Open work owned, not every stage · click through for the department's own queue</span>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 72px 78px 76px 84px 128px;gap:12px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<div>Department</div><div style="text-align:right">Open</div><div style="text-align:right">Overdue</div><div style="text-align:right">Blocked</div><div style="text-align:right">On-time</div><div></div>
+</div>
+<sc-for list="{{ pccDepts }}" as="d" hint-placeholder-count="8">
+<div onClick="{{ d.go }}" style="display:grid;grid-template-columns:minmax(0,1fr) 72px 78px 76px 84px 128px;gap:12px;align-items:center;min-height:44px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<div style="font-size:12.5px;display:flex;align-items:center;gap:8px;min-width:0"><i style="width:6px;height:6px;border-radius:50%;flex:none;display:block;background:{{ d.dot }}"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.name }}</span></div>
+<div style="text-align:right;font:400 12px 'JetBrains Mono',monospace">{{ d.open }}</div>
+<div style="text-align:right;font:500 12px 'JetBrains Mono',monospace;color:{{ d.overFg }}">{{ d.over }}</div>
+<div style="text-align:right;font:400 12px 'JetBrains Mono',monospace;color:{{ d.blkFg }}">{{ d.blocked }}</div>
+<div style="text-align:right;font:500 12px 'JetBrains Mono',monospace;color:{{ d.otFg }}">{{ d.ontime }}</div>
+<div style="color:#8b919a;font-size:11.5px;text-align:right">{{ d.note }}</div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSched }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="02 Project Schedule">
+<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px;flex-wrap:wrap">
+<h1 style="font:600 20px Inter;margin:0">Timeline (Gantt)</h1>
+<span style="font:500 13px 'JetBrains Mono',monospace;color:#ff7a1a">DESPL-320</span>
+<span style="color:#8b919a;font-size:12.5px">rolled up across 9 units · process grain</span>
+</div>
+<p style="margin:0 0 14px;color:#8b919a;font-size:12px">Planned against actual, one row per process. Open a row for dates, dependency and unit split.</p>
+
+<div style="display:flex;gap:2px;border-bottom:1px solid #262a30;margin-bottom:14px;overflow-x:auto">
+<sc-for list="{{ pTabs }}" as="t" hint-placeholder-count="9">
+<div onClick="{{ t.go }}" style="padding:8px 12px;font-size:12.5px;white-space:nowrap;cursor:pointer;border-bottom:2px solid {{ t.bd }};color:{{ t.fg }};font-weight:{{ t.fw }}" style-hover="color:#e7e9ec">{{ t.label }}</div>
+</sc-for>
+</div>
+
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+<div style="display:flex;align-items:center;gap:7px;background:#141619;border:1px solid #262a30;border-radius:4px;padding:0 10px;height:32px;min-width:190px">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5L21 21"></path></svg>
+<span style="color:#8b919a;font-size:12px">Search process or unit</span>
+</div>
+<div style="display:flex;align-items:center;gap:7px;background:#141619;border:1px solid #262a30;border-radius:4px;padding:0 10px;height:32px">
+<span style="font:500 10px 'JetBrains Mono',monospace;color:#8b919a;letter-spacing:.08em">RANGE</span>
+<span style="font:400 12px 'JetBrains Mono',monospace">Apr 26 – Dec 26</span>
+<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2"><path d="M6 9l6 6 6-6"></path></svg>
+</div>
+<sc-for list="{{ schedDeptChips }}" as="c" hint-placeholder-count="4">
+<button onClick="{{ c.pick }}" style="border-radius:20px;height:28px;padding:0 12px;font:500 11.5px Inter;cursor:pointer;background:{{ c.bg }};color:{{ c.fg }};border:1px solid {{ c.bd }}">{{ c.label }}</button>
+</sc-for>
+</div>
+<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+<sc-for list="{{ schedStatusChips }}" as="c" hint-placeholder-count="6">
+<button onClick="{{ c.pick }}" style="border-radius:20px;height:26px;padding:0 11px;font:500 11px Inter;cursor:pointer;background:{{ c.bg }};color:{{ c.fg }};border:1px solid {{ c.bd }}">{{ c.label }}</button>
+</sc-for>
+<span style="margin-left:auto;display:flex;gap:14px;align-items:center;color:#8b919a;font-size:11px">
+<span style="display:inline-flex;align-items:center;gap:6px"><i style="width:16px;height:8px;border:1px solid #4a4f57;border-radius:2px;display:block"></i>planned</span>
+<span style="display:inline-flex;align-items:center;gap:6px"><i style="width:16px;height:8px;background:#4c8dff;border-radius:2px;display:block"></i>actual</span>
+<span style="display:inline-flex;align-items:center;gap:6px"><i style="width:16px;height:8px;background:rgba(255,122,26,.4);border-radius:2px;display:block"></i>forecast slip</span>
+</span>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="display:grid;grid-template-columns:268px minmax(0,1fr);border-bottom:1px solid #262a30">
+<div style="padding:8px 14px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">Department · process</div>
+<div style="position:relative;border-left:1px solid #262a30">
+<div style="display:flex">
+<sc-for list="{{ months }}" as="m" hint-placeholder-count="9">
+<div style="flex:none;width:{{ m.w }};padding:8px 0 8px 7px;border-left:1px solid rgba(38,42,48,.6);font:600 10.5px 'JetBrains Mono',monospace;color:#8b919a">{{ m.label }}</div>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:268px minmax(0,1fr);border-bottom:1px solid #262a30;background:#1c1f24">
+<div style="padding:6px 14px;font:600 10px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">Milestones</div>
+<div style="position:relative;height:44px;border-left:1px solid #262a30">
+<sc-for list="{{ schedMs }}" as="m" hint-placeholder-count="4">
+<div style="position:absolute;top:{{ m.top }};left:{{ m.left }};display:flex;align-items:center;gap:5px;flex-direction:{{ m.dir }};transform:{{ m.tx }}">
+<i style="width:8px;height:8px;background:{{ m.fg }};transform:rotate(45deg);display:block;flex:none"></i>
+<span style="font:500 10px Inter;color:{{ m.fg }};white-space:nowrap">{{ m.label }}</span>
+</div>
+</sc-for>
+<i style="position:absolute;top:0;bottom:0;left:{{ todayLeft }};width:1px;background:#ff7a1a;display:block"></i>
+</div>
+</div>
+
+<sc-for list="{{ schedRows }}" as="r" hint-placeholder-count="15">
+<div>
+<div onClick="{{ r.toggle }}" style="display:grid;grid-template-columns:268px minmax(0,1fr);border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer;background:{{ r.rowBg }}" style-hover="background:#1c1f24">
+<div style="padding:8px 14px;min-width:0">
+<div style="display:flex;align-items:center;gap:7px;min-width:0">
+<i style="width:6px;height:6px;border-radius:50%;flex:none;display:block;background:{{ r.fill }}"></i>
+<span style="font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.stage }}</span>
+<sc-if value="{{ r.isBn }}" hint-placeholder-val="{{ false }}">
+<span style="flex:none;font:700 9px 'JetBrains Mono',monospace;letter-spacing:.1em;color:#ff7a1a;background:rgba(255,122,26,.14);padding:2px 5px;border-radius:3px">BOTTLENECK</span>
+</sc-if>
+</div>
+<div style="color:#8b919a;font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.dept }} · stage {{ r.st }}</div>
+</div>
+<div style="position:relative;height:44px;border-left:1px solid #262a30">
+<i style="position:absolute;top:11px;left:{{ r.pLeft }};width:{{ r.pWidth }};height:9px;border:1px solid #4a4f57;border-radius:2px;display:block"></i>
+<sc-if value="{{ r.hasFc }}" hint-placeholder-val="{{ false }}">
+<i style="position:absolute;top:11px;left:{{ r.fcLeft }};width:{{ r.fcWidth }};height:9px;background:rgba(255,122,26,.4);border-radius:2px;display:block"></i>
+</sc-if>
+<sc-if value="{{ r.hasActual }}" hint-placeholder-val="{{ true }}">
+<i style="position:absolute;top:24px;left:{{ r.aLeft }};width:{{ r.aWidth }};height:9px;border-radius:2px;display:block;background:{{ r.fill }}"></i>
+</sc-if>
+<i style="position:absolute;top:0;bottom:0;left:{{ todayLeft }};width:1px;background:rgba(255,122,26,.55);display:block"></i>
+</div>
+</div>
+<sc-if value="{{ r.isOpen }}" hint-placeholder-val="{{ false }}">
+<div style="background:#0b0c0e;border-bottom:1px solid #262a30;padding:14px 16px 16px;display:flex;gap:26px;flex-wrap:wrap">
+<div style="display:grid;grid-template-columns:repeat(4,auto);gap:12px 26px">
+<div><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">Planned</div><div style="font:500 12.5px 'JetBrains Mono',monospace">{{ r.pFmt }}</div></div>
+<div><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">Actual</div><div style="font:500 12.5px 'JetBrains Mono',monospace">{{ r.aFmt }}</div></div>
+<div><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">Variance</div><div style="font:500 12.5px 'JetBrains Mono',monospace;color:{{ r.chipFg }}">{{ r.v }}</div></div>
+<div><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">Status</div><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:{{ r.chipBg }};color:{{ r.chipFg }}"><i style="width:5px;height:5px;border-radius:50%;display:block;background:{{ r.chipFg }}"></i>{{ r.status }}</span></div>
+<div style="grid-column:span 2"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">Dependency</div><div style="font-size:12.5px">{{ r.dep }}</div></div>
+<div style="grid-column:span 2"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">Units</div><div style="font-size:12.5px">{{ r.units }}</div></div>
+</div>
+<div style="display:flex;gap:8px;align-items:flex-start;margin-left:auto">
+<button onClick="{{ r.openAct }}" style="background:#ff7a1a;border:1px solid #ff7a1a;color:#000;border-radius:4px;height:36px;padding:0 14px;font:600 12.5px Inter;cursor:pointer" style-hover="filter:brightness(1.12)">Open activity</button>
+<button onClick="{{ goDept }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:36px;padding:0 12px;font:500 12.5px Inter;cursor:pointer" style-hover="border-color:#3a3f47">Open department</button>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isAct }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="03 Activity Detail">
+<div onClick="{{ goPcc }}" style="display:inline-flex;align-items:center;gap:6px;color:#8b919a;font-size:12px;cursor:pointer;margin-bottom:12px" style-hover="color:#e7e9ec">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5.5L8.5 12l6.5 6.5"></path></svg>Back to DESPL-320
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:18px 20px;margin-bottom:12px">
+<div style="display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap">
+<div style="flex:1 1 380px;min-width:0">
+<div style="font:500 11.5px 'JetBrains Mono',monospace;color:#8b919a;margin-bottom:6px">DESPL-320 · 320SR03 · Stages 14–15 · Fabrication / Welding</div>
+<h1 style="font:600 22px/1.25 Inter;margin:0 0 10px">Internal &amp; External Attachments</h1>
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.5px;background:{{ actChipBg }};color:{{ actChipFg }}"><i style="width:5px;height:5px;border-radius:50%;display:block;background:{{ actChipFg }}"></i>{{ actKind }}</span>
+<span style="color:#8b919a;font-size:12.5px">Due <b style="color:#e7e9ec;font-weight:500">26 Nov</b> · owner <b style="color:#e7e9ec;font-weight:500">Rakesh Yadav</b> · standard 5d, elapsed 4d</span>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;min-width:210px">
+<button style="background:#ff7a1a;border:1px solid #ff7a1a;color:#000;border-radius:4px;height:44px;padding:0 18px;font:600 13.5px Inter;cursor:pointer" style-hover="filter:brightness(1.12)">{{ actPrimary }}</button>
+<button style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:36px;padding:0 16px;font:500 12.5px Inter;cursor:pointer" style-hover="border-color:#3a3f47">{{ actSecond }}</button>
+<button onClick="{{ openAssign }}" style="background:transparent;border:1px solid #262a30;color:#8b919a;border-radius:4px;height:32px;padding:0 16px;font:500 12px Inter;cursor:pointer" style-hover="color:#e7e9ec;border-color:#3a3f47">Reassign…</button>
+</div>
+</div>
+<div style="margin-top:14px;border-top:1px solid #262a30;padding-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+<span style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Action model — pick a state</span>
+<sc-for list="{{ actStateChips }}" as="c" hint-placeholder-count="6">
+<button onClick="{{ c.pick }}" style="border-radius:20px;height:26px;padding:0 11px;font:500 11px Inter;cursor:pointer;background:{{ c.bg }};color:{{ c.fg }};border:1px solid {{ c.bd }}">{{ c.label }}</button>
+</sc-for>
+<span style="color:#8b919a;font-size:11.5px;flex:1 1 260px">{{ actNote }}</span>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:12px">
+<div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Progress</div>
+<span style="margin-left:auto;font:600 14px 'JetBrains Mono',monospace">72%</span>
+</div>
+<div style="height:10px;border-radius:2px;background:#1c1f24;overflow:hidden;margin-bottom:8px"><i style="display:block;height:100%;width:72%;background:#4c8dff"></i></div>
+<div style="color:#8b919a;font-size:11.5px">13 of 18 backing operations complete · last write 05 Sept 14:20 by Rakesh Yadav</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:9px">What needs to happen</div>
+<div style="font-size:13px;line-height:1.65">Fit and weld all internal and external attachments to shell 320SR03 — lifting lugs, saddle pads, name-plate bracket and earthing lug — to drawing DWG-320-14 rev C. Weld visual clearance must be raised with Quality Control / QA before the unit moves to PWHT.</div>
+<div style="margin-top:12px;background:#1c1f24;border-left:2px solid #a371f7;padding:9px 12px;font-size:12.5px;line-height:1.55">Submitted for QC on 05 Sept. Nothing further can be written against this activity until QA verifies or rejects — you submitted it, so you cannot verify it yourself.</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Dependencies</h3></div>
+<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6)">
+<i style="width:7px;height:7px;border-radius:50%;background:#3fb950;display:block;flex:none"></i>
+<div style="flex:1;min-width:0"><div style="font-size:12.5px">Shell Fit-Up &amp; Welding · stage 10</div><div style="color:#8b919a;font-size:11px;margin-top:2px">Predecessor · verified 28 Aug by QA</div></div>
+<span style="color:#3fb950;font-size:11.5px">Complete</span>
+</div>
+<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6)">
+<i style="width:7px;height:7px;border-radius:50%;background:#a371f7;display:block;flex:none"></i>
+<div style="flex:1;min-width:0"><div style="font-size:12.5px">Weld NDE · stage 14</div><div style="color:#8b919a;font-size:11px;margin-top:2px">Quality Control / QA · in queue 5 days</div></div>
+<button onClick="{{ goQcd }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:30px;padding:0 11px;font:500 11.5px Inter;cursor:pointer" style-hover="border-color:#3a3f47">View QC</button>
+</div>
+<div style="display:flex;align-items:center;gap:10px;padding:11px 16px">
+<i style="width:7px;height:7px;border-radius:50%;background:#4a4f57;display:block;flex:none"></i>
+<div style="flex:1;min-width:0"><div style="font-size:12.5px">PWHT · stage 16</div><div style="color:#8b919a;font-size:11px;margin-top:2px">Successor · Heat Treatment is waiting on this activity</div></div>
+<span style="color:#8b919a;font-size:11.5px">Blocked by this</span>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div onClick="{{ toggleHist }}" style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px;cursor:pointer" style-hover="background:#1c1f24">
+<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2.6" style="transform:{{ histCaret }}"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Activity history</h3>
+<span style="color:#8b919a;font-size:11.5px">Append-only audit trail</span>
+<span style="margin-left:auto;color:#8b919a;font:500 11px 'JetBrains Mono',monospace">6 events</span>
+</div>
+<sc-if value="{{ histOpen }}" hint-placeholder-val="{{ true }}">
+<div>
+<div style="display:grid;grid-template-columns:104px minmax(0,1fr) 130px;gap:12px;padding:7px 16px;border-bottom:1px solid #262a30;font:600 10px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a"><div>Date</div><div>Action</div><div>User</div></div>
+<sc-for list="{{ actHistory }}" as="h" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:104px minmax(0,1fr) 130px;gap:12px;align-items:center;min-height:38px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6)">
+<div style="font:400 11.5px 'JetBrains Mono',monospace;color:#8b919a">{{ h.at }}</div>
+<div style="font-size:12.5px;min-width:0">{{ h.what }}<span style="color:#8b919a">{{ h.detail }}</span></div>
+<div style="font-size:12px;color:#8b919a">{{ h.who }}</div>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Dates</div>
+<div style="display:grid;grid-template-columns:auto auto;gap:9px 14px;font-size:12.5px">
+<span style="color:#8b919a">Planned</span><span style="font-family:'JetBrains Mono',monospace">21 Sept → 26 Nov</span>
+<span style="color:#8b919a">Actual start</span><span style="font-family:'JetBrains Mono',monospace">01 Sept</span>
+<span style="color:#8b919a">Submitted</span><span style="font-family:'JetBrains Mono',monospace">05 Sept 14:20</span>
+<span style="color:#8b919a">Variance</span><span style="font-family:'JetBrains Mono',monospace;color:#3fb950">−2d</span>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Documents</h3></div>
+<sc-for list="{{ actDocs }}" as="d" hint-placeholder-count="3">
+<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="1.8"><path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7z"></path><path d="M14 3v4h4"></path></svg>
+<div style="min-width:0;flex:1"><div style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.name }}</div><div style="color:#8b919a;font-size:11px;margin-top:1px">{{ d.sub }}</div></div>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;gap:8px;align-items:center"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Hold points</h3><span style="margin-left:auto;font:600 11px 'JetBrains Mono',monospace;color:#d9a62e">2 open</span></div>
+<div onClick="{{ goQcd }}" style="padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<div style="font-size:12.5px">Weld visual — attachments</div>
+<div style="color:#8b919a;font-size:11px;margin-top:2px">ITP-320-11 · class W · QC review</div>
+</div>
+<div onClick="{{ goQcd }}" style="padding:11px 16px;cursor:pointer" style-hover="background:#1c1f24">
+<div style="font-size:12.5px">Dimensional check</div>
+<div style="color:#8b919a;font-size:11px;margin-top:2px">ITP-320-12 · class H · pending</div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:9px">Ownership</div>
+<div style="display:flex;align-items:center;gap:10px">
+<div style="width:30px;height:30px;border-radius:6px;background:#1c1f24;display:flex;align-items:center;justify-content:center;font:600 11px 'JetBrains Mono',monospace;color:#8b919a;flex:none">RY</div>
+<div style="min-width:0"><div style="font-size:12.5px;font-weight:500">Rakesh Yadav</div><div style="color:#8b919a;font-size:11px">Fitter · claimed 01 Sept 08:10</div></div>
+</div>
+<div style="color:#8b919a;font-size:11.5px;margin-top:10px">Reassigned once — from department pool by S. Jadeja, reason “capacity”.</div>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDept }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="04 Department Overview">
+<div style="display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+<div style="flex:1 1 320px;min-width:0">
+<h1 style="font:600 20px Inter;margin:0">Fabrication / Welding</h1>
+<div style="color:#8b919a;font-size:12.5px;margin-top:4px">12 people · 86 active activities across 3 projects · supervisor S. Jadeja</div>
+</div>
+<div style="display:flex;gap:8px">
+<button onClick="{{ goTeam }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:36px;padding:0 14px;font:500 12.5px Inter;cursor:pointer" style-hover="border-color:#3a3f47">Open Team</button>
+<button onClick="{{ goWeld }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:36px;padding:0 14px;font:500 12.5px Inter;cursor:pointer" style-hover="border-color:#3a3f47">Production view</button>
+</div>
+</div>
+
+<div style="display:flex;border:1px solid #262a30;border-radius:6px;background:#141619;margin-bottom:12px;overflow:hidden;flex-wrap:wrap">
+<div style="padding:13px 18px;border-right:1px solid #262a30;flex:1;min-width:130px">
+<div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:6px">Active</div>
+<div style="font:600 22px 'JetBrains Mono',monospace;line-height:1">86</div>
+</div>
+<div style="padding:13px 18px;border-right:1px solid #262a30;flex:1;min-width:130px;border-top:2px solid #f0524d">
+<div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:6px">Overdue</div>
+<div style="font:600 22px 'JetBrains Mono',monospace;line-height:1;color:#f0524d">8</div>
+</div>
+<div style="padding:13px 18px;border-right:1px solid #262a30;flex:1;min-width:130px">
+<div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:6px">Blocked</div>
+<div style="font:600 22px 'JetBrains Mono',monospace;line-height:1;color:#d9a62e">7</div>
+</div>
+<div style="padding:13px 18px;border-right:1px solid #262a30;flex:1;min-width:130px">
+<div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:6px">Due today</div>
+<div style="font:600 22px 'JetBrains Mono',monospace;line-height:1">12</div>
+</div>
+<div style="padding:13px 18px;flex:1;min-width:130px">
+<div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:6px">On-time · 30d</div>
+<div style="font:600 22px 'JetBrains Mono',monospace;line-height:1;color:#3fb950">91<span style="font-size:13px;color:#8b919a">%</span></div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 17px;margin-bottom:12px;display:flex;gap:26px;flex-wrap:wrap;align-items:center">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;flex:none">Department health</div>
+<div style="display:flex;gap:26px;flex-wrap:wrap;font-size:12.5px">
+<div><span style="color:#8b919a">Oldest overdue</span> <b style="font:500 13px 'JetBrains Mono',monospace;color:#f0524d">9d</b></div>
+<div><span style="color:#8b919a">Delay reasons pending</span> <b style="font:500 13px 'JetBrains Mono',monospace;color:#d9a62e">3</b></div>
+<div><span style="color:#8b919a">First-pass yield</span> <b style="font:500 13px 'JetBrains Mono',monospace">94%</b></div>
+<div><span style="color:#8b919a">WIP vs capacity</span> <b style="font:500 13px 'JetBrains Mono',monospace">78%</b></div>
+<div><span style="color:#8b919a">Unassigned</span> <b style="font:500 13px 'JetBrains Mono',monospace">6</b></div>
+</div>
+<button onClick="{{ goTeam }}" style="margin-left:auto;background:transparent;border:1px solid #ff7a1a;color:#ff7a1a;border-radius:4px;height:32px;padding:0 13px;font:600 12px Inter;cursor:pointer" style-hover="background:rgba(255,122,26,.1)">Assign the 6 unowned</button>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Workload</h3>
+<div style="display:flex;gap:6px;margin-left:8px">
+<sc-for list="{{ deptViewChips }}" as="c" hint-placeholder-count="3">
+<button onClick="{{ c.pick }}" style="border-radius:20px;height:26px;padding:0 11px;font:500 11px Inter;cursor:pointer;background:{{ c.bg }};color:{{ c.fg }};border:1px solid {{ c.bd }}">{{ c.label }}</button>
+</sc-for>
+</div>
+<span style="margin-left:auto;color:#8b919a;font-size:11.5px">Employee view is visible to supervisors and above</span>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 74px 82px 78px 88px 150px;gap:12px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<sc-for list="{{ deptHead }}" as="h" hint-placeholder-count="6">
+<div style="text-align:{{ h.align }}">{{ h.label }}</div>
+</sc-for>
+</div>
+<sc-for list="{{ deptRows }}" as="r" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 74px 82px 78px 88px 150px;gap:12px;align-items:center;min-height:42px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6)" style-hover="background:#1c1f24">
+<sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="6">
+<div style="text-align:{{ c.align }};font-family:{{ c.mono }};font-size:12.5px;font-weight:{{ c.fw }};color:{{ c.fg }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ c.label }}</div>
+</sc-for>
+</div>
+</sc-for>
+<div style="padding:10px 16px;color:#8b919a;font-size:11.5px">Cycle time, throughput and welder productivity live in Welding / Production — they are investigations, not decisions.</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isTeam }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="05 Supervisor Team">
+<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px;flex-wrap:wrap">
+<h1 style="font:600 20px Inter;margin:0">Team</h1>
+<span style="color:#8b919a;font-size:12.5px">Fabrication / Welding · 12 people · S. Jadeja</span>
+</div>
+<p style="margin:0 0 16px;color:#8b919a;font-size:12px">Other people's work: who is loaded, who is late, and what nobody owns. Your own queue stays in My Day.</p>
+
+<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:12px 14px"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:7px">Due today</div><div style="font:600 22px 'JetBrains Mono',monospace;line-height:1">12</div></div>
+<div style="background:#141619;border:1px solid #262a30;border-top:2px solid #f0524d;border-radius:6px;padding:12px 14px"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:7px">Overdue</div><div style="font:600 22px 'JetBrains Mono',monospace;line-height:1;color:#f0524d">8</div></div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:12px 14px"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:7px">Blocked</div><div style="font:600 22px 'JetBrains Mono',monospace;line-height:1;color:#d9a62e">7</div></div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:12px 14px"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:7px">Unassigned</div><div style="font:600 22px 'JetBrains Mono',monospace;line-height:1">6</div></div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:12px 14px"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:7px">Capacity used</div><div style="font:600 22px 'JetBrains Mono',monospace;line-height:1;color:#d9a62e">78<span style="font-size:13px;color:#8b919a">%</span></div></div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden;margin-bottom:12px">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Workload by employee</h3>
+<span style="color:#8b919a;font-size:11.5px">Load = in progress + queued, against a 12-item working ceiling</span>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 140px 68px 68px 68px 76px 116px;gap:10px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<div>Person</div><div>Load</div><div style="text-align:right">Today</div><div style="text-align:right">Overdue</div><div style="text-align:right">Blocked</div><div style="text-align:right">Capacity</div><div></div>
+</div>
+<sc-for list="{{ teamPeople }}" as="p" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 140px 68px 68px 68px 76px 116px;gap:10px;align-items:center;min-height:50px;padding:6px 16px;border-bottom:1px solid rgba(38,42,48,.6)" style-hover="background:#1c1f24">
+<div style="display:flex;align-items:center;gap:9px;min-width:0">
+<div style="width:27px;height:27px;border-radius:6px;background:#1c1f24;display:flex;align-items:center;justify-content:center;font:600 10px 'JetBrains Mono',monospace;color:#8b919a;flex:none">{{ p.ini }}</div>
+<div style="min-width:0"><div style="font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.name }}</div><div style="color:#8b919a;font-size:11px">{{ p.role }}</div></div>
+</div>
+<div>
+<div style="height:8px;border-radius:2px;background:#1c1f24;overflow:hidden;display:flex">
+<i style="display:block;height:100%;background:#4c8dff;width:{{ p.wipW }}"></i>
+<i style="display:block;height:100%;background:#4a4f57;width:{{ p.qW }}"></i>
+</div>
+<div style="color:#8b919a;font:400 10.5px 'JetBrains Mono',monospace;margin-top:4px">{{ p.loadLabel }}</div>
+</div>
+<div style="text-align:right;font:400 12px 'JetBrains Mono',monospace;color:#8b919a">{{ p.todayTxt }}</div>
+<div style="text-align:right;font:500 12px 'JetBrains Mono',monospace;color:{{ p.overFg }}">{{ p.overTxt }}</div>
+<div style="text-align:right;font:500 12px 'JetBrains Mono',monospace;color:{{ p.blkFg }}">{{ p.blkTxt }}</div>
+<div style="text-align:right;font:500 12px 'JetBrains Mono',monospace;color:{{ p.capFg }}">{{ p.capLabel }}</div>
+<div style="display:flex;justify-content:flex-end;gap:6px">
+<button onClick="{{ p.openAssign }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:32px;padding:0 11px;font:500 11.5px Inter;white-space:nowrap;cursor:pointer" style-hover="border-color:#3a3f47">{{ p.act }}</button>
+</div>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Unassigned work</h3>
+<span style="color:#8b919a;font-size:11.5px">Never shown on an employee's My Day — it has no owner yet</span>
+<span style="margin-left:auto;font:600 11px 'JetBrains Mono',monospace;color:#8b919a">6 activities</span>
+</div>
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 96px 90px 92px 116px 108px;gap:12px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<div>Activity</div><div>Project</div><div>Unit</div><div>Due</div><div>Priority</div><div></div>
+</div>
+<sc-for list="{{ unassigned }}" as="r" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 96px 90px 92px 116px 108px;gap:12px;align-items:center;min-height:46px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6)" style-hover="background:#1c1f24">
+<div style="min-width:0"><div style="font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.proc }}</div><div style="color:#8b919a;font-size:11px;margin-top:2px">{{ r.stage }}</div></div>
+<div style="font:400 12px 'JetBrains Mono',monospace;color:#ff7a1a">{{ r.job }}</div>
+<div style="font:400 12px 'JetBrains Mono',monospace;color:#8b919a">{{ r.unit }}</div>
+<div style="font:400 12px 'JetBrains Mono',monospace;color:{{ r.dueFg }}">{{ r.due }}</div>
+<div><span style="display:inline-flex;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;letter-spacing:.3px;background:{{ r.priBg }};color:{{ r.priFg }}">{{ r.pri }}</span></div>
+<div style="display:flex;justify-content:flex-end">
+<button onClick="{{ r.openAssign }}" style="background:#ff7a1a;border:1px solid #ff7a1a;color:#000;border-radius:4px;height:32px;padding:0 14px;font:600 12px Inter;cursor:pointer" style-hover="filter:brightness(1.12)">Assign</button>
+</div>
+</div>
+</sc-for>
+</div>
+
+<sc-if value="{{ assignOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position:fixed;inset:0;background:rgba(6,7,8,.72);display:flex;align-items:center;justify-content:center;z-index:60;padding:24px">
+<div style="width:560px;max-width:100%;background:#141619;border:1px solid #2e3034;border-radius:8px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden">
+<div style="padding:14px 18px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px">
+<div style="font:600 13px Inter">Reassign activity</div>
+<span style="font:500 10px 'JetBrains Mono',monospace;color:#8b919a;letter-spacing:.08em">STEP {{ assignStepLabel }} OF 2</span>
+<button onClick="{{ closeAssign }}" style="margin-left:auto;background:transparent;border:0;color:#8b919a;font-size:17px;cursor:pointer;line-height:1">×</button>
+</div>
+
+<div style="padding:14px 18px;border-bottom:1px solid #262a30;background:#1c1f24">
+<div style="font-size:13px;font-weight:500">Internal &amp; External Attachments</div>
+<div style="color:#8b919a;font-size:11.5px;margin-top:3px">DESPL-320 · 320SR03 · stages 14–15 · Fabrication / Welding</div>
+<div style="display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap">
+<div><div style="color:#8b919a;font-size:10.5px;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">Current owner</div><div style="font-size:12.5px">Rakesh Yadav · Fitter</div></div>
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff7a1a" stroke-width="2"><path d="M4 12h15M14 7l5 5-5 5"></path></svg>
+<div><div style="color:#8b919a;font-size:10.5px;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px">New owner</div><div style="font-size:12.5px;color:{{ newOwnerFg }}">{{ newOwner }}</div></div>
+</div>
+</div>
+
+<sc-if value="{{ assignStep1 }}" hint-placeholder-val="{{ true }}">
+<div>
+<div style="padding:12px 18px 6px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Select employee — Fabrication / Welding only</div>
+<div style="max-height:280px;overflow:auto;padding:0 18px 12px;display:flex;flex-direction:column;gap:8px">
+<sc-for list="{{ assignCandidates }}" as="c" hint-placeholder-count="4">
+<div onClick="{{ c.pick }}" style="border-radius:6px;padding:11px 13px;cursor:pointer;display:flex;align-items:center;gap:11px;background:{{ c.bg }};border:1px solid {{ c.bd }}" style-hover="border-color:#3a3f47">
+<div style="width:29px;height:29px;border-radius:6px;background:#1c1f24;display:flex;align-items:center;justify-content:center;font:600 10.5px 'JetBrains Mono',monospace;color:#8b919a;flex:none">{{ c.ini }}</div>
+<div style="min-width:0;flex:1">
+<div style="font-size:12.5px;font-weight:500">{{ c.name }} <span style="color:#8b919a;font-weight:400">· {{ c.role }}</span></div>
+<div style="color:#8b919a;font-size:11px;margin-top:2px">{{ c.load }} · {{ c.note }}</div>
+</div>
+<div style="width:56px;flex:none">
+<div style="height:6px;border-radius:2px;background:#1c1f24;overflow:hidden"><i style="display:block;height:100%;width:{{ c.capW }};background:{{ c.capFg }}"></i></div>
+</div>
+</div>
+</sc-for>
+</div>
+<div style="padding:13px 18px;border-top:1px solid #262a30;display:flex;gap:8px;align-items:center">
+<span style="color:#8b919a;font-size:11.5px">Assignment never changes gating — only whose list it appears on.</span>
+<button onClick="{{ closeAssign }}" style="margin-left:auto;background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:36px;padding:0 14px;font:500 12.5px Inter;cursor:pointer">Cancel</button>
+<button onClick="{{ toStep2 }}" style="border-radius:4px;height:36px;padding:0 16px;font:600 12.5px Inter;cursor:pointer;background:{{ nextBg }};color:{{ nextFg }};border:1px solid {{ nextBd }}">Next</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ assignStep2 }}" hint-placeholder-val="{{ false }}">
+<div>
+<div style="padding:14px 18px 4px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Reason — recorded in the audit trail</div>
+<div style="padding:8px 18px 0;display:flex;gap:6px;flex-wrap:wrap">
+<sc-for list="{{ assignReasons }}" as="r" hint-placeholder-count="5">
+<button onClick="{{ r.pick }}" style="border-radius:20px;height:28px;padding:0 12px;font:500 11.5px Inter;cursor:pointer;background:{{ r.bg }};color:{{ r.fg }};border:1px solid {{ r.bd }}">{{ r.label }}</button>
+</sc-for>
+</div>
+<div style="padding:14px 18px 4px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Note — optional</div>
+<div style="padding:8px 18px 14px">
+<div style="border:1px solid #262a30;background:#0b0c0e;border-radius:4px;padding:10px 12px;min-height:64px;color:#4a4f57;font-size:12.5px">Rakesh is on the overdue nozzle weld — moving this so attachments are not held twice.</div>
+</div>
+<div style="padding:12px 18px;background:#1c1f24;border-top:1px solid #262a30;font-size:12px;color:#8b919a">Previous change: 28 Aug 17:30 — assigned from department pool to Rakesh Yadav by S. Jadeja, reason “capacity”.</div>
+<div style="padding:13px 18px;border-top:1px solid #262a30;display:flex;gap:8px;align-items:center">
+<span style="color:#8b919a;font-size:11.5px">{{ newOwner }} will be notified · reason {{ pickedReason }}</span>
+<button onClick="{{ backAssign }}" style="margin-left:auto;background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:36px;padding:0 14px;font:500 12.5px Inter;cursor:pointer">Back</button>
+<button onClick="{{ confirm }}" style="border-radius:4px;height:36px;padding:0 16px;font:600 12.5px Inter;cursor:pointer;background:{{ confirmBg }};color:{{ confirmFg }};border:1px solid {{ confirmBd }}">Confirm assignment</button>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isQc }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="07 QC and Hold Points">
+<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px;flex-wrap:wrap">
+<h1 style="font:600 20px Inter;margin:0">QC &amp; Hold Points</h1>
+<span style="font:500 13px 'JetBrains Mono',monospace;color:#ff7a1a">DESPL-320</span>
+<span style="color:#8b919a;font-size:12.5px">A. Mehta · Quality Control / QA</span>
+</div>
+<p style="margin:0 0 16px;color:#8b919a;font-size:12px">Six queues, one decision each. Nothing here is a table you have to scan.</p>
+
+<div style="display:flex;gap:2px;border-bottom:1px solid #262a30;margin-bottom:14px;overflow-x:auto">
+<sc-for list="{{ qcTabs }}" as="t" hint-placeholder-count="6">
+<div onClick="{{ t.pick }}" style="display:flex;align-items:center;gap:7px;padding:9px 13px;font-size:12.5px;white-space:nowrap;cursor:pointer;border-bottom:2px solid {{ t.bd }};background:{{ t.bg }};color:{{ t.fg }}" style-hover="color:#e7e9ec">
+{{ t.label }}<span style="font:600 11px 'JetBrains Mono',monospace;color:{{ t.nFg }}">{{ t.n }}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:10px">
+<sc-for list="{{ qcRows }}" as="r" hint-placeholder-count="3">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 17px;display:flex;gap:18px;align-items:center;flex-wrap:wrap" style-hover="border-color:#3a3f47">
+<div style="flex:1 1 340px;min-width:0">
+<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:5px">
+<span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:{{ r.chipBg }};color:{{ r.chipFg }}"><i style="width:5px;height:5px;border-radius:50%;display:block;background:{{ r.chipFg }}"></i>{{ r.status }}</span>
+<span style="font:500 11.5px 'JetBrains Mono',monospace;color:#8b919a">{{ r.ref }}</span>
+</div>
+<div style="font:600 15px Inter;margin-bottom:4px">{{ r.title }}</div>
+<div style="color:#8b919a;font-size:12.5px">{{ r.meta }}</div>
+</div>
+<div style="font:500 12.5px 'JetBrains Mono',monospace;color:{{ r.dueFg }};min-width:96px">{{ r.due }}</div>
+<button onClick="{{ r.open }}" style="border-radius:4px;height:40px;padding:0 18px;font:600 13px Inter;white-space:nowrap;cursor:pointer;background:{{ r.btnBg }};color:{{ r.btnFg }};border:1px solid {{ r.btnBd }}" style-hover="filter:brightness(1.12)">{{ r.act }} →</button>
+</div>
+</sc-for>
+<sc-if value="{{ qcEmpty }}" hint-placeholder-val="{{ false }}">
+<div style="background:#141619;border:1px dashed #2e3034;border-radius:6px;padding:38px 20px;text-align:center">
+<div style="font-size:13.5px;font-weight:500;margin-bottom:5px">Nothing in this queue</div>
+<div style="color:#8b919a;font-size:12px">Submissions land here the moment a department submits for QC.</div>
+</div>
+</sc-if>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isQcd }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="08 QC Detail">
+<div onClick="{{ goQc }}" style="display:inline-flex;align-items:center;gap:6px;color:#8b919a;font-size:12px;cursor:pointer;margin-bottom:12px" style-hover="color:#e7e9ec">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 5.5L8.5 12l6.5 6.5"></path></svg>Back to awaiting verification
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:18px 20px;margin-bottom:12px;display:flex;gap:22px;align-items:flex-start;flex-wrap:wrap">
+<div style="flex:1 1 360px;min-width:0">
+<div style="font:500 11.5px 'JetBrains Mono',monospace;color:#8b919a;margin-bottom:6px">DESPL-320 · 320SR01 · stage 2 · ITP-320-02</div>
+<h1 style="font:600 22px/1.25 Inter;margin:0 0 10px">PC Receipt &amp; Order Review</h1>
+<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.5px;background:rgba(163,113,247,.12);color:#a371f7"><i style="width:5px;height:5px;border-radius:50%;background:#a371f7;display:block"></i>Awaiting QC</span>
+<span style="color:#8b919a;font-size:12.5px">Submitted by <b style="color:#e7e9ec;font-weight:500">Stores</b> · 06 Sept 16:40 · due <b style="color:#e7e9ec;font-weight:500">today</b></span>
+</div>
+</div>
+<div style="display:flex;flex-direction:column;gap:8px;min-width:220px">
+<button style="background:#3fb950;border:1px solid #3fb950;color:#06210d;border-radius:4px;height:44px;padding:0 18px;font:600 13.5px Inter;cursor:pointer" style-hover="filter:brightness(1.1)">Verify</button>
+<div style="display:flex;gap:8px">
+<button style="flex:1;background:#1c1f24;border:1px solid #f0524d;color:#f0524d;border-radius:4px;height:36px;font:600 12.5px Inter;cursor:pointer" style-hover="background:rgba(240,82,77,.1)">Reject</button>
+<button style="flex:1;background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:36px;font:500 12.5px Inter;cursor:pointer" style-hover="border-color:#3a3f47">Put on hold</button>
+</div>
+<button style="background:transparent;border:1px solid #262a30;color:#8b919a;border-radius:4px;height:32px;font:500 12px Inter;cursor:pointer" style-hover="color:#e7e9ec;border-color:#3a3f47">Request information</button>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:12px">
+<div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Inspection</div>
+<div style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px 16px;font-size:12.5px">
+<span style="color:#8b919a">Inspection type</span><span>Document review · class H (hold point, blocks completion)</span>
+<span style="color:#8b919a">Procedure</span><span>QCP-PV-01 rev 4 · clause 3.2 — purchase-class verification</span>
+<span style="color:#8b919a">Acceptance</span><span>Material grade and heat numbers match the approved PO and MTC</span>
+<span style="color:#8b919a">Witness</span><span>DESPL QA · no TPI call required for class H</span>
+<span style="color:#8b919a">Attempt</span><span>1 of 3 · no previous rejection on this item</span>
+</div>
+<div style="margin-top:13px;background:#1c1f24;border-left:2px solid #a371f7;padding:9px 12px;font-size:12.5px;line-height:1.55">Stores submitted this. Maker–checker applies: whoever submitted an item cannot verify it, and there is no admin override.</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:8px"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Evidence</h3><span style="margin-left:auto;color:#8b919a;font-size:11.5px">3 attachments</span></div>
+<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="1.8"><path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7z"></path><path d="M14 3v4h4"></path></svg>
+<div style="flex:1;min-width:0"><div style="font-size:12.5px">MTC-320-PL-014.pdf</div><div style="color:#8b919a;font-size:11px;margin-top:1px">Mill test certificate · uploaded by Stores</div></div>
+</div>
+<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="1.8"><path d="M14 3H7a1 1 0 00-1 1v16a1 1 0 001 1h10a1 1 0 001-1V7z"></path><path d="M14 3v4h4"></path></svg>
+<div style="flex:1;min-width:0"><div style="font-size:12.5px">PO-4471 rev 2</div><div style="color:#8b919a;font-size:11px;margin-top:1px">Purchase order · Procurement</div></div>
+</div>
+<div style="display:flex;align-items:center;gap:10px;padding:11px 16px;cursor:pointer" style-hover="background:#1c1f24">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="1"></rect><path d="M3 15l5-4 4 3 3-2 6 5"></path></svg>
+<div style="flex:1;min-width:0"><div style="font-size:12.5px">heat-stamp-320SR01.jpg</div><div style="color:#8b919a;font-size:11px;margin-top:1px">Photo evidence · 06 Sept 16:38</div></div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">History</h3></div>
+<div style="display:grid;grid-template-columns:104px minmax(0,1fr) 120px;gap:12px;padding:7px 16px;border-bottom:1px solid #262a30;font:600 10px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a"><div>Date</div><div>Action</div><div>User</div></div>
+<div style="display:grid;grid-template-columns:104px minmax(0,1fr) 120px;gap:12px;padding:8px 16px;border-bottom:1px solid rgba(38,42,48,.6);font-size:12.5px"><div style="font-family:'JetBrains Mono',monospace;color:#8b919a">06 Sept 16:40</div><div>Submitted for QC</div><div style="color:#8b919a">V. Sharma · Stores</div></div>
+<div style="display:grid;grid-template-columns:104px minmax(0,1fr) 120px;gap:12px;padding:8px 16px;border-bottom:1px solid rgba(38,42,48,.6);font-size:12.5px"><div style="font-family:'JetBrains Mono',monospace;color:#8b919a">06 Sept 09:15</div><div>Started</div><div style="color:#8b919a">V. Sharma · Stores</div></div>
+<div style="display:grid;grid-template-columns:104px minmax(0,1fr) 120px;gap:12px;padding:8px 16px;font-size:12.5px"><div style="font-family:'JetBrains Mono',monospace;color:#8b919a">04 Sept 11:00</div><div>Hold point raised from ITP-320 rev B</div><div style="color:#8b919a">System</div></div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Context</div>
+<div style="display:grid;grid-template-columns:auto auto;gap:9px 14px;font-size:12.5px">
+<span style="color:#8b919a">Project</span><span style="font-family:'JetBrains Mono',monospace">DESPL-320</span>
+<span style="color:#8b919a">Unit</span><span style="font-family:'JetBrains Mono',monospace">320SR01</span>
+<span style="color:#8b919a">Process</span><span>PC Receipt &amp; Order Review</span>
+<span style="color:#8b919a">Department</span><span>Stores</span>
+<span style="color:#8b919a">Submitted</span><span style="font-family:'JetBrains Mono',monospace">06 Sept 16:40</span>
+<span style="color:#8b919a">Due</span><span style="font-family:'JetBrains Mono',monospace;color:#f0524d">07 Sept</span>
+</div>
+</div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:9px">What clears if you verify</div>
+<div style="font-size:12.5px;line-height:1.6">Stage 2 completes on 320SR01 and releases <b style="font-weight:600">Material Issue &amp; Kitting</b> for the unit. Rejecting raises an NCR against Stores and returns the activity to in progress.</div>
+</div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:9px">Queue position</div>
+<div style="font-size:12.5px;color:#8b919a">3rd of 3 awaiting verification · oldest submission is 5 days old (Weld NDE 320SR02)</div>
+<button onClick="{{ goQc }}" style="margin-top:11px;background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:32px;padding:0 12px;font:500 12px Inter;cursor:pointer" style-hover="border-color:#3a3f47">Take the oldest instead</button>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isWeld }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="09 Welding Production">
+<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px;flex-wrap:wrap">
+<h1 style="font:600 20px Inter;margin:0">Welding / Production</h1>
+<span style="color:#8b919a;font-size:12.5px">Fabrication / Welding · shift A · 07 Sept</span>
+</div>
+<p style="margin:0 0 14px;color:#8b919a;font-size:12px">What is on the floor right now, and what is stopping it.</p>
+
+<div style="display:flex;border:1px solid #262a30;border-radius:6px;background:#141619;margin-bottom:12px;overflow:hidden;flex-wrap:wrap">
+<div style="padding:12px 16px;border-right:1px solid #262a30;flex:1;min-width:120px"><div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:5px">On the floor</div><div style="font:600 20px 'JetBrains Mono',monospace">5</div></div>
+<div style="padding:12px 16px;border-right:1px solid #262a30;flex:1;min-width:120px"><div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:5px">Due today</div><div style="font:600 20px 'JetBrains Mono',monospace">12</div></div>
+<div style="padding:12px 16px;border-right:1px solid #262a30;flex:1;min-width:120px;border-top:2px solid #f0524d"><div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:5px">Overdue</div><div style="font:600 20px 'JetBrains Mono',monospace;color:#f0524d">8</div></div>
+<div style="padding:12px 16px;border-right:1px solid #262a30;flex:1;min-width:120px"><div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:5px">Blocked</div><div style="font:600 20px 'JetBrains Mono',monospace;color:#d9a62e">7</div></div>
+<div style="padding:12px 16px;border-right:1px solid #262a30;flex:1;min-width:120px"><div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:5px">Open joints</div><div style="font:600 20px 'JetBrains Mono',monospace">62</div></div>
+<div style="padding:12px 16px;flex:1;min-width:120px"><div style="font:600 10px Inter;letter-spacing:1px;text-transform:uppercase;color:#8b919a;margin-bottom:5px">Repair rate</div><div style="font:600 20px 'JetBrains Mono',monospace;color:#3fb950">4.2<span style="font-size:12px;color:#8b919a">% / 6%</span></div></div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden;margin-bottom:12px">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Current work</h3>
+<span style="color:#8b919a;font-size:11.5px">Worst first · elapsed against standard duration</span>
+</div>
+<div style="display:grid;grid-template-columns:84px minmax(0,1fr) 128px 92px 96px 124px 132px;gap:12px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<div>Unit</div><div>Process</div><div>Welder / fitter</div><div>Started</div><div>Elapsed</div><div>Status</div><div></div>
+</div>
+<sc-for list="{{ weldWork }}" as="r" hint-placeholder-count="6">
+<div onClick="{{ r.open }}" style="display:grid;grid-template-columns:84px minmax(0,1fr) 128px 92px 96px 124px 132px;gap:12px;align-items:center;min-height:52px;padding:6px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<div style="font:500 12px 'JetBrains Mono',monospace">{{ r.unit }}</div>
+<div style="min-width:0"><div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.proc }}</div><div style="color:#8b919a;font-size:11px;margin-top:2px">stage {{ r.stage }}</div></div>
+<div style="font-size:12.5px;color:#8b919a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.who }}</div>
+<div style="font:400 12px 'JetBrains Mono',monospace;color:#8b919a">{{ r.started }}</div>
+<div style="font:500 12px 'JetBrains Mono',monospace;color:{{ r.elFg }}">{{ r.el }}</div>
+<div><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:{{ r.chipBg }};color:{{ r.chipFg }}"><i style="width:5px;height:5px;border-radius:50%;display:block;background:{{ r.chipFg }}"></i>{{ r.status }}</span></div>
+<div style="display:flex;justify-content:flex-end"><button style="border-radius:4px;height:38px;padding:0 14px;font:600 12.5px Inter;white-space:nowrap;cursor:pointer;background:{{ r.btnBg }};color:{{ r.btnFg }};border:1px solid {{ r.btnBd }}" style-hover="filter:brightness(1.12)">{{ r.act }}</button></div>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Recent NDT results</h3>
+<span style="color:#8b919a;font-size:11.5px">A reject opens an NCR and sends the joint back to the welder</span>
+</div>
+<div style="display:grid;grid-template-columns:150px 92px 76px 104px minmax(0,1fr) 92px;gap:12px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<div>Joint</div><div>Unit</div><div>Test</div><div>Result</div><div>Welder</div><div style="text-align:right">Recorded</div>
+</div>
+<sc-for list="{{ weldNdt }}" as="r" hint-placeholder-count="4">
+<div style="display:grid;grid-template-columns:150px 92px 76px 104px minmax(0,1fr) 92px;gap:12px;align-items:center;min-height:42px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6)" style-hover="background:#1c1f24">
+<div style="font:400 12px 'JetBrains Mono',monospace">{{ r.joint }}</div>
+<div style="font:400 12px 'JetBrains Mono',monospace;color:#8b919a">{{ r.unit }}</div>
+<div style="font:400 12px 'JetBrains Mono',monospace;color:#8b919a">{{ r.test }}</div>
+<div><span style="display:inline-flex;padding:2px 8px;border-radius:10px;font:700 10px 'JetBrains Mono',monospace;letter-spacing:.06em;background:{{ r.resBg }};color:{{ r.resFg }}">{{ r.res }}</span></div>
+<div style="font-size:12.5px;color:#8b919a">{{ r.who }}</div>
+<div style="text-align:right;font:400 12px 'JetBrains Mono',monospace;color:#8b919a">{{ r.at }}</div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isStates }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="11 States">
+<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:4px;flex-wrap:wrap">
+<h1 style="font:600 20px Inter;margin:0">States</h1>
+<span style="color:#8b919a;font-size:12.5px">Every operational screen in Round 2 uses these · one activity row, ten conditions</span>
+</div>
+<p style="margin:0 0 16px;color:#8b919a;font-size:12px">Status vocabulary is the app's own six values plus the two derived markers; the other four are shell states.</p>
+
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Loading</div>
+<div style="display:flex;flex-direction:column;gap:9px">
+<div style="height:11px;width:62%;border-radius:2px;background:#1c1f24"></div>
+<div style="height:11px;width:88%;border-radius:2px;background:#1c1f24"></div>
+<div style="height:11px;width:44%;border-radius:2px;background:#1c1f24"></div>
+</div>
+<div style="color:#8b919a;font-size:11.5px;margin-top:11px">Skeleton keeps row height, so nothing jumps when data lands.</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Empty</div>
+<div style="border:1px dashed #2e3034;border-radius:5px;padding:20px;text-align:center">
+<div style="font-size:13px;font-weight:500;margin-bottom:4px">No overdue work</div>
+<div style="color:#8b919a;font-size:11.5px">Nothing to decide here today.</div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Error</div>
+<div style="border:1px solid rgba(240,82,77,.4);background:rgba(240,82,77,.06);border-radius:5px;padding:12px 14px">
+<div style="font-size:12.5px;font-weight:500;color:#f0524d;margin-bottom:4px">Could not load the QC queue</div>
+<div style="color:#8b919a;font-size:11.5px;margin-bottom:10px">The request timed out. Nothing was changed.</div>
+<button style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:32px;padding:0 12px;font:500 12px Inter;cursor:pointer">Retry</button>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Success</div>
+<div style="border:1px solid rgba(63,185,80,.4);background:rgba(63,185,80,.06);border-radius:5px;padding:12px 14px;display:flex;gap:10px;align-items:center">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#3fb950" stroke-width="2.2"><path d="M5 13l4.5 4.5L19 7"></path></svg>
+<div><div style="font-size:12.5px;font-weight:500">Submitted for QC</div><div style="color:#8b919a;font-size:11.5px;margin-top:2px">Quality Control / QA notified · 320SR03</div></div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">No permission</div>
+<div style="border:1px solid #262a30;border-radius:5px;padding:12px 14px;display:flex;gap:10px;align-items:center">
+<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="1.8"><rect x="5" y="11" width="14" height="9" rx="1"></rect><path d="M8.5 11V8a3.5 3.5 0 017 0v3"></path></svg>
+<div><div style="font-size:12.5px;font-weight:500">Verification is QC-only</div><div style="color:#8b919a;font-size:11.5px;margin-top:2px">You submitted this item, so you cannot verify it.</div></div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Activity row · six statuses</div>
+<div style="display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:rgba(74,79,87,.25);color:#9aa0a8;min-width:104px"><i style="width:5px;height:5px;border-radius:50%;background:#9aa0a8;display:block"></i>Not started</span><span style="color:#8b919a">primary action</span> Start</div>
+<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:rgba(76,141,255,.12);color:#4c8dff;min-width:104px"><i style="width:5px;height:5px;border-radius:50%;background:#4c8dff;display:block"></i>In progress</span><span style="color:#8b919a">primary action</span> Update progress</div>
+<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:rgba(163,113,247,.12);color:#a371f7;min-width:104px"><i style="width:5px;height:5px;border-radius:50%;background:#a371f7;display:block"></i>Awaiting QC</span><span style="color:#8b919a">primary action</span> View QC</div>
+<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:rgba(217,166,46,.12);color:#d9a62e;min-width:104px"><i style="width:5px;height:5px;border-radius:50%;background:#d9a62e;display:block"></i>On hold</span><span style="color:#8b919a">primary action</span> Resume</div>
+<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:rgba(240,82,77,.12);color:#f0524d;min-width:104px"><i style="width:5px;height:5px;border-radius:50%;background:#f0524d;display:block"></i>Overdue</span><span style="color:#8b919a">primary action</span> File reason &amp; start</div>
+<div style="display:flex;align-items:center;gap:9px;font-size:12.5px"><span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.4px;background:rgba(63,185,80,.12);color:#3fb950;min-width:104px"><i style="width:5px;height:5px;border-radius:50%;background:#3fb950;display:block"></i>Complete</span><span style="color:#8b919a">read-only</span> Open QC record</div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Blocked · derived, not a status</div>
+<div style="border:1px solid #262a30;border-left:2px solid #d9a62e;border-radius:5px;padding:12px 14px">
+<div style="font-size:12.5px;font-weight:500;margin-bottom:3px">Internal &amp; External Attachments · 320SR03</div>
+<div style="color:#8b919a;font-size:11.5px">Not started — blocked by Weld NDE. The action button is replaced by the reason it cannot run.</div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:14px 16px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Overdue with no reason filed</div>
+<div style="border:1px solid #f0524d;border-radius:5px;overflow:hidden">
+<div style="height:22px;display:flex;align-items:center;padding:0 12px;background:#f0524d;color:#0b0c0e;font:700 9.5px 'JetBrains Mono',monospace;letter-spacing:.12em">OVERDUE 8 DAYS · REASON REQUIRED</div>
+<div style="padding:11px 13px;font-size:12.5px">Nozzle Welding · 320SR02 — progress writes are blocked until a delay reason is filed.</div>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isTablet }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="10 Tablet — production floor" style="padding:22px;background:#141619;display:flex;justify-content:center">
+<div style="width:1120px;max-width:100%;background:#17181b;border:12px solid #202226;border-radius:20px;box-shadow:0 20px 50px rgba(0,0,0,.5);overflow:hidden">
+
+<div style="height:44px;display:flex;align-items:center;gap:14px;padding:0 20px;background:#0b0c0e;border-bottom:1px solid #262a30">
+<b style="font-size:14px;letter-spacing:.5px">DESPL</b>
+<span style="color:#8b919a;font-size:12px">Fabrication / Welding · Rakesh Yadav</span>
+<span style="margin-left:auto;font:500 11.5px 'JetBrains Mono',monospace;color:#8b919a">MON 07 SEPT · 09:42</span>
+</div>
+
+<div style="display:flex;gap:8px;padding:12px 20px;background:#0b0c0e;border-bottom:1px solid #262a30">
+<sc-for list="{{ tabletTabs }}" as="t" hint-placeholder-count="3">
+<button onClick="{{ t.pick }}" style="height:52px;padding:0 26px;border-radius:6px;font:600 15px Inter;cursor:pointer;background:{{ t.bg }};color:{{ t.fg }};border:1px solid {{ t.bd }}">{{ t.label }}</button>
+</sc-for>
+</div>
+
+<div style="padding:22px 20px 26px;background:#0b0c0e;min-height:640px">
+
+<sc-if value="{{ tabActivity }}" hint-placeholder-val="{{ true }}">
+<div>
+<div style="font:500 14px 'JetBrains Mono',monospace;color:#8b919a;margin-bottom:8px">DESPL-320 · 320SR03 · stages 14–15</div>
+<h1 style="font:600 32px/1.2 Inter;margin:0 0 14px">Internal &amp; External Attachments</h1>
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:22px">
+<span style="display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:8px;font:600 15px Inter;background:rgba(76,141,255,.14);color:#4c8dff"><i style="width:9px;height:9px;border-radius:50%;background:#4c8dff;display:block"></i>In progress</span>
+<span style="font-size:17px;color:#8b919a">Due <b style="color:#e7e9ec;font-weight:600">26 Nov</b></span>
+<span style="font-size:17px;color:#8b919a">Standard 5d · elapsed 4d</span>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:10px;padding:20px 22px;margin-bottom:14px">
+<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px"><div style="font:600 13px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Progress</div><span style="margin-left:auto;font:600 26px 'JetBrains Mono',monospace">72%</span></div>
+<div style="height:18px;border-radius:4px;background:#1c1f24;overflow:hidden"><i style="display:block;height:100%;width:72%;background:#4c8dff"></i></div>
+<div style="color:#8b919a;font-size:15px;margin-top:10px">13 of 18 operations complete</div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:16px">
+<div style="background:#141619;border:1px solid #262a30;border-radius:10px;padding:18px 20px">
+<div style="font:600 13px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">What needs to happen</div>
+<div style="font-size:17px;line-height:1.6">Fit and weld lifting lugs, saddle pads, name-plate bracket and earthing lug to DWG-320-14 rev C. Raise weld visual with QA before PWHT.</div>
+</div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:10px;padding:18px 20px">
+<div style="font:600 13px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Documents</div>
+<div style="display:flex;flex-direction:column;gap:10px">
+<div style="height:52px;border:1px solid #262a30;border-radius:8px;display:flex;align-items:center;padding:0 14px;font-size:16px;cursor:pointer" style-hover="border-color:#3a3f47">DWG-320-14 rev C</div>
+<div style="height:52px;border:1px solid #262a30;border-radius:8px;display:flex;align-items:center;padding:0 14px;font-size:16px;cursor:pointer" style-hover="border-color:#3a3f47">WPS-320-06 · fillet weld</div>
+</div>
+</div>
+</div>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+<button style="flex:1 1 320px;height:78px;border-radius:10px;background:#ff7a1a;border:1px solid #ff7a1a;color:#000;font:600 21px Inter;cursor:pointer" style-hover="filter:brightness(1.1)">Submit for QC</button>
+<button style="flex:0 0 220px;height:78px;border-radius:10px;background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;font:600 19px Inter;cursor:pointer" style-hover="border-color:#3a3f47">Update progress</button>
+<button style="flex:0 0 180px;height:78px;border-radius:10px;background:#1c1f24;border:1px solid #262a30;color:#d9a62e;font:600 19px Inter;cursor:pointer" style-hover="border-color:#d9a62e">Put on hold</button>
+</div>
+<div style="color:#8b919a;font-size:14px;margin-top:12px">Submitting notifies Quality Control / QA. No typing required — the reason list is pre-set.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ tabQc }}" hint-placeholder-val="{{ false }}">
+<div>
+<div style="font:500 14px 'JetBrains Mono',monospace;color:#8b919a;margin-bottom:8px">DESPL-320 · 320SR01 · stage 2 · ITP-320-02</div>
+<h1 style="font:600 32px/1.2 Inter;margin:0 0 14px">PC Receipt &amp; Order Review</h1>
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
+<span style="display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:8px;font:600 15px Inter;background:rgba(163,113,247,.14);color:#a371f7"><i style="width:9px;height:9px;border-radius:50%;background:#a371f7;display:block"></i>Awaiting verification</span>
+<span style="font-size:17px;color:#8b919a">Submitted by Stores · 06 Sept 16:40</span>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:10px;padding:20px 22px;margin-bottom:14px">
+<div style="font:600 13px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Acceptance criteria</div>
+<div style="font-size:18px;line-height:1.55">Material grade and heat numbers match the approved PO and MTC. Class H hold point — completion is blocked until cleared.</div>
+</div>
+
+<div style="display:flex;gap:12px;margin-bottom:16px">
+<div style="flex:1;height:120px;border:1px solid #262a30;border-radius:10px;background:#141619;display:flex;align-items:center;justify-content:center;color:#8b919a;font-size:15px">MTC-320-PL-014.pdf</div>
+<div style="flex:1;height:120px;border:1px solid #262a30;border-radius:10px;background:#141619;display:flex;align-items:center;justify-content:center;color:#8b919a;font-size:15px">heat-stamp photo</div>
+<div style="flex:1;height:120px;border:1px dashed #2e3034;border-radius:10px;display:flex;align-items:center;justify-content:center;color:#8b919a;font-size:15px">Add photo</div>
+</div>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+<button style="flex:1 1 300px;height:82px;border-radius:10px;background:#3fb950;border:1px solid #3fb950;color:#06210d;font:600 22px Inter;cursor:pointer" style-hover="filter:brightness(1.08)">Verify</button>
+<button style="flex:0 0 220px;height:82px;border-radius:10px;background:#1c1f24;border:1px solid #f0524d;color:#f0524d;font:600 20px Inter;cursor:pointer" style-hover="background:rgba(240,82,77,.1)">Reject</button>
+<button style="flex:0 0 220px;height:82px;border-radius:10px;background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;font:600 20px Inter;cursor:pointer" style-hover="border-color:#3a3f47">Put on hold</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ tabWork }}" hint-placeholder-val="{{ false }}">
+<div>
+<h1 style="font:600 30px Inter;margin:0 0 6px">My work today</h1>
+<div style="color:#8b919a;font-size:16px;margin-bottom:20px">4 activities · 1 overdue</div>
+<div style="display:flex;flex-direction:column;gap:12px">
+<sc-for list="{{ tabletWork }}" as="r" hint-placeholder-count="4">
+<div style="background:#141619;border:1px solid #262a30;border-radius:10px;padding:16px 18px;display:flex;gap:16px;align-items:center;flex-wrap:wrap">
+<div style="flex:1 1 300px;min-width:0">
+<div style="font:500 14px 'JetBrains Mono',monospace;color:#8b919a;margin-bottom:4px">{{ r.unit }}</div>
+<div style="font:600 20px Inter">{{ r.proc }}</div>
+</div>
+<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 13px;border-radius:8px;font:600 14px Inter;background:{{ r.chipBg }};color:{{ r.chipFg }}"><i style="width:7px;height:7px;border-radius:50%;display:block;background:{{ r.chipFg }}"></i>{{ r.status }}</span>
+<div style="font:500 16px 'JetBrains Mono',monospace;color:{{ r.dueFg }};min-width:120px">{{ r.due }}</div>
+<button style="height:64px;padding:0 26px;border-radius:9px;font:600 18px Inter;cursor:pointer;border:0;background:{{ r.btnBg }};color:{{ r.btnFg }}" style-hover="filter:brightness(1.1)">{{ r.act }}</button>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1420,&quot;height&quot;:1020},&quot;startScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pcc&quot;,&quot;sched&quot;,&quot;act&quot;,&quot;dept&quot;,&quot;team&quot;,&quot;assign&quot;,&quot;qc&quot;,&quot;qcd&quot;,&quot;weld&quot;,&quot;tablet&quot;,&quot;states&quot;],&quot;default&quot;:&quot;pcc&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Walkthrough&quot;},&quot;showForecastBars&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Schedule&quot;},&quot;showBottleneckFlags&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Schedule&quot;}}">
+class Component extends DCLogic {
+  state = {
+    screen: "pcc",
+    pTab: "overview",
+    assignOpen: false, assignStep: 1, person: null, reason: null,
+    schedDept: "all", schedStatus: "all",
+    qcTab: "awaiting",
+    histOpen: false,
+    tabTab: "activity",
+    stateCase: "loading",
+  };
+
+  CHIP = {
+    idle:      { label: "Not started", bg: "rgba(74,79,87,.25)",   fg: "#9aa0a8" },
+    progress:  { label: "In progress", bg: "rgba(76,141,255,.12)", fg: "#4c8dff" },
+    submitted: { label: "Awaiting QC", bg: "rgba(163,113,247,.12)",fg: "#a371f7" },
+    hold:      { label: "On hold",     bg: "rgba(217,166,46,.12)", fg: "#d9a62e" },
+    overdue:   { label: "Overdue",     bg: "rgba(240,82,77,.12)",  fg: "#f0524d" },
+    complete:  { label: "Complete",    bg: "rgba(63,185,80,.12)",  fg: "#3fb950" },
+  };
+
+  TABS = [
+    { id: "pcc", label: "1 · Control Centre" },
+    { id: "sched", label: "2 · Schedule" },
+    { id: "act", label: "3 · Activity" },
+    { id: "dept", label: "4 · Department" },
+    { id: "team", label: "5 · Team" },
+    { id: "assign", label: "6 · Assignment" },
+    { id: "qc", label: "7 · QC queues" },
+    { id: "qcd", label: "8 · QC detail" },
+    { id: "weld", label: "9 · Production" },
+    { id: "tablet", label: "10 · Tablet" },
+    { id: "states", label: "11 · States" },
+  ];
+
+  NAV = [
+    { head: "My work" },
+    { id: "myday", label: "My Day", icon: "M4 7h16M4 12h16M4 17h10" },
+    { id: "team", label: "Team", icon: "M3.5 19.5c1-2.9 3-4.4 5.5-4.4s4.5 1.5 5.5 4.4M9 4.8a3.2 3.2 0 010 6.4", badge: "4", badgeKind: "red" },
+    { head: "Projects" },
+    { id: "pcc", label: "DESPL-320", icon: "M3 7l9-4 9 4-9 4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4" },
+    { id: "sched", label: "Schedule", icon: "M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" },
+    { id: "dept", label: "Departments", icon: "M4 20V9l8-5 8 5v11M9 20v-6h6v6" },
+    { head: "Quality" },
+    { id: "qc", label: "QC & Hold Points", icon: "M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6l8-4z", badge: "6", badgeKind: "orange" },
+    { id: "weld", label: "Welding / Production", icon: "M5 19l7-14 7 14M8 13h8" },
+    { head: "Records" },
+    { id: "reports", label: "Reports", icon: "M5 20V6h14v14zM8 16v-4M12 16V9M16 16v-2" },
+  ];
+
+  P_TABS = [
+    { id: "overview", label: "Overview" },
+    { id: "sched", label: "Timeline (Gantt)" },
+    { id: "bom", label: "BOM & Components" },
+    { id: "assembly", label: "Assembly" },
+    { id: "qcp", label: "QCP / Hold points" },
+    { id: "packing", label: "Packing" },
+    { id: "dispatch", label: "Dispatch" },
+    { id: "activity", label: "Activity" },
+    { id: "client", label: "Client View" },
+  ];
+
+  MILESTONES = [
+    { date: "11 Sept", name: "Shell fit-up & welding complete", sub: "9 units · 7 done, 2 in progress", kind: "overdue", state: "At risk" },
+    { date: "25 Sept", name: "Weld NDE cleared", sub: "Quality Control / QA · 5 units in queue", kind: "submitted", state: "Blocked" },
+    { date: "13 Nov", name: "Hydrostatic test — client witness", sub: "ITP-320-05 · TPI call 12d late", kind: "hold", state: "Hold point" },
+    { date: "30 Nov", name: "Dispatch — promised date", sub: "Forecast 08 Dec · +6 working days", kind: "overdue", state: "Forecast slip" },
+  ];
+
+  PCC_DEPTS = [
+    { name: "Design & Detail Engineering", open: 4, over: 0, blocked: 0, ontime: "96%", note: "Drawings released" },
+    { name: "Procurement", open: 6, over: 0, blocked: 0, ontime: "89%", note: "—" },
+    { name: "Stores", open: 3, over: 1, blocked: 0, ontime: "82%", note: "1 kit not issued" },
+    { name: "Fabrication Prep", open: 9, over: 0, blocked: 0, ontime: "93%", note: "—" },
+    { name: "Fabrication / Welding", open: 86, over: 4, blocked: 7, ontime: "76%", note: "Owns the overdue" },
+    { name: "Quality Control / QA", open: 41, over: 0, blocked: 0, ontime: "88%", note: "Bottleneck — 5 in queue" },
+    { name: "Heat Treatment", open: 5, over: 0, blocked: 2, ontime: "91%", note: "Waiting on NDE" },
+    { name: "Documentation / MDR", open: 7, over: 0, blocked: 0, ontime: "94%", note: "—" },
+  ];
+
+  T0 = new Date("2026-04-01").getTime();
+  T1 = new Date("2026-12-15").getTime();
+  MONTHS = ["Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
+
+  SCHED = [
+    { dept: "Design & Detail Engineering", stage: "Manufacturing Drawings", st: "1–3", p: ["2026-04-01", "2026-04-24"], a: ["2026-04-01", "2026-04-22"], kind: "complete", v: "−2d", units: "9 of 9 complete", dep: "—" },
+    { dept: "Procurement", stage: "Plate & Pipe Procurement", st: "4–5", p: ["2026-04-27", "2026-05-29"], a: ["2026-04-27", "2026-06-05"], kind: "complete", v: "+5d", units: "9 of 9 complete", dep: "after Manufacturing Drawings" },
+    { dept: "Stores", stage: "Material Issue & Kitting", st: "6", p: ["2026-06-01", "2026-06-19"], a: ["2026-06-08", "2026-06-26"], kind: "complete", v: "+5d", units: "9 of 9 complete", dep: "after Plate & Pipe Procurement" },
+    { dept: "Fabrication Prep", stage: "Cutting / Blanking / Petals", st: "7–8", p: ["2026-06-22", "2026-07-10"], a: ["2026-06-29", "2026-07-17"], kind: "complete", v: "+5d", units: "9 of 9 complete", dep: "after Material Issue & Kitting" },
+    { dept: "Fabrication Prep", stage: "Plate Rolling / Forming", st: "9", p: ["2026-07-13", "2026-07-24"], a: ["2026-07-20", "2026-08-07"], kind: "complete", v: "+10d", units: "9 of 9 complete", dep: "after Cutting / Blanking" },
+    { dept: "Machine Shop", stage: "Nozzle Machining", st: "12", p: ["2026-07-27", "2026-08-14"], a: ["2026-08-03", "2026-08-21"], kind: "complete", v: "+5d", units: "9 of 9 complete", dep: "after Plate Rolling / Forming" },
+    { dept: "Fabrication / Welding", stage: "Shell Fit-Up & Welding", st: "10", p: ["2026-08-17", "2026-09-11"], a: ["2026-08-24", null], kind: "progress", v: "+5d", units: "7 of 9 complete · 2 in progress", dep: "after Plate Rolling / Forming" },
+    { dept: "Fabrication / Welding", stage: "Nozzle Welding", st: "13", p: ["2026-08-24", "2026-09-04"], a: ["2026-08-31", null], kind: "overdue", v: "+4d", units: "8 of 9 complete · 1 overdue, no reason filed", dep: "after Nozzle Machining" },
+    { dept: "Quality Control / QA", stage: "Weld NDE", st: "14", p: ["2026-09-07", "2026-09-25"], a: ["2026-09-02", null], kind: "submitted", v: "watch", units: "5 units awaiting verification · oldest 5d", dep: "after Shell Fit-Up & Welding", bottleneck: true },
+    { dept: "Heat Treatment", stage: "PWHT", st: "16", p: ["2026-09-28", "2026-10-09"], a: null, kind: "idle", v: "+6d fc", units: "2 units blocked", dep: "blocked by Weld NDE", fc: 6 },
+    { dept: "Fabrication / Welding", stage: "Internal & External Attachments", st: "14–15", p: ["2026-09-21", "2026-11-26"], a: null, kind: "idle", v: "+6d fc", units: "5 units blocked", dep: "blocked by Weld NDE", fc: 6 },
+    { dept: "Quality Control / QA", stage: "Hydrostatic / Pressure Test", st: "20", p: ["2026-10-05", "2026-11-13"], a: null, kind: "hold", v: "hold", units: "ITP-320-05 · client witness 12d late", dep: "after Internal & External Attachments", fc: 6 },
+    { dept: "Surface Treatment & Painting", stage: "Surface Treatment", st: "22", p: ["2026-11-09", "2026-11-20"], a: null, kind: "idle", v: "+6d fc", units: "not started", dep: "after Hydrostatic / Pressure Test", fc: 6 },
+    { dept: "Documentation / MDR", stage: "MDR Compilation", st: "24", p: ["2026-11-16", "2026-11-27"], a: null, kind: "idle", v: "+6d fc", units: "not started", dep: "after Surface Treatment", fc: 6 },
+    { dept: "Dispatch & Logistics", stage: "Packing & Dispatch", st: "25", p: ["2026-11-27", "2026-11-30"], a: null, kind: "idle", v: "+6d fc", units: "promised 30 Nov · forecast 08 Dec", dep: "after MDR Compilation", fc: 6 },
+  ];
+
+  SCHED_MS = [
+    { at: "2026-09-11", label: "Shell complete", kind: "overdue" },
+    { at: "2026-09-25", label: "NDE cleared", kind: "submitted" },
+    { at: "2026-11-13", label: "Hydro test", kind: "hold" },
+    { at: "2026-11-30", label: "Dispatch", kind: "overdue" },
+  ];
+
+  ACT_STATES = [
+    { id: "idle", primary: "Start", second: "Reassign", note: "Predecessor cleared — nothing is stopping this." },
+    { id: "progress", primary: "Update progress", second: "Submit for QC", note: "Started 01 Sept by Rakesh Yadav." },
+    { id: "submitted", primary: "View QC submission", second: "Put on hold", note: "With Quality Control / QA since 05 Sept. You cannot verify your own submission." },
+    { id: "hold", primary: "Resume", second: "Edit hold reason", note: "On hold 6d — machine breakdown, no restart date recorded." },
+    { id: "overdue", primary: "File delay reason & start", second: "Reassign", note: "Overdue 4 days. A delay reason is required before any further progress write." },
+    { id: "complete", primary: "Open QC record", second: "Reopen request", note: "Verified 05 Sept by QA. Read-only from here." },
+  ];
+
+  QC_TABS = [
+    { id: "awaiting", label: "Awaiting verification", n: 3, kind: "submitted" },
+    { id: "upcoming", label: "Upcoming", n: 4, kind: "idle" },
+    { id: "overdue", label: "Overdue", n: 1, kind: "overdue" },
+    { id: "hold", label: "On hold", n: 2, kind: "hold" },
+    { id: "rejected", label: "Rejected", n: 1, kind: "overdue" },
+    { id: "completed", label: "Completed", n: 12, kind: "complete" },
+  ];
+
+  QC_QUEUES = {
+    awaiting: [
+      { title: "Weld NDE", ref: "DESPL-320 · 320SR02 · stage 14", meta: "Submitted by Imran Shaikh (Fabrication / Welding) · in queue 5 days", due: "Due today", kind: "submitted", act: "Review", hot: true },
+      { title: "Internal & External Attachments", ref: "DESPL-320 · 320SR03 · stages 14–15", meta: "Submitted by Rakesh Yadav (Fabrication / Welding) · in queue 2 days", due: "Due 26 Nov", kind: "submitted", act: "Review" },
+      { title: "PC Receipt & Order Review", ref: "DESPL-320 · 320SR01 · stage 2", meta: "Submitted by Stores · in queue 1 day", due: "Due today", kind: "submitted", act: "Review" },
+    ],
+    upcoming: [
+      { title: "Head / Dish-End Assembly", ref: "12548 · de00101 · stage 11", meta: "In progress — expected submission tomorrow", due: "Due 09 Sept", kind: "progress", act: "Open" },
+      { title: "Shell Fit-Up & Welding", ref: "DESPL-320 · 320SR08 · stage 10", meta: "In progress · 2 of 4 operations complete", due: "Due 11 Sept", kind: "progress", act: "Open" },
+      { title: "Nozzle Welding", ref: "DESPL-320 · 320SR07 · stage 13", meta: "Not started · unassigned", due: "Due 18 Sept", kind: "idle", act: "Open" },
+      { title: "PWHT", ref: "DESPL-320 · 320SR03 · stage 16", meta: "Blocked by Weld NDE", due: "Due 09 Oct", kind: "idle", act: "Open" },
+    ],
+    overdue: [
+      { title: "Weld NDE", ref: "DESPL-320 · 320SR02 · stage 14", meta: "In QC queue 5 days — past the 3-day verification standard", due: "Overdue 2d", kind: "overdue", act: "Review", hot: true },
+    ],
+    hold: [
+      { title: "Hydrostatic / Pressure Test", ref: "DESPL-320 · 320SR03 · stage 20", meta: "ITP-320-05 class W · awaiting client witness (TPI), call raised 12 days ago", due: "Blocks completion", kind: "hold", act: "Open", hot: true },
+      { title: "Dimensional check — attachments", ref: "DESPL-320 · 320SR03 · stage 15", meta: "ITP-320-12 class H · pending, raised with QA today", due: "—", kind: "hold", act: "Open" },
+    ],
+    rejected: [
+      { title: "Weld NDE — RT film re-shoot", ref: "DESPL-320 · 320SR02 · stage 14", meta: "Rejected 05 Sept by A. Mehta · NCR-0041 open, awaiting disposition 2 days", due: "Rework", kind: "overdue", act: "Open NCR", hot: true },
+    ],
+    completed: [
+      { title: "Shell Fit-Up & Welding", ref: "DESPL-320 · 320SR01 · stage 10", meta: "Verified 05 Sept 15:40 by A. Mehta · first pass", due: "Closed", kind: "complete", act: "Record" },
+      { title: "Nozzle Machining", ref: "DESPL-320 · 320SR04 · stage 12", meta: "Verified 04 Sept 11:05 by A. Mehta · first pass", due: "Closed", kind: "complete", act: "Record" },
+      { title: "Material Issue & Kitting", ref: "12548 · de00101 · stage 6", meta: "Verified 04 Sept 09:20 by R. Nair · first pass", due: "Closed", kind: "complete", act: "Record" },
+    ],
+  };
+
+  WELD_WORK = [
+    { unit: "320SR02", proc: "Nozzle Welding", stage: "13", who: "Imran Shaikh", started: "31 Aug", el: "8d / 3d", kind: "overdue", act: "File reason", primary: true },
+    { unit: "320SR08", proc: "Shell Fit-Up & Welding", stage: "10", who: "Dinesh Patel", started: "04 Sept", el: "2d / 4d", kind: "progress", act: "Submit for QC", primary: true },
+    { unit: "320SR09", proc: "Shell Fit-Up & Welding", stage: "10", who: "Mahesh Rathod", started: "05 Sept", el: "1d / 4d", kind: "progress", act: "Update", primary: false },
+    { unit: "320SR03", proc: "Internal & External Attachments", stage: "14–15", who: "Rakesh Yadav", started: "01 Sept", el: "4d / 5d", kind: "submitted", act: "View QC", primary: false },
+    { unit: "de00101", proc: "Nozzle Fabrication & Fit-Up", stage: "12–13", who: "Imran Shaikh", started: "28 Aug", el: "on hold 6d", kind: "hold", act: "Resume", primary: false },
+    { unit: "320SR05", proc: "Draining & Drying", stage: "19", who: "unassigned", started: "—", el: "due today", kind: "idle", act: "Assign", primary: false },
+  ];
+
+  WELD_NDT = [
+    { joint: "J-320-02-14", unit: "320SR02", test: "RT", res: "REJECT", who: "Imran Shaikh", at: "05 Sept" },
+    { joint: "J-320-01-11", unit: "320SR01", test: "UT", res: "ACCEPT", who: "Dinesh Patel", at: "05 Sept" },
+    { joint: "J-320-01-09", unit: "320SR01", test: "RT", res: "ACCEPT", who: "Imran Shaikh", at: "04 Sept" },
+    { joint: "J-320-04-06", unit: "320SR04", test: "MPI", res: "ACCEPT", who: "Mahesh Rathod", at: "04 Sept" },
+  ];
+
+  DEPT_VIEWS = {
+    project: { head: ["Project", "Active", "Overdue", "Blocked", "Due today", "Where"], rows: [
+      ["DESPL-320", "62", "4", "5", "8", "Shell fit-up, nozzle welding"],
+      ["12548", "14", "3", "1", "3", "Nozzle fab & fit-up (on hold 6d)"],
+      ["DE0467", "10", "1", "1", "1", "Final assembly — unplanned"],
+    ] },
+    employee: { head: ["Employee", "Active", "Overdue", "Blocked", "Due today", "On-time 30d"], rows: [
+      ["Rakesh Yadav · Fitter", "7", "1", "1", "2", "88%"],
+      ["Imran Shaikh · Welder 6G", "9", "2", "2", "3", "71%"],
+      ["Dinesh Patel · Welder 3G", "5", "0", "1", "1", "94%"],
+      ["Mahesh Rathod · Fitter", "6", "1", "0", "2", "80%"],
+      ["Suresh Kumar · Fit-up helper", "4", "0", "0", "1", "100%"],
+      ["Anil Chauhan · Welder 6G", "0", "0", "0", "0", "—"],
+    ] },
+    process: { head: ["Process / stage", "Active", "Overdue", "Blocked", "Due today", "Standard"], rows: [
+      ["Shell Fit-Up & Welding · 10", "18", "0", "0", "4", "4d"],
+      ["Nozzle Welding · 13", "16", "3", "0", "3", "3d"],
+      ["Internal & External Attachments · 14–15", "22", "1", "5", "2", "5d"],
+      ["Head / Dish-End Assembly · 11", "12", "2", "1", "2", "4d"],
+      ["Nozzle Fabrication & Fit-Up · 12–13", "10", "2", "1", "1", "3d"],
+      ["Draining & Drying · 19", "8", "0", "0", "0", "1d"],
+    ] },
+  };
+
+  TEAM_PEOPLE = [
+    { name: "Rakesh Yadav", role: "Fitter", wip: 2, q: 5, today: 2, over: 1, blk: 1, cap: 88, ini: "RY" },
+    { name: "Imran Shaikh", role: "Welder · 6G", wip: 1, q: 8, today: 3, over: 2, blk: 2, cap: 96, ini: "IS" },
+    { name: "Dinesh Patel", role: "Welder · 3G", wip: 1, q: 4, today: 1, over: 0, blk: 1, cap: 62, ini: "DP" },
+    { name: "Mahesh Rathod", role: "Fitter", wip: 2, q: 4, today: 2, over: 1, blk: 0, cap: 74, ini: "MR" },
+    { name: "Suresh Kumar", role: "Fit-up helper", wip: 0, q: 4, today: 1, over: 0, blk: 0, cap: 48, ini: "SK" },
+    { name: "Anil Chauhan", role: "Welder · 6G", wip: 0, q: 0, today: 0, over: 0, blk: 0, cap: 0, ini: "AC" },
+  ];
+
+  UNASSIGNED = [
+    { proc: "Internal & External Attachments", stage: "Stages 14–15", job: "DESPL-320", unit: "320SR03", due: "26 Nov", pri: "Critical path", hot: true },
+    { proc: "Final Assembly", stage: "Stage 15", job: "DE0467", unit: "—", due: "09 Sept", pri: "Due in 2d", hot: true },
+    { proc: "Draining & Drying", stage: "Stage 19", job: "DESPL-320", unit: "320SR05", due: "07 Sept", pri: "Due today", hot: true },
+    { proc: "Draining & Drying", stage: "Stage 19", job: "DESPL-320", unit: "320SR06", due: "15 Mar", pri: "Normal" },
+    { proc: "Head / Dish-End Assembly", stage: "Stage 11", job: "12548", unit: "de00101", due: "02 Jan", pri: "Normal" },
+    { proc: "Nozzle Welding", stage: "Stage 13", job: "DESPL-320", unit: "320SR07", due: "18 Sept", pri: "Normal" },
+  ];
+
+  ASSIGN_CANDIDATES = [
+    { name: "Dinesh Patel", role: "Welder · 3G", ini: "DP", load: "1 in progress · 4 queued", cap: 62, note: "Lowest load in the department" },
+    { name: "Suresh Kumar", role: "Fit-up helper", ini: "SK", load: "0 in progress · 4 queued", cap: 48, note: "Cannot sign weld visual — needs a welder" },
+    { name: "Anil Chauhan", role: "Welder · 6G", ini: "AC", load: "no work assigned", cap: 0, note: "Returned from leave today" },
+    { name: "Mahesh Rathod", role: "Fitter", ini: "MR", load: "2 in progress · 4 queued", cap: 74, note: "1 overdue open" },
+  ];
+
+  ASSIGN_REASONS = ["Capacity", "Skill / qualification", "Absence", "Shift change", "Escalation"];
+
+  fmt(d) {
+    const dt = new Date(d);
+    return `${String(dt.getUTCDate()).padStart(2, "0")} ${this.MONTHS[dt.getUTCMonth() - 3] || dt.toDateString().slice(4, 7)}`;
+  }
+  pct(d) { return ((new Date(d).getTime() - this.T0) / (this.T1 - this.T0)) * 100; }
+  span(a, b) { return Math.max(this.pct(b) - this.pct(a), 0.6); }
+  shift(d, days) { const t = new Date(d).getTime() + days * 864e5; return new Date(t).toISOString().slice(0, 10); }
+
+  set = (p) => this.setState(p);
+  go = (screen) => () => this.set({ screen });
+
+  chip(kind) {
+    const c = this.CHIP[kind];
+    return { chipBg: c.bg, chipFg: c.fg, chipLabel: c.label };
+  }
+
+  renderVals() {
+    const s = this.state;
+    const sc = s.screen || this.props.startScreen || "pcc";
+    const showFc = this.props.showForecastBars !== false;
+    const showBn = this.props.showBottleneckFlags !== false;
+    const bare = sc === "tablet";
+
+    const tabs = this.TABS.map((t) => ({
+      key: t.id, label: t.label,
+      go: t.id === "assign" ? () => this.set({ screen: "assign", assignOpen: true, assignStep: 1 }) : this.go(t.id),
+      bg: sc === t.id ? "#ff7a1a" : "#1c1f24",
+      fg: sc === t.id ? "#000" : "#8b919a",
+      bd: sc === t.id ? "#ff7a1a" : "#262a30",
+    }));
+
+    const navActive = { pcc: "pcc", sched: "sched", act: "pcc", dept: "dept", team: "team", assign: "team", qc: "qc", qcd: "qc", weld: "weld", states: "myday" }[sc] || "";
+    const nav = this.NAV.map((n, i) => {
+      if (n.head) return { key: "h" + i, isHead: true, isItem: false, label: n.head };
+      const on = navActive === n.id;
+      return {
+        key: n.id, isHead: false, isItem: true, label: n.label, icon: n.icon,
+        go: this.go(n.id === "myday" || n.id === "reports" ? sc : n.id),
+        bg: on ? "#1c1f24" : "transparent", fg: on ? "#e7e9ec" : "#8b919a",
+        bd: on ? "#ff7a1a" : "transparent", r: on ? "0 6px 6px 0" : "6px",
+        hasBadge: !!n.badge, badge: n.badge || "",
+        badgeBg: n.badgeKind === "red" ? "rgba(240,82,77,.14)" : "rgba(255,122,26,.16)",
+        badgeFg: n.badgeKind === "red" ? "#f0524d" : "#ff7a1a",
+      };
+    });
+
+    const crumbs = {
+      pcc: ["Projects", "DESPL-320"],
+      sched: ["DESPL-320", "Timeline (Gantt)"],
+      act: ["DESPL-320 / 320SR03", "Internal & External Attachments"],
+      dept: ["Departments", "Fabrication / Welding"],
+      team: ["My team", "Team"],
+      assign: ["My team", "Team — reassign"],
+      qc: ["Quality", "QC & Hold Points"],
+      qcd: ["QC & Hold Points", "PC Receipt & Order Review"],
+      weld: ["Quality", "Welding / Production"],
+      states: ["Reference", "States"],
+    }[sc] || ["DESPL", ""];
+
+    const pTabActive = sc === "sched" ? "sched" : s.pTab;
+    const pTabs = this.P_TABS.map((t) => {
+      const on = pTabActive === t.id;
+      return {
+        key: t.id, label: t.label,
+        go: t.id === "sched" ? this.go("sched") : () => this.set({ pTab: t.id }),
+        bd: on ? "#ff7a1a" : "transparent", fg: on ? "#e7e9ec" : "#8b919a", fw: on ? "600" : "400",
+      };
+    });
+
+    return {
+      chromeOn: !bare, isBare: bare,
+      tabs, nav, pTabs,
+      crumbRoot: crumbs[0], crumbLeaf: crumbs[1],
+      userName: "S. Jadeja", userIni: "SJ", userRole: "Supervisor · Fab / Welding",
+
+      isPcc: sc === "pcc", isSched: sc === "sched", isAct: sc === "act",
+      isDept: sc === "dept", isTeam: sc === "team" || sc === "assign",
+      isQc: sc === "qc", isQcd: sc === "qcd", isWeld: sc === "weld",
+      isTablet: sc === "tablet", isStates: sc === "states",
+
+      goPcc: this.go("pcc"), goSched: this.go("sched"), goAct: this.go("act"),
+      goDept: this.go("dept"), goTeam: this.go("team"), goQc: this.go("qc"),
+      goQcd: this.go("qcd"), goWeld: this.go("weld"),
+
+      milestones: this.MILESTONES.map((m) => Object.assign({ key: m.name }, m, this.chip(m.kind))),
+
+      months: this.MONTHS.map((m, i) => ({ key: m, label: m, w: `${100 / 9}%` })),
+      todayLeft: `${this.pct("2026-09-07").toFixed(2)}%`,
+      schedMs: this.SCHED_MS.map((m, i) => {
+        const p = this.pct(m.at);
+        const late = p > 86;
+        return {
+          key: m.label, label: m.label, left: `${p.toFixed(2)}%`, fg: this.CHIP[m.kind].fg,
+          top: i % 2 === 0 ? "5px" : "23px",
+          dir: late ? "row-reverse" : "row",
+          tx: late ? "translateX(-100%) translateX(4px)" : "translateX(-4px)",
+        };
+      }),
+      schedDeptChips: ["All departments", "Fabrication / Welding", "Quality Control / QA", "Heat Treatment"].map((d) => ({
+        key: d, label: d, pick: () => this.set({ schedDept: d === "All departments" ? "all" : d }),
+        bg: (s.schedDept === "all" ? "All departments" : s.schedDept) === d ? "rgba(255,122,26,.14)" : "#1c1f24",
+        fg: (s.schedDept === "all" ? "All departments" : s.schedDept) === d ? "#ff7a1a" : "#8b919a",
+        bd: (s.schedDept === "all" ? "All departments" : s.schedDept) === d ? "rgba(255,122,26,.45)" : "#262a30",
+      })),
+      schedStatusChips: [
+        { id: "all", label: "All statuses" }, { id: "overdue", label: "Overdue" },
+        { id: "submitted", label: "Awaiting QC" }, { id: "hold", label: "On hold" },
+        { id: "idle", label: "Not started" }, { id: "complete", label: "Complete" },
+      ].map((o) => ({
+        key: o.id, label: o.label, pick: () => this.set({ schedStatus: o.id }),
+        bg: s.schedStatus === o.id ? "rgba(255,122,26,.14)" : "#1c1f24",
+        fg: s.schedStatus === o.id ? "#ff7a1a" : "#8b919a",
+        bd: s.schedStatus === o.id ? "rgba(255,122,26,.45)" : "#262a30",
+      })),
+      schedRows: this.SCHED
+        .filter((r) => (s.schedDept === "all" || r.dept === s.schedDept) && (s.schedStatus === "all" || r.kind === s.schedStatus))
+        .map((r, i) => {
+          const c = this.CHIP[r.kind];
+          const open = s.schedOpen === r.stage;
+          const aEnd = r.a ? (r.a[1] || "2026-09-07") : null;
+          return {
+            key: r.stage + i, dept: r.dept, stage: r.stage, st: r.st, dep: r.dep, v: r.v, units: r.units,
+            status: c.label, chipBg: c.bg, chipFg: c.fg, fill: c.fg,
+            pLeft: `${this.pct(r.p[0]).toFixed(2)}%`, pWidth: `${this.span(r.p[0], r.p[1]).toFixed(2)}%`,
+            hasActual: !!r.a, aLeft: r.a ? `${this.pct(r.a[0]).toFixed(2)}%` : "0%",
+            aWidth: r.a ? `${this.span(r.a[0], aEnd).toFixed(2)}%` : "0%",
+            hasFc: !!r.fc && showFc, fcLeft: r.fc ? `${this.pct(r.p[1]).toFixed(2)}%` : "0%",
+            fcWidth: r.fc ? `${this.span(r.p[1], this.shift(r.p[1], r.fc)).toFixed(2)}%` : "0%",
+            pFmt: `${this.fmt(r.p[0])} → ${this.fmt(r.p[1])}`,
+            aFmt: r.a ? `${this.fmt(r.a[0])} → ${r.a[1] ? this.fmt(r.a[1]) : "in progress"}` : "not started",
+            isBn: !!r.bottleneck && showBn, isOpen: open, rowBg: open ? "#1c1f24" : "transparent",
+            toggle: () => this.set({ schedOpen: open ? null : r.stage }),
+            openAct: this.go("act"),
+          };
+        }),
+
+      assignStepLabel: s.assignStep === 2 ? "2" : "1",
+
+      tabletTabs: [
+        { id: "activity", label: "Activity" }, { id: "qc", label: "QC" }, { id: "work", label: "My work" },
+      ].map((o) => ({
+        key: o.id, label: o.label, pick: () => this.set({ tabTab: o.id }),
+        bg: (s.tabTab || "activity") === o.id ? "#ff7a1a" : "#1c1f24",
+        fg: (s.tabTab || "activity") === o.id ? "#000" : "#8b919a",
+        bd: (s.tabTab || "activity") === o.id ? "#ff7a1a" : "#2e3034",
+      })),
+      tabActivity: (s.tabTab || "activity") === "activity",
+      tabQc: s.tabTab === "qc",
+      tabWork: s.tabTab === "work",
+      tabletWork: [
+        { unit: "320SR08", proc: "Shell Fit-Up & Welding", due: "Due today", kind: "progress", act: "Submit for QC" },
+        { unit: "320SR09", proc: "Shell Fit-Up & Welding", due: "Due 11 Sept", kind: "progress", act: "Update" },
+        { unit: "320SR02", proc: "Nozzle Welding", due: "Overdue 8d", kind: "overdue", act: "File reason" },
+        { unit: "320SR05", proc: "Draining & Drying", due: "Due today", kind: "idle", act: "Start" },
+      ].map((r, i) => {
+        const c = this.CHIP[r.kind];
+        return Object.assign({ key: i }, r, {
+          status: c.label, chipBg: c.bg, chipFg: c.fg,
+          dueFg: r.kind === "overdue" ? "#f0524d" : "#8b919a",
+          btnBg: r.kind === "overdue" ? "#f0524d" : "#ff7a1a",
+          btnFg: r.kind === "overdue" ? "#0b0c0e" : "#000",
+        });
+      }),
+
+      qcTabs: this.QC_TABS.map((t) => {
+        const on = s.qcTab === t.id;
+        const c = this.CHIP[t.kind];
+        return {
+          key: t.id, label: t.label, n: String(t.n), pick: () => this.set({ qcTab: t.id }),
+          bg: on ? "#1c1f24" : "transparent", fg: on ? "#e7e9ec" : "#8b919a",
+          bd: on ? c.fg : "transparent", nFg: on ? c.fg : "#8b919a",
+        };
+      }),
+      qcTitle: (this.QC_TABS.find((t) => t.id === s.qcTab) || {}).label,
+      qcRows: (this.QC_QUEUES[s.qcTab] || []).map((r, i) => {
+        const c = this.CHIP[r.kind];
+        return Object.assign({ key: i }, r, {
+          status: c.label, chipBg: c.bg, chipFg: c.fg,
+          dueFg: r.hot ? "#f0524d" : "#8b919a",
+          btnBg: r.hot ? "#ff7a1a" : "#1c1f24", btnFg: r.hot ? "#000" : "#e7e9ec", btnBd: r.hot ? "#ff7a1a" : "#262a30",
+          open: this.go("qcd"),
+        });
+      }),
+      qcEmpty: (this.QC_QUEUES[s.qcTab] || []).length === 0,
+
+      weldWork: this.WELD_WORK.map((r, i) => {
+        const c = this.CHIP[r.kind];
+        return Object.assign({ key: i }, r, {
+          status: c.label, chipBg: c.bg, chipFg: c.fg,
+          btnBg: r.primary ? "#ff7a1a" : "#1c1f24", btnFg: r.primary ? "#000" : "#e7e9ec", btnBd: r.primary ? "#ff7a1a" : "#262a30",
+          elFg: r.kind === "overdue" || r.kind === "hold" ? "#f0524d" : "#8b919a",
+          open: this.go("act"),
+        });
+      }),
+      weldNdt: this.WELD_NDT.map((r, i) => Object.assign({ key: i }, r, {
+        resFg: r.res === "REJECT" ? "#f0524d" : "#3fb950",
+        resBg: r.res === "REJECT" ? "rgba(240,82,77,.12)" : "rgba(63,185,80,.12)",
+      })),
+
+      deptViewChips: [
+        { id: "project", label: "By project" }, { id: "employee", label: "By employee" }, { id: "process", label: "By process / stage" },
+      ].map((o) => ({
+        key: o.id, label: o.label, pick: () => this.set({ deptView: o.id }),
+        bg: (s.deptView || "project") === o.id ? "rgba(255,122,26,.14)" : "#1c1f24",
+        fg: (s.deptView || "project") === o.id ? "#ff7a1a" : "#8b919a",
+        bd: (s.deptView || "project") === o.id ? "rgba(255,122,26,.45)" : "#262a30",
+      })),
+      deptHead: this.DEPT_VIEWS[s.deptView || "project"].head.map((h, i) => ({ key: i, label: h, align: i === 0 ? "left" : "right" })),
+      deptRows: this.DEPT_VIEWS[s.deptView || "project"].rows.map((r, i) => ({
+        key: i,
+        cells: r.map((c, j) => ({
+          key: j, label: c, align: j === 0 ? "left" : j === 5 ? "right" : "right",
+          fg: j === 2 && c !== "0" ? "#f0524d" : j === 3 && c !== "0" ? "#d9a62e" : j === 0 ? "#e7e9ec" : "#8b919a",
+          fw: j === 0 ? "500" : "400",
+          mono: j === 0 ? "Inter" : "'JetBrains Mono',monospace",
+        })),
+      })),
+
+      teamPeople: this.TEAM_PEOPLE.map((p) => Object.assign({ key: p.name }, p, {
+        wipW: `${Math.round((p.wip / 12) * 100)}%`,
+        qW: `${Math.round((p.q / 12) * 100)}%`,
+        loadLabel: p.wip + p.q === 0 ? "no work assigned" : `${p.wip} WIP · ${p.q} queued`,
+        capLabel: p.cap === 0 ? "idle" : `${p.cap}%`,
+        capFg: p.cap >= 90 ? "#f0524d" : p.cap >= 70 ? "#d9a62e" : p.cap === 0 ? "#8b919a" : "#3fb950",
+        overFg: p.over > 0 ? "#f0524d" : "#4a4f57",
+        blkFg: p.blk > 0 ? "#d9a62e" : "#4a4f57",
+        overTxt: p.over === 0 ? "—" : String(p.over),
+        blkTxt: p.blk === 0 ? "—" : String(p.blk),
+        todayTxt: p.today === 0 ? "—" : String(p.today),
+        act: p.wip + p.q === 0 ? "Assign work" : "View queue",
+        openAssign: () => this.set({ screen: "assign", assignOpen: true, assignStep: 1 }),
+      })),
+      unassigned: this.UNASSIGNED.map((r, i) => Object.assign({ key: i }, r, {
+        dueFg: r.hot ? "#f0524d" : "#8b919a",
+        priBg: r.hot ? "rgba(240,82,77,.12)" : "rgba(74,79,87,.25)",
+        priFg: r.hot ? "#f0524d" : "#9aa0a8",
+        openAssign: () => this.set({ screen: "assign", assignOpen: true, assignStep: 1 }),
+      })),
+
+      assignOpen: !!s.assignOpen || sc === "assign",
+      assignStep1: s.assignStep !== 2, assignStep2: s.assignStep === 2,
+      closeAssign: () => this.set({ assignOpen: false, screen: "team", person: null, reason: null, assignStep: 1 }),
+      backAssign: () => this.set({ assignStep: 1 }),
+      assignCandidates: this.ASSIGN_CANDIDATES.map((c) => ({
+        key: c.name, name: c.name, role: c.role, ini: c.ini, load: c.load, note: c.note,
+        capW: `${c.cap}%`, capFg: c.cap >= 90 ? "#f0524d" : c.cap >= 70 ? "#d9a62e" : "#3fb950",
+        bg: s.person === c.name ? "rgba(255,122,26,.07)" : "transparent",
+        bd: s.person === c.name ? "#ff7a1a" : "#262a30",
+        pick: () => this.set({ person: c.name }),
+      })),
+      assignReasons: this.ASSIGN_REASONS.map((r) => ({
+        key: r, label: r, pick: () => this.set({ reason: r }),
+        bg: s.reason === r ? "rgba(255,122,26,.14)" : "#1c1f24",
+        fg: s.reason === r ? "#ff7a1a" : "#8b919a",
+        bd: s.reason === r ? "rgba(255,122,26,.45)" : "#262a30",
+      })),
+      newOwner: s.person || "no one selected",
+      newOwnerFg: s.person ? "#e7e9ec" : "#8b919a",
+      pickedReason: s.reason || "not given",
+      canNext: !!s.person,
+      nextBg: s.person ? "#ff7a1a" : "#1c1f24",
+      nextFg: s.person ? "#000" : "#4a4f57",
+      nextBd: s.person ? "#ff7a1a" : "#262a30",
+      toStep2: () => { if (s.person) this.set({ assignStep: 2 }); },
+      confirmBg: s.reason ? "#ff7a1a" : "#1c1f24",
+      confirmFg: s.reason ? "#000" : "#4a4f57",
+      confirmBd: s.reason ? "#ff7a1a" : "#262a30",
+      confirm: () => { if (s.reason) this.set({ assignOpen: false, screen: "team", assignStep: 1 }); },
+
+      histOpen: s.histOpen !== false,
+      histCaret: s.histOpen !== false ? "rotate(90deg)" : "none",
+      toggleHist: () => this.set({ histOpen: s.histOpen === false }),
+      actHistory: [
+        { at: "05 Sept 14:20", what: "Submitted for QC", detail: " · weld visual raised on ITP-320-11", who: "Rakesh Yadav" },
+        { at: "04 Sept 16:05", what: "Progress updated", detail: " · 13 of 18 operations", who: "Rakesh Yadav" },
+        { at: "02 Sept 09:40", what: "Hold released", detail: " · material kit issued by Stores", who: "S. Jadeja" },
+        { at: "01 Sept 11:15", what: "Put on hold", detail: " · reason: material not issued", who: "Rakesh Yadav" },
+        { at: "01 Sept 08:10", what: "Started", detail: "", who: "Rakesh Yadav" },
+        { at: "28 Aug 17:30", what: "Assigned", detail: " · from department pool, reason: capacity", who: "S. Jadeja" },
+      ].map((h, i) => Object.assign({ key: i }, h)),
+      actDocs: [
+        { name: "DWG-320-14 rev C — attachment details", sub: "Drawing · released 12 Aug" },
+        { name: "WPS-320-06 — fillet weld procedure", sub: "Procedure · approved" },
+        { name: "ITP-320 rev B — inspection & test plan", sub: "Inspection document · items 11–12 apply" },
+      ].map((d) => Object.assign({ key: d.name }, d)),
+      openAssign: () => this.set({ screen: "assign", assignOpen: true, assignStep: 1 }),
+
+      actKind: this.CHIP[s.actState || "submitted"].label,
+      actChipBg: this.CHIP[s.actState || "submitted"].bg,
+      actChipFg: this.CHIP[s.actState || "submitted"].fg,
+      actPrimary: (this.ACT_STATES.find((a) => a.id === (s.actState || "submitted")) || {}).primary,
+      actSecond: (this.ACT_STATES.find((a) => a.id === (s.actState || "submitted")) || {}).second,
+      actNote: (this.ACT_STATES.find((a) => a.id === (s.actState || "submitted")) || {}).note,
+      actStateChips: this.ACT_STATES.map((a) => {
+        const on = (s.actState || "submitted") === a.id;
+        const c = this.CHIP[a.id];
+        return {
+          key: a.id, label: c.label, pick: () => this.set({ actState: a.id }),
+          bg: on ? c.bg : "#1c1f24", fg: on ? c.fg : "#8b919a", bd: on ? c.fg : "#262a30",
+        };
+      }),
+      pccDepts: this.PCC_DEPTS.map((d) => Object.assign({ key: d.name }, d, {
+        go: this.go("dept"),
+        dot: d.over > 0 ? "#f0524d" : d.blocked > 0 ? "#d9a62e" : "#3fb950",
+        overFg: d.over > 0 ? "#f0524d" : "#4a4f57",
+        blkFg: d.blocked > 0 ? "#d9a62e" : "#4a4f57",
+        otFg: parseInt(d.ontime, 10) >= 88 ? "#3fb950" : parseInt(d.ontime, 10) >= 80 ? "#d9a62e" : "#f0524d",
+        over: d.over === 0 ? "—" : String(d.over),
+        blocked: d.blocked === 0 ? "—" : String(d.blocked),
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

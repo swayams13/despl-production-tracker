@@ -57,5 +57,14 @@ export default defineConfig({
     command: 'pnpm build && pnpm start',
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
+    // ci.yml already runs `pnpm build` as its own step before `pnpm e2e`, but
+    // this command rebuilds again (reuseExistingServer is false in CI) — a
+    // real, known redundancy, not addressed here. On a loaded shared runner
+    // that second build-then-start occasionally doesn't land inside the
+    // 60000ms default (confirmed live: PR #42 hit `Timed out waiting 60000ms
+    // from config.webServer` twice across three CI attempts, 8 Sep 2026).
+    // 3 minutes comfortably covers a cold rebuild + server start with room
+    // to spare, without masking a genuinely hung server.
+    timeout: 180_000,
   },
 });

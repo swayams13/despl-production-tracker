@@ -4,6 +4,8 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { StageSpine } from "@/components/industrial/stage-spine";
+import { PageHeader } from "@/components/industrial/page-header";
+import { clickableRowProps } from "@/components/industrial/data-table";
 import { sendDigestAction } from "@/app/actions/reports";
 import type { DailyDigest, DigestHistoryEntry } from "@/lib/services/reports.read";
 
@@ -44,25 +46,27 @@ export function ReportsClient({
 
   return (
     <>
-      <div className="page-h">
-        <h1>Reports</h1>
-        <span className="sub">Daily digest — generated from real events, never static</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
-          <input
-            type="date"
-            className="btn"
-            value={digest.date}
-            max={new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)}
-            onChange={(e) => e.target.value && changeDate(e.target.value)}
-            aria-label="Digest date"
-          />
-          {canSend && (
-            <button className="btn btn-accent" disabled={pending || alreadySent} onClick={send}>
-              {alreadySent ? "Sent" : "Send now"}
-            </button>
-          )}
-        </span>
-      </div>
+      <PageHeader
+        title="Reports"
+        subtitle="Daily digest — generated from real events, never static"
+        actions={
+          <>
+            <input
+              type="date"
+              className="btn"
+              value={digest.date}
+              max={new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10)}
+              onChange={(e) => e.target.value && changeDate(e.target.value)}
+              aria-label="Digest date"
+            />
+            {canSend && (
+              <button className="btn btn-accent" disabled={pending || alreadySent} onClick={send}>
+                {alreadySent ? "Sent" : "Send now"}
+              </button>
+            )}
+          </>
+        }
+      />
 
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd">
@@ -137,7 +141,12 @@ export function ReportsClient({
             <p className="note" style={{ padding: "0 16px 14px" }}>No digest has been sent yet.</p>
           ) : (
             history.map((h) => (
-              <div className="d-row" key={h.date} onClick={() => changeDate(h.date)} style={{ cursor: "pointer", padding: "10px 16px" }}>
+              <div
+                className="d-row"
+                key={h.date}
+                {...clickableRowProps(() => changeDate(h.date))}
+                style={{ cursor: "pointer", padding: "10px 16px" }}
+              >
                 {fmtDate(h.date)}
                 <small>Sent {new Date(h.sentAt).toLocaleString("en-IN")}</small>
               </div>

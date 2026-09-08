@@ -301,10 +301,10 @@ body {
    Tokens and component styles are ported 1:1 from the approved mockup.
    ═══════════════════════════════════════════════════════════════════════════ */
 .theme-industrial {
-  --bg: #0b0c0e; --surface: #141619; --surface-2: #1c1f24; --border: #262a30;
+  --bg: #0b0c0e; --surface: #141619; --surface-2: #1c1f24; --border: #666d75;
   --text: #e7e9ec; --muted: #8b919a; --accent: #ff7a1a;
   --s-complete: #3fb950; --s-progress: #4c8dff; --s-submitted: #a371f7;
-  --s-hold: #d9a62e; --s-overdue: #f0524d; --s-idle: #4a4f57;
+  --s-hold: #d9a62e; --s-overdue: #f0524d; --s-idle: #606670;
   /* Token layer (SPEC-supervisor-ui-v3 §2.1, D27/D28). Tokens only — this
      session adds them and the two palette overrides below; retrofitting every
      border/weight declaration to consume them is deliberately out of scope. */
@@ -440,7 +440,7 @@ body {
 .theme-industrial .kbd:hover { background: var(--surface-2); color: var(--text); }
 .theme-industrial .bell { position: relative; cursor: pointer; color: var(--muted); display: flex; padding: 4px; border-radius: 5px; background: none; border: none; }
 .theme-industrial .bell:hover { background: var(--surface-2); color: var(--text); }
-.theme-industrial .bell em { position: absolute; top: -2px; right: -3px; background: var(--accent); color: #000; font-style: normal; font-size: 9px; font-weight: 700; border-radius: 7px; padding: 0 4px; }
+.theme-industrial .bell em { position: absolute; top: -4px; right: -6px; background: var(--accent); color: #000; font-style: normal; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 5px; line-height: 1.4; }
 .theme-industrial .drop { position: absolute; top: calc(100% + 6px); right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 290px; box-shadow: 0 10px 30px rgba(0, 0, 0, .5); z-index: 40; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
 .theme-industrial .drop .d-row { padding: 10px 14px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; }
 .theme-industrial .drop .d-row:last-child { border-bottom: none; }
@@ -462,7 +462,7 @@ body {
 .theme-industrial .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 .theme-industrial .card .hd { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .theme-industrial .card .hd h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
-.theme-industrial .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 10px; max-width: 100%; overflow: hidden; }
+.theme-industrial .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; padding: 2px 8px; border-radius: 10px; max-width: 100%; overflow: hidden; }
 .theme-industrial .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* Narrow pipeline columns (dept-grid) can't guarantee enough room for a
    department's full status label (e.g. "Ready for QCP checkpoint") — clip to
@@ -474,10 +474,10 @@ body {
    block below, which must stay last in the cascade — see comment there. */
 .theme-industrial .chip-icon { display: none; }
 .theme-industrial .c-complete { background: rgba(63, 185, 80, .12); color: var(--s-complete); } .theme-industrial .c-complete i { background: var(--s-complete); }
-.theme-industrial .c-progress { background: rgba(76, 141, 255, .12); color: var(--s-progress); } .theme-industrial .c-progress i { background: var(--s-progress); }
-.theme-industrial .c-submitted { background: rgba(163, 113, 247, .12); color: var(--s-submitted); } .theme-industrial .c-submitted i { background: var(--s-submitted); }
+.theme-industrial .c-progress { background: rgba(76, 141, 255, .05); color: var(--s-progress); } .theme-industrial .c-progress i { background: var(--s-progress); }
+.theme-industrial .c-submitted { background: rgba(163, 113, 247, .05); color: var(--s-submitted); } .theme-industrial .c-submitted i { background: var(--s-submitted); }
 .theme-industrial .c-hold { background: rgba(217, 166, 46, .12); color: var(--s-hold); } .theme-industrial .c-hold i { background: var(--s-hold); }
-.theme-industrial .c-overdue { background: rgba(240, 82, 77, .12); color: var(--s-overdue); } .theme-industrial .c-overdue i { background: var(--s-overdue); }
+.theme-industrial .c-overdue { background: rgba(240, 82, 77, .05); color: var(--s-overdue); } .theme-industrial .c-overdue i { background: var(--s-overdue); }
 .theme-industrial .c-idle { background: rgba(74, 79, 87, .25); color: #9aa0a8; } .theme-industrial .c-idle i { background: var(--s-idle); }
 /* neutral tag — role/department badges (Task 4.2). Distinct shape from
    .chip on purpose: status is the ONLY thing that gets the pill+dot
@@ -494,6 +494,12 @@ body {
    neutral border (equal specificity, later in the file) off this button. */
 .theme-industrial .btn-accent:hover { border-color: var(--accent); filter: brightness(1.12); }
 .theme-industrial .btn-ghost { background: transparent; }
+/* Destructive confirm button (Phase 4, DESIGN_SYSTEM.md §2/§16: Reject etc.
+   get a status-critical fill instead of the accent). Same shape as
+   .btn-accent, critical red instead of orange, white text (the red is dark
+   enough that black text — .btn-accent's choice — fails contrast). */
+.theme-industrial .btn-destructive { background: var(--s-overdue); border-color: var(--s-overdue); color: #fff; font-weight: 600; }
+.theme-industrial .btn-destructive:hover { filter: brightness(1.12); }
 .theme-industrial :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* stage spine (signature element) */
@@ -649,7 +655,7 @@ body {
 
 /* workspace (§4.4) — ported 1:1 from the mockup */
 .theme-industrial table { width: 100%; border-collapse: collapse; }
-.theme-industrial th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.theme-industrial th { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .theme-industrial td { padding: 0 12px; height: 36px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 13px; }
 .theme-industrial tbody tr:last-child td { border-bottom: none; }
 .theme-industrial tr.row { transition: background .12s; }
@@ -801,6 +807,18 @@ body {
 @media (max-width: 1023px) {
   .theme-industrial .jobswitch { display: none; }
   .theme-industrial .kbd { display: none; }
+  /* Activity Detail, tablet: rail collapses behind a disclosure below the
+     primary action; the primary action itself goes full-width/56px min and
+     stays first in DOM so it's visible without scrolling. */
+  .theme-industrial .actd-rail-desktop-only { display: none; }
+  .theme-industrial .actd-rail-mobile-only { display: block; }
+  .theme-industrial .actd-primary-bar .btn { width: 100%; min-height: 56px; font-size: 14px; }
+  .theme-industrial .actd-primary-bar > div { display: flex; gap: 8px; }
+  .theme-industrial .actd-primary-bar > div .btn { flex: 1; }
+  /* RESPONSIVE_GUIDELINES.md, Supervisor Team: "reassignment opens the same
+     2-step modal, sized full-screen on tablet rather than centered" — a
+     general Modal rule (any confirm dialog benefits, not just Reassign). */
+  .theme-industrial.admin-dialog { width: 100%; height: 100%; max-width: 100%; max-height: 100%; top: 0; left: 0; transform: none; border-radius: 0; }
 }
 @media (min-width: 1024px) {
   .theme-industrial .sidebar { display: flex; }
@@ -830,7 +848,7 @@ body {
   cursor: pointer; font-family: inherit; transition: background .15s, color .15s, border-color .15s;
 }
 .theme-industrial .rail-item svg { width: 19px; height: 19px; flex: none; }
-.theme-industrial .rail-item span { font-size: 9.5px; font-weight: 500; }
+.theme-industrial .rail-item span { font-size: 11px; font-weight: 500; }
 .theme-industrial .rail-item:hover { color: var(--text); }
 .theme-industrial .rail-item.active {
   background: color-mix(in oklab, var(--accent) 12%, var(--surface));
@@ -838,8 +856,8 @@ body {
 }
 .theme-industrial .rail-item.active span { font-weight: 600; }
 .theme-industrial .rail-item .badge, .theme-industrial .rail-item .badge-alert {
-  position: absolute; top: 4px; right: 8px; font-size: 9.5px; font-weight: 700;
-  padding: 1px 5px; border-radius: 8px; line-height: 1.4;
+  position: absolute; top: 4px; right: 8px; font-size: 11px; font-weight: 700;
+  padding: 1px 6px; border-radius: 8px; line-height: 1.4;
 }
 .theme-industrial .rail-item .badge { background: rgba(240, 82, 77, .14); color: var(--s-overdue); }
 .theme-industrial .rail-item .badge-alert { background: var(--s-hold); color: #fff; }
@@ -860,8 +878,8 @@ body {
 }
 .theme-industrial .bn-icon-wrap { position: relative; display: flex; }
 .theme-industrial .bn-badge {
-  position: absolute; top: -4px; right: -8px; background: var(--s-hold); color: #fff;
-  font-style: normal; font-size: 9px; font-weight: 700; border-radius: 7px; padding: 0 4px;
+  position: absolute; top: -6px; right: -10px; background: var(--s-hold); color: #fff;
+  font-style: normal; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 5px;
 }
 
 /* dashboard (§4.2) — ported 1:1 from the mockup */
@@ -877,7 +895,7 @@ body {
    borrows a status colour and spends no extra accent. */
 .theme-industrial .kpi.selected,
 .theme-industrial .kpi.clicky.selected:hover { border-color: var(--text); background: var(--surface-2); }
-.theme-industrial .kpi h6 { font-size: 10.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
+.theme-industrial .kpi h6 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); font-weight: 600; margin-bottom: 8px; }
 .theme-industrial .kpi .v { font-size: 28px; font-weight: 600; line-height: 1; }
 .theme-industrial .kpi .v small { font-size: 14px; color: var(--muted); font-weight: 500; }
 .theme-industrial .kpi .sub { margin-top: 8px; font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
@@ -886,11 +904,21 @@ body {
 .theme-industrial .statstrip { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); margin-bottom: 14px; overflow-x: auto; }
 .theme-industrial .stat { flex: 1; padding: 10px 16px; border-right: 1px solid var(--border); min-width: 140px; }
 .theme-industrial .stat:last-child { border-right: none; }
-.theme-industrial .stat h6 { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600; margin-bottom: 4px; white-space: nowrap; }
+.theme-industrial .stat h6 { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600; margin-bottom: 4px; white-space: nowrap; }
 .theme-industrial .stat .v { font-size: 15px; font-weight: 600; }
 .theme-industrial .stat .v small { font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 4px; }
 .theme-industrial .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 14px; }
 .theme-industrial .grid-h { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+
+/* Activity Detail (Phase 4, Round 2 mockup 03) — content + right rail reuses
+   .grid-2 as-is (already stacks at the laptop breakpoint below, matching
+   RESPONSIVE_GUIDELINES.md's "right rail moves below, still visible" rule
+   for this screen — no new layout class needed for that part).
+   Named actd-* (not ad-*): globals.css's own admin-dialog comment already
+   documents that ad-blocker cosmetic filters hide anything named `.ad-*`. */
+.theme-industrial .actd-rail-mobile-only { display: none; }
+.theme-industrial .actd-primary-bar { margin-bottom: 16px; }
+.theme-industrial .actd-primary-bar:empty { display: none; }
 .theme-industrial .legend { display: flex; gap: 14px; margin-left: auto; font-size: 11px; color: var(--muted); align-items: center; flex-wrap: wrap; }
 .theme-industrial .legend i { width: 14px; height: 2px; display: inline-block; margin-right: 5px; vertical-align: middle; }
 .theme-industrial .cp-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); transition: background .12s; }
@@ -927,7 +955,7 @@ body {
 .theme-industrial .bars { display: flex; align-items: flex-end; gap: 8px; height: 120px; padding: 0 4px; }
 .theme-industrial .bars .b { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 5px; justify-content: flex-end; height: 100%; }
 .theme-industrial .bars .b i { width: 100%; max-width: 34px; border-radius: 3px 3px 0 0; background: var(--s-progress); display: block; transition: height .7s cubic-bezier(.2, .8, .2, 1); }
-.theme-industrial .bars .b span { font-size: 10px; color: var(--muted); }
+.theme-industrial .bars .b span { font-size: 11px; color: var(--muted); }
 .theme-industrial .gbar-row { display: grid; grid-template-columns: 170px 1fr 70px; gap: 10px; align-items: center; padding: 6px 16px; font-size: 12px; }
 .theme-industrial .gbar { height: 12px; border-radius: 2px; background: var(--surface-2); position: relative; overflow: hidden; }
 .theme-industrial .gbar i { position: absolute; top: 0; left: 0; height: 100%; border-radius: 2px; }
@@ -960,7 +988,7 @@ body {
 .theme-industrial .week-strip { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
 .theme-industrial .week-cell { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 9px 8px; text-align: center; }
 .theme-industrial .week-cell.today { border-color: rgba(255, 122, 26, .55); background: rgba(255, 122, 26, .06); }
-.theme-industrial .week-cell .dy { font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: .05em; }
+.theme-industrial .week-cell .dy { font-size: 11px; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: .05em; }
 .theme-industrial .week-cell .dn { font-size: 15px; font-weight: 600; margin: 1px 0 5px; }
 .theme-industrial .week-cell .ld { font-size: 10.5px; color: var(--muted); }
 .theme-industrial .week-cell .ld b { color: var(--text); font-weight: 600; }
@@ -970,6 +998,14 @@ body {
 .theme-industrial .tab { padding: 8px 14px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; white-space: nowrap; text-decoration: none; }
 .theme-industrial a.tab { cursor: pointer; }
 .theme-industrial .tab.on { color: var(--text); border-bottom-color: var(--accent); }
+
+/* DataTable helpers (Phase 4, COMPONENT_INVENTORY.md): sortable column
+   header + Detail-tier row-expansion toggle. Plain buttons inheriting the
+   table's own font/color so a sortable header reads identically to a static
+   one until hovered/focused. */
+.theme-industrial .dt-sort-btn { background: none; border: none; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; text-align: inherit; }
+.theme-industrial .dt-expand-btn { background: none; border: none; padding: 4px; margin: -4px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; border-radius: 4px; }
+.theme-industrial .dt-expand-btn:hover { background: var(--surface-2); color: var(--text); }
 .theme-industrial .uxs { overflow-x: auto; padding: 14px 16px; }
 .theme-industrial .uxs table { border-collapse: separate; border-spacing: 3px; width: auto; }
 .theme-industrial .uxs td { border: none; height: auto; padding: 0; }
@@ -981,6 +1017,7 @@ body {
 .theme-industrial .feed-row { display: flex; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--border); font-size: 12px; align-items: flex-start; }
 .theme-industrial .feed-row:last-child { border-bottom: none; }
 .theme-industrial .feed-row .when { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.theme-industrial .feed-row[role="button"]:hover { background: var(--surface-2); }
 
 /* new-job wizard (/jobs/new) — step rail + family-card selection states.
    Everything else in the wizard reuses .card/.hd/.dept-grid/.dept-card/
@@ -1019,10 +1056,10 @@ body {
 .theme-industrial .g-track { flex: 1; position: relative; height: 100%; min-width: 420px; }
 .theme-industrial .g-target { position: absolute; top: 13px; height: 5px; background: var(--track); border-radius: 2px; }
 .theme-industrial .g-actual { position: absolute; top: 9px; height: 13px; border-radius: 3px; display: flex; align-items: center; overflow: hidden; }
-.theme-industrial .g-actual b { font-size: 9px; color: rgba(0, 0, 0, .75); padding-left: 5px; font-weight: 600; }
+.theme-industrial .g-actual b { font-size: 11px; color: rgba(0, 0, 0, .75); padding-left: 5px; font-weight: 600; }
 .theme-industrial .g-today { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--text); opacity: .5; }
 .theme-industrial .g-wrap { position: relative; }
-.theme-industrial .g-todaylab { position: absolute; top: -2px; transform: translateX(-50%); font-size: 9px; color: var(--text); opacity: .7; background: var(--bg); padding: 0 4px; }
+.theme-industrial .g-todaylab { position: absolute; top: -2px; transform: translateX(-50%); font-size: 11px; color: var(--text); opacity: .7; background: var(--bg); padding: 0 4px; }
 
 .theme-industrial .bom-grp { border-bottom: 1px solid var(--border); }
 .theme-industrial .bom-grp:last-child { border-bottom: none; }
@@ -1095,10 +1132,29 @@ body {
     border-radius: 6px;
     gap: 6px;
     font-weight: 600;
-    font-size: 11.5px;
+    font-size: 12px;
     text-transform: none;
     letter-spacing: normal;
   }
   .theme-industrial .chip i { display: none; }
   .theme-industrial .chip-icon { display: inline-flex; }
+
+  /* AUD-054 typography floor: 12px minimum under a coarse pointer for the
+     same selectors bumped to 11px above (fine pointer). This block is
+     deliberately last in the .theme-industrial cascade (see the file header
+     comment above @media (pointer: coarse)), so these overrides win. */
+  .theme-industrial th,
+  .theme-industrial .kpi h6,
+  .theme-industrial .stat h6,
+  .theme-industrial .rail-item span,
+  .theme-industrial .rail-item .badge,
+  .theme-industrial .rail-item .badge-alert,
+  .theme-industrial .bell em,
+  .theme-industrial .bn-badge,
+  .theme-industrial .week-cell .dy,
+  .theme-industrial .bars .b span,
+  .theme-industrial .g-actual b,
+  .theme-industrial .g-todaylab {
+    font-size: 12px;
+  }
 }
