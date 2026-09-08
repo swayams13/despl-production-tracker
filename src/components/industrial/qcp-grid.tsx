@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { recordQcpAction } from "@/app/actions/qcp";
+import { recordQcpAction, approveQcpWaiverAction } from "@/app/actions/qcp";
 import type { QcpGrid as QcpGridData, QcpGridRow } from "@/lib/services/qcp-grid.read";
 
 const CHIP: Record<string, string> = {
@@ -12,9 +12,10 @@ const CHIP: Record<string, string> = {
   Pending: "c-idle",
   "QC review": "c-submitted",
   Reinspect: "c-overdue",
+  "Pending waiver": "c-hold",
 };
 
-export function QcpGrid({ jobId, data }: { jobId: number; data: QcpGridData }) {
+export function QcpGrid({ jobId, data, canApproveWaiver }: { jobId: number; data: QcpGridData; canApproveWaiver: boolean }) {
   const router = useRouter();
   const [recordingId, setRecordingId] = useState<number | null>(null);
   const [pending, start] = useTransition();
@@ -30,6 +31,17 @@ export function QcpGrid({ jobId, data }: { jobId: number; data: QcpGridData }) {
       else {
         toast.success(result === "ACCEPTED" ? "Cleared." : result === "REJECTED" ? "Rejected — flagged for reinspection." : "Marked not applicable.");
         setRecordingId(null);
+        router.refresh();
+      }
+    });
+  };
+
+  const approveWaiver = (qcpItemId: number) => {
+    start(async () => {
+      const r = await approveQcpWaiverAction(qcpItemId, data.unitId);
+      if (!r.ok) toast.error(r.message);
+      else {
+        toast.success("Waiver approved — hold point cleared.");
         router.refresh();
       }
     });
@@ -72,6 +84,8 @@ export function QcpGrid({ jobId, data }: { jobId: number; data: QcpGridData }) {
                 recordingId={recordingId}
                 setRecordingId={setRecordingId}
                 onRecord={record}
+                onApproveWaiver={approveWaiver}
+                canApproveWaiver={canApproveWaiver}
                 pending={pending}
               />
             ))}
@@ -87,12 +101,16 @@ function QcpSectionRows({
   recordingId,
   setRecordingId,
   onRecord,
+  onApproveWaiver,
+  canApproveWaiver,
   pending,
 }: {
   sec: QcpGridData["sections"][number];
   recordingId: number | null;
   setRecordingId: (id: number | null) => void;
   onRecord: (qcpItemId: number, result: "ACCEPTED" | "REJECTED" | "NA") => void;
+  onApproveWaiver: (qcpItemId: number) => void;
+  canApproveWaiver: boolean;
   pending: boolean;
 }) {
   return (
@@ -103,7 +121,16 @@ function QcpSectionRows({
         </td>
       </tr>
       {sec.rows.map((row) => (
-        <QcpRow key={row.qcpItemId} row={row} recording={recordingId === row.qcpItemId} setRecording={setRecordingId} onRecord={onRecord} pending={pending} />
+        <QcpRow
+          key={row.qcpItemId}
+          row={row}
+          recording={recordingId === row.qcpItemId}
+          setRecording={setRecordingId}
+          onRecord={onRecord}
+          onApproveWaiver={onApproveWaiver}
+          canApproveWaiver={canApproveWaiver}
+          pending={pending}
+        />
       ))}
     </>
   );
@@ -114,15 +141,23 @@ function QcpRow({
   recording,
   setRecording,
   onRecord,
+  onApproveWaiver,
+  canApproveWaiver,
   pending,
 }: {
   row: QcpGridRow;
   recording: boolean;
   setRecording: (id: number | null) => void;
   onRecord: (qcpItemId: number, result: "ACCEPTED" | "REJECTED" | "NA") => void;
+  onApproveWaiver: (qcpItemId: number) => void;
+  canApproveWaiver: boolean;
   pending: boolean;
 }) {
-  const actionable = row.status !== "Cleared";
+  const actionable = row.status !== "Cleared" && !row.pendingWaiver;
+  // AUD-003: a Production Head/Admin sign-off, not the QC Reject/Clear pair —
+  // only offered on a checkpoint that is actually sitting in the pending-NA
+  // state, and only to a role that can call approveQcpWaiver server-side.
+  const showApproveWaiver = row.pendingWaiver && canApproveWaiver;
   return (
     <tr className="row">
       <td className="mono" style={{ color: "var(--muted)" }}>{row.srNo}</td>
@@ -134,6 +169,9 @@ function QcpRow({
       <td><span className={`chip ${CHIP[row.status] ?? "c-idle"}`}><i />{row.status}</span></td>
       <td className="num mono" style={{ color: row.ageDays > 3 ? "var(--s-overdue)" : "var(--muted)" }}>{row.ageDays > 0 ? `${row.ageDays}d` : "—"}</td>
       <td className="num">
+        {showApproveWaiver && (
+          <button className="btn btn-accent" disabled={pending} onClick={() => onApproveWaiver(row.qcpItemId)}>Approve waiver</button>
+        )}
         {actionable && (
           recording ? (
             <span style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
