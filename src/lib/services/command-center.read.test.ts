@@ -266,3 +266,99 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — batched fan-ou
     }
   });
 });
+
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadCommandCenter — one job's malformed spine must not 500 the whole screen (AUD-090)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("a cyclic JobProcessEdge graph on one job is skipped; the tenant's other job still renders", async () => {
+    const org = await owner.organization.create({ data: { code: `CC-CPM-${Date.now()}`, name: "Command Center CPM safety test" } });
+    const tenantId = org.id;
+    const dept = await owner.department.create({ data: { tenantId, code: "STORES", name: "Stores" } });
+    const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-CC-CPM-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PV", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+
+    // Good job: one process, no edges — a normal, computable spine.
+    const goodJob = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-cc-cpm-good-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-CCCPM-GOOD-${Date.now()}`,
+      },
+    });
+    const goodRun = await owner.scheduleRun.create({
+      data: { jobId: goodJob.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const goodProcess = await owner.jobProcess.create({
+      data: { jobId: goodJob.id, seq: 1, code: "P1", name: "Material receipt", departmentId: dept.id, durationMinDays: 1, durationMaxDays: 2 },
+    });
+    const goodPlan = await owner.processPlan.create({
+      data: { jobId: goodJob.id, scheduleRunId: goodRun.id, jobProcessId: goodProcess.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    // Bad job: two processes whose JobProcessEdges form a 2-node cycle —
+    // computeCpm's topologicalOrder throws on this (cpm.ts: "process graph
+    // has a cycle"). Before this fix, that throw propagated straight out of
+    // loadCommandCenter's per-job loop and 500'd the whole screen.
+    const badJob = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-cc-cpm-bad-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-CCCPM-BAD-${Date.now()}`,
+      },
+    });
+    const badRun = await owner.scheduleRun.create({
+      data: { jobId: badJob.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+    const badP1 = await owner.jobProcess.create({
+      data: { jobId: badJob.id, seq: 1, code: "P1", name: "Bad step 1", departmentId: dept.id, durationMinDays: 1, durationMaxDays: 2 },
+    });
+    const badP2 = await owner.jobProcess.create({
+      data: { jobId: badJob.id, seq: 2, code: "P2", name: "Bad step 2", departmentId: dept.id, durationMinDays: 1, durationMaxDays: 2 },
+    });
+    await owner.jobProcessEdge.create({
+      data: { jobId: badJob.id, processId: badP1.id, predecessorId: badP2.id, type: "FINISH_TO_START", lagDays: 0 },
+    });
+    await owner.jobProcessEdge.create({
+      data: { jobId: badJob.id, processId: badP2.id, predecessorId: badP1.id, type: "FINISH_TO_START", lagDays: 0 },
+    });
+    await owner.processPlan.create({
+      data: { jobId: badJob.id, scheduleRunId: badRun.id, jobProcessId: badP1.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" },
+    });
+
+    const viewer: Actor = {
+      userId: 1,
+      tenantId,
+      clientId: null,
+      name: "PH",
+      email: "ph@despl.test",
+      roles: [ROLES.PRODUCTION_HEAD],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+
+    // Must not throw — the whole point of this fix.
+    const view = await loadCommandCenter(viewer, dept.id, "STORES", "Stores");
+
+    const allRows = [...view.decideToday, ...view.waitingOnOthers, ...view.blocking, ...view.pipeline.flatMap((c) => c.rows)];
+    // Good job's CPM-derived data survives intact.
+    expect(allRows.some((r) => r.ranked.plan.id === goodPlan.id)).toBe(true);
+    // Bad job contributes no CPM-derived rows anywhere — it was skipped, not
+    // half-rendered.
+    expect(allRows.some((r) => r.jobId === badJob.id)).toBe(false);
+  });
+});

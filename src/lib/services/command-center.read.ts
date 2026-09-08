@@ -1,7 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { hasRole, ROLES, type Actor } from "@/lib/authz";
-import { computeCpm } from "@/lib/schedule";
-import { getCurrentScheduleRunsBatch, loadJobSpinesBatch } from "./_shared";
+import { getCurrentScheduleRunsBatch, loadJobSpinesBatch, computeCpmSafe } from "./_shared";
 import { prioritize, compareRankedPlans, type RankedPlan, type PlanState } from "./prioritizer";
 import { loadJobs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
@@ -258,7 +257,12 @@ export async function loadCommandCenter(
 
       const spine = spinesByJob.get(job.id);
       if (!spine) continue;
-      const cpm = computeCpm(spine.processes, spine.edges);
+      // A batch omission or a malformed spine (cycle, missing duration) on
+      // ANY one job must not 500 the Command Center for every department —
+      // skip just this job's contribution (audit H2/0.10, myday.read.ts's
+      // same pattern).
+      const cpm = computeCpmSafe(spine.processes, spine.edges);
+      if (!cpm) continue;
       const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
       const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
       const procMeta = new Map(

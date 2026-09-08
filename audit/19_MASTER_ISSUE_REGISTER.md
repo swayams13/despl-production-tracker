@@ -115,7 +115,7 @@ by domain. Full evidence for each is in the referenced document.*
 | AUD-087 | Reports is a mailing tool, not a reporting surface — which is why analysis colonised the dashboard | `reports/` | M | `06` §9 |
 | AUD-088 | The Gantt tab ships ~1,440 bar objects for a screen showing one unit | `gantt.read.ts:43-96` | M | `07` §4 |
 | AUD-089 | The cron notification guard is not atomic; a missed run is silent | `notifications.service.ts:149` | S | `15` §4 |
-| AUD-090 | Command Center uses `computeCpm`, not `computeCpmSafe` — one bad spine 500s six departments | `command-center.read.ts:243` | S | `15` §6 |
+| AUD-090 | ☑ **CLOSED — PR TBD (branch `fix/aud-090-command-center-safe-cpm`).** ~~Command Center uses `computeCpm`, not `computeCpmSafe` — one bad spine 500s six departments~~ Swapped for `computeCpmSafe` + `if (!cpm) continue;` at the one call site, matching `myday.read.ts`'s existing pattern verbatim. `activeRunIds.push(run.id)` already ran before the spine/CPM check in this file, so a bad job's cleared-today counts (which don't depend on CPM) still count; only its CPM-derived rows (`ownRows`/`blockingRows`/`pipeline`) are skipped. | `command-center.read.ts:261` | S | `15` §6 |
 | AUD-091 | No error boundary outside `(app)`; no `global-error.tsx`; `/login` renders raw during an outage | `src/app/` | S | `15` §3 |
 | AUD-092 | The BOM tree loads every operation, rejection, procurement event and stock txn for an equipment | `bom.read.ts:360-430` | M | `14` §9 |
 | AUD-093 | The welding view reads every joint and NDT result ever to draw a 14-day sparkline | `welding.read.ts:86-170` | M | `14` §9 |
