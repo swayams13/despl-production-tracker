@@ -1,0 +1,31 @@
+-- AUD-100 — the migration set does not replay from scratch on a clean
+-- cluster. `20260815120000_v_unit_stage_status`, `20260827040000_v_process_
+-- plan_percent`, `20260905020000_operation_ref_family_seq`, and
+-- `20260908100000_tenant_scoped_status_views` each end with a bare
+-- `GRANT SELECT ON <view> TO despl_web;`. `despl_web` is not created by the
+-- migration set at all — it's created by `scripts/provision-db-role.sql`,
+-- run out-of-band, once per environment. Replaying every migration on an
+-- empty cluster (no despl_web pre-created — the normal rehearsal path
+-- always has one already and never exercises this) fails at each of those
+-- four statements with "role despl_web does not exist".
+--
+-- Not fixed by editing those four migrations — applied migrations are
+-- immutable here (Prisma checksums them; historical files never change).
+-- Fixed by granting to despl_app instead, additively, in a new migration.
+-- despl_app is the NOLOGIN permission-bundle role created idempotently by
+-- 20260813051500_rls_and_app_role, and provision-db-role.sql's own
+-- `GRANT despl_app TO despl_web;` (line 27) makes despl_web a real member
+-- of it, so despl_web inherits SELECT on both views through this grant
+-- without needing to exist yet when the migration set runs. Confirmed by
+-- reading that script, not assumed.
+--
+-- This changes nothing for any cluster that already has despl_web — it
+-- already holds SELECT on both views directly, granted by the migrations
+-- above; those direct grants are left untouched and are now redundant but
+-- harmless. This migration only changes what a brand-new cluster gets when
+-- replaying from migration #1: despl_app (and therefore any role granted
+-- despl_app, including a despl_web created later) gets SELECT immediately,
+-- with no ordering dependency on when despl_web shows up.
+
+GRANT SELECT ON v_unit_stage_status TO despl_app;
+GRANT SELECT ON v_process_plan_percent TO despl_app;
