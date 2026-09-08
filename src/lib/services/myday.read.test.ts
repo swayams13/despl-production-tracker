@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadMyDay, type MyDayView } from "./myday.read";
 import { workingDaysBetween, DEFAULT_CALENDAR } from "@/lib/schedule";
 import { ROLES, type Actor } from "@/lib/authz";
+import { istCalendarDayMarker } from "@/lib/shared/business-day";
 
 /**
  * `/my-day` (personal dashboards v1, SPEC §6.1). No pure-testable surface —
@@ -220,11 +221,22 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     jpDurationMax.set("done", 2);
     const done_actualStart = new Date(now.getTime() - 2 * 24 * 3600 * 1000);
     const done_actualFinish = new Date(now.getTime());
+    // plannedFinish must be a truncated IST-calendar-day marker, matching how
+    // every real writer (schedule.service.ts / override.service.ts, both via
+    // addWorkingDays → toDateOnly) actually stores it — never a raw
+    // timestamp. A raw `now` here made isOnTime's result flip on UTC
+    // time-of-day (see business-day.test.ts's "UTC-evening" cases): once IST
+    // had already rolled to the next calendar day relative to UTC's "today",
+    // istCalendarDayMarker(actualFinish) computed tomorrow's marker while this
+    // raw dueDate still carried today's date + time-of-day, so `on time`
+    // spuriously evaluated false. Using the same marker for both sides make
+    // this deterministically on-time regardless of wall-clock time of day.
+    const done_plannedFinish = istCalendarDayMarker(done_actualFinish);
     planDoneMine = {
       ...(await owner.processPlan.create({
         data: {
           jobId: jp6.jobId, scheduleRunId: run.id, jobProcessId: jp6.id, ownerDepartmentId: deptMine.id, assigneeUserId: meUser.id,
-          status: "COMPLETE", plannedFinish: done_actualFinish, actualStart: done_actualStart, actualFinish: done_actualFinish,
+          status: "COMPLETE", plannedFinish: done_plannedFinish, actualStart: done_actualStart, actualFinish: done_actualFinish,
         },
       })),
       actualStart: done_actualStart,
@@ -235,7 +247,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("myday.read (DB)", async () => {
     jpDurationMax.set("late", 2);
     const late_actualStart = new Date(now.getTime() - 5 * 24 * 3600 * 1000);
     const late_actualFinish = new Date(now.getTime());
-    const late_plannedFinish = new Date(now.getTime() - 5 * 24 * 3600 * 1000); // took 5 real days against a same-day plan → late
+    // Also a truncated marker for realism (5 real days late either way, so
+    // this one was never time-of-day sensitive, but it should still reflect
+    // the shape production actually writes).
+    const late_plannedFinish = istCalendarDayMarker(new Date(now.getTime() - 5 * 24 * 3600 * 1000)); // took 5 real days against a same-day plan → late
     planCompleteLate = {
       ...(await owner.processPlan.create({
         data: {
