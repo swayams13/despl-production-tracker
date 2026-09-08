@@ -1017,6 +1017,7 @@ body {
 .theme-industrial .feed-row { display: flex; gap: 10px; padding: 9px 16px; border-bottom: 1px solid var(--border); font-size: 12px; align-items: flex-start; }
 .theme-industrial .feed-row:last-child { border-bottom: none; }
 .theme-industrial .feed-row .when { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.theme-industrial .feed-row[role="button"]:hover { background: var(--surface-2); }
 
 /* new-job wizard (/jobs/new) — step rail + family-card selection states.
    Everything else in the wizard reuses .card/.hd/.dept-grid/.dept-card/

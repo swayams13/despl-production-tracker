@@ -5688,3 +5688,17 @@ Also (same file, same fix already applied in Steps 2/3): `CommandRow`'s clickabl
 **Verified**: `pnpm typecheck`/`lint` clean, `pnpm test` 629/629 (unchanged — this step touched no service/business logic, only presentation, so the full `pnpm test:db` re-run from Step 4 still stands). **Not verified live in a browser** — same Chrome-extension situation as every prior step this session.
 
 **Next**: Step 6, Project Control Centre.
+
+## Session — Phase 4 design-handoff implementation, step 6 Project Control Centre, 8 Sep 2026
+
+**Found already mature**: `jobs/[id]`'s Overview tab already has a `loading.tsx`, real `<Link>`-based tabs (already keyboard-reachable), a real `<button>` for every units×stage matrix cell (already keyboard-reachable, already has `aria-label`), and `.grid-2` for the two-column desktop/stacked-laptop layout RESPONSIVE_GUIDELINES.md asks for. The page header wasn't swapped onto `<PageHeader>` — it has real content (StatusChip, JobDetailsEditor, JobDateEditor) that doesn't cleanly fit the component's title/subtitle/actions shape without distorting either the header's layout or the component's contract, so it was deliberately left hand-rolled rather than forced.
+
+**Checked the actual mockup HTML rather than guess at scope**: grepped `design_handoff_phase4/mockups/DESPL Round 2.dc.html`'s `01 Project Control Centre` section directly. Its real second panel is **"Exceptions"**, not an activity log — confirmed independently by UX_FINAL_REVIEW.md's own screen review: "Activity-level table deliberately absent — exceptions list links out instead." The current build had drifted from that: its Overview tab showed a 5-row "Activity" preview (duplicating the dedicated "Activity" tab one click away) instead of Exceptions.
+
+**Fixed**: replaced that Activity preview with a real `ExceptionsCard` — every unit×stage segment across the job currently `overdue`, `on hold`, or carrying a `rejected` marker, sorted rejected/overdue-first, each row opening the same `StageSheet` the matrix cells already do. Computed entirely from `unitSpines` (already loaded for the stage spine/matrix above it) — **no new query**, since every `StageSegment` already carries `status`/`overdue`/`rejected`. The full activity log is unaffected — still one click away via the existing "Activity" tab, this only removed a duplicate preview of it. Rows use `clickableRowProps()` (same accessibility fix as Steps 2-4); added a `.feed-row[role="button"]:hover` rule since this row type had never been clickable before.
+
+**Deliberately NOT built, logged rather than guessed at**: the mockup's other two Project Control Centre panels — "Departments on this project" (per-department health/status for this job) and "Upcoming milestones" — have no equivalent in the current build and no existing data read to reuse (unlike Exceptions, which only needed a client-side filter over already-loaded data). Building either would mean new service-layer queries, matching Activity Detail/Supervisor Team's scope from Steps 3-4, not a "hardening" pass — out of budget for this session given Step 7 (10 more screens) is still ahead. Flagged for a future session, not invented here.
+
+**Verified**: `pnpm typecheck`/`lint` clean, `pnpm test` 629/629 (this step touched no service files — the Exceptions computation is pure client-side derivation from existing props — so no DB-gated re-run was needed). **Not verified live in a browser** — same Chrome-extension situation as every step this session.
+
+**Next**: Step 7, remaining Round 1-3 screens.
