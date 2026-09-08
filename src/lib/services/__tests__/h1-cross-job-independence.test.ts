@@ -35,7 +35,7 @@ describe.skipIf(!RUN_DB)("H1 — cross-job independence (Project A vs Project B)
   const { startAssemblyStep, submitAssemblyStep, rejectAssemblyStep, verifyAssemblyStep } = await import(
     "../assembly.service"
   );
-  const { closeNcr } = await import("../ncr.service");
+  const { closeNcr, dispositionNcr } = await import("../ncr.service");
   const { receiveStock, issueStock } = await import("../stock.service");
   const { createDrawingRevision } = await import("../drawing.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
@@ -267,6 +267,8 @@ describe.skipIf(!RUN_DB)("H1 — cross-job independence (Project A vs Project B)
     await submitAssemblyStep(sup, { assemblyStepId: A.assemblyStep.id });
     const rejection = await owner.assemblyStepRejection.findFirstOrThrow({ where: { assemblyStepId: A.assemblyStep.id } });
     const ncr = await owner.ncr.findUniqueOrThrow({ where: { assemblyStepRejectionId: rejection.id } });
+    // AUD-026: verify no longer auto-closes an OPEN Ncr — disposition it first.
+    await dispositionNcr(qc, { ncrId: ncr.id, disposition: "USE_AS_IS" });
     const verified = await verifyAssemblyStep(qc, { assemblyStepId: A.assemblyStep.id });
     expect(verified.status).toBe("COMPLETE");
     const closed = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
@@ -280,6 +282,8 @@ describe.skipIf(!RUN_DB)("H1 — cross-job independence (Project A vs Project B)
     await rejectComponentOperation(qc, { componentOperationId: A.componentOp.id, categoryId: delayCategory.id, detail: "ctl2" });
     const opRejection = await owner.componentOperationRejection.findFirstOrThrow({ where: { componentOperationId: A.componentOp.id } });
     const opNcr = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: opRejection.id } });
+    // AUD-026: closeNcr no longer accepts an OPEN source — disposition it first.
+    await dispositionNcr(qc, { ncrId: opNcr.id, disposition: "USE_AS_IS" });
     const directClose = await withTenant(tenantId, (tx) => closeNcr(tx, qc, { ncrId: opNcr.id, jobId: A.job.id }));
     expect(directClose.status).toBe("CLOSED");
 
