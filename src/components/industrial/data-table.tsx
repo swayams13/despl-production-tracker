@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 /**
  * DataTable helpers (COMPONENT_INVENTORY.md's table-system rules) — NOT a
@@ -59,6 +59,44 @@ export function SortableTh<K extends string>({
       </button>
     </th>
   );
+}
+
+/**
+ * ACCESSIBILITY_AUDIT.md's named gap: "Table row click-to-navigate … must
+ * also be a real focusable element (button/link role), not a div-only
+ * onClick — currently the mockups use onClick on divs for speed; production
+ * must upgrade these to semantic, focusable elements." Confirmed live in
+ * this codebase on every clickable `<tr>`/`.rt-card`/`<QueueCard>` (my-day,
+ * workspace, command/[dept], departments, qc all share the pattern) — none
+ * are keyboard-reachable today. Spread the return value onto the row/card
+ * element; returns `{}` for a non-clickable row so the element stays a
+ * plain, non-interactive `<tr>`/`<div>` (many rows are conditionally
+ * clickable — job-grain rows with no unitId have nothing to open).
+ *
+ * Every row this wraps also nests real action buttons/selects (Start,
+ * Claim, delay-reason picker, …), already `stopPropagation`'d on click so a
+ * button tap doesn't also open the row. `keydown` bubbles the same way
+ * `click` does, so without the `target !== currentTarget` guard below,
+ * pressing Enter/Space on a nested button would ALSO fire the row's own
+ * onClick (the keydown bubbles up from the button to this row, which has no
+ * stopPropagation of its own) — a real double-fire, not a hypothetical one.
+ */
+export function clickableRowProps(onClick: (() => void) | undefined, label?: string) {
+  if (!onClick) return {};
+  return {
+    role: "button" as const,
+    tabIndex: 0,
+    "aria-label": label,
+    onClick,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.target !== e.currentTarget) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onClick();
+      }
+    },
+    style: { cursor: "pointer" },
+  };
 }
 
 /** Focusable disclosure toggle for a row's Detail-tier fields. */

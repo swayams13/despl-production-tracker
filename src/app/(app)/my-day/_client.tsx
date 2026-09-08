@@ -11,6 +11,7 @@ import { CountUp } from "@/components/industrial/count-up";
 import { ResponsiveTable } from "@/components/industrial/responsive-table";
 import { QueueCard } from "@/components/industrial/queue-card";
 import { StatusChip } from "@/components/industrial/status-chip";
+import { clickableRowProps } from "@/components/industrial/data-table";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { ActionResult } from "@/app/actions/_action";
 import type { MyDayView, MyDayRow } from "@/lib/services/myday.read";
@@ -215,7 +216,7 @@ function MineRowView({
   const { refusal, pending, run, categoryId, setCategoryId, detail, setDetail, overdue, canStartAfterFile, clickable, fileReason } = useMineRowActions(row);
 
   return (
-    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <tr className="row" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -262,7 +263,7 @@ function MineCardView({
   const { status, label } = mineDisplayStatus(row);
 
   return (
-    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <div className="rt-card" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <div className="rt-card-top">
         <b>{row.processName}</b>
         <StatusChip status={status} label={label} />
@@ -319,7 +320,7 @@ function PoolRowView({
   const { refusal, pending, run, clickable } = usePoolRowActions(row);
 
   return (
-    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <tr className="row" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -375,7 +376,7 @@ function PoolCardView({
   const { refusal, pending, run, clickable } = usePoolRowActions(row);
 
   return (
-    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <div className="rt-card" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <div className="rt-card-top">
         <b>{row.processName}</b>
         <StatusChip status="idle" label="Unassigned" />
@@ -440,7 +441,7 @@ function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () =
   const { refusal, pending, run, rejecting, setRejecting, reason, setReason, reject, clickable } = useQcRowActions(row);
 
   return (
-    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <tr className="row" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -469,7 +470,7 @@ function QcQueueCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () 
   const { refusal, pending, run, rejecting, setRejecting, reason, setReason, reject, clickable } = useQcRowActions(row);
 
   return (
-    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <div className="rt-card" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <div className="rt-card-top">
         <b>{row.processName}</b>
         <StatusChip status="submitted" />
@@ -503,7 +504,7 @@ function QcQueueCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () 
 function SelfSubmittedRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
   const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
   return (
-    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <tr className="row" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -521,7 +522,7 @@ function SelfSubmittedRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage
 function SelfSubmittedCardView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () => void }) {
   const clickable = row.ranked.plan.unitId != null; // job-grain rows have no StageSheet to open — see MineRowView
   return (
-    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <div className="rt-card" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <div className="rt-card-top">
         <b>{row.processName}</b>
         <StatusChip status="submitted" />
@@ -563,7 +564,7 @@ function TeamHeldRowView({
   const { refusal, pending, run, clickable, status, label } = useTeamHeldRowActions(row);
 
   return (
-    <tr className="row" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <tr className="row" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <td style={{ width: 40 }}>
         <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials(row.assigneeName ?? "—")}</div>
       </td>
@@ -605,7 +606,7 @@ function TeamHeldCardView({
   const { refusal, pending, run, clickable, status, label } = useTeamHeldRowActions(row);
 
   return (
-    <div className="rt-card" onClick={clickable ? onOpenStage : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <div className="rt-card" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <div className="rt-card-top">
         <b>{row.processName}</b>
         <StatusChip status={status} label={label} />

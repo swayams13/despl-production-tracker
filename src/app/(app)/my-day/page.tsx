@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { loadMyDay } from "@/lib/services/myday.read";
+import { PageHeader } from "@/components/industrial/page-header";
 import { MyDayClient } from "./_client";
 
 const ROLE_LABEL: Record<string, string> = {
@@ -56,23 +57,27 @@ export default async function MyDay() {
 
   return (
     <>
-      <div className="page-h">
-        <h1>My Day</h1>
-        <span className="sub">
-          Hi {firstName} · {roleLabel || "—"} · {depts.map((d) => d.name).join(", ") || "—"} · {today} · cleared today:{" "}
-          <span className="mono">{view.clearedToday}</span>
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 14 }}>
-          {officeDept && (
-            <Link href={`/command/${officeDept.code.toLowerCase()}`} className="sub">
-              Command Center →
+      <PageHeader
+        title="My Day"
+        subtitle={
+          <>
+            Hi {firstName} · {roleLabel || "—"} · {depts.map((d) => d.name).join(", ") || "—"} · {today} · cleared today:{" "}
+            <span className="mono">{view.clearedToday}</span>
+          </>
+        }
+        actions={
+          <>
+            {officeDept && (
+              <Link href={`/command/${officeDept.code.toLowerCase()}`} className="sub">
+                Command Center →
+              </Link>
+            )}
+            <Link href="/workspace" className="sub">
+              Department view →
             </Link>
-          )}
-          <Link href="/workspace" className="sub">
-            Department view →
-          </Link>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <MyDayClient view={view} actorUserId={actor.userId} isQc={isQc} canAssign={canAssign} />
     </>
