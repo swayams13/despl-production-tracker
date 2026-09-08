@@ -5855,7 +5855,7 @@ Picked up `audit/SESSION-05-AUD-100.md`. The brief's defect: replaying every mig
 
 **Verified**: `pnpm lint`/`typecheck` clean. No application code touched; no historical migration edited or reordered. Docker container removed after testing — no shared/remote database touched, `despl_demo` untouched, matching the brief's explicit ban.
 
-**Landed**: branch `fix/aud-100-migration-replay-grants`, PR #46 opened against `main`, not merged. `audit/19_MASTER_ISSUE_REGISTER.md` marks AUD-100 closed on narrow scope — the residual replay-from-absolute-zero limitation is written into that row, not hidden. `docs/mos-execution/LEDGER.md` updated with the same findings.
+**Landed**: branch `fix/aud-100-migration-replay-grants`, PR #47 opened against `main`, not merged. `audit/19_MASTER_ISSUE_REGISTER.md` marks AUD-100 closed on narrow scope — the residual replay-from-absolute-zero limitation is written into that row, not hidden. `docs/mos-execution/LEDGER.md` updated with the same findings.
 
 **Explicitly out of scope, per the brief**: fixing `ci.yml` to exercise the true from-scratch case, and any other grant-ordering/role-provisioning issue — both just noted here and in the LEDGER.
 
