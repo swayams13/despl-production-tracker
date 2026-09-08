@@ -63,6 +63,8 @@ const STATUS: Record<ErrorCode, number> = {
   ROUTE_STEP_SEQ_UNKNOWN: 409,
   UNIT_NOT_COMPLETE: 409,
   QCP_CODE_NOT_WAIVABLE: 409,
+  PROCESS_NOT_OPTIONAL: 409,
+  EXCLUSION_REASON_REQUIRED: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

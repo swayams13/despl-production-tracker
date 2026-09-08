@@ -178,6 +178,26 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     });
   }
 
+  // AUD-033: seed/lead-time-model.json's 36 PRESSURE_VESSEL processes carry
+  // no `optional` field at all (prisma/seed.ts's templateProcess.createMany
+  // never sets it), so every seeded TemplateProcess.optional is false today —
+  // there is currently no real seeded process a test can exclude and expect
+  // to succeed. Rather than fabricate a synthetic template/version (which the
+  // session brief explicitly steers away from), these tests flip a real
+  // seeded row's `optional` flag for the duration of one assertion, then put
+  // it back — the row and its code are real, only the flag is toggled.
+  // Recommendation: seed data should mark at least one real conditional
+  // process (schema's own doc comment names PWHT) `optional: true`; tracked
+  // as a follow-up, not fixed in this session (see PR notes).
+  async function withOptionalTrue(versionId: number, code: string, fn: () => Promise<void>) {
+    await owner.templateProcess.updateMany({ where: { versionId, code }, data: { optional: true } });
+    try {
+      await fn();
+    } finally {
+      await owner.templateProcess.updateMany({ where: { versionId, code }, data: { optional: false } });
+    }
+  }
+
   // Job's FK children are NOT uniformly onDelete: Cascade (Equipment, Unit,
   // BomItem and QcpTemplate are not — only JobProcess/JobProcessEdge/
   // ScheduleRun/AssemblyDrawing/DispatchBatch are), so a bare `job.delete`
@@ -266,21 +286,134 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
 
   it("keeps excluded processes AND their edges, marked included: false", async () => {
     const refs = await seedRefs();
+    // seq 28 ("Draining & Drying") — an arbitrary real process, flipped
+    // optional for this test only (see withOptionalTrue's note above).
     const someCode = (await owner.templateProcess.findFirstOrThrow({
-      where: { versionId: refs.version.id, seq: 10 },
+      where: { versionId: refs.version.id, seq: 28 },
     })).code;
 
-    const r = await createJob(actor(), base({ jobNumber: "TEST-EXCL-1", excludedProcessCodes: [someCode] }, refs));
-    created.push(r.jobId);
+    await withOptionalTrue(refs.version.id, someCode, async () => {
+      const r = await createJob(
+        actor(),
+        base(
+          { jobNumber: "TEST-EXCL-1", excludedProcessCodes: [someCode], exclusionReason: "Client scope waiver" },
+          refs,
+        ),
+      );
+      created.push(r.jobId);
 
-    const excluded = await owner.jobProcess.findFirstOrThrow({ where: { jobId: r.jobId, code: someCode } });
-    expect(excluded.included).toBe(false);
-    // Durations retained: bypassExcluded needs duration(X) to compose the bridge lag.
-    expect(excluded.durationMaxDays).not.toBeNull();
-    const stillWired = await owner.jobProcessEdge.count({
-      where: { OR: [{ processId: excluded.id }, { predecessorId: excluded.id }] },
+      const excluded = await owner.jobProcess.findFirstOrThrow({ where: { jobId: r.jobId, code: someCode } });
+      expect(excluded.included).toBe(false);
+      // Durations retained: bypassExcluded needs duration(X) to compose the bridge lag.
+      expect(excluded.durationMaxDays).not.toBeNull();
+      const stillWired = await owner.jobProcessEdge.count({
+        where: { OR: [{ processId: excluded.id }, { predecessorId: excluded.id }] },
+      });
+      expect(stillWired).toBeGreaterThan(0);
     });
-    expect(stillWired).toBeGreaterThan(0);
+  });
+
+  // ── AUD-033: TemplateProcess.optional enforcement ──────────────────────
+  describe("AUD-033 — excluding a non-optional template process is refused", () => {
+    it("1. excludes a real optional process, with a reason: succeeds, included: false, reason lands on the audit event", async () => {
+      const refs = await seedRefs();
+      const optionalCode = (await owner.templateProcess.findFirstOrThrow({
+        where: { versionId: refs.version.id, seq: 28 },
+      })).code;
+
+      await withOptionalTrue(refs.version.id, optionalCode, async () => {
+        const r = await createJob(
+          actor(),
+          base(
+            {
+              jobNumber: "TEST-AUD033-OK",
+              excludedProcessCodes: [optionalCode],
+              exclusionReason: "Client waived drying — pneumatic test only",
+            },
+            refs,
+          ),
+        );
+        created.push(r.jobId);
+
+        const jp = await owner.jobProcess.findFirstOrThrow({ where: { jobId: r.jobId, code: optionalCode } });
+        expect(jp.included).toBe(false);
+
+        const auditRow = await owner.auditLog.findFirstOrThrow({
+          where: { action: "job.create", entityType: "Job", entityId: String(r.jobId) },
+        });
+        const after = auditRow.after as Record<string, unknown> | null;
+        expect(after?.excludedProcessCodes).toEqual([optionalCode]);
+        expect(after?.exclusionReason).toBe("Client waived drying — pneumatic test only");
+      });
+    });
+
+    it("2. excludes a real optional process with no reason supplied: refused", async () => {
+      const refs = await seedRefs();
+      const optionalCode = (await owner.templateProcess.findFirstOrThrow({
+        where: { versionId: refs.version.id, seq: 28 },
+      })).code;
+
+      await withOptionalTrue(refs.version.id, optionalCode, async () => {
+        await expect(
+          createJob(
+            actor(),
+            base({ jobNumber: "TEST-AUD033-NOREASON", excludedProcessCodes: [optionalCode] }, refs),
+          ),
+        ).rejects.toMatchObject({ code: ERROR_CODES.EXCLUSION_REASON_REQUIRED });
+        expect(await owner.job.count({ where: { jobNumber: "TEST-AUD033-NOREASON" } })).toBe(0);
+      });
+    });
+
+    it("3. excludes a real non-optional process (PWHT): refused PROCESS_NOT_OPTIONAL, whole transaction rolled back", async () => {
+      const refs = await seedRefs();
+      const pwht = await owner.templateProcess.findFirstOrThrow({
+        where: { versionId: refs.version.id, name: { contains: "PWHT" } },
+      });
+      expect(pwht.optional).toBe(false); // sanity: this is the seeded default, not a synthetic fixture
+
+      const auditBefore = await owner.auditLog.count({ where: { action: "job.create" } });
+      await expect(
+        createJob(
+          actor(),
+          base(
+            {
+              jobNumber: "TEST-AUD033-MANDATORY",
+              excludedProcessCodes: [pwht.code],
+              exclusionReason: "Trying to skip PWHT",
+            },
+            refs,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: ERROR_CODES.PROCESS_NOT_OPTIONAL, detail: { processCodes: [pwht.code] } });
+
+      expect(await owner.job.count({ where: { jobNumber: "TEST-AUD033-MANDATORY" } })).toBe(0);
+      expect(await owner.jobProcess.count({ where: { code: pwht.code, job: { jobNumber: "TEST-AUD033-MANDATORY" } } })).toBe(0);
+      expect(await owner.auditLog.count({ where: { action: "job.create" } })).toBe(auditBefore);
+    });
+
+    it("4. excludes a code that doesn't exist in the template version: unchanged, refused NOT_FOUND", async () => {
+      const refs = await seedRefs();
+      await expect(
+        createJob(
+          actor(),
+          base(
+            {
+              jobNumber: "TEST-AUD033-UNKNOWN",
+              excludedProcessCodes: ["NO-SUCH-CODE"],
+              exclusionReason: "irrelevant",
+            },
+            refs,
+          ),
+        ),
+      ).rejects.toMatchObject({ code: ERROR_CODES.NOT_FOUND, detail: { entity: "TemplateProcess" } });
+    });
+
+    it("5. no exclusions at all: unaffected, succeeds without a reason", async () => {
+      const refs = await seedRefs();
+      const r = await createJob(actor(), base({ jobNumber: "TEST-AUD033-NONE" }, refs));
+      created.push(r.jobId);
+      expect(r.processCount).toBeGreaterThan(0);
+    });
   });
 
   it("gives the job a uuid publicId, not something derivable from its id", async () => {

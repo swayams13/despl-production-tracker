@@ -594,6 +594,7 @@ describe.skipIf(!RUN_DB)("qcp.service — library authoring (DB)", async () => {
       remarks: null,
       specs: null,
       excludedProcessCodes: [],
+      exclusionReason: null,
       equipments: [{ equipmentTypeId: null, name: "Vessel", blockNo: 1, remarks: null, serials: ["SR01"] }],
       qcpTemplateSourceId: template.id,
       copyBomFromEquipmentId: null,
