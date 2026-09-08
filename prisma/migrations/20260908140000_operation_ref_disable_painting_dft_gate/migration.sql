@@ -1,0 +1,17 @@
+-- AUD-029: PAINTING's requires_dft_gate flag (turned on by
+-- 20260904230000_operation_ref_requires_dft_gate) has no reachable producer.
+-- component.service.ts's recordPaintRecord/recordDftReading exist only as
+-- service-layer functions -- no Server Action, route, or UI anywhere under
+-- src/app or src/components ever calls them. Every real PAINTING
+-- ComponentOperation therefore starts and submits fine, then sits SUBMITTED
+-- forever: verifyComponentOperation's DFT gate always throws
+-- DFT_NOT_ACCEPTED, and assertComponentOpsComplete then blocks the owning
+-- process stage and everything downstream of it. No floor user, supervisor,
+-- or admin can clear this today -- an enabled gate with no way to satisfy it.
+--
+-- Interim fix (the real fix -- a paint/DFT recording UI -- is a separate,
+-- larger piece of work, tracked as a follow-up): disable the gate until that
+-- write path ships. No tenant filter on this UPDATE, so it reaches every
+-- tenant's own PAINTING row, not just tenant 1's -- OperationRef is
+-- @@unique([tenantId, code]), so each tenant seeded its own PAINTING row.
+UPDATE "operation_refs" SET "requires_dft_gate" = false WHERE "code" = 'PAINTING';

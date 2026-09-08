@@ -717,8 +717,10 @@ export const createJobSchema = z
     remarks: z.string().trim().min(1).nullable().default(null),
     /** Filtered through the family's SPEC_FIELDS in the service. */
     specs: z.record(z.string(), z.unknown()).nullable().default(null),
-    /** TemplateProcess.code values this client skips, e.g. PWHT. */
+    /** TemplateProcess.code values this client skips, e.g. PWHT. Only codes with TemplateProcess.optional === true may actually be excluded — enforced in the service (AUD-033). */
     excludedProcessCodes: z.array(z.string().trim().min(1)).default([]),
+    /** Free-text reason for each optional process excluded — required when excludedProcessCodes is non-empty (AUD-033). */
+    exclusionReason: z.string().trim().min(1).nullable().default(null),
     equipments: z
       .array(
         z

@@ -117,6 +117,10 @@ export const ERROR_CODES = {
   UNIT_NOT_COMPLETE: "UNIT_NOT_COMPLETE",
   /** recordQcpExecution (AUD-003): NA was submitted for a checkpoint whose blocking code is not waivable — it can never be cleared this way. */
   QCP_CODE_NOT_WAIVABLE: "QCP_CODE_NOT_WAIVABLE",
+  /** createJob (AUD-033): excludedProcessCodes named a TemplateProcess whose `optional` flag is false — only processes the template author marked optional can be dropped from a job's scope. */
+  PROCESS_NOT_OPTIONAL: "PROCESS_NOT_OPTIONAL",
+  /** createJob (AUD-033): excludedProcessCodes is non-empty but exclusionReason was not supplied — a permanent scope change needs a reason on record. */
+  EXCLUSION_REASON_REQUIRED: "EXCLUSION_REASON_REQUIRED",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -198,6 +202,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This unit still has incomplete process stages on its current schedule run. It cannot be released or dispatched until production is complete.",
   QCP_CODE_NOT_WAIVABLE:
     "This checkpoint's hold code cannot be waived — it must be inspected and marked accepted or rejected, not recorded as not applicable.",
+  PROCESS_NOT_OPTIONAL:
+    "This process is mandatory on this route and cannot be excluded from the job's scope.",
+  EXCLUSION_REASON_REQUIRED:
+    "Excluding a process from the job's scope requires a reason, which is recorded.",
 };
 
 /**

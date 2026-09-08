@@ -61,4 +61,31 @@ describe("isOnTime", () => {
     expect(isOnTime(null, dueAug25)).toBe(false);
     expect(isOnTime(new Date(), null)).toBe(false);
   });
+
+  // Regression guard for the myday.read.test.ts flake (onTimePct30d
+  // "1 on-time of 2 completed" reported 0 instead of 50). Root cause was a
+  // test-fixture bug, not a defect in isOnTime: the fixture passed a raw,
+  // untruncated `now` as dueDate/plannedFinish, which no production writer
+  // ever does (schedule.service.ts / override.service.ts both route through
+  // addWorkingDays → toDateOnly, always a UTC-midnight marker). isOnTime's
+  // contract (see file header) assumes dueDate is already such a marker —
+  // feeding it a raw timestamp is a caller error, and this function is not
+  // expected to defend against it. These two cases pin that exact mechanism
+  // so it can't silently regress back into a fixture (or, if ever discovered
+  // in production, wrongly get re-diagnosed as "isOnTime is broken").
+  it("SHAPE CONTRACT: a raw untruncated dueDate equal to actualFinish flips false once IST has rolled to the next calendar day (UTC-evening instant) — this is why fixtures must truncate dueDate, not a defect in isOnTime", () => {
+    // 19:00 UTC — inside the danger window (>=18:30 UTC), IST is already on
+    // the next calendar day relative to UTC's "today".
+    const sameInstantRaw = new Date("2026-08-25T19:00:00.000Z");
+    expect(isOnTime(sameInstantRaw, sameInstantRaw)).toBe(false);
+  });
+
+  it("FIX PATTERN: truncating dueDate to actualFinish's own IST calendar-day marker is on-time at every time of day, including the UTC-evening window", () => {
+    const eveningInstant = new Date("2026-08-25T19:00:00.000Z"); // UTC-evening danger window
+    const morningInstant = new Date("2026-08-25T02:00:00.000Z"); // outside the danger window
+    for (const actualFinish of [eveningInstant, morningInstant]) {
+      const dueDate = istCalendarDayMarker(actualFinish);
+      expect(isOnTime(actualFinish, dueDate)).toBe(true);
+    }
+  });
 });
