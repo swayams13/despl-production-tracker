@@ -186,16 +186,28 @@ unchanged — this was a pointer correction, not a rewrite.
 
 ## Remaining gaps / TODOs for the next session
 
-- **Browser verification**: nothing in this session was verified in a real
-  browser or against `design_handoff_phase4/screenshots/` — the Chrome
-  extension was not connected in this environment. Every change here is
-  verified by `pnpm typecheck`/`lint`/`test`/`test:db` (full suite,
-  1053-1054/1054 passing every run, only the long-documented pre-existing
-  `process.service.test.ts` hold-point flake) and code review, not by
-  rendering the page. This is the single biggest open item — a session
-  with working browser automation should drive the real `/login` form
-  (never forge a session — see `CLAUDE.md`'s agent-conduct section) and
-  screenshot-compare every screen touched against its reference PNG.
+- **Browser verification: done, in a same-day follow-up pass.** The Chrome
+  extension connected in a later turn. Drove the real `/login` form
+  (`admin@despl.local` / the seed's documented dev-only password — no
+  forged session) and confirmed every screen renders and functions:
+  Dashboard (MetricCards, count-up, the portfolio table's new tablet card
+  fallback with a working `<details>` disclosure), My Day (desktop + phone
+  queue view), Supervisor Team (roster disclosure, StageSheet, the new
+  "Open full detail →" link), Activity Detail (real page render, **Start
+  correctly refused with `REASON_REQUIRED` on a genuinely overdue stage** —
+  server gating verified end to end through the new page — Reassign select
+  populated with a real department-scoped member), Departments/Department
+  Detail, QC & Hold Points, Welding, Reports, and Project Control Centre's
+  new Exceptions panel. **Most importantly**: real keyboard-only
+  verification of `clickableRowProps()` — Tab landed the visible focus ring
+  on a table row, Enter (no mouse) opened the `StageSheet` drawer. Full
+  account in `progress.md`'s "real browser verification" session.
+  **Still open**: pixel-level screenshot diffing against
+  `design_handoff_phase4/screenshots/` (spot-checked visually, not
+  diffed), and exercising Hold/Verify/Reject/Reassign's actual submit
+  (none have matching seed data in this environment right now — an
+  IN_PROGRESS stage, a SUBMITTED stage with a different submitter, or a
+  roster member with open items to reassign).
 - **Five analytics screens** (Portfolio/Project/Department Analytics,
   Schedule Performance, Bottleneck Analysis) — no route exists; each is
   realistically its own multi-session build (new service reads, new
