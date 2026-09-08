@@ -28,7 +28,7 @@ export async function loadPrioritizedJob(actor: Actor, jobId: number): Promise<P
     assertClientScope(actor, job.clientId);
 
     // Job-grain key: per-unit plans live under the null-equipment run.
-    const run = await getCurrentScheduleRun(tx, jobId, null);
+    const run = await getCurrentScheduleRun(tx, jobId);
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
@@ -414,7 +414,7 @@ export async function loadWorkspaceView(
     if (!job) return null;
     assertClientScope(actor, job.clientId);
 
-    const run = await getCurrentScheduleRun(tx, jobId, null);
+    const run = await getCurrentScheduleRun(tx, jobId);
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);
@@ -739,7 +739,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     if (!job) return null;
     assertClientScope(actor, job.clientId);
 
-    const run = await getCurrentScheduleRun(tx, jobId, null);
+    const run = await getCurrentScheduleRun(tx, jobId);
     if (!run) return null;
 
     const spine = await loadJobSpine(tx, jobId);

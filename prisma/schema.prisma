@@ -1023,6 +1023,23 @@ model JobProcessEdge {
 
 // ── Scheduling ──────────────────────────────────────────────────────────
 
+/// AUD-034 — a job may have at most one CURRENT run, full stop, regardless of
+/// equipmentId grain (a job-grain run and an equipment-grain run competing for
+/// "current" was proven live: persistScheduleRun used to demote only the
+/// matching (jobId, equipmentId) pair, so a job-grain generateSchedule call
+/// followed by an equipment-grain applyDurationOverride call left both
+/// isCurrent = true — double-counting every reader that assumes exactly one).
+///
+/// UNIQUENESS CONSTRAINT (DDL-only, not representable in Prisma schema DSL):
+/// Enforced by a raw-SQL partial unique index in migration
+/// 20260908130000_schedule_run_one_current_per_job:
+///   CREATE UNIQUE INDEX schedule_runs_one_current_per_job ON schedule_runs (job_id) WHERE is_current;
+/// This is intentionally NOT `(job_id, equipment_id)` or a COALESCE-guarded
+/// variant of it — that shape only prevents two runs at the identical grain
+/// from racing, not the job-grain-vs-equipment-grain case above. Application
+/// code (_shared.ts's persistScheduleRun/getCurrentScheduleRun/
+/// getCurrentScheduleRunsBatch) enforces the same invariant at the service
+/// layer; this index is the DB-level backstop for any write that bypasses it.
 model ScheduleRun {
   id                   Int                  @id @default(autoincrement())
   jobId                Int                  @map("job_id")

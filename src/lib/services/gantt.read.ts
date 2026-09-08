@@ -30,7 +30,7 @@ export async function loadJobGantt(actor: Actor, jobId: number): Promise<JobGant
     const now = new Date();
     if (units.length === 0) return { units: [], edges: [], now: now.toISOString() };
 
-    const run = await getCurrentScheduleRun(tx, jobId, null);
+    const run = await getCurrentScheduleRun(tx, jobId);
     if (!run) return { units: [], edges: [], now: now.toISOString() };
 
     const processes = await tx.jobProcess.findMany({

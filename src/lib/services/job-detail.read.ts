@@ -59,7 +59,7 @@ export async function loadJobHeader(actor: Actor, jobId: number): Promise<JobHea
     if (!job) return null;
     assertClientScope(actor, job.clientId);
 
-    const run = await getCurrentScheduleRun(tx, jobId, null);
+    const run = await getCurrentScheduleRun(tx, jobId);
     const plans = run?.processPlans ?? [];
     const totalPlans = plans.length;
     const completePlans = plans.filter((p) => p.status === "COMPLETE").length;
