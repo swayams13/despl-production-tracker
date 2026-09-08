@@ -82,8 +82,7 @@
       "label": "Painting / Coating / Galvanizing",
       "dept": "SURFACE_PAINT",
       "csvColumn": "Painting",
-      "leadTimeProcess": 30,
-      "requiresDftGate": true
+      "leadTimeProcess": 30
     },
     "INSPECTION": {
       "label": "Dimensional / Visual Inspection",

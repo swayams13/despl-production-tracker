@@ -170,6 +170,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   // B6 — the gate is OperationRef.requiresDftGate now, not the "PAINTING" code string.
   let unflaggedPaintingCodeOp = 0; // code "PAINTING", requiresDftGate: false → must verify with no PaintRecord (proves the code string itself no longer gates)
   let flaggedNonPaintingCodeOp = 0; // code "GALVANIZING", requiresDftGate: true, no PaintRecord → must be refused (proves the flag, not the code, gates)
+  let opPaintingId = 0; // the real "PAINTING" OperationRef's id — AUD-029 regression test flips its flag off/on around one test, mirroring the migration
   // AUD-026 — dispositionNcr gate fixtures (each its own component; RECEIPT op, no other gates).
   let ncrGateNeverDispositionedOp = 0;
   let ncrGateDispositionedOp = 0;
@@ -532,6 +533,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     const opPainting = await owner.operationRef.create({
       data: { tenantId, code: "PAINTING", name: "Painting", defaultDepartmentId: deptA.id, requiresDftGate: true },
     });
+    opPaintingId = opPainting.id;
     const componentPaintNoRecord = await owner.component.create({
       data: { jobId, equipmentId: equipment.id, tag: "PAINT-NO-RECORD", componentTypeId: componentType.id },
     });
@@ -1055,6 +1057,37 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     await startComponentOperation(supA, { componentOperationId: flaggedNonPaintingCodeOp });
     await submitComponentOperation(supA, { componentOperationId: flaggedNonPaintingCodeOp });
     await expectCode(verifyComponentOperation(qc, { componentOperationId: flaggedNonPaintingCodeOp }), ERROR_CODES.DFT_NOT_ACCEPTED);
+  });
+
+  it("AUD-029: a real PAINTING op with requiresDftGate flipped off (as this session's migration does DB-wide) verifies with zero PaintRecord/DftReading", async () => {
+    // Flips the SAME "PAINTING" OperationRef the tests above use (not a
+    // decoy code) to `false`, exactly what
+    // 20260908140000_operation_ref_disable_painting_dft_gate does in every
+    // tenant. Reverted at the end so the gate-mechanism coverage above
+    // (which needs the flag ON to prove DFT_NOT_ACCEPTED still fires) is
+    // untouched for any test that runs after this one.
+    await owner.operationRef.update({ where: { id: opPaintingId }, data: { requiresDftGate: false } });
+    try {
+      const equipment = await owner.equipment.create({ data: { jobId, name: "Paint post-fix vessel" } });
+      const componentType = await owner.componentTypeRef.create({
+        data: { tenantId, code: "PAINT_POSTFIX", name: "Paint post-fix" },
+      });
+      const component = await owner.component.create({
+        data: { jobId, equipmentId: equipment.id, tag: "PAINT-POST-FIX", componentTypeId: componentType.id },
+      });
+      const op = await owner.componentOperation.create({
+        data: { jobId, componentId: component.id, seq: 1, operationId: opPaintingId },
+      });
+
+      await startComponentOperation(supA, { componentOperationId: op.id });
+      await submitComponentOperation(supA, { componentOperationId: op.id });
+      const verified = await verifyComponentOperation(qc, { componentOperationId: op.id });
+      expect(verified.status).toBe("COMPLETE");
+      expect(await owner.paintRecord.count({ where: { componentOperationId: op.id } })).toBe(0);
+      expect(await owner.dftReading.count({ where: { componentOperationId: op.id } })).toBe(0);
+    } finally {
+      await owner.operationRef.update({ where: { id: opPaintingId }, data: { requiresDftGate: true } });
+    }
   });
 
   it("recordDftReading is tenant-anchored: another tenant's actor cannot attach a reading to this operation by id (NOT_FOUND)", async () => {
