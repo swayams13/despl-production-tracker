@@ -118,6 +118,12 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
   async function deleteOrgAndChildren(tenantId: number) {
     await owner.dispatchBatchUnit.deleteMany({ where: { dispatchBatch: { job: { tenantId } } } });
     await owner.dispatchBatch.deleteMany({ where: { job: { tenantId } } });
+    // AUD-005 — ProcessPlan.unitId has no cascade off Unit, so these must go
+    // before unit.deleteMany below or that call hits a foreign-key violation.
+    await owner.processPlan.deleteMany({ where: { job: { tenantId } } });
+    await owner.jobProcess.deleteMany({ where: { job: { tenantId } } });
+    await owner.scheduleRun.deleteMany({ where: { job: { tenantId } } });
+    await owner.department.deleteMany({ where: { tenantId } });
     await owner.ncr.deleteMany({ where: { componentOperationRejection: { componentOperation: { component: { equipment: { job: { tenantId } } } } } } });
     await owner.componentOperationRejection.deleteMany({ where: { componentOperation: { component: { equipment: { job: { tenantId } } } } } });
     await owner.componentOperation.deleteMany({ where: { component: { equipment: { job: { tenantId } } } } });
@@ -227,6 +233,76 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     });
     await owner.qcpItemPartyCode.create({
       data: { qcpItemId: qcpItem.id, inspectionPartyId: party.id, qcpCodeId: qcpCode.id },
+    });
+  }
+
+  /** AUD-005 — same blocking QcpItem as `openHoldPoint`, but with a recorded
+   * REJECTED execution rather than no execution at all, so the fixture
+   * matches the real "checkpoint flips to REJECTED" scenario the finding
+   * describes, not just an item nobody has attempted yet. */
+  async function rejectHoldPoint(tenantId: number, job: { id: number }, unit: { id: number }) {
+    const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "V", vessel: "V" } });
+    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "QC" } });
+    const qcpCode = await owner.qcpCodeRef.create({
+      data: { tenantId, code: "H", label: "Hold", blocksCompletion: true },
+    });
+    const qcpItem = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Hydrotest witness" },
+    });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: qcpItem.id, inspectionPartyId: party.id, qcpCodeId: qcpCode.id },
+    });
+    await owner.qcpExecution.create({
+      data: { jobId: job.id, qcpItemId: qcpItem.id, unitId: unit.id, attemptNo: 1, result: "REJECTED" },
+    });
+  }
+
+  /** AUD-005 — a ScheduleRun a unit's ProcessPlan rows can be pinned to, the
+   * same grain assertUnitProductionComplete reads (`scheduleRun.isCurrent`). */
+  async function createCurrentScheduleRun(job: { id: number }) {
+    return owner.scheduleRun.create({
+      data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
+    });
+  }
+
+  let processFixtureSeq = 0;
+
+  /** AUD-005 — a ProcessPlan for the given unit under the given (current)
+   * schedule run. `included: false` mirrors envelope.ts's real behaviour: an
+   * excluded JobProcess never receives a ProcessPlan row at all, so passing
+   * it returns null rather than creating one. */
+  async function addProcessPlan(
+    tenantId: number,
+    job: { id: number },
+    scheduleRun: { id: number },
+    unit: { id: number },
+    status: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "COMPLETE" | "ON_HOLD",
+    opts: { included?: boolean } = {},
+  ) {
+    const seq = ++processFixtureSeq;
+    const department = await owner.department.create({
+      data: { tenantId, code: `DEPT-${Date.now()}-${Math.random()}-${seq}`, name: "Dept" },
+    });
+    const jobProcess = await owner.jobProcess.create({
+      data: {
+        jobId: job.id,
+        seq,
+        code: `PROC-${Date.now()}-${Math.random()}-${seq}`,
+        name: "Process",
+        departmentId: department.id,
+        included: opts.included ?? true,
+      },
+    });
+    if (opts.included === false) return null;
+    return owner.processPlan.create({
+      data: {
+        scheduleRunId: scheduleRun.id,
+        jobProcessId: jobProcess.id,
+        unitId: unit.id,
+        status,
+        ownerDepartmentId: department.id,
+        jobId: job.id,
+      },
     });
   }
 
@@ -491,6 +567,155 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
       const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
       const link = await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
       expect(link.unitId).toBe(unit.id);
+    });
+  });
+
+  describe("AUD-005 — re-check quality gates at release and dispatch", () => {
+    it("approveDispatchRelease refuses when an NCR opens after addUnitToBatch (NCR_OPEN)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-NCR-1" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+
+      // The gate ran clean at batching time — the defect opens afterwards,
+      // three days later in the audit's own example.
+      await openNcr(tenantId, job, unit, user);
+
+      await expectCode(approveDispatchRelease(ph, { dispatchBatchId: batch.id }), ERROR_CODES.NCR_OPEN);
+    });
+
+    it("recordDispatch refuses when an NCR opens after a clean release (NCR_OPEN)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-NCR-2" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+      await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
+
+      // Released clean on Monday; the NCR is the Wednesday event from the
+      // audit's own example — recordDispatch is the only gate left standing
+      // between this unit and a dispatch note.
+      await openNcr(tenantId, job, unit, user);
+
+      await expectCode(recordDispatch(ph, { dispatchBatchId: batch.id }), ERROR_CODES.NCR_OPEN);
+    });
+
+    it("approveDispatchRelease refuses when a checkpoint flips to REJECTED after addUnitToBatch (HOLD_POINT_OPEN)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-HOLD" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+
+      await rejectHoldPoint(tenantId, job, unit);
+
+      await expectCode(approveDispatchRelease(ph, { dispatchBatchId: batch.id }), ERROR_CODES.HOLD_POINT_OPEN);
+    });
+  });
+
+  describe("AUD-005 — production-completeness gate", () => {
+    it("approveDispatchRelease refuses a unit with an incomplete ProcessPlan (UNIT_NOT_COMPLETE)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const run = await createCurrentScheduleRun(job);
+      await addProcessPlan(tenantId, job, run, unit, "NOT_STARTED");
+
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-INC-1" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+
+      await expectCode(approveDispatchRelease(ph, { dispatchBatchId: batch.id }), ERROR_CODES.UNIT_NOT_COMPLETE);
+    });
+
+    it("recordDispatch refuses when a ProcessPlan regresses off COMPLETE after a clean release (UNIT_NOT_COMPLETE)", async () => {
+      // An incomplete unit is already refused at approveDispatchRelease (the
+      // test above), so the only way to reach recordDispatch's OWN
+      // completeness check — proving it doesn't just trust that release
+      // already verified it — is a plan that was COMPLETE at release time and
+      // regresses before dispatch (e.g. an admin correction reopening a
+      // stage; CLAUDE.md invariant #6 permits versioned corrections).
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const run = await createCurrentScheduleRun(job);
+      const plan = await addProcessPlan(tenantId, job, run, unit, "COMPLETE");
+
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-INC-2" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+      await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
+
+      await owner.processPlan.update({ where: { id: plan!.id }, data: { status: "IN_PROGRESS" } });
+
+      await expectCode(recordDispatch(ph, { dispatchBatchId: batch.id }), ERROR_CODES.UNIT_NOT_COMPLETE);
+    });
+
+    it("release allows a unit with a legitimately excluded process, all remaining plans COMPLETE (regression guard)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const run = await createCurrentScheduleRun(job);
+      // Excluded — never receives a ProcessPlan row at all, same as envelope.ts.
+      await addProcessPlan(tenantId, job, run, unit, "NOT_STARTED", { included: false });
+      // Included and finished — the only ProcessPlan row that actually exists.
+      await addProcessPlan(tenantId, job, run, unit, "COMPLETE");
+
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-EXCL" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+
+      const released = await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
+      expect(released.releaseApprovedAt).not.toBeNull();
+    });
+
+    it("addUnitToBatch still allows an incomplete unit — the completeness gate is not run this early", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const run = await createCurrentScheduleRun(job);
+      await addProcessPlan(tenantId, job, run, unit, "NOT_STARTED");
+
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-EARLY" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+
+      const link = await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+      expect(link.unitId).toBe(unit.id);
+    });
+
+    it("a fully clean, fully COMPLETE unit releases and dispatches, still writing the audit row and domain event", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const run = await createCurrentScheduleRun(job);
+      await addProcessPlan(tenantId, job, run, unit, "COMPLETE");
+
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-CLEAN" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+
+      const released = await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
+      expect(released.releaseApprovedAt).not.toBeNull();
+      const dispatched = await recordDispatch(ph, { dispatchBatchId: batch.id });
+      expect(dispatched.actualDispatchDate).not.toBeNull();
+
+      const auditRows = await owner.auditLog.findMany({
+        where: { tenantId, entityType: "DispatchBatch", entityId: String(batch.id) },
+      });
+      expect(auditRows.map((r) => r.action)).toEqual(
+        expect.arrayContaining(["dispatchBatch.approveRelease", "dispatchBatch.recordDispatch"]),
+      );
+
+      const eventRows = await owner.domainEvent.findMany({
+        where: { tenantId, aggregateType: "DispatchBatch", aggregateId: String(batch.id) },
+      });
+      expect(eventRows.map((r) => r.type)).toEqual(
+        expect.arrayContaining(["DispatchReleaseApproved", "DispatchRecorded"]),
+      );
     });
   });
 });

@@ -111,6 +111,8 @@ export const ERROR_CODES = {
   JOB_HAS_INCOMPLETE_PLANS: "JOB_HAS_INCOMPLETE_PLANS",
   /** setOperationRefFamilySeq (C6): the given number is not among the family's own published TemplateProcess.seq values. */
   ROUTE_STEP_SEQ_UNKNOWN: "ROUTE_STEP_SEQ_UNKNOWN",
+  /** approveDispatchRelease/recordDispatch (AUD-005): a unit was released or dispatched with production stages still incomplete. */
+  UNIT_NOT_COMPLETE: "UNIT_NOT_COMPLETE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -186,6 +188,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
   ROUTE_STEP_SEQ_UNKNOWN:
     "This number does not match any process in the family's published route — check the template's process list.",
+  UNIT_NOT_COMPLETE:
+    "This unit still has incomplete process stages on its current schedule run. It cannot be released or dispatched until production is complete.",
 };
 
 /**
