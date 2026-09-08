@@ -60,6 +60,7 @@ const STATUS: Record<ErrorCode, number> = {
   QCP_ITEM_UNRESOLVED: 500,
   JOB_HAS_INCOMPLETE_PLANS: 409,
   ROUTE_STEP_SEQ_UNKNOWN: 409,
+  UNIT_NOT_COMPLETE: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

@@ -3,7 +3,7 @@ import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
-import { assertUnitHasNoOpenHoldPoint, assertUnitHasNoOpenNcr } from "./_shared";
+import { assertUnitHasNoOpenHoldPoint, assertUnitHasNoOpenNcr, assertUnitProductionComplete } from "./_shared";
 import {
   createDispatchBatchSchema,
   addUnitToBatchSchema,
@@ -187,6 +187,20 @@ export async function approveDispatchRelease(
     const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
     assertDispatchBatchTransition("approveRelease", deriveDispatchBatchStatus(batch));
 
+    // AUD-005 — addUnitToBatch's gate ran at batching time; a unit's quality
+    // state and production completeness are both mutable after that (an NCR
+    // can open, a hold point can flip, days can pass before release), so
+    // this is a genuinely separate re-check, not a redundant re-run.
+    const links = await tx.dispatchBatchUnit.findMany({
+      where: { dispatchBatchId: batch.id },
+      select: { unitId: true },
+    });
+    for (const { unitId } of links) {
+      await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
+      await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);
+      await assertUnitProductionComplete(tx, unitId, batch.jobId);
+    }
+
     return audited(tx, actor, async () => {
       const now = new Date();
       const updated = await tx.dispatchBatch.update({
@@ -238,6 +252,21 @@ export async function recordDispatch(actor: Actor, input: RecordDispatchInput): 
   return withTenant(actor.tenantId, async (tx) => {
     const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
     assertDispatchBatchTransition("recordDispatch", deriveDispatchBatchStatus(batch));
+
+    // AUD-005 — re-checked independently of approveDispatchRelease's own
+    // re-check: a unit released clean can still develop an open NCR, an
+    // uncleared hold point, or an incomplete ProcessPlan before the physical
+    // dispatch actually happens, and this is the last gate standing between
+    // that unit and a dispatch note/gate pass/LR number.
+    const links = await tx.dispatchBatchUnit.findMany({
+      where: { dispatchBatchId: batch.id },
+      select: { unitId: true },
+    });
+    for (const { unitId } of links) {
+      await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
+      await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);
+      await assertUnitProductionComplete(tx, unitId, batch.jobId);
+    }
 
     return audited(tx, actor, async () => {
       const now = new Date();

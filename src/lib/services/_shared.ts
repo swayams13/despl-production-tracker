@@ -828,6 +828,39 @@ export async function assertUnitHasNoOpenHoldPoint(tx: Tx, unitId: number, jobId
 }
 
 /**
+ * AUD-005 — dispatch's third quality gate: a unit may not be released or
+ * dispatched while any ProcessPlan on its current schedule run is still
+ * short of COMPLETE. A JobProcess with `included = false` never receives a
+ * ProcessPlan row at all (envelope.ts) — filtering on existing ProcessPlan
+ * rows alone is therefore already correct for exclusions; no `included`
+ * check is needed or wanted here. Scoped to `scheduleRun.isCurrent` the same
+ * way `loadMyOverdueCount` (workspace.read.ts) reads it — AUD-034 (a job can
+ * hold two `isCurrent` runs) is a separate, tracked finding, not fixed here.
+ *
+ * Excludes the stage(s) tagged `evidenceKind: DISPATCH_RECORDED` (the
+ * Dispatch work-order stage itself): `assertEvidenceSatisfied` only lets
+ * that stage's own ProcessPlan verify to COMPLETE *after*
+ * `dispatchBatchUnit`'s `actualDispatchDate` is set, i.e. after this
+ * function's caller (`recordDispatch`) has already run. Requiring it
+ * COMPLETE here would deadlock the stage against itself; every other stage,
+ * including PACKING_DONE, has no such cycle and is still required.
+ */
+export async function assertUnitProductionComplete(tx: Tx, unitId: number, jobId: number): Promise<void> {
+  const incomplete = await tx.processPlan.findMany({
+    where: { unitId, jobId, scheduleRun: { isCurrent: true }, status: { not: "COMPLETE" } },
+    select: { id: true, jobProcess: { select: { templateProcess: { select: { evidenceKind: true } } } } },
+  });
+  const blocking = incomplete.filter((p) => p.jobProcess.templateProcess?.evidenceKind !== "DISPATCH_RECORDED");
+  if (blocking.length > 0) {
+    throw new AppError(ERROR_CODES.UNIT_NOT_COMPLETE, {
+      unitId,
+      jobId,
+      incompleteProcessPlanIds: blocking.map((p) => p.id),
+    });
+  }
+}
+
+/**
  * `verifyProcess` gate (Phase 5, D4): a stage tagged with
  * `TemplateProcess.evidenceKind` cannot verify until the matching evidence
  * exists for this unit. No-op when `unitId` is null (job/equipment grain —
