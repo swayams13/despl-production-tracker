@@ -237,8 +237,19 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
     // matching comment in component.service.ts's verifyComponentOperation
     // (task review Critical #1): repeated reject→resubmit→reject cycles can
     // leave more than one Ncr open for the same step.
+    //
+    // AUD-026: an Ncr still OPEN was never dispositioned — closing it here
+    // would skip dispositionNcr entirely and record no engineering decision.
+    // Refuse before touching anything if any linked Ncr is still OPEN; only
+    // DISPOSITIONED/REWORK_IN_PROGRESS ones are eligible to close.
+    const undispositioned = await tx.ncr.count({
+      where: { status: "OPEN", assemblyStepRejection: { assemblyStepId: step.id } },
+    });
+    if (undispositioned > 0) {
+      throw new AppError(ERROR_CODES.NCR_NOT_DISPOSITIONED, { assemblyStepId: step.id, undispositioned });
+    }
     const openNcrs = await tx.ncr.findMany({
-      where: { status: { not: "CLOSED" }, assemblyStepRejection: { assemblyStepId: step.id } },
+      where: { status: { in: ["DISPOSITIONED", "REWORK_IN_PROGRESS"] }, assemblyStepRejection: { assemblyStepId: step.id } },
     });
 
     return audited(tx, actor, async () => {

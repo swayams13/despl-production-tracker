@@ -17,6 +17,8 @@ export const ERROR_CODES = {
   HOLD_POINT_OPEN: "HOLD_POINT_OPEN",
   /** verifyProcess: a mapped ComponentOperation/AssemblyStep has a non-CLOSED Ncr (Phase 5, N3). */
   NCR_OPEN: "NCR_OPEN",
+  /** verifyComponentOperation / verifyAssemblyStep (AUD-026): an NCR opened against this work is still OPEN — it must be dispositioned before the rework that resolved it can be verified closed. */
+  NCR_NOT_DISPOSITIONED: "NCR_NOT_DISPOSITIONED",
   /** verifyProcess: the stage's TemplateProcess.evidenceKind requires proof (packaged/dispatched/MDR compiled) that isn't recorded yet (Phase 5, D4). */
   EVIDENCE_NOT_SATISFIED: "EVIDENCE_NOT_SATISFIED",
   /** Department has an overdue process and owes a categorised delay reason. */
@@ -129,6 +131,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "An inspection hold point on this item is still open. It must be cleared before completion.",
   NCR_OPEN:
     "An operation feeding this stage has an open non-conformance report. It must be closed before this stage can verify.",
+  NCR_NOT_DISPOSITIONED:
+    "A non-conformance report on this work is still open. QC must record a disposition (repair, rework, use-as-is, scrap, or concession) before this can be verified.",
   EVIDENCE_NOT_SATISFIED:
     "This stage requires evidence that hasn't been recorded yet. Complete the required action first, then verify.",
   REASON_REQUIRED:

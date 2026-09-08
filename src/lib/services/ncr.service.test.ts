@@ -25,7 +25,6 @@ describe("assertNcrTransition", () => {
   const legal: Array<[NcrAction, NcrStatus, NcrStatus]> = [
     ["dispositionRework", "OPEN", "REWORK_IN_PROGRESS"],
     ["dispositionFinal", "OPEN", "DISPOSITIONED"],
-    ["close", "OPEN", "CLOSED"],
     ["close", "DISPOSITIONED", "CLOSED"],
     ["close", "REWORK_IN_PROGRESS", "CLOSED"],
   ];
@@ -238,7 +237,10 @@ describe.skipIf(!RUN_DB)("dispositionNcr (DB-backed)", async () => {
       ERROR_CODES.NOT_FOUND,
     );
 
-    // Sanity: the correct jobId for that same ncrId succeeds.
+    // Sanity: the correct jobId for that same ncrId succeeds — AUD-026:
+    // close now requires DISPOSITIONED/REWORK_IN_PROGRESS, so disposition
+    // ncrB first (it's still OPEN from the reject above).
+    await dispositionNcr(qc, { ncrId: ncrB.id, disposition: "USE_AS_IS" });
     const closedB = await withTenant(tenantId, (tx) => closeNcr(tx, qc, { ncrId: ncrB.id, jobId: ncrB.jobId }));
     expect(closedB.status).toBe("CLOSED");
   });

@@ -110,6 +110,7 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     linkGoverningDrawing,
   } = await import("./component.service");
   const { issueStock } = await import("./stock.service");
+  const { dispositionNcr, closeNcr } = await import("./ncr.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
@@ -169,6 +170,12 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   // B6 — the gate is OperationRef.requiresDftGate now, not the "PAINTING" code string.
   let unflaggedPaintingCodeOp = 0; // code "PAINTING", requiresDftGate: false → must verify with no PaintRecord (proves the code string itself no longer gates)
   let flaggedNonPaintingCodeOp = 0; // code "GALVANIZING", requiresDftGate: true, no PaintRecord → must be refused (proves the flag, not the code, gates)
+  // AUD-026 — dispositionNcr gate fixtures (each its own component; RECEIPT op, no other gates).
+  let ncrGateNeverDispositionedOp = 0;
+  let ncrGateDispositionedOp = 0;
+  let ncrGateTwoNcrsOp = 0;
+  let ncrGateDirectCloseOp = 0;
+  let ncrGateNoNcrOp = 0;
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({
@@ -574,6 +581,24 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       })
     ).id;
 
+    // AUD-026 — dispositionNcr gate fixtures. One component per scenario so
+    // reject/verify cycles on one can't interfere with another's gating.
+    async function freshNcrGateOp(tag: string): Promise<number> {
+      const c = await owner.component.create({
+        data: { jobId, equipmentId: equipment.id, tag, componentTypeId: componentType.id },
+      });
+      return (
+        await owner.componentOperation.create({
+          data: { jobId, componentId: c.id, seq: 1, operationId: opReceipt.id },
+        })
+      ).id;
+    }
+    ncrGateNeverDispositionedOp = await freshNcrGateOp("NCR-GATE-NEVER-DISP");
+    ncrGateDispositionedOp = await freshNcrGateOp("NCR-GATE-DISP");
+    ncrGateTwoNcrsOp = await freshNcrGateOp("NCR-GATE-TWO");
+    ncrGateDirectCloseOp = await freshNcrGateOp("NCR-GATE-DIRECT-CLOSE");
+    ncrGateNoNcrOp = await freshNcrGateOp("NCR-GATE-NO-NCR");
+
     const userSup = await owner.user.create({
       data: { tenantId, email: "co-sup@x", username: "co-sup", name: "Sup", passwordHash: "x" },
     });
@@ -749,6 +774,12 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     });
     expect(openBefore).toHaveLength(2);
 
+    // AUD-026: verify no longer auto-closes an OPEN Ncr — both must be
+    // dispositioned first.
+    for (const ncr of openBefore) {
+      await dispositionNcr(qc, { ncrId: ncr.id, disposition: "USE_AS_IS" });
+    }
+
     const verified = await verifyComponentOperation(qc, { componentOperationId: opDetailTest });
     expect(verified.status).toBe("COMPLETE");
 
@@ -799,10 +830,12 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     const resubmitted = await submitComponentOperation(supA, { componentOperationId: componentBOpSeq1 });
     expect(resubmitted.status).toBe("SUBMITTED");
 
-    // N1: re-verifying closes the open Ncr and stamps reworkFinishedAt (the
-    // dispositionNcr(REWORK) path already stamped reworkStartedAt — covered
-    // in ncr.service.test.ts; here the Ncr is still just OPEN, so verify
-    // closes it directly with no rework interval to record).
+    // AUD-026: verify no longer auto-closes an OPEN Ncr — QC must disposition
+    // it first. USE_AS_IS is a dispositionFinal transition (no rework
+    // interval to record), matching this test's original "no rework" intent.
+    await dispositionNcr(qc, { ncrId: ncr.id, disposition: "USE_AS_IS" });
+
+    // N1: re-verifying closes the (now DISPOSITIONED) Ncr.
     const verified = await verifyComponentOperation(qc, { componentOperationId: componentBOpSeq1 });
     expect(verified.status).toBe("COMPLETE");
     const closed = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
@@ -1050,5 +1083,87 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     );
     const readingCount = await owner.dftReading.count({ where: { componentOperationId: paintOpTwoCoats } });
     expect(readingCount).toBe(2); // only the two legitimate readings from the previous test
+  });
+
+  // ── AUD-026: dispositionNcr is a hard gate on the verify path ──────────
+
+  it("AUD-026 (1): reject → resubmit → reverify with the Ncr still OPEN is refused, NCR_NOT_DISPOSITIONED", async () => {
+    await startComponentOperation(supA, { componentOperationId: ncrGateNeverDispositionedOp });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateNeverDispositionedOp });
+    await rejectComponentOperation(qc, { componentOperationId: ncrGateNeverDispositionedOp, categoryId: rejectCategoryId });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateNeverDispositionedOp });
+
+    await expectCode(
+      verifyComponentOperation(qc, { componentOperationId: ncrGateNeverDispositionedOp }),
+      ERROR_CODES.NCR_NOT_DISPOSITIONED,
+    );
+    const op = await owner.componentOperation.findUniqueOrThrow({ where: { id: ncrGateNeverDispositionedOp } });
+    expect(op.status).toBe("SUBMITTED"); // refusal did not advance state
+  });
+
+  it("AUD-026 (2): dispositionNcr called before reverify lets verify proceed and closes the Ncr with the disposition recorded", async () => {
+    await startComponentOperation(supA, { componentOperationId: ncrGateDispositionedOp });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateDispositionedOp });
+    await rejectComponentOperation(qc, { componentOperationId: ncrGateDispositionedOp, categoryId: rejectCategoryId });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateDispositionedOp });
+
+    const rejection = await owner.componentOperationRejection.findFirstOrThrow({
+      where: { componentOperationId: ncrGateDispositionedOp },
+    });
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejection.id } });
+    await dispositionNcr(qc, { ncrId: ncr.id, disposition: "USE_AS_IS", notes: "no rework needed" });
+
+    const verified = await verifyComponentOperation(qc, { componentOperationId: ncrGateDispositionedOp });
+    expect(verified.status).toBe("COMPLETE");
+
+    const closed = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(closed.status).toBe("CLOSED");
+    expect(closed.disposition).toBe("USE_AS_IS");
+    expect(closed.dispositionedBy).toBe(qc.userId);
+    expect(closed.dispositionNotes).toBe("no rework needed");
+  });
+
+  it("AUD-026 (3): two Ncrs open on the same op, only one dispositioned — reverify is still refused, and the undispositioned one stays OPEN", async () => {
+    await startComponentOperation(supA, { componentOperationId: ncrGateTwoNcrsOp });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateTwoNcrsOp });
+    await rejectComponentOperation(qc, { componentOperationId: ncrGateTwoNcrsOp, categoryId: rejectCategoryId, detail: "first" });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateTwoNcrsOp });
+    await rejectComponentOperation(qc, { componentOperationId: ncrGateTwoNcrsOp, categoryId: rejectCategoryId, detail: "second" });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateTwoNcrsOp });
+
+    const ncrs = await owner.ncr.findMany({
+      where: { componentOperationRejection: { componentOperationId: ncrGateTwoNcrsOp } },
+      orderBy: { id: "asc" },
+    });
+    expect(ncrs).toHaveLength(2);
+    await dispositionNcr(qc, { ncrId: ncrs[0].id, disposition: "USE_AS_IS" });
+
+    await expectCode(
+      verifyComponentOperation(qc, { componentOperationId: ncrGateTwoNcrsOp }),
+      ERROR_CODES.NCR_NOT_DISPOSITIONED,
+    );
+    const stillOpen = await owner.ncr.findUniqueOrThrow({ where: { id: ncrs[1].id } });
+    expect(stillOpen.status).toBe("OPEN");
+  });
+
+  it("AUD-026 (4): closeNcr called directly on an OPEN-source Ncr is refused at the transition-table layer, independent of the verify-path pre-check", async () => {
+    await startComponentOperation(supA, { componentOperationId: ncrGateDirectCloseOp });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateDirectCloseOp });
+    await rejectComponentOperation(qc, { componentOperationId: ncrGateDirectCloseOp, categoryId: rejectCategoryId });
+
+    const rejection = await owner.componentOperationRejection.findFirstOrThrow({
+      where: { componentOperationId: ncrGateDirectCloseOp },
+    });
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { componentOperationRejectionId: rejection.id } });
+    expect(ncr.status).toBe("OPEN");
+
+    await expectCode(closeNcr(owner, qc, { ncrId: ncr.id, jobId }), ERROR_CODES.INVALID_STATE_TRANSITION);
+  });
+
+  it("AUD-026 (5): an op with no Ncr ever raised verifies exactly as before — no regression for the common case", async () => {
+    await startComponentOperation(supA, { componentOperationId: ncrGateNoNcrOp });
+    await submitComponentOperation(supA, { componentOperationId: ncrGateNoNcrOp });
+    const verified = await verifyComponentOperation(qc, { componentOperationId: ncrGateNoNcrOp });
+    expect(verified.status).toBe("COMPLETE");
   });
 });
