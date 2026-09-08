@@ -1,6 +1,6 @@
 # 19 — MASTER ISSUE REGISTER
 
-*114 findings, de-duplicated across seven audit streams. Sorted by severity, then
+*115 findings, de-duplicated across seven audit streams. Sorted by severity, then
 by domain. Full evidence for each is in the referenced document.*
 
 **Severity:** P0 = production blocker · P1 = critical · P2 = important · P3 = improvement
@@ -48,7 +48,7 @@ by domain. Full evidence for each is in the referenced document.*
 | **AUD-027** | ☑ **CLOSED — PR #50 (`fix/aud-027-sql-overdue-ist-day-marker`, merged).** ~~Two incompatible definitions of "overdue" — every KPI fires a full working day before the gate~~ New `IMMUTABLE` SQL function `ist_day_marker(ts)` mirrors `istCalendarDayMarker()` exactly (verified against its own boundary test cases, not the naive `AT TIME ZONE 'Asia/Kolkata'` expression first proposed — that one computes a different, 5.5h-off instant). Repointed the three confirmed raw sites: `v_unit_stage_status.is_overdue` (new migration, starting from AUD-002's tenant-scoped body), `jobs.read.ts`'s tallies `overdue` count, `portfolio.read.ts`'s `newly_overdue` sub-select. `portfolio.read.ts`'s `holds_opened` (a rolling-24h window bound, not an overdue threshold) deliberately left untouched, per the session brief's own distinction. | `20260908130000_ist_day_marker_overdue_fix`, `jobs.read.ts`, `portfolio.read.ts` | business-logic | S | `10` §5 |
 | AUD-028 | `de.aggregate_id::int` will throw once a snapshot event exists — non-deterministic 500s tenant-wide | 6 call sites | integrity | S | `10` §5 |
 | AUD-029 | PAINTING operations are permanently un-verifiable — the DFT gate has no writer for its evidence | `component.service.ts:368-390` | business-logic | S / M | `10` §5 |
-| AUD-030 | `v_unit_stage_status` ignores `JobProcess.included` — excluding a process makes its stages permanently non-complete | `20260815120000` | scheduling | S | `10` §4 |
+| **AUD-030** | ☑ **CLOSED — PR #53 (`fix/aud-030-excluded-process-stage-rollup`).** ~~`v_unit_stage_status` ignores `JobProcess.included` — excluding a process makes its stages permanently non-complete~~ Traced to the `exploded` CTE's direct `JOIN job_processes jp` (no `included` predicate) — `generateSchedule` already never creates a `ProcessPlan` for an excluded process, so the bug wasn't in the numerator; it was that an excluded process's `work_order_stages` still got unnested into the rollup. Two symptoms: a stage touched only by an excluded process rendered `'idle'` forever (phantom grey tile); a stage *shared* with an included process could never reach `'complete'`, since the excluded sibling's NULL-status row kept `count(*) FILTER (WHERE status IS DISTINCT FROM 'COMPLETE') = 0` from ever being true (`IS DISTINCT FROM` treats NULL as distinct from `'COMPLETE'`, unlike `=`). Fix: `AND jp.included = true` added to that one join. `v_process_plan_percent` untouched — its only `job_processes` reference is reached exclusively through `process_plans`, which already excludes excluded processes by construction. `CREATE OR REPLACE VIEW` (not `DROP`+`CREATE`), which also preserved the existing `despl_app` grant with no reissue needed. | `20260908140000_aud030_excluded_process_stage_rollup` | scheduling | S | `10` §4 |
 | AUD-031 | `forecastDispatch` is not a forecast; the client portal shows the promise labelled as one | 4 read models | business-logic | L | `07` §7 |
 | AUD-032 | `assertKitReady` demands the whole equipment's kit per unit and ignores consumption | `_shared.ts:946-965` | business-logic | M | `10` §5 |
 | **AUD-033** | ☑ **CLOSED — PR #55 (`fix/aud-033-process-not-optional-gate`).** ~~`TemplateProcess.optional` never enforced — hydrotest and final inspection can be excluded at intake~~ `createJob` now refuses new code `PROCESS_NOT_OPTIONAL` (409) for any `excludedProcessCodes` entry whose `TemplateProcess.optional` is `false`, checked as an independent step after the existing `unknownExclusions`/`NOT_FOUND` check. A legitimate exclusion (an `optional: true` process) now also requires a non-empty `exclusionReason` (new `EXCLUSION_REASON_REQUIRED` code) recorded on the job-creation audit event's `after`/`eventPayload` — no new schema column, per the session's own scoping. **Real gap found while implementing, not in the brief**: `seed/lead-time-model.json`'s 36-process PRESSURE_VESSEL route (and `prisma/seed.ts`'s `templateProcess.createMany`) never sets `optional` at all, so every seeded `TemplateProcess.optional` is `false` today — there is no real process a user could legitimately exclude yet, even after this fix. Flagged as a follow-up (seed data should mark at least one real conditional process, e.g. PWHT, `optional: true`), not fixed here. `jobs/new/_client.tsx`'s exclude checkbox now disables for non-optional rows and a reason textarea appears once anything is excluded, so the fix is reachable through the UI, not just the service. | `job-intake.service.ts`, `errors.ts`, `schemas.ts`, `jobs/new/_client.tsx` | business-logic | S | `07` §9 |
@@ -133,7 +133,7 @@ by domain. Full evidence for each is in the referenced document.*
 
 ---
 
-## P3 — improvement (10)
+## P3 — improvement (11)
 
 | ID | Title | Module | Cx | Detail |
 |---|---|---|---|---|
@@ -147,6 +147,7 @@ by domain. Full evidence for each is in the referenced document.*
 | AUD-112 | Welding is a card wall with an unreadable 70×20px sparkline and a `max` recomputed in the render loop | `welding/_client.tsx` | S | `06` §9 |
 | AUD-113 | Nineteen operational date columns across seven hot tables are entirely unindexed | `schema.prisma` | S | `11` §7 |
 | AUD-114 | `dispatch_batch_units.unit_id` has no leading index, on a query that runs on every verification | `schema.prisma:2204` | S | `14` §3 |
+| **AUD-115** | ☑ **CLOSED — same PR.** `myday.read.test.ts`'s `onTimePct30d` fixture fed `isOnTime` a raw, untruncated `now()` as `plannedFinish` — `istCalendarDayMarker`'s IST shift then flips the comparison false once UTC wall-clock time crosses 18:30 (IST has already rolled to the next calendar day). **Test-fixture-only, never a live bug**: every real writer of `ProcessPlan.plannedFinish` (`schedule.service.ts:148`, `override.service.ts:173`) sources it exclusively from `addWorkingDays`/`computeEnvelope`, which always route through `toDateOnly` and return a UTC-midnight-truncated marker — production never writes the untruncated shape this fixture accidentally used. Fixed by truncating the fixture's `plannedFinish` via `istCalendarDayMarker`; pinned with two new deterministic (fixed-instant, no wall-clock dependency) cases in `business-day.test.ts`. | `myday.read.test.ts`, `business-day.test.ts` | S | this session |
 
 ---
 
