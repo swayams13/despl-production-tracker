@@ -115,12 +115,20 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ladder (DB-backed, isolated fixtur
     for (const id of [planA, planB, planC]) await setPlan(id, { status: "NOT_STARTED", plannedFinish: future });
   }
 
+  // AUD-002: v_unit_stage_status now joins through `jobs` on an explicit
+  // app.tenant_id predicate (20260908100000_tenant_scoped_status_views), so
+  // even this owner-role client — which bypasses RLS but not the view's own
+  // literal join condition — must set it, same as real callers do via
+  // withTenant.
   async function fill(): Promise<{ fill_status: string; is_overdue: boolean; is_rejected: boolean; governing_plan_id: number | null }> {
-    const rows = await owner.$queryRaw<{ fill_status: string; is_overdue: boolean; is_rejected: boolean; governing_plan_id: number | null }[]>`
-      SELECT fill_status, is_overdue, is_rejected, governing_plan_id
-      FROM v_unit_stage_status
-      WHERE job_id = ${jobId} AND unit_id = ${unitId} AND stage_no = ${STAGE}
-    `;
+    const rows = await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant_id', ${String(REF.tenant)}, true)`;
+      return tx.$queryRaw<{ fill_status: string; is_overdue: boolean; is_rejected: boolean; governing_plan_id: number | null }[]>`
+        SELECT fill_status, is_overdue, is_rejected, governing_plan_id
+        FROM v_unit_stage_status
+        WHERE job_id = ${jobId} AND unit_id = ${unitId} AND stage_no = ${STAGE}
+      `;
+    });
     expect(rows.length).toBe(1);
     return rows[0];
   }
