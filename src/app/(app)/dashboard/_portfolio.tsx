@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CountUp } from "@/components/industrial/count-up";
 import { HealthChip } from "@/components/industrial/health-chip";
 import { StageSpine } from "@/components/industrial/stage-spine";
+import { ResponsiveTable } from "@/components/industrial/responsive-table";
 import { HEALTH_LABEL, HEALTH_ORDER, type JobHealth } from "@/lib/services/job-health";
 import type { Portfolio, PortfolioRow } from "@/lib/services/portfolio.read";
 
@@ -107,35 +108,47 @@ export function PortfolioBand({
             </span>
           )}
         </div>
-        <div style={{ padding: "4px 8px 10px", overflowX: "auto" }}>
-          <table className="matrix">
-            <thead>
-              <tr>
-                <th style={{ minWidth: 110 }}>Job</th>
-                <th style={{ minWidth: 140 }}>Client</th>
-                <th style={{ minWidth: 100 }}>Health</th>
-                <th style={{ minWidth: 130 }}>Complete</th>
-                <th style={{ minWidth: 120 }}>Stages</th>
-                <th>Promised</th>
-                <th>Forecast</th>
-                <th>Variance</th>
-                <th>Overdue</th>
-                <th>Holds</th>
-                <th style={{ minWidth: 140 }}>Last 24h</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((r) => <Row key={r.id} r={r} />)}
-            </tbody>
-          </table>
-          {shown.length === 0 && (
-            <p className="note" style={{ margin: "16px 0" }}>
-              No projects are {HEALTH_LABEL[activeFilter!].toLowerCase()} right now.{" "}
-              <Link href={href(null)} className="btn btn-ghost">Show all</Link>
-            </p>
-          )}
-        </div>
+        {shown.length === 0 ? (
+          <p className="note" style={{ margin: "16px 0" }}>
+            No projects are {HEALTH_LABEL[activeFilter!].toLowerCase()} right now.{" "}
+            <Link href={href(null)} className="btn btn-ghost">Show all</Link>
+          </p>
+        ) : (
+          <div style={{ padding: "4px 8px 10px" }}>
+            <ResponsiveTable
+              table={
+                <div style={{ overflowX: "auto" }}>
+                  <table className="matrix">
+                    <thead>
+                      <tr>
+                        <th style={{ minWidth: 110 }}>Job</th>
+                        <th style={{ minWidth: 140 }}>Client</th>
+                        <th style={{ minWidth: 100 }}>Health</th>
+                        <th style={{ minWidth: 130 }}>Complete</th>
+                        <th style={{ minWidth: 120 }}>Stages</th>
+                        <th>Promised</th>
+                        <th>Forecast</th>
+                        <th>Variance</th>
+                        <th>Overdue</th>
+                        <th>Holds</th>
+                        <th style={{ minWidth: 140 }}>Last 24h</th>
+                        <th>Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shown.map((r) => <Row key={r.id} r={r} />)}
+                    </tbody>
+                  </table>
+                </div>
+              }
+              cards={
+                <>
+                  {shown.map((r) => <ProjectCard key={r.id} r={r} />)}
+                </>
+              }
+            />
+          </div>
+        )}
         {cancelledCount > 0 && (
           <div style={{ padding: "8px 16px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
             {cancelledCount} cancelled — not shown
@@ -143,6 +156,54 @@ export function PortfolioBand({
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * Tablet card (RESPONSIVE_GUIDELINES.md, Management Dashboard: "health table
+ * converts to stacked cards, one project per card, tap to drill in" — this
+ * table previously had no card fallback at all, just `overflow-x:auto` on
+ * the raw `<table>`, which is the exact pattern COMPONENT_INVENTORY.md's
+ * table rules call out as the rare exception, not something to reach for
+ * by default). Detail-tier fields (Last 24h, Updated — COMPONENT_INVENTORY.md:
+ * "behind disclosure, never a column") sit behind a native `<details>` so no
+ * client-side state is needed in this otherwise-server-rendered file.
+ */
+function ProjectCard({ r }: { r: PortfolioRow }) {
+  const v = r.forecastVarianceDays;
+  const noUnits = r.unitRollup.length === 0;
+  return (
+    <div className="rt-card">
+      <div className="rt-card-top">
+        <Link href={`/jobs/${r.id}`} className="mono" style={{ fontWeight: 600 }}>{r.jobNumber} →</Link>
+        <HealthChip health={r.health} />
+      </div>
+      <div className="rt-card-meta">{r.clientName}</div>
+      {!noUnits && (
+        <div style={{ margin: "8px 0" }}>
+          <StageSpine variant="mini" segments={r.unitRollup} />
+        </div>
+      )}
+      <div className="rt-card-row">
+        <span>Complete <b className="mono">{r.percentComplete}%</b></span>
+        <span>Promised <span className="mono">{fmtDate(r.committedDeliveryDate)}</span></span>
+        <span>Forecast <span className="mono">{fmtDate(r.forecastDispatch)}</span></span>
+        {v !== null && (
+          <span className="mono" style={{ color: v > 0 ? "var(--s-overdue)" : "var(--s-complete)" }}>{v > 0 ? "+" : ""}{v}d variance</span>
+        )}
+        <span style={{ color: r.overduePlans > 0 ? "var(--s-overdue)" : undefined }}>{r.overduePlans} overdue</span>
+        <span style={{ color: r.openHoldPoints > 0 ? "var(--s-hold)" : undefined }}>{r.openHoldPoints} holds</span>
+      </div>
+      <details>
+        <summary className="sh-sec" style={{ cursor: "pointer", margin: "8px 0 0" }}>Activity</summary>
+        <div className="rt-card-row" style={{ marginTop: 6 }}>
+          <span style={{ color: "var(--s-complete)" }}>+{r.verifiedLast24h} verified</span>
+          <span style={{ color: r.newlyOverdueLast24h > 0 ? "var(--s-overdue)" : undefined }}>{r.newlyOverdueLast24h} newly late</span>
+          <span style={{ color: r.holdsOpenedLast24h > 0 ? "var(--s-hold)" : undefined }}>{r.holdsOpenedLast24h} new holds</span>
+          <span>Updated {fmtRelative(r.lastActivityAt)}</span>
+        </div>
+      </details>
+    </div>
   );
 }
 

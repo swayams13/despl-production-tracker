@@ -4,7 +4,8 @@ import { getActor, ROLES, hasRole } from "@/lib/authz";
 import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
 import { loadPortfolio, type PortfolioRow } from "@/lib/services/portfolio.read";
 import { PortfolioBand, healthFromSlug } from "./_portfolio";
-import { CountUp } from "@/components/industrial/count-up";
+import { PageHeader } from "@/components/industrial/page-header";
+import { MetricCard } from "@/components/industrial/metric-card";
 import { Sunburst, type SunburstNode } from "@/components/viz";
 import { portfolioToSunburst } from "./_sunburst-data";
 
@@ -136,7 +137,7 @@ export default async function Dashboard({
   if (!k) {
     return (
       <>
-        <div className="page-h"><h1>Dashboard</h1></div>
+        <PageHeader title="Dashboard" />
         <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} jobParam={jobParam} />
         <PortfolioHealthCard data={sunburstData} />
         {portfolio.rows.length > 0 && (
@@ -164,13 +165,15 @@ export default async function Dashboard({
 
   return (
     <>
-      <div className="page-h">
-        <h1>Dashboard</h1>
-        <span className="sub" style={{ marginLeft: "auto" }}>
-          {now.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })} · as of{" "}
-          <span className="mono">{now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
-        </span>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        actions={
+          <span className="sub">
+            {now.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short" })} · as of{" "}
+            <span className="mono">{now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+          </span>
+        }
+      />
 
       <PortfolioBand portfolio={portfolio} activeFilter={activeFilter} jobParam={jobParam} />
       <PortfolioHealthCard data={sunburstData} />
@@ -189,40 +192,40 @@ export default async function Dashboard({
       </div>
 
       <div className="kpis">
-        <div className="kpi">
-          <h6>Overall completion</h6>
-          <div className="v mono"><CountUp value={k.percentComplete} /><small>%</small></div>
-          <div className="sub"><span className="mono">{completeCount} of {k.totalPlans}</span> plans complete</div>
-          <div className="pbar"><i style={{ width: `${k.percentComplete}%` }} /></div>
-        </div>
+        <MetricCard
+          label="Overall completion"
+          value={k.percentComplete}
+          suffix="%"
+          progressPercent={k.percentComplete}
+          sub={<><span className="mono">{completeCount} of {k.totalPlans}</span> plans complete</>}
+        />
 
-        <Link href="/workspace" className="kpi clicky">
-          <h6>On track</h6>
-          <div className="v mono"><CountUp value={onTrack} /></div>
-          <div className="sub">not currently overdue</div>
-        </Link>
+        <MetricCard label="On track" value={onTrack} href="/workspace" sub="not currently overdue" />
 
-        <Link href="/workspace?status=overdue" className={`kpi clicky${k.overdue > 0 ? " alert" : ""}`}>
-          <h6>At-risk / overdue</h6>
-          <div className="v mono" style={{ color: k.overdue > 0 ? "var(--s-overdue)" : undefined }}><CountUp value={k.overdue} /></div>
-          <div className="sub">click to review</div>
-        </Link>
+        <MetricCard
+          label="At-risk / overdue"
+          value={k.overdue}
+          href="/workspace?status=overdue"
+          alert={k.overdue > 0}
+          valueColor={k.overdue > 0 ? "var(--s-overdue)" : undefined}
+          sub="click to review"
+        />
 
-        <div className="kpi">
-          <h6>Open hold points</h6>
-          <div className="v mono"><CountUp value={k.openHoldPoints} /></div>
-          <div className="sub">
-            {k.oldestHoldAgeDays !== null
+        <MetricCard
+          label="Open hold points"
+          value={k.openHoldPoints}
+          sub={
+            k.oldestHoldAgeDays !== null
               ? <>oldest open <b className="mono" style={{ color: "var(--s-hold)" }}>{k.oldestHoldAgeDays}d</b> · {k.awaitingTpiCount} await TPI</>
-              : "No open hold points"}
-          </div>
-        </div>
+              : "No open hold points"
+          }
+        />
 
-        <div className="kpi">
-          <h6>Forecast dispatch</h6>
-          <div className="v mono" style={{ fontSize: 22, paddingTop: 4 }}>{fmtDate(k.forecastDispatch)}</div>
-          <div className="sub">
-            {k.committedDeliveryDate ? (
+        <MetricCard
+          label="Forecast dispatch"
+          value={fmtDate(k.forecastDispatch)}
+          sub={
+            k.committedDeliveryDate ? (
               <>
                 <span className="delta" style={{ color: (k.forecastVarianceDays ?? 0) > 0 ? "var(--s-overdue)" : "var(--s-complete)" }}>
                   {(k.forecastVarianceDays ?? 0) > 0 ? "+" : ""}{k.forecastVarianceDays}d
@@ -231,9 +234,9 @@ export default async function Dashboard({
               </>
             ) : (
               "No contractual date set yet"
-            )}
-          </div>
-        </div>
+            )
+          }
+        />
       </div>
 
       <div className="statstrip">
