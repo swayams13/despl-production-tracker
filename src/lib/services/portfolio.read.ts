@@ -78,7 +78,7 @@ export async function loadPortfolio(actor: Actor): Promise<Portfolio> {
                    WHERE sr.job_id = j.id
                      AND pp.status <> 'COMPLETE'
                      AND pp.planned_finish >= (SELECT since FROM win)
-                     AND pp.planned_finish < (now() AT TIME ZONE 'UTC')) AS newly_overdue,
+                     AND pp.planned_finish < ist_day_marker(now())) AS newly_overdue,
                  -- Same predicate as loadDailyDigest's "holds opened" (reports.read.ts):
                  -- a gated process (one carrying a blocks_completion QCP code) that
                  -- STARTED in the window. There is no "hold opened" event; the process

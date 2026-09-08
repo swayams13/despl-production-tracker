@@ -98,7 +98,7 @@ export async function loadJobs(
              count(*) FILTER (
                WHERE pp.status <> 'COMPLETE'
                  AND pp.planned_finish IS NOT NULL
-                 AND pp.planned_finish < (now() AT TIME ZONE 'UTC')
+                 AND pp.planned_finish < ist_day_marker(now())
              )::int AS overdue,
              max(pp.planned_finish) AS forecast
       FROM process_plans pp
