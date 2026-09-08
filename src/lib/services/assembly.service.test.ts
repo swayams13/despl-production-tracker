@@ -99,11 +99,17 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
   let step3 = 0; // unit1, seq3 (deptB, no jointRef) — gated on step2
   let step4 = 0; // unit1, seq4 (deptB, INSPECTION, linked to qcpItemId) — A4 sync
   let step5 = 0; // unit1, seq5 (deptB, WORK, no qcpItemId) — A4 sync must not fire here
+  let step6 = 0; // unit1, seq6 (deptB, INSPECTION, blocking code is internal-only) — AUD-004
+  let step7 = 0; // unit1, seq7 (deptB, INSPECTION, blocking code is external) — AUD-004
+  let step8 = 0; // unit1, seq8 (deptB, INSPECTION, external blocking + internal non-blocking) — AUD-004
   let unit1Id = 0;
   let unit2Step1 = 0; // unit2, seq1 — cross-unit isolation
   let rejectCategoryId = 0;
   let testTypeId = 0;
   let qcpItemId = 0;
+  let qcpItemInternalOnlyId = 0;
+  let qcpItemExternalBlockingId = 0;
+  let qcpItemMixedId = 0;
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({ where: { tenantId, entityType: "AssemblyStep", entityId: String(entityId) } });
@@ -210,11 +216,105 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
       },
     });
 
+    // AUD-004: three more INSPECTION checkpoints, each with a different
+    // party-code shape, for verifyAssemblyStep's new external-blocking-party
+    // pre-check. "DESPL" seed convention: InspectionParty.code === the
+    // tenant's own Organization.code marks the internal party (see
+    // seed/qcp-templates.json's observedPartySets) — here that's org.code
+    // itself, not the literal string "DESPL".
+    const internalParty = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: org.code } });
+    const externalParty = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "CLIENT_TPI" } });
+    const holdCode = await owner.qcpCodeRef.create({
+      data: { tenantId, code: "H", label: "Hold", blocksCompletion: true },
+    });
+    const performCode = await owner.qcpCodeRef.create({
+      data: { tenantId, code: "P", label: "Perform", blocksCompletion: false },
+    });
+
+    const qcpItemInternalOnly = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 2, srNo: "4.6", kind: "CHECKPOINT", activity: "Internal-only hold" },
+    });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: qcpItemInternalOnly.id, inspectionPartyId: internalParty.id, qcpCodeId: holdCode.id },
+    });
+
+    const qcpItemExternalBlocking = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 3, srNo: "4.7", kind: "CHECKPOINT", activity: "External TPI hold" },
+    });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: qcpItemExternalBlocking.id, inspectionPartyId: externalParty.id, qcpCodeId: holdCode.id },
+    });
+
+    const qcpItemMixed = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 4, srNo: "4.8", kind: "CHECKPOINT", activity: "Mixed hold" },
+    });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: qcpItemMixed.id, inspectionPartyId: externalParty.id, qcpCodeId: holdCode.id },
+    });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: qcpItemMixed.id, inspectionPartyId: internalParty.id, qcpCodeId: performCode.id },
+    });
+
+    const ts6 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 6,
+        groupCode: "E",
+        groupName: "Shell Sub-Assembly (LS-1)",
+        srNo: "4.6",
+        activity: "Internal-only hold check",
+        kind: "INSPECTION",
+        defaultDepartmentId: deptB.id,
+      },
+    });
+    const ts7 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 7,
+        groupCode: "E",
+        groupName: "Shell Sub-Assembly (LS-1)",
+        srNo: "4.7",
+        activity: "External TPI hold check",
+        kind: "INSPECTION",
+        defaultDepartmentId: deptB.id,
+      },
+    });
+    const ts8 = await owner.assemblyTemplateStep.create({
+      data: {
+        versionId: asmVersion.id,
+        seq: 8,
+        groupCode: "E",
+        groupName: "Shell Sub-Assembly (LS-1)",
+        srNo: "4.8",
+        activity: "Mixed hold check",
+        kind: "INSPECTION",
+        defaultDepartmentId: deptB.id,
+      },
+    });
+
     step1 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts1.id, seq: 1, jobId } })).id;
     step2 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts2.id, seq: 2, jobId } })).id;
     step3 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts3.id, seq: 3, jobId } })).id;
     step4 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts4.id, seq: 4, qcpItemId, jobId } })).id;
     step5 = (await owner.assemblyStep.create({ data: { unitId: unit1.id, templateStepId: ts5.id, seq: 5, jobId } })).id;
+    step6 = (
+      await owner.assemblyStep.create({
+        data: { unitId: unit1.id, templateStepId: ts6.id, seq: 6, qcpItemId: qcpItemInternalOnly.id, jobId },
+      })
+    ).id;
+    step7 = (
+      await owner.assemblyStep.create({
+        data: { unitId: unit1.id, templateStepId: ts7.id, seq: 7, qcpItemId: qcpItemExternalBlocking.id, jobId },
+      })
+    ).id;
+    step8 = (
+      await owner.assemblyStep.create({
+        data: { unitId: unit1.id, templateStepId: ts8.id, seq: 8, qcpItemId: qcpItemMixed.id, jobId },
+      })
+    ).id;
+    qcpItemInternalOnlyId = qcpItemInternalOnly.id;
+    qcpItemExternalBlockingId = qcpItemExternalBlocking.id;
+    qcpItemMixedId = qcpItemMixed.id;
     unit1Id = unit1.id;
     unit2Step1 = (await owner.assemblyStep.create({ data: { unitId: unit2.id, templateStepId: ts1.id, seq: 1, jobId } })).id;
 
@@ -416,6 +516,37 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     const verified = await verifyAssemblyStep(qc, { assemblyStepId: step5 });
     expect(verified.status).toBe("COMPLETE");
     expect(await owner.qcpExecution.count({})).toBe(before);
+  });
+
+  it("AUD-004 (1): INSPECTION step whose QcpItem's only blocking code belongs to the tenant's own internal party — unchanged, auto-records ACCEPTED", async () => {
+    await startAssemblyStep(supB, { assemblyStepId: step6 });
+    await submitAssemblyStep(supB, { assemblyStepId: step6 });
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step6 });
+    expect(verified.status).toBe("COMPLETE");
+
+    const execs = await owner.qcpExecution.findMany({ where: { qcpItemId: qcpItemInternalOnlyId, unitId: unit1Id } });
+    expect(execs).toHaveLength(1);
+    expect(execs[0]).toMatchObject({ result: "ACCEPTED", clearedBy: qc.userId });
+  });
+
+  it("AUD-004 (2): INSPECTION step whose QcpItem has a blocking code for an EXTERNAL party (CLIENT_TPI) — verify succeeds, but no QcpExecution is auto-recorded, and the hold point stays open", async () => {
+    await startAssemblyStep(supB, { assemblyStepId: step7 });
+    await submitAssemblyStep(supB, { assemblyStepId: step7 });
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step7 });
+    expect(verified.status).toBe("COMPLETE"); // the assembly step itself still verifies
+
+    const execs = await owner.qcpExecution.findMany({ where: { qcpItemId: qcpItemExternalBlockingId, unitId: unit1Id } });
+    expect(execs).toHaveLength(0); // but no false-positive evidence was manufactured for the TPI
+  });
+
+  it("AUD-004 (3): QcpItem has one external blocking code AND one internal non-blocking code — one external blocking code is enough to withhold the auto-record", async () => {
+    await startAssemblyStep(supB, { assemblyStepId: step8 });
+    await submitAssemblyStep(supB, { assemblyStepId: step8 });
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: step8 });
+    expect(verified.status).toBe("COMPLETE");
+
+    const execs = await owner.qcpExecution.findMany({ where: { qcpItemId: qcpItemMixedId, unitId: unit1Id } });
+    expect(execs).toHaveLength(0);
   });
 
   it("illegal transition: verifying a NOT_STARTED step is refused", async () => {
