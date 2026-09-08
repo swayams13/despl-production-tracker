@@ -1,0 +1,184 @@
+# 19 — MASTER ISSUE REGISTER
+
+*114 findings, de-duplicated across seven audit streams. Sorted by severity, then
+by domain. Full evidence for each is in the referenced document.*
+
+**Severity:** P0 = production blocker · P1 = critical · P2 = important · P3 = improvement
+**Complexity:** S = hours · M = days · L = a week or more
+
+---
+
+## P0 — production blockers (24)
+
+| ID | Title | Module | Type | Cx | Depends on | Detail |
+|---|---|---|---|---|---|---|
+| **AUD-001** | Job-grain RLS fails open — 28 operational tables have no DB tenant isolation; cross-tenant read **and write** proven live | `20260905090000_h1_job_isolation_rls`, `20260813051500` | multi-tenancy | L | — | `12` §1, `11` §3.3 |
+| **AUD-002** | ☑ **CLOSED (interim) — PR #45.** ~~`v_unit_stage_status` returns other tenants' units on the normal request path~~ Both `v_unit_stage_status` and `v_process_plan_percent` now join through `jobs` with an explicit `j.tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::int` predicate, so the fail-open `job_isolation` policy on the job-grain tables they read (units/equipments/job_processes/process_plans) has something tenant-scoped to key off. **AUD-001 remains open** — those tables are still fail-open for any other query that reads them directly without going through these two views. | `20260908100000_tenant_scoped_status_views` | data-leak | S (interim) / L | AUD-001 | `11` §3.4 |
+| **AUD-003** | Any QC user clears a blocking hold point with result `NA`; waiver approval entirely unimplemented | `qcp.service.ts`, `_shared.ts`, `schemas.ts` | business-logic | M | — | `10` §2 |
+| **AUD-004** | Verifying an internal assembly step auto-stamps `ACCEPTED` on the linked TPI/witness hold point | `assembly.service.ts:257-272` | business-logic | M | AUD-003 | `10` §2 |
+| **AUD-005** | ☑ **CLOSED — PR #42.** ~~Dispatch release and recording re-check nothing — a unit ships with an open NCR/hold point and zero production complete~~ `approveDispatchRelease`/`recordDispatch` now re-check both quality gates plus a new `UNIT_NOT_COMPLETE` production-completeness gate, in a per-unit loop inside the existing transaction. The listed "Depends on AUD-034" was deliberately not resolved (out of scope per the fix session's brief) — the new gate scopes to `scheduleRun.isCurrent` the same way existing readers do and does not assume exactly one current run. | `dispatch.service.ts`, `packing.service.ts` | business-logic | **S** | AUD-034 | `10` §2 |
+| **AUD-006** | One CHECK constraint across 73 tables; 7 of 8 impossible states reachable from the app's own role | schema-wide | integrity | M | — | `11` §5.1, §6 |
+| **AUD-007** | ☑ **CLOSED — PR #43.** ~~`/workspace` hardcodes `"DESPL-320"`; every dashboard drill-down drops `job=` and lands on the wrong project~~ `pilotJobId` deleted; `/workspace` now shows an explicit picker when `?job=` is absent/invalid instead of guessing. All 7 dashboard/portfolio drill-down links now carry `job=`. | `workspace/page.tsx:8-12`, `dashboard/page.tsx` | project-context | **S** | — | `06` §4 |
+| **AUD-008** | My Day shows the department pool and teammates' work — a department board wearing a personal title | `myday.read.ts:246-273` | ia-violation | M | AUD-010 | `04` §1 |
+| **AUD-009** | The department pool table is uncapped — ~320 rows on one real job, on a personal dashboard | `my-day/_client.tsx:1080` | density | M | AUD-008 | `04` §2 |
+| **AUD-010** | The Team surface does not exist — no route, no read model, no nav item | `src/app/(app)/` | gap | L | — | `05` §1 |
+| **AUD-011** | Two disjoint nav arrays switched by viewport — My Day unreachable on desktop, Dashboard unreachable on tablet | `app-shell.tsx:127-165` | navigation | M | AUD-012 | `03` §6 |
+| **AUD-012** | Navigation is not role-filtered — one static list for every role except Admin | `app-shell.tsx:144-216` | navigation | **S** | AUD-013 | `03` §6 |
+| **AUD-013** | No operator role — every shop-floor employee is seeded `SUPERVISOR` and can assign colleagues' work | `authz/index.ts:6-13`, `seed.ts:1476` | role-model | M | — | `02` §3 |
+| **AUD-014** | The same page renders for every role — branching exists only as redirects and hidden buttons | `src/app/(app)/**` | role-model | L | AUD-013 | `02` §4 |
+| **AUD-015** | The dashboard is a portfolio band bolted onto a single-project deep-dive (~15% portfolio-grain) | `dashboard/page.tsx` | dashboard | L | AUD-016 | `06` §1 |
+| **AUD-016** | The Needs Attention exception queue does not exist; substitutes carry no owner, age or action | `dashboard/page.tsx:259-280` | dashboard | L | AUD-007 | `06` §3 |
+| **AUD-017** | The S-curve is untrustworthy — unweighted counts, and planned rebases on every reschedule | `workspace.read.ts:634-662` | chart | L | — | `06` §6 |
+| **AUD-018** | The QC cockpit is three unbounded flat lists with no filter, pagination or hierarchy | `qc-cockpit.read.ts` | qc-workflow | L | — | `09` §1 |
+| **AUD-019** | Workspace, Command Center and Department-detail all answer "what is my department working on?" | three surfaces | ia-overlap | L | AUD-010 | `03` §3 |
+| **AUD-020** | The app-group layout loads the entire job portfolio on every page render | `(app)/layout.tsx:40-44` | performance | **S** | — | `14` §1 |
+| **AUD-021** | `v_unit_stage_status`'s CTE is materialised — full-tenant cross-product per read; ~688k cost on an empty DB | `20260815120000` | index/perf | M | — | `11` §8, `14` §1 |
+| **AUD-022** | `loadDepartmentCards` loads every current `ProcessPlan` into JavaScript; Command Center does it twice | `departments.read.ts:117-133` | performance | M | AUD-055 | `08` §5 |
+| **AUD-023** | The activity-feed UNION limits after the union — an authenticated self-inflicted DoS | `events.read.ts:60-93` | performance | **S** | — | `13` §5 |
+| **AUD-024** | Railway ignores `railway.json` — merging to `main` ships code without its schema. Precedent: 2 Sep, 20 migrations, one day of breakage | `railway.json`, CI | deploy | **S** | — | `15` §2 |
+
+---
+
+## P1 — critical (47)
+
+| ID | Title | Module | Type | Cx | Detail |
+|---|---|---|---|---|---|
+| AUD-025 | Client users reach `/board` and `/profile` and receive internal job telemetry, bypassing `ClientVisibilityPolicy` | `board/page.tsx`, `profile/page.tsx`, `(app)/layout.tsx` | authz-bypass | S | `12` §4 |
+| AUD-026 | Re-verifying a reworked operation auto-closes its NCR from `OPEN` — disposition skipped entirely | `ncr.service.ts:25`, `component.service.ts:398` | business-logic | S | `10` §2 |
+| AUD-027 | Two incompatible definitions of "overdue" — every KPI fires a full working day before the gate | `_shared.ts:500` vs 4 SQL sites | business-logic | S | `10` §5 |
+| AUD-028 | `de.aggregate_id::int` will throw once a snapshot event exists — non-deterministic 500s tenant-wide | 6 call sites | integrity | S | `10` §5 |
+| AUD-029 | PAINTING operations are permanently un-verifiable — the DFT gate has no writer for its evidence | `component.service.ts:368-390` | business-logic | S / M | `10` §5 |
+| AUD-030 | `v_unit_stage_status` ignores `JobProcess.included` — excluding a process makes its stages permanently non-complete | `20260815120000` | scheduling | S | `10` §4 |
+| AUD-031 | `forecastDispatch` is not a forecast; the client portal shows the promise labelled as one | 4 read models | business-logic | L | `07` §7 |
+| AUD-032 | `assertKitReady` demands the whole equipment's kit per unit and ignores consumption | `_shared.ts:946-965` | business-logic | M | `10` §5 |
+| AUD-033 | `TemplateProcess.optional` never enforced — hydrotest and final inspection can be excluded at intake | `job-intake.service.ts:140` | business-logic | S | `07` §9 |
+| AUD-034 | Two `isCurrent` schedule runs per job — double-counts every tally and blocks stage completion | `_shared.ts:349`, both views | integrity | M | `10` §4 |
+| AUD-035 | A duration override destructively overwrites the printed envelope and can deadlock feasibility forever | `override.service.ts:117-139` | scheduling | M | `10` §4 |
+| AUD-036 | The badge labelled "my overdue" counts the department (or the whole tenant) | `workspace.read.ts:989` | ia-violation | S | `04` §7 |
+| AUD-037 | The QC cockpit has no role gate — every staff user sees every NCR, named | `qc/page.tsx` | role-model | S | `09` §2 |
+| AUD-038 | Pool management lives on the individual's dashboard, with no workload context — invites cherry-picking | `my-day/_client.tsx:338` | assignment-model | M | `05` §5 |
+| AUD-039 | Project context is not real — the switcher navigates, the badge lies, five unrelated filters | `app-shell.tsx:376-423` | project-context | L | `03` §7 |
+| AUD-040 | `/board` and `/profile` are "coming in R2" stubs shipped in the shop-floor navigation | two pages | gap | S | `03` §5 |
+| AUD-041 | The QC verify queue and hold points render on four surfaces with four scopes and three status ladders | 4 surfaces | ia-overlap | M | `09` §3 |
+| AUD-042 | My Day has no workload summary — 30-day performance KPIs occupy the top of the page | `my-day/_client.tsx:940` | hierarchy | S | `04` §5 |
+| AUD-043 | Blocked work has no home — filed under "Up next", and the computed dependency text is discarded | `_client.tsx:58-64` | hierarchy | S | `04` §6 |
+| AUD-044 | No loading skeletons on the six heaviest routes | `src/app/(app)/` | states | S | `15` §3 |
+| AUD-045 | Every My Day row is rendered three times into the DOM — ~960 hydrated instances at pool volume | `globals.css:674-700` | density | M | `04` §3 |
+| AUD-046 | "My Workspace" filters by nobody and is pinned to one hardcoded job | `workspace.read.ts:441` | ia-violation | S | `05` §2 |
+| AUD-047 | The project-health table has no planned % — "Variance" is a date variance | `_portfolio.tsx`, `jobs.read.ts:160` | dashboard | M | `06` §5 |
+| AUD-048 | The Department × status matrix charts inert totals; the one actionable column is absent | `dashboard/page.tsx:283-330` | chart | M | `06` §8 |
+| AUD-049 | The Sunburst encodes plan count, has no labels, and is a dead control | `viz/sunburst.tsx` | chart | S | `06` §7 |
+| AUD-050 | Portfolio table: 12 columns, no sticky identifier, no sort, search or pagination | `_portfolio.tsx:110-144` | density | M | `06` §10 |
+| AUD-051 | The QCP grid is per-unit only — auditing 40 units means 40 page loads | `qcp-grid.read.ts:68` | qc-workflow | M | `07` §5 |
+| AUD-052 | `/departments` is three numbers; the detail page is a giant task list; rework load computed and discarded | `departments.read.ts` | hierarchy | M | `08` §2 |
+| AUD-053 | The project Overview is a spine plus an activity feed — four header numbers already computed and not rendered | `jobs/[id]/_client.tsx` | project-screen | L | `07` §2 |
+| AUD-054 | 9–11.5px type across management and shop-floor surfaces — density solved with font size | `globals.css` + 69 inline | visual | M | `17` §5 |
+| AUD-055 | Missing indexes behind eight hot filter/sort columns, one of them on the layout's critical path | `schema.prisma` | index | S | `14` §3 |
+| AUD-056 | `date_trunc()` in the QC yield join predicate defeats every index and has no lower bound | `qc-cockpit.read.ts:227` | index | S | `09` §4 |
+| AUD-057 | The QC cockpit is unbounded in four places and quadratic in one | `qc-cockpit.read.ts` | performance | M | `09` §4 |
+| AUD-058 | `loadMappedOps` N+1 in the StageSheet — 24 serialised round-trips on the primary interaction | `stage-detail.read.ts:155` | n+1 | S | `14` §5 |
+| AUD-059 | `aggregate_id::int` casts in WHERE/JOIN disable the `domain_events` index in four read models | 4 read models | index | S | `14` §4 |
+| AUD-060 | `loadPortfolio` runs 3N correlated subqueries over an unpaginated job set | `portfolio.read.ts:64-99` | performance | M | `14` §6 |
+| AUD-061 | No request-level memoisation — `getActor` and `loadJobs` run 2–4× per request | `authz/index.ts`, `jobs.read.ts` | performance | **S** | `14` §7 |
+| AUD-062 | An expired session shows a dead toast instead of redirecting; work goes unrecorded for a shift | `_action.ts:119-136` | failure-mode | S | `13` §2 |
+| AUD-063 | No observability — no structured JSON logs, no error reporting, no metrics, no health alerting | `_action.ts`, `package.json` | observability | S / M | `15` §5 |
+| AUD-064 | Clickable rows and cards are not keyboard-operable — WCAG 2.1.1 Level A | `my-day/_client.tsx`, `workspace/_client.tsx` | accessibility | M | `17` §1 |
+| AUD-065 | 154 inputs, 4 `htmlFor` — most fields carry only a placeholder | 32 client components | accessibility | M | `17` §3 |
+| AUD-066 | `--border` (1.15:1) and `--s-idle` (2.00:1) fail the 3:1 non-text minimum | `globals.css:304-307` | accessibility | **S** | `17` §2 |
+| AUD-067 | Shop-floor touch targets far under 44×44 — the spine is 13×14px | `globals.css:502, 906, 976` | accessibility | M | `17` §4 |
+| AUD-068 | Zero E2E coverage of any write path — the product's most important refusals are unproven end to end | `e2e/` | testing | M | `16` §5 |
+| AUD-069 | Deleting a job orphans its QCP into the shared library, readable by every tenant | 4 `SET NULL` FKs | data-leak | M | `11` §5.3 |
+| AUD-070 | Management sees Start/Verify buttons they are forbidden to press | `workspace.read.ts:441` | role-model | S | `05` §3 |
+| AUD-071 | Variances reported in calendar days while the schedule is computed in a 6-day week — ~15% divergence | 4 read models | scheduling | M | `07` §8 |
+
+---
+
+## P2 — important (33)
+
+| ID | Title | Module | Cx | Detail |
+|---|---|---|---|---|
+| AUD-072 | Every quality gate is a check-then-act read under READ COMMITTED with no lock on the rows it checks | `db.ts`, `_shared.ts` | M | `10` §5 |
+| AUD-073 | A VERIFIED client snapshot can be reverted to PUBLISHED by a concurrent publish | `client-snapshot.service.ts:87` | S | `10` §5 |
+| AUD-074 | The mandatory-delay-reason block covers 2 of 8 progress paths; one filed reason unblocks forever | `_shared.ts`, 3 services | M | `10` §5 |
+| AUD-075 | Percent-complete goes backwards when BOM rows are added mid-job — visible to the client | `v_process_plan_percent` | M | `10` §5 |
+| AUD-076 | Ten core mutable tables carry no `createdAt`/`updatedAt`; NCR ageing cannot be computed | `schema.prisma` | M | `11` §5.4 |
+| AUD-077 | `recordQcpExecution` never checks the checkpoint belongs to the unit's job | `qcp.service.ts:71` | S | `12` §6 |
+| AUD-078 | `QcpTemplate`/`QcpItem`/`InspectionParty` have no tenant anchor — library rows are cross-tenant readable and clonable | `schema.prisma`, `qcp.service.ts` | M | `12` §6 |
+| AUD-079 | ADMIN password reset defeats maker–checker — an admin can become a QC user | `admin.service.ts:156-196` | M | `12` §5 |
+| AUD-080 | `job_isolation` skips nine job-owned tables; `rls-coverage.test.ts` is structurally blind to the gap | migration, test | M | `12` §1 |
+| AUD-081 | Command Center: 13 containers, 9 tables, rows duplicated within the screen, no primary action | `command/[dept]/_client.tsx` | M | `05` §6 |
+| AUD-082 | Four computed read-model fields render nowhere, two of them behind dedicated queries | 4 read models | S | `08` §3 |
+| AUD-083 | `/workspace` and `/alerts` regress from My Day's inline refusal feedback to toast-only | 2 clients | S | `05` §9 |
+| AUD-084 | `/workspace` should retire into `/team`; its unique value is the bulk toolbar | `workspace/` | M | `03` §3 |
+| AUD-085 | Five of six `viz/` components are dead code while the dashboard hand-rolls an inferior S-curve | `components/viz/` | M | `06` §9 |
+| AUD-086 | Dashboard filter state is inconsistent — the health filter never reaches the Sunburst | `dashboard/page.tsx:117` | S | `06` §7 |
+| AUD-087 | Reports is a mailing tool, not a reporting surface — which is why analysis colonised the dashboard | `reports/` | M | `06` §9 |
+| AUD-088 | The Gantt tab ships ~1,440 bar objects for a screen showing one unit | `gantt.read.ts:43-96` | M | `07` §4 |
+| AUD-089 | The cron notification guard is not atomic; a missed run is silent | `notifications.service.ts:149` | S | `15` §4 |
+| AUD-090 | Command Center uses `computeCpm`, not `computeCpmSafe` — one bad spine 500s six departments | `command-center.read.ts:243` | S | `15` §6 |
+| AUD-091 | No error boundary outside `(app)`; no `global-error.tsx`; `/login` renders raw during an outage | `src/app/` | S | `15` §3 |
+| AUD-092 | The BOM tree loads every operation, rejection, procurement event and stock txn for an equipment | `bom.read.ts:360-430` | M | `14` §9 |
+| AUD-093 | The welding view reads every joint and NDT result ever to draw a 14-day sparkline | `welding.read.ts:86-170` | M | `14` §9 |
+| AUD-094 | Prisma connection pool unsized for Railway; 9 transactions per `/my-day` page view | `db.ts:19-29` | S | `14` §8 |
+| AUD-095 | `authz.test.ts` proves the predicates, not their application — a real omission of this class already shipped once | `authz.test.ts` | M | `16` §4 |
+| AUD-096 | Lost update on field edits — no version column, no `updatedAt` precondition | job/BOM editors | M | `15` §1 |
+| AUD-097 | No `<main>`, no skip link, no `scope=` on any `<th>`, no `aria-expanded` on disclosures | `app-shell.tsx`, all tables | M | `17` §6 |
+| AUD-098 | `role="listitem"` on the spine's `<button>` removes the button role | `stage-spine.tsx:48-61` | S | `17` §7 |
+| AUD-099 | Unit serial numbers are unique per equipment, not per job — two units in one job can share a serial | `units` unique index | S | `11` §5.2 |
+| AUD-100 | The migration set does not apply from scratch — three GRANTs to a role created outside it | 3 migrations | S | `11` §2 |
+| AUD-101 | `/departments/[id]` must narrow to performance — drop the open-items table | `departments/[id]/` | S | `08` §6 |
+| AUD-102 | Three status chips fail AA on the `--surface-2` panel background | `globals.css:476-481` | S | `17` §8 |
+| AUD-103 | `CountUp` animates in JavaScript and ignores `prefers-reduced-motion` | `count-up.tsx` | S | `17` §9 |
+| AUD-104 | Migrations take ACCESS EXCLUSIVE locks with full validation scans; no `CONCURRENTLY` anywhere | `prisma/migrations/` | S | `11` §9 |
+
+---
+
+## P3 — improvement (10)
+
+| ID | Title | Module | Cx | Detail |
+|---|---|---|---|---|
+| AUD-105 | `audit_log.ip` and `.user_agent` are NULL on every row ever written | `lib/audit/index.ts` | M | `12` §7 |
+| AUD-106 | The cron digest writes audit rows attributed to a real named ADMIN who did not act | `cron.service.ts:69-96` | S | `12` §7 |
+| AUD-107 | `/api/health` returns pending migration names to unauthenticated callers | `api/health/route.ts:67` | S | `12` §7 |
+| AUD-108 | CSP is Report-Only with no reporting endpoint — it enforces and collects nothing | `next.config.ts:35` | S | `12` §7 |
+| AUD-109 | The login throttle is keyed only on the identifier — any known username can be locked out | `actions/auth.ts:47-57` | M | `12` §7 |
+| AUD-110 | `bypassExcluded` re-derives edge type from the composed lag's sign, weakening a start gate | `schedule/exclude.ts:55-62` | S | `10` §4 |
+| AUD-111 | `/alerts` is reachable only below 1024px; the bell has no "see all" link | `app-shell.tsx:133` | S | `03` §5 |
+| AUD-112 | Welding is a card wall with an unreadable 70×20px sparkline and a `max` recomputed in the render loop | `welding/_client.tsx` | S | `06` §9 |
+| AUD-113 | Nineteen operational date columns across seven hot tables are entirely unindexed | `schema.prisma` | S | `11` §7 |
+| AUD-114 | `dispatch_batch_units.unit_id` has no leading index, on a query that runs on every verification | `schema.prisma:2204` | S | `14` §3 |
+
+---
+
+## Cross-cutting themes
+
+Five root causes account for most of the 114.
+
+| Theme | Findings |
+|---|---|
+| **Read models ran ahead of the surfaces that present them** — four computed fields render nowhere, five chart components are dead, and the dashboard is a workspace read model asked to do a portfolio job | AUD-015, 016, 047, 048, 052, 053, 082, 085, 087 |
+| **No surface was ever retired when a better answer to the same question arrived** | AUD-008, 010, 019, 041, 046, 084, 101 |
+| **Pilot-scale assumptions, honestly documented and not yet paid down** | AUD-020, 021, 022, 023, 057, 060, 088, 092, 093 |
+| **A gate was shipped enabled before its evidence writer existed** | AUD-003, 004, 026, 029, 035, 074 |
+| **A correctness fix landed in one language and not the other** | AUD-027, 059, 071 |
+
+The first two are IA problems and resolve by consolidation. The third is
+documented debt with known triggers. The fourth is the compliance exposure and
+must be closed first. The fifth is cheap and mechanical.
+
+---
+
+## Sortable index by module
+
+| Module | Findings |
+|---|---|
+| `prisma/` (schema, migrations, views) | 001, 002, 006, 021, 030, 034, 055, 069, 076, 099, 100, 104, 113, 114 |
+| `lib/services/` (business rules) | 003, 004, 005, 026, 029, 031, 032, 033, 035, 072, 073, 074, 075, 077, 078, 079, 089, 090 |
+| `lib/services/*.read.ts` | 008, 018, 020, 022, 023, 036, 046, 052, 056, 057, 058, 059, 060, 082, 088, 092, 093 |
+| `lib/authz/`, `lib/auth/` | 013, 014, 061, 079, 095, 109 |
+| `app/actions/`, `app/api/` | 025, 062, 106, 107 |
+| `app/(app)/` pages and clients | 007, 009, 015, 016, 037, 040, 042, 043, 044, 045, 050, 051, 053, 070, 081, 083, 086, 101, 111, 112 |
+| `components/industrial/`, `components/viz/` | 011, 012, 039, 049, 085, 097, 098, 103 |
+| `globals.css` | 054, 066, 067, 102 |
+| Deploy, CI, observability | 024, 063, 091, 094 |
+| Tests | 068, 080, 095 |
