@@ -807,6 +807,14 @@ body {
 @media (max-width: 1023px) {
   .theme-industrial .jobswitch { display: none; }
   .theme-industrial .kbd { display: none; }
+  /* Activity Detail, tablet: rail collapses behind a disclosure below the
+     primary action; the primary action itself goes full-width/56px min and
+     stays first in DOM so it's visible without scrolling. */
+  .theme-industrial .actd-rail-desktop-only { display: none; }
+  .theme-industrial .actd-rail-mobile-only { display: block; }
+  .theme-industrial .actd-primary-bar .btn { width: 100%; min-height: 56px; font-size: 14px; }
+  .theme-industrial .actd-primary-bar > div { display: flex; gap: 8px; }
+  .theme-industrial .actd-primary-bar > div .btn { flex: 1; }
 }
 @media (min-width: 1024px) {
   .theme-industrial .sidebar { display: flex; }
@@ -897,6 +905,16 @@ body {
 .theme-industrial .stat .v small { font-size: 11px; color: var(--muted); font-weight: 500; margin-left: 4px; }
 .theme-industrial .grid-2 { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; margin-bottom: 14px; }
 .theme-industrial .grid-h { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+
+/* Activity Detail (Phase 4, Round 2 mockup 03) — content + right rail reuses
+   .grid-2 as-is (already stacks at the laptop breakpoint below, matching
+   RESPONSIVE_GUIDELINES.md's "right rail moves below, still visible" rule
+   for this screen — no new layout class needed for that part).
+   Named actd-* (not ad-*): globals.css's own admin-dialog comment already
+   documents that ad-blocker cosmetic filters hide anything named `.ad-*`. */
+.theme-industrial .actd-rail-mobile-only { display: none; }
+.theme-industrial .actd-primary-bar { margin-bottom: 16px; }
+.theme-industrial .actd-primary-bar:empty { display: none; }
 .theme-industrial .legend { display: flex; gap: 14px; margin-left: auto; font-size: 11px; color: var(--muted); align-items: center; flex-wrap: wrap; }
 .theme-industrial .legend i { width: 14px; height: 2px; display: inline-block; margin-right: 5px; vertical-align: middle; }
 .theme-industrial .cp-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); transition: background .12s; }
