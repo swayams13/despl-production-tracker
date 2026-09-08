@@ -164,18 +164,19 @@ export async function generateSchedule(
 }
 
 /**
- * The current schedule run (with plans) for a job/equipment, or null. Read-only:
- * any actor who can see the job's client may read it (client viewers included).
+ * The job's one current schedule run (with plans), or null (AUD-034: one
+ * current run per job, full stop — no equipmentId grain to select between
+ * any more). Read-only: any actor who can see the job's client may read it
+ * (client viewers included).
  */
 export async function getSchedule(
   actor: Actor,
   jobId: number,
-  equipmentId?: number | null,
 ): Promise<ScheduleRunWithPlans | null> {
   return withTenant(actor.tenantId, async (tx) => {
     const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
     if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
     assertClientScope(actor, job.clientId);
-    return getCurrentScheduleRun(tx, jobId, equipmentId ?? null);
+    return getCurrentScheduleRun(tx, jobId);
   });
 }

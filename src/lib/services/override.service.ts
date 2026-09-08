@@ -139,7 +139,9 @@ export async function applyDurationOverride(
     }
 
     // Prior run: carry its baseline forward, never mutate it (invariant #6).
-    const priorRun = await getCurrentScheduleRun(tx, jobId, equipmentId);
+    // AUD-034: getCurrentScheduleRun no longer takes equipmentId — one
+    // current run per job, full stop, so this is the job's only current run.
+    const priorRun = await getCurrentScheduleRun(tx, jobId);
     const priorBaseline = new Map(
       (priorRun?.processPlans ?? []).map((pp) => [
         pp.jobProcessId,

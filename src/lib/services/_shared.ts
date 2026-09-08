@@ -297,8 +297,10 @@ export interface PersistScheduleRunInput {
 export type ScheduleRunWithPlans = ScheduleRun & { processPlans: ProcessPlan[] };
 
 /**
- * Persist a new schedule as the next version for (jobId, equipmentId): demote
- * every current sibling run, insert this one as isCurrent, write its
+ * Persist a new schedule as the next version for jobId: demote every current
+ * run for the job (AUD-034 — one current run per job, full stop, regardless
+ * of equipmentId grain; enforced at the DB by the partial unique index
+ * schedule_runs_one_current_per_job), insert this one as isCurrent, write its
  * ProcessPlan rows (unitId per the input PlanInput — null at job/equipment
  * grain, per-serial when the caller expands per unit; status NOT_STARTED),
  * and audit it — all in the caller's transaction. Never mutates a prior run's
@@ -316,38 +318,42 @@ export async function persistScheduleRun(
 ): Promise<ScheduleRunWithPlans> {
   const { jobId, equipmentId } = input;
 
-  // Serialize concurrent schedule generation per job. The (jobId, equipmentId,
-  // version) unique index is NULL-distinct in Postgres and equipmentId is null
-  // at the job grain, so it cannot stop two isCurrent runs racing to the same
-  // version. Lock the parent job row FOR UPDATE so read-max-version → demote →
-  // insert is atomic across overlapping calls (double-click, retry, two planners).
-  // ponytail: per-job row lock; a partial unique index on (job_id) WHERE
-  // is_current is the DB-native alternative if this lock ever contends.
+  // Serialize concurrent schedule generation per job. AUD-034: the DB-level
+  // backstop is now the partial unique index schedule_runs_one_current_per_job
+  // (job_id) WHERE is_current — but that alone would surface a constraint
+  // violation to a racing caller instead of serializing it cleanly. Lock the
+  // parent job row FOR UPDATE so read-max-version → demote → insert is atomic
+  // across overlapping calls (double-click, retry, two planners).
   await tx.$queryRaw`SELECT id FROM jobs WHERE id = ${jobId} FOR UPDATE`;
 
-  // Reschedule must not orphan in-flight actuals (audit C1): the prior current
+  // Reschedule must not orphan in-flight actuals (audit C1): a prior current
   // run's plans carry real floor work — actualStart/actualFinish/submittedBy/
-  // verifiedBy/status — and every read filters isCurrent, so demoting the run
-  // without carrying them forward makes that work invisible everywhere. Read
-  // the prior current run's plans BEFORE demoting it (still readable either way
-  // since demote only flips isCurrent, not the rows) and key them by the same
-  // (jobProcessId, unitId) grain the new plans are built on.
-  const priorRun = await tx.scheduleRun.findFirst({
-    where: { jobId, equipmentId, isCurrent: true },
+  // verifiedBy/status — and every read filters isCurrent, so demoting a run
+  // without carrying its work forward makes that work invisible everywhere.
+  // Read every current run for the JOB (not just this equipmentId — AUD-034:
+  // before this migration's cleanup, or for any job mid-flight when this
+  // ships, there could legitimately still be two) BEFORE demoting them (still
+  // readable either way since demote only flips isCurrent, not the rows), and
+  // merge all of their plans, keyed by the same (jobProcessId, unitId) grain
+  // the new plans are built on.
+  const priorRuns = await tx.scheduleRun.findMany({
+    where: { jobId, isCurrent: true },
     include: { processPlans: true },
   });
   const priorByKey = new Map(
-    (priorRun?.processPlans ?? []).map((p) => [priorActualsKey(p.jobProcessId, p.unitId), p]),
+    priorRuns.flatMap((r) => r.processPlans).map((p) => [priorActualsKey(p.jobProcessId, p.unitId), p]),
   );
 
+  // Version is a single per-job sequence (AUD-034) — there is no longer a
+  // second equipmentId grain to version independently.
   const prev = await tx.scheduleRun.aggregate({
     _max: { version: true },
-    where: { jobId, equipmentId },
+    where: { jobId },
   });
   const version = (prev._max.version ?? 0) + 1;
 
   await tx.scheduleRun.updateMany({
-    where: { jobId, equipmentId, isCurrent: true },
+    where: { jobId, isCurrent: true },
     data: { isCurrent: false },
   });
 
@@ -407,14 +413,13 @@ export async function persistScheduleRun(
   return run;
 }
 
-/** The current run for (jobId, equipmentId) with its plans, or null. Undefined equipmentId means the job-level grain (equipmentId null). */
+/** The one current run for jobId, with its plans, or null (AUD-034: one current run per job, full stop). */
 export async function getCurrentScheduleRun(
   tx: Tx,
   jobId: number,
-  equipmentId?: number | null,
 ): Promise<ScheduleRunWithPlans | null> {
   return tx.scheduleRun.findFirst({
-    where: { jobId, equipmentId: equipmentId ?? null, isCurrent: true },
+    where: { jobId, isCurrent: true },
     include: { processPlans: true },
   });
 }
@@ -423,11 +428,10 @@ export async function getCurrentScheduleRun(
 export async function getCurrentScheduleRunsBatch(
   tx: Tx,
   jobIds: number[],
-  equipmentId?: number | null,
 ): Promise<Map<number, ScheduleRunWithPlans>> {
   if (jobIds.length === 0) return new Map();
   const runs = await tx.scheduleRun.findMany({
-    where: { jobId: { in: jobIds }, equipmentId: equipmentId ?? null, isCurrent: true },
+    where: { jobId: { in: jobIds }, isCurrent: true },
     include: { processPlans: true },
   });
   return new Map(runs.map((r) => [r.jobId, r]));

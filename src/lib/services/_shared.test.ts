@@ -463,7 +463,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("getCurrentScheduleRunsBatch (DB)", a
         ctx.skip(msg);
       }
 
-      const map = await owner.$transaction(async (tx) => getCurrentScheduleRunsBatch(tx, [jobA.id, jobB.id], null));
+      const map = await owner.$transaction(async (tx) => getCurrentScheduleRunsBatch(tx, [jobA.id, jobB.id]));
 
       expect(map.get(jobA.id)?.id).toBe(runA?.id);
       expect(map.get(jobB.id)?.id).toBe(runB?.id);

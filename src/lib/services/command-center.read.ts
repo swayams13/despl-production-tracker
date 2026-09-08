@@ -236,7 +236,7 @@ export async function loadCommandCenter(
 
     const jobIds = jobs.map((j) => j.id);
     const [runsByJob, spinesByJob] = await Promise.all([
-      getCurrentScheduleRunsBatch(tx, jobIds, null),
+      getCurrentScheduleRunsBatch(tx, jobIds),
       loadJobSpinesBatch(tx, jobIds),
     ]);
     const allUnits = await tx.unit.findMany({

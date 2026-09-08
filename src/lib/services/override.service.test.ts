@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { applyDurationOverride } from "./override.service";
 import { generateSchedule } from "./schedule.service";
-import { loadJobSpine } from "./_shared";
+import { loadJobSpine, getCurrentScheduleRun } from "./_shared";
 import { computeEnvelope } from "@/lib/schedule";
 import { isAppError, ERROR_CODES } from "@/lib/shared/errors";
 import { ROLES, type Actor } from "@/lib/authz";
@@ -188,5 +188,126 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + d
       expect(pp.plannedStart?.getTime()).toBe(e.plannedStartMax.getTime());
       expect(pp.plannedFinish?.getTime()).toBe(e.plannedFinishMax.getTime());
     }
+  });
+});
+
+/**
+ * AUD-034 — a job could hold two `isCurrent` ScheduleRun rows at once:
+ * persistScheduleRun's demotion was scoped to (jobId, equipmentId), so a
+ * job-grain generateSchedule (equipmentId null) followed by an equipment-
+ * grain applyDurationOverride (a real equipmentId) left BOTH current —
+ * proven live. Fixed by broadening every ScheduleRun lookup/demote in
+ * _shared.ts to job-grain only, backed by a DB-level partial unique index
+ * (schedule_runs_one_current_per_job) as the constraint of last resort.
+ *
+ * Reuses DE0467 (this file's owned job for scheduling writes — see the
+ * versioning test above) so this file stays the sole writer to its version
+ * sequence.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("AUD-034 — one current ScheduleRun per job (DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  // The actual regression guard: before the fix, this sequence left two
+  // current rows for the job (one per grain) and every stage-status reader
+  // that assumes exactly one would double-count.
+  it("an equipment-grain override after a job-grain generateSchedule demotes the job-grain run too", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+    if (!job) throw new Error("seed missing DE0467 — run pnpm db:seed");
+    const equipment = await owner.equipment.findFirst({ where: { jobId: job.id } });
+    if (!equipment) throw new Error("seed job DE0467 has no equipment row");
+    const a = actor({ tenantId: job.tenantId, clientId: null });
+
+    // Job-grain run — equipmentId null — becomes current.
+    const jobGrainRun = await generateSchedule(a, { jobId: job.id, mode: "FORWARD" });
+    expect(jobGrainRun.equipmentId).toBeNull();
+    expect(jobGrainRun.isCurrent).toBe(true);
+
+    const proc = await owner.jobProcess.findFirst({
+      where: { jobId: job.id, included: true, provisional: false, durationMaxDays: { not: null } },
+      orderBy: { seq: "asc" },
+    });
+    if (!proc) throw new Error("seed job has no schedulable process");
+
+    // Equipment-grain override. Before the fix, persistScheduleRun's demotion
+    // was scoped to (jobId, equipmentId) and would only have touched other
+    // equipment-grain runs at this equipmentId — jobGrainRun would have
+    // stayed isCurrent = true alongside this one.
+    const equipGrainRun = await applyDurationOverride(a, {
+      jobId: job.id,
+      equipmentId: equipment.id,
+      jobProcessId: proc.id,
+      durationOverrideDays: (proc.durationMaxDays ?? 5) + 3,
+      reason: "AUD-034 regression: equipment-grain override must demote the job-grain run too",
+    });
+    expect(equipGrainRun.equipmentId).toBe(equipment.id);
+
+    const currentRuns = await owner.scheduleRun.findMany({ where: { jobId: job.id, isCurrent: true } });
+    expect(currentRuns).toHaveLength(1);
+    expect(currentRuns[0]?.id).toBe(equipGrainRun.id);
+
+    const staleJobGrainRun = await owner.scheduleRun.findUnique({ where: { id: jobGrainRun.id } });
+    expect(staleJobGrainRun?.isCurrent).toBe(false);
+  });
+
+  // Genuine two-transaction race (same pattern as template.service.test.ts's
+  // "serializes concurrent saves"): persistScheduleRun's `SELECT ... FOR
+  // UPDATE` on the job row forces the second call's transaction to block
+  // until the first commits, so both fulfill — no unique-constraint
+  // violation surfaces to either caller — and only one ends up current.
+  it("serializes two concurrent generateSchedule calls for the same job — exactly one ends up current", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+    if (!job) throw new Error("seed missing DE0467 — run pnpm db:seed");
+    const a = actor({ tenantId: job.tenantId, clientId: null });
+
+    const results = await Promise.allSettled([
+      generateSchedule(a, { jobId: job.id, mode: "FORWARD" }),
+      generateSchedule(a, { jobId: job.id, mode: "FORWARD" }),
+    ]);
+
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+
+    const currentRuns = await owner.scheduleRun.findMany({ where: { jobId: job.id, isCurrent: true } });
+    expect(currentRuns).toHaveLength(1);
+  });
+
+  // DB-level backstop, not just the app-level row lock: a write that bypasses
+  // the service layer entirely (direct SQL, no FOR UPDATE) is still rejected.
+  it("the DB unique index rejects a second is_current row inserted outside the service layer", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+    if (!job) throw new Error("seed missing DE0467 — run pnpm db:seed");
+    const current = await owner.scheduleRun.findFirst({ where: { jobId: job.id, isCurrent: true } });
+    if (!current) throw new Error("DE0467 has no current run — run the earlier tests in this file first");
+
+    // Postgres's raised error (code 23505, unique_violation) surfaces through
+    // Prisma's $executeRaw with the DETAIL text but not the constraint name
+    // itself — assert on the code + key detail, not the index name string.
+    await expect(
+      owner.$executeRaw`
+        INSERT INTO schedule_runs (job_id, version, mode, project_start_date, is_current)
+        VALUES (${job.id}, ${current.version + 1000}, 'FORWARD'::"ScheduleMode", now(), true)
+      `,
+    ).rejects.toThrow(/23505/);
+
+    const currentRuns = await owner.scheduleRun.findMany({ where: { jobId: job.id, isCurrent: true } });
+    expect(currentRuns).toHaveLength(1);
+    expect(currentRuns[0]?.id).toBe(current.id);
+  });
+
+  // getCurrentScheduleRun's own signature: no equipmentId argument any more,
+  // and it returns the job's one current run regardless of what equipmentId
+  // that run happens to carry.
+  it("getCurrentScheduleRun(tx, jobId) returns the job's one current run without an equipmentId argument", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+    if (!job) throw new Error("seed missing DE0467 — run pnpm db:seed");
+    const expected = await owner.scheduleRun.findFirst({ where: { jobId: job.id, isCurrent: true } });
+    if (!expected) throw new Error("DE0467 has no current run — run the earlier tests in this file first");
+
+    const found = await withTenant(job.tenantId, (tx) => getCurrentScheduleRun(tx, job.id));
+    expect(found?.id).toBe(expected.id);
   });
 });
