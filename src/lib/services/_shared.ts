@@ -943,6 +943,25 @@ export async function assertEvidenceSatisfied(
 }
 
 /**
+ * AUD-029 regression guard. `OperationRef.requiresDftGate` (or any future
+ * declarative gate flag of this shape) must never be enabled for a code
+ * unless a real, reachable write path exists for whatever it checks — a
+ * Server Action or route under `src/app`/`src/components`, not just a
+ * service-layer function nobody calls. PAINTING shipped with the flag on and
+ * `recordPaintRecord`/`recordDftReading` existing ONLY as service functions
+ * (zero callers) — the gate refused every real PAINTING op forever, with no
+ * action anywhere that could clear it. See `gate-reachability.test.ts`,
+ * which asserts every `requiresDftGate: true` code in
+ * `seed/component-routes.json` has a `true` entry here. Flip an entry to
+ * `true` ONLY in the same PR that ships the write path — the seed flag and
+ * the migration backfill must move together with it.
+ */
+export const KNOWN_GATE_PRODUCERS: Record<string, boolean> = {
+  // Interim (AUD-029): gate disabled until the paint/DFT recording UI ships.
+  PAINTING: false,
+};
+
+/**
  * B7, Phase 4 (CLAUDE.md #2's fourth gate): a component's linked `BomItem`
  * must not be recorded short before its next operation starts. SEAM, same
  * convention as `assertComponentOpsComplete`/`assertNoOpenHoldPoint`: no-op
