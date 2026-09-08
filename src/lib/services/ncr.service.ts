@@ -22,7 +22,10 @@ export const NCR_TRANSITIONS: Record<NcrAction, { from: NcrStatus[]; to: NcrStat
   dispositionFinal: { from: ["OPEN"], to: "DISPOSITIONED" },
   // Auto-closed from the operation's verify flow once rework is re-verified,
   // or manually for a DISPOSITIONED (no-rework) Ncr via a later UI action.
-  close: { from: ["OPEN", "DISPOSITIONED", "REWORK_IN_PROGRESS"], to: "CLOSED" },
+  // OPEN is deliberately NOT a source (AUD-026): closing straight from OPEN
+  // skipped dispositionNcr entirely, so the manufacturing record showed a
+  // non-conformance raised and closed with no recorded engineering decision.
+  close: { from: ["DISPOSITIONED", "REWORK_IN_PROGRESS"], to: "CLOSED" },
 };
 
 export function assertNcrTransition(action: NcrAction, from: NcrStatus): NcrStatus {

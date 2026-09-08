@@ -86,6 +86,7 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
   const { startAssemblyStep, submitAssemblyStep, verifyAssemblyStep, rejectAssemblyStep } = await import(
     "./assembly.service"
   );
+  const { dispositionNcr, closeNcr } = await import("./ncr.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
@@ -110,6 +111,12 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
   let qcpItemInternalOnlyId = 0;
   let qcpItemExternalBlockingId = 0;
   let qcpItemMixedId = 0;
+  // AUD-026 — dispositionNcr gate fixtures (each its own unit; ts1 step, no other gates).
+  let ncrGateNeverDispositionedStep = 0;
+  let ncrGateDispositionedStep = 0;
+  let ncrGateTwoNcrsStep = 0;
+  let ncrGateDirectCloseStep = 0;
+  let ncrGateNoNcrStep = 0;
 
   async function auditCount(entityId: number): Promise<number> {
     return owner.auditLog.count({ where: { tenantId, entityType: "AssemblyStep", entityId: String(entityId) } });
@@ -321,6 +328,19 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     rejectCategoryId = (await owner.delayCategoryRef.create({ data: { tenantId, code: "REWORK", name: "Rework" } })).id;
     testTypeId = (await owner.testTypeRef.create({ data: { tenantId, code: "PAUT", name: "PAUT" } })).id;
 
+    // AUD-026 — dispositionNcr gate fixtures. One unit per scenario, reusing
+    // ts1 (WORK, deptA, no jointRef, no previous-step gate) so reject/verify
+    // cycles on one can't interfere with another's gating.
+    async function freshNcrGateStep(serialNo: string): Promise<number> {
+      const u = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo } });
+      return (await owner.assemblyStep.create({ data: { unitId: u.id, templateStepId: ts1.id, seq: 1, jobId } })).id;
+    }
+    ncrGateNeverDispositionedStep = await freshNcrGateStep("NCR-GATE-NEVER-DISP");
+    ncrGateDispositionedStep = await freshNcrGateStep("NCR-GATE-DISP");
+    ncrGateTwoNcrsStep = await freshNcrGateStep("NCR-GATE-TWO");
+    ncrGateDirectCloseStep = await freshNcrGateStep("NCR-GATE-DIRECT-CLOSE");
+    ncrGateNoNcrStep = await freshNcrGateStep("NCR-GATE-NO-NCR");
+
     const userSup = await owner.user.create({
       data: { tenantId, email: "asm-sup@x", username: "asm-sup", name: "Sup", passwordHash: "x" },
     });
@@ -443,11 +463,16 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     const resubmitted = await submitAssemblyStep(supA, { assemblyStepId: step2 });
     expect(resubmitted.status).toBe("SUBMITTED");
 
+    // AUD-026: verify no longer auto-closes an OPEN Ncr — QC must disposition
+    // it first. USE_AS_IS is a dispositionFinal transition (no rework
+    // interval to record), matching this test's original "no rework" intent.
+    await dispositionNcr(qc, { ncrId: ncr.id, disposition: "USE_AS_IS" });
+
     // Unblock step3 (seq 3, gated on step2 = seq 2) for the tests below.
     const verified = await verifyAssemblyStep(qc, { assemblyStepId: step2 });
     expect(verified.status).toBe("COMPLETE");
 
-    // N1: re-verifying closes the open Ncr.
+    // N1: re-verifying closes the (now DISPOSITIONED) Ncr.
     const closed = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
     expect(closed.status).toBe("CLOSED");
     expect(closed.closedBy).toBe(qc.userId);
@@ -475,6 +500,12 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     });
     expect(openBefore).toHaveLength(2);
 
+    // AUD-026: verify no longer auto-closes an OPEN Ncr — both must be
+    // dispositioned first.
+    for (const ncr of openBefore) {
+      await dispositionNcr(qc, { ncrId: ncr.id, disposition: "USE_AS_IS" });
+    }
+
     const verified = await verifyAssemblyStep(qc, { assemblyStepId: step3 });
     expect(verified.status).toBe("COMPLETE");
 
@@ -499,6 +530,12 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     expect(afterReject[0]).toMatchObject({ result: "REJECTED", clearedBy: qc.userId, attemptNo: 1 });
 
     await submitAssemblyStep(supB, { assemblyStepId: step4 });
+
+    // AUD-026: verify no longer auto-closes an OPEN Ncr — disposition it first.
+    const rejection4 = await owner.assemblyStepRejection.findFirstOrThrow({ where: { assemblyStepId: step4 } });
+    const ncr4 = await owner.ncr.findUniqueOrThrow({ where: { assemblyStepRejectionId: rejection4.id } });
+    await dispositionNcr(qc, { ncrId: ncr4.id, disposition: "USE_AS_IS" });
+
     const verified = await verifyAssemblyStep(qc, { assemblyStepId: step4 });
     expect(verified.status).toBe("COMPLETE");
 
@@ -623,5 +660,87 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
 
     const afterVerify = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
     expect(afterVerify.status).not.toBe("CLOSED");
+  });
+
+  // ── AUD-026: dispositionNcr is a hard gate on the verify path ──────────
+
+  it("AUD-026 (1): reject → resubmit → reverify with the Ncr still OPEN is refused, NCR_NOT_DISPOSITIONED", async () => {
+    await startAssemblyStep(supA, { assemblyStepId: ncrGateNeverDispositionedStep });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateNeverDispositionedStep });
+    await rejectAssemblyStep(qc, { assemblyStepId: ncrGateNeverDispositionedStep, categoryId: rejectCategoryId });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateNeverDispositionedStep });
+
+    await expectCode(
+      verifyAssemblyStep(qc, { assemblyStepId: ncrGateNeverDispositionedStep }),
+      ERROR_CODES.NCR_NOT_DISPOSITIONED,
+    );
+    const step = await owner.assemblyStep.findUniqueOrThrow({ where: { id: ncrGateNeverDispositionedStep } });
+    expect(step.status).toBe("SUBMITTED"); // refusal did not advance state
+  });
+
+  it("AUD-026 (2): dispositionNcr called before reverify lets verify proceed and closes the Ncr with the disposition recorded", async () => {
+    await startAssemblyStep(supA, { assemblyStepId: ncrGateDispositionedStep });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateDispositionedStep });
+    await rejectAssemblyStep(qc, { assemblyStepId: ncrGateDispositionedStep, categoryId: rejectCategoryId });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateDispositionedStep });
+
+    const rejection = await owner.assemblyStepRejection.findFirstOrThrow({
+      where: { assemblyStepId: ncrGateDispositionedStep },
+    });
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { assemblyStepRejectionId: rejection.id } });
+    await dispositionNcr(qc, { ncrId: ncr.id, disposition: "USE_AS_IS", notes: "no rework needed" });
+
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: ncrGateDispositionedStep });
+    expect(verified.status).toBe("COMPLETE");
+
+    const closed = await owner.ncr.findUniqueOrThrow({ where: { id: ncr.id } });
+    expect(closed.status).toBe("CLOSED");
+    expect(closed.disposition).toBe("USE_AS_IS");
+    expect(closed.dispositionedBy).toBe(qc.userId);
+    expect(closed.dispositionNotes).toBe("no rework needed");
+  });
+
+  it("AUD-026 (3): two Ncrs open on the same step, only one dispositioned — reverify is still refused, and the undispositioned one stays OPEN", async () => {
+    await startAssemblyStep(supA, { assemblyStepId: ncrGateTwoNcrsStep });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateTwoNcrsStep });
+    await rejectAssemblyStep(qc, { assemblyStepId: ncrGateTwoNcrsStep, categoryId: rejectCategoryId, detail: "first" });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateTwoNcrsStep });
+    await rejectAssemblyStep(qc, { assemblyStepId: ncrGateTwoNcrsStep, categoryId: rejectCategoryId, detail: "second" });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateTwoNcrsStep });
+
+    const ncrs = await owner.ncr.findMany({
+      where: { assemblyStepRejection: { assemblyStepId: ncrGateTwoNcrsStep } },
+      orderBy: { id: "asc" },
+    });
+    expect(ncrs).toHaveLength(2);
+    await dispositionNcr(qc, { ncrId: ncrs[0].id, disposition: "USE_AS_IS" });
+
+    await expectCode(
+      verifyAssemblyStep(qc, { assemblyStepId: ncrGateTwoNcrsStep }),
+      ERROR_CODES.NCR_NOT_DISPOSITIONED,
+    );
+    const stillOpen = await owner.ncr.findUniqueOrThrow({ where: { id: ncrs[1].id } });
+    expect(stillOpen.status).toBe("OPEN");
+  });
+
+  it("AUD-026 (4): closeNcr called directly on an OPEN-source Ncr is refused at the transition-table layer, independent of the verify-path pre-check", async () => {
+    await startAssemblyStep(supA, { assemblyStepId: ncrGateDirectCloseStep });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateDirectCloseStep });
+    await rejectAssemblyStep(qc, { assemblyStepId: ncrGateDirectCloseStep, categoryId: rejectCategoryId });
+
+    const rejection = await owner.assemblyStepRejection.findFirstOrThrow({
+      where: { assemblyStepId: ncrGateDirectCloseStep },
+    });
+    const ncr = await owner.ncr.findUniqueOrThrow({ where: { assemblyStepRejectionId: rejection.id } });
+    expect(ncr.status).toBe("OPEN");
+
+    await expectCode(closeNcr(owner, qc, { ncrId: ncr.id, jobId }), ERROR_CODES.INVALID_STATE_TRANSITION);
+  });
+
+  it("AUD-026 (5): a step with no Ncr ever raised verifies exactly as before — no regression for the common case", async () => {
+    await startAssemblyStep(supA, { assemblyStepId: ncrGateNoNcrStep });
+    await submitAssemblyStep(supA, { assemblyStepId: ncrGateNoNcrStep });
+    const verified = await verifyAssemblyStep(qc, { assemblyStepId: ncrGateNoNcrStep });
+    expect(verified.status).toBe("COMPLETE");
   });
 });
