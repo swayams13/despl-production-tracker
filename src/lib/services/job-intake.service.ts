@@ -146,6 +146,24 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       });
     }
 
+    // AUD-033: TemplateProcess.optional is the template author's own record of
+    // which processes are conditional (schema doc: "Conditional processes
+    // (e.g. PWHT) can be excluded per job"). Excluding anything else drops it
+    // silently — no ProcessPlan, nothing to gate, nothing to verify.
+    const nonOptionalExclusions = version.processes
+      .filter((tp) => parsed.excludedProcessCodes.includes(tp.code) && !tp.optional)
+      .map((tp) => tp.code);
+    if (nonOptionalExclusions.length > 0) {
+      throw new AppError(ERROR_CODES.PROCESS_NOT_OPTIONAL, { processCodes: nonOptionalExclusions });
+    }
+
+    // A permanent scope change deserves a reason on record (audit's own fix
+    // recommendation) — captured in this transaction's audit event, not a new
+    // column (see PR notes on whether that's needed eventually).
+    if (parsed.excludedProcessCodes.length > 0 && !parsed.exclusionReason) {
+      throw new AppError(ERROR_CODES.EXCLUSION_REASON_REQUIRED);
+    }
+
     const specs = parsed.specs ? validateSpecs(family.code, parsed.specs) : null;
 
     // ── Write ────────────────────────────────────────────────────────────
@@ -302,9 +320,16 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             componentCount: result.componentCount,
             assemblyStepCount: result.assemblyStepCount,
             excludedProcessCodes: parsed.excludedProcessCodes,
+            exclusionReason: parsed.exclusionReason,
           },
           eventType: "JobCreated",
-          eventPayload: { jobId: job.id, jobNumber: job.jobNumber, familyId: job.familyId },
+          eventPayload: {
+            jobId: job.id,
+            jobNumber: job.jobNumber,
+            familyId: job.familyId,
+            excludedProcessCodes: parsed.excludedProcessCodes,
+            exclusionReason: parsed.exclusionReason,
+          },
         },
       };
     });

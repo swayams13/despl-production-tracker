@@ -69,6 +69,8 @@ interface WizardState {
   familyId: number | null;
   versionId: number | null;
   excludedProcessCodes: string[];
+  /** Required when excludedProcessCodes is non-empty — AUD-033. */
+  exclusionReason: string;
   qcpTemplateSourceId: number | null;
   // step 3
   equipments: EquipBlockState[];
@@ -117,6 +119,7 @@ function defaultState(options: IntakeOptions): WizardState {
     familyId: null,
     versionId: null,
     excludedProcessCodes: [],
+    exclusionReason: "",
     qcpTemplateSourceId: null,
     equipments: [emptyBlock()],
     designCode: "",
@@ -167,7 +170,10 @@ function step1Valid(s: WizardState): boolean {
 }
 function step2Valid(s: WizardState, families: IntakeFamily[]): boolean {
   const fam = families.find((f) => f.id === s.familyId);
-  return !!fam && fam.schedulable && s.versionId != null;
+  if (!fam || !fam.schedulable || s.versionId == null) return false;
+  // AUD-033: a permanent scope change needs a reason on record.
+  if (s.excludedProcessCodes.length > 0 && !s.exclusionReason.trim()) return false;
+  return true;
 }
 function step3Valid(s: WizardState): boolean {
   if (s.equipments.length === 0) return false;
@@ -256,6 +262,7 @@ export function NewJobWizard({ options }: { options: IntakeOptions }) {
       remarks: state.remarks.trim() || null,
       specs: Object.keys(state.specs).length ? state.specs : null,
       excludedProcessCodes: state.excludedProcessCodes,
+      exclusionReason: state.excludedProcessCodes.length > 0 ? state.exclusionReason.trim() || null : null,
       equipments: state.equipments.map((e) => ({
         equipmentTypeId: e.equipmentTypeId,
         name: e.name.trim(),
@@ -701,7 +708,14 @@ function StepRoute({
                       <td style={{ color: "var(--muted)" }}>{p.departmentName}</td>
                       <td className="num mono">{p.durationMaxDays ?? "—"}</td>
                       <td className="num">
-                        <input type="checkbox" checked={!excluded} onChange={() => toggleExcluded(p.code)} aria-label={`Include ${p.name}`} />
+                        <input
+                          type="checkbox"
+                          checked={!excluded}
+                          disabled={!p.optional}
+                          title={p.optional ? undefined : "This process is mandatory on this route and cannot be excluded"}
+                          onChange={() => toggleExcluded(p.code)}
+                          aria-label={`Include ${p.name}`}
+                        />
                       </td>
                     </tr>
                   );
@@ -709,6 +723,21 @@ function StepRoute({
               </tbody>
             </table>
           ) : null}
+          {state.excludedProcessCodes.length > 0 && (
+            <div style={{ padding: "0 16px 16px" }}>
+              <label className="emp-hint" style={{ display: "block", marginBottom: 4 }} htmlFor="exclusion-reason">
+                Reason for excluding {state.excludedProcessCodes.length} process{state.excludedProcessCodes.length === 1 ? "" : "es"} *
+              </label>
+              <textarea
+                id="exclusion-reason"
+                className="ws-detail"
+                style={{ width: "100%", minHeight: 60 }}
+                value={state.exclusionReason}
+                onChange={(e) => patch({ exclusionReason: e.target.value })}
+                placeholder="Required — recorded on the job's audit trail"
+              />
+            </div>
+          )}
         </div>
       )}
 
