@@ -604,11 +604,11 @@ test.describe.serial("AA contrast (assertion 6) — chips, KPI values, spine", (
   );
 });
 
-// Known, pre-existing, DISCLOSED shortfalls — not introduced by this task and
+// Known, pre-existing, DISCLOSED shortfall — not introduced by this task and
 // not fixable within it (task-7-brief.md global constraint #1: test
-// infrastructure only, no src/ changes). Both were measured and reported by
-// Task 6's own AA audit before this task existed. test.fixme() (not silence,
-// not a weakened assertion) is the record that they're known and tracked.
+// infrastructure only, no src/ changes). Measured and reported by Task 6's
+// own AA audit before this task existed. test.fixme() (not silence, not a
+// weakened assertion) is the record that it's known and tracked.
 test.fixme(
   "AA contrast: light theme .c-hold chip text is 4.45:1 against --surface (need 4.5) — " +
     "known, disclosed, pre-existing shortfall. task-6-report.md 'Residual, per your ruling' " +
@@ -618,14 +618,14 @@ test.fixme(
   async () => {},
 );
 
-test.fixme(
-  "AA contrast: dark theme's spine idle fill (--s-idle on --surface) is 2.20:1 against the 3:1 " +
-    "non-text minimum — known, pre-existing, deliberately frozen. task-6-report.md §4 DARK table " +
-    "('spine fill --s-idle | 2.20 | 3 | pre-existing fail'). The dark palette is frozen by design " +
-    "('must render identically to main', task-6-brief.md constraint #4), so this cannot be fixed " +
-    "from any task, including this one.",
-  async () => {},
-);
+// The dark theme's spine-idle contrast fixme that used to sit here (--s-idle
+// at 2.20:1 against the 3:1 non-text minimum, "deliberately frozen" per
+// task-6-brief.md constraint #4) is gone: audit/18_DESIGN_SYSTEM.md (AUD-066)
+// had the controller lift that freeze, and globals.css's --s-idle moved to
+// #606670 (3.13:1 against --surface, verified with this file's own
+// wcag-contrast.ts helper). The general "needs a deterministic all-statuses
+// spine fixture" fixme above (line ~600) still covers exercising this for
+// real once /kit's replacement exists.
 
 // ── Assertions 4, 5, 7 — R2/R3 content that doesn't exist in this codebase
 // yet (controller ruling, task-7-brief.md). Real describe/test structure now;

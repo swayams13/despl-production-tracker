@@ -311,7 +311,7 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
                 <div className="b" key={i}>
                   <i style={{ height: w.yieldPct != null ? `${w.yieldPct}%` : "2%", background: w.yieldPct == null ? "var(--s-idle)" : undefined }} title={w.yieldPct != null ? `${w.yieldPct}% first-pass yield` : "No submissions"} />
                   <span>{w.yieldPct != null ? `${w.yieldPct}%` : "—"}</span>
-                  <span style={{ fontSize: 9 }}>{fmtWeek(w.weekStart)}</span>
+                  <span>{fmtWeek(w.weekStart)}</span>
                 </div>
               ))}
             </div>

@@ -231,7 +231,7 @@ export function JobDetailClient({
                       <tr>
                         <td className="ulab" />
                         {unitSpines[0].segments.map((s) => (
-                          <td key={s.stageNo} style={{ textAlign: "center", color: "#565b63", fontSize: 9 }} className="mono">
+                          <td key={s.stageNo} style={{ textAlign: "center", color: "#565b63", fontSize: 11 }} className="mono">
                             {s.stageNo}
                           </td>
                         ))}
