@@ -58,6 +58,7 @@ export function JobDetailClient({
   canEditJobDates,
   canManagePacking,
   canManageDispatch,
+  canApproveQcpWaiver,
   tab,
   openUnit,
   openStage: openStageParam,
@@ -78,6 +79,7 @@ export function JobDetailClient({
   canEditJobDates: boolean;
   canManagePacking: boolean;
   canManageDispatch: boolean;
+  canApproveQcpWaiver: boolean;
   tab: "overview" | "gantt" | "bom" | "assembly" | "qcp" | "packing" | "dispatch" | "activity" | "client";
   /** Deep-link from a notification (`?openUnit=&openStage=`) — auto-opens the StageSheet once on mount. */
   openUnit?: number;
@@ -172,7 +174,7 @@ export function JobDetailClient({
       ) : tab === "assembly" ? (
         assembly ? <AssemblyPanel jobId={jobId} data={assembly} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
       ) : tab === "qcp" ? (
-        qcp ? <QcpGrid jobId={jobId} data={qcp} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
+        qcp ? <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveQcpWaiver} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
       ) : tab === "packing" ? (
         packing ? (
           <PackingPanel jobId={jobId} data={packing} canManagePacking={canManagePacking} />

@@ -113,6 +113,8 @@ export const ERROR_CODES = {
   ROUTE_STEP_SEQ_UNKNOWN: "ROUTE_STEP_SEQ_UNKNOWN",
   /** approveDispatchRelease/recordDispatch (AUD-005): a unit was released or dispatched with production stages still incomplete. */
   UNIT_NOT_COMPLETE: "UNIT_NOT_COMPLETE",
+  /** recordQcpExecution (AUD-003): NA was submitted for a checkpoint whose blocking code is not waivable — it can never be cleared this way. */
+  QCP_CODE_NOT_WAIVABLE: "QCP_CODE_NOT_WAIVABLE",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -190,6 +192,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This number does not match any process in the family's published route — check the template's process list.",
   UNIT_NOT_COMPLETE:
     "This unit still has incomplete process stages on its current schedule run. It cannot be released or dispatched until production is complete.",
+  QCP_CODE_NOT_WAIVABLE:
+    "This checkpoint's hold code cannot be waived — it must be inspected and marked accepted or rejected, not recorded as not applicable.",
 };
 
 /**
