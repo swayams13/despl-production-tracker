@@ -1,11 +1,18 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { StatusChip } from "@/components/industrial/status-chip";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import { CountUp } from "@/components/industrial/count-up";
-import type { CommandCenterView, CommandCenterRow } from "@/lib/services/command-center.read";
+import { Modal, ModalConfirmFooter } from "@/components/industrial/modal";
+import { assignPlanAction } from "@/app/actions/assignment";
+import { clickableRowProps } from "@/components/industrial/data-table";
+import type { ActionResult } from "@/app/actions/_action";
+import type { CommandCenterView, CommandCenterRow, TeamMemberRow } from "@/lib/services/command-center.read";
 import type { PlanState } from "@/lib/services/prioritizer";
 
 // Fixed UTC+5:30 offset — same convention myday.read.ts's istDay() /
@@ -103,7 +110,7 @@ function CommandRow({
   const showChip = !inPipeline || row.ranked.overdue;
   const chipLabel = inPipeline ? undefined : row.ranked.overdue ? undefined : PLAN_STATE_LABEL[row.ranked.state];
   return (
-    <tr className="row" onClick={clickable ? onOpen : undefined} style={clickable ? { cursor: "pointer" } : undefined}>
+    <tr className="row" {...clickableRowProps(clickable ? onOpen : undefined)}>
       <td className="mono" style={{ color: "var(--muted)", width: 90 }}>{row.jobNumber}</td>
       <td>
         {row.processName}
@@ -128,6 +135,150 @@ function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {
         <p className="note" style={{ margin: "12px 0" }}>{text}</p>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Reassign — 2-step modal (COMPONENT_INVENTORY.md's canonical shape for any
+ * multi-step confirmation): step 1 picks the new owner, step 2 confirms
+ * "previous → new" before calling `assignPlanAction`. Full-screen on tablet
+ * via the `.admin-dialog` breakpoint rule in globals.css, not a separate
+ * layout here.
+ */
+function ReassignModal({
+  row,
+  fromName,
+  members,
+  onClose,
+  onDone,
+}: {
+  row: CommandCenterRow;
+  fromName: string;
+  members: { userId: number; name: string }[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [step, setStep] = useState<1 | 2>(1);
+  const [targetId, setTargetId] = useState<number | "">("");
+  const target = members.find((m) => m.userId === targetId);
+
+  const confirm = () => {
+    if (targetId === "") return;
+    start(async () => {
+      const r: ActionResult = await assignPlanAction(row.ranked.plan.id, targetId);
+      if (!r.ok) {
+        toast.error(r.message);
+        return;
+      }
+      toast.success("Reassigned.");
+      onDone();
+      router.refresh();
+    });
+  };
+
+  return (
+    <Modal
+      open
+      onOpenChange={(o) => !o && onClose()}
+      title={`Reassign ${row.processName}`}
+      footer={
+        step === 1 ? (
+          <button className="btn btn-accent" disabled={targetId === ""} onClick={() => setStep(2)}>Continue</button>
+        ) : (
+          <ModalConfirmFooter onCancel={() => setStep(1)} onConfirm={confirm} confirmLabel="Confirm reassign" disabled={pending} cancelLabel="Back" />
+        )
+      }
+    >
+      {step === 1 ? (
+        <>
+          <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 12px" }}>{row.jobNumber} · {row.stageLabel}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</p>
+          <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>New owner</label>
+          <select className="btn" style={{ width: "100%" }} value={targetId} onChange={(e) => setTargetId(e.target.value ? Number(e.target.value) : "")} aria-label="New owner">
+            <option value="">Choose a member…</option>
+            {members.map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
+          </select>
+        </>
+      ) : (
+        <p style={{ fontSize: 13, margin: 0 }}>
+          Reassign <b>{row.processName}</b> from <b>{fromName}</b> to <b>{target?.name}</b>?
+        </p>
+      )}
+    </Modal>
+  );
+}
+
+/** Supervisor Team's roster (Phase 4, Round 1 mockup `03`/Round 2 `05`):
+ * "whose work needs a decision", grouped by employee rather than by
+ * state-bucket like the sections above. Desktop/laptop: full roster with a
+ * per-employee item disclosure. Tablet: same markup, but each employee's
+ * load already reads as a compact stat line (openCount/overdueCount) rather
+ * than a table row — no separate tablet-only component needed here since
+ * this section was never a `<table>` to begin with. */
+function TeamSection({ team, canAct }: { team: TeamMemberRow[]; canAct: boolean }) {
+  const [reassignRow, setReassignRow] = useState<{ row: CommandCenterRow; fromName: string } | null>(null);
+  const members = team.map((t) => ({ userId: t.userId, name: t.name }));
+
+  return (
+    <div className="card ws-card" style={{ marginTop: 14 }}>
+      <div className="hd">
+        <b>Team</b>
+        <span className="meta">Whose work needs a decision</span>
+      </div>
+      {team.length === 0 ? (
+        <p className="note" style={{ margin: "16px 0" }}>No active members in this department yet.</p>
+      ) : (
+        <div style={{ padding: 16, display: "grid", gap: 10 }}>
+          {team.map((member) => (
+            <details key={member.userId} open={member.overdueCount > 0}>
+              <summary style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", listStyle: "none" }}>
+                <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>
+                  {member.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                </div>
+                <b style={{ fontSize: 13 }}>{member.name}</b>
+                <span className="mono" style={{ color: "var(--muted)", fontSize: 11.5 }}>{member.openCount} open</span>
+                {member.overdueCount > 0 && (
+                  <span className="chip c-overdue"><i />{member.overdueCount} overdue</span>
+                )}
+              </summary>
+              <div style={{ marginTop: 8, paddingLeft: 34 }}>
+                {member.items.length === 0 ? (
+                  <p className="note" style={{ margin: "8px 0", textAlign: "left" }}>No open items.</p>
+                ) : (
+                  member.items.map((item) => (
+                    <div key={item.ranked.plan.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                      <span>
+                        {item.processName}
+                        <span style={{ color: "var(--muted)" }}> · {item.jobNumber} · {item.stageLabel}</span>
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <StatusChip status={displayStatus(item.ranked)} />
+                        {canAct && (
+                          <button className="btn" onClick={() => setReassignRow({ row: item, fromName: member.name })}>
+                            Reassign…
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+
+      {reassignRow && (
+        <ReassignModal
+          row={reassignRow.row}
+          fromName={reassignRow.fromName}
+          members={members}
+          onClose={() => setReassignRow(null)}
+          onDone={() => setReassignRow(null)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -182,6 +333,8 @@ export function CommandCenterClient({ view, canAct }: { view: CommandCenterView;
           </div>
         </div>
       </div>
+
+      <TeamSection team={view.team} canAct={canAct} />
 
       <div className="dept-grid">
         {view.pipeline.map((col) => (

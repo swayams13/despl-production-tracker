@@ -5656,3 +5656,19 @@ Not named in the design doc but load-bearing: `workspace/_client.tsx` is the sha
 **Verified**: `pnpm typecheck`, `pnpm lint` clean. `pnpm test` 629/629 (unchanged). `pnpm test:db` (full suite, `despl_test`) **1052/1053** — the one failure is the long-documented, pre-existing `process.service.test.ts` hold-point flake (mentioned in this file's own history across multiple prior sessions), confirmed unrelated: this session touched no gating/hold-point code, only additive read-side fields and new UI. **Not verified live in a browser** — same Chrome-extension-not-connected situation as Step 2; flagging for a session with browser automation available, alongside Step 2's outstanding screenshot comparison.
 
 **Next**: Step 4, Supervisor Team.
+
+## Session — Phase 4 design-handoff implementation, step 4 Supervisor Team, 8 Sep 2026
+
+**No 1:1 existing route** (confirmed in Step 0's audit) — built the roster grouping as a real addition to `command/[dept]` (the screen supervisors already land on) rather than a new standalone route, since the design doc's own note says Round 1's `03`/Round 2's `05` "Supervisor Team" are the same screen, project-scoped variant.
+
+**Service change, reusing the existing heavy computation rather than duplicating it**: `command-center.read.ts`'s `loadCommandCenter` already builds `ownRows` (every one of this department's ranked plans, via a CPM + prioritizer pass per active job) to feed `decideToday`/`pipeline`/`waitingOnOthers`. Added a new `TeamMemberRow[]` (`userId`, `name`, `openCount`, `overdueCount`, `items`) grouped from that SAME `ownRows` array by `assigneeUserId` — no second CPM/prioritizer pass. An assignee no longer an active department member is silently excluded from the roster (their items still show up in the existing sections above, just not attributed to a roster row) — a deliberate, documented choice, not an oversight.
+
+**TDD'd**: added one test to `command-center.read.test.ts` (13/13 passing, up from 12) covering the real edge cases — overdue-first sort, a COMPLETE plan excluded from the open-workload count, an unclaimed plan attributed to no one, and a plan assigned to a user outside the department silently excluded from its roster.
+
+**Built** (`command/[dept]/_client.tsx`): a "Team" card — one `<details>` disclosure per active member (auto-open when they have overdue work), each showing open/overdue counts and their item list, with a **Reassign** action per item. Reassign uses a real 2-step flow inside the new `Modal` component (step 1: pick the new owner; step 2: confirm "X → Y", showing the actual previous owner since the roster grouping already has that context — Activity Detail's Reassign, built last session, couldn't show a previous owner because `StageDetail` doesn't carry one). Full-screen on tablet via a new general `.admin-dialog` breakpoint rule in globals.css (RESPONSIVE_GUIDELINES.md's explicit ask for this screen — benefits any future Modal on tablet, not just this one).
+
+Also (same file, same fix already applied in Steps 2/3): `CommandRow`'s clickable `<tr>` now uses `clickableRowProps()` (was plain `onClick` with no keyboard path); added `command/[dept]/loading.tsx` (didn't exist before); swapped the hand-rolled `.page-h` for `<PageHeader>` in `page.tsx`.
+
+**Verified**: `pnpm typecheck`/`lint` clean, `pnpm test` 629/629, `pnpm test:db` full suite **1053/1054** (the one failure is the same long-documented pre-existing `process.service.test.ts` hold-point flake as every prior session this week — confirmed unrelated, this session touched no gating code). **Not verified live in a browser** — same Chrome-extension-not-connected situation as Steps 2-3.
+
+**Next**: Step 5, Management Dashboard.
