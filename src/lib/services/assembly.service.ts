@@ -255,20 +255,44 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
       // staying stuck PENDING forever (verify already proved QC role + not
       // the submitter, via assertMakerChecker above).
       if (step.templateStep.kind === "INSPECTION" && step.qcpItemId != null) {
-        const exec = await recordQcpExecutionTx(tx, actor, {
-          qcpItemId: step.qcpItemId,
-          unitId: step.unitId,
-          result: "ACCEPTED",
-          jobId: step.jobId,
+        // AUD-004: an internal DESPL employee verifying this step must not
+        // manufacture evidence that a THIRD PARTY (client TPI, buyer TPI,
+        // EIL TPIA, ...) witnessed something they were never actually
+        // present for — assertMakerChecker above only proves two different
+        // internal humans were involved, it says nothing about an external
+        // inspector. InspectionParty.code has no boolean "is this internal"
+        // column; the real marker used by every seeded QCP template is
+        // InspectionParty.code === the tenant's own Organization.code (see
+        // seed/qcp-templates.json's observedPartySets, where "DESPL" is the
+        // party code and matches Organization.code exactly). If any BLOCKING
+        // party code on this checkpoint belongs to a party other than that,
+        // skip the auto-record entirely — leave the checkpoint exactly as it
+        // is (no execution row, still open per assertNoOpenHoldPoint) until
+        // someone records it for real via recordQcpExecution.
+        const partyCodes = await tx.qcpItemPartyCode.findMany({
+          where: { qcpItemId: step.qcpItemId },
+          select: { qcpCode: { select: { blocksCompletion: true } }, inspectionParty: { select: { code: true } } },
         });
-        await recordAudit(tx, actor, {
-          action: "qcp.record",
-          entityType: "QcpExecution",
-          entityId: exec.id,
-          after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
-          eventType: "QcpExecutionRecorded",
-          eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
-        });
+        const org = await tx.organization.findUnique({ where: { id: actor.tenantId }, select: { code: true } });
+        const externalBlocking = partyCodes.some(
+          (pc) => pc.qcpCode.blocksCompletion && pc.inspectionParty.code !== org?.code,
+        );
+        if (!externalBlocking) {
+          const exec = await recordQcpExecutionTx(tx, actor, {
+            qcpItemId: step.qcpItemId,
+            unitId: step.unitId,
+            result: "ACCEPTED",
+            jobId: step.jobId,
+          });
+          await recordAudit(tx, actor, {
+            action: "qcp.record",
+            entityType: "QcpExecution",
+            entityId: exec.id,
+            after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
+            eventType: "QcpExecutionRecorded",
+            eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
+          });
+        }
       }
       return {
         result: updated,
