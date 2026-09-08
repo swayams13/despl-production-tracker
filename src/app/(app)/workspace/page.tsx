@@ -1,16 +1,10 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
-import { withTenant } from "@/lib/db";
 import { loadWorkspaceView } from "@/lib/services/workspace.read";
+import { loadJobs } from "@/lib/services/jobs.read";
 import { UnitRow, UnitCardView, CardBulkActions, QcRow, QcCardView, HoldRow, HoldCardView, FilterChip, SortSelect } from "./_client";
 import { ResponsiveTable } from "@/components/industrial/responsive-table";
-
-async function pilotJobId(tenantId: number): Promise<number | null> {
-  return withTenant(tenantId, async (tx) => {
-    const j = await tx.job.findFirst({ where: { jobNumber: "DESPL-320" }, select: { id: true } });
-    return j?.id ?? null;
-  });
-}
 
 function first(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
@@ -27,14 +21,36 @@ export default async function Workspace({
 
   const sp = await searchParams;
   const jobParam = Number(first(sp.job));
-  const jobId = Number.isInteger(jobParam) && jobParam > 0 ? jobParam : await pilotJobId(actor.tenantId);
-  const view = jobId
-    ? await loadWorkspaceView(actor, jobId, {
-        dept: first(sp.dept),
-        status: first(sp.status),
-        sort: first(sp.sort),
-      })
-    : null;
+  const jobId = Number.isInteger(jobParam) && jobParam > 0 ? jobParam : null;
+
+  if (!jobId) {
+    const jobs = await loadJobs(actor); // already tenant/client scoped — see jobs.read.ts
+    return (
+      <>
+        <div className="page-h"><h1>My Workspace</h1></div>
+        {jobs.length === 0 ? (
+          <p className="note">No projects exist yet.</p>
+        ) : (
+          <>
+            <p className="note">Select a project to see its worklist.</p>
+            <nav className="sub" style={{ display: "flex", gap: 6, flexWrap: "wrap" }} aria-label="Select project">
+              {jobs.map((j) => (
+                <Link key={j.id} href={`/workspace?job=${j.id}`} className="chip c-idle">
+                  <i />{j.jobNumber}
+                </Link>
+              ))}
+            </nav>
+          </>
+        )}
+      </>
+    );
+  }
+
+  const view = await loadWorkspaceView(actor, jobId, {
+    dept: first(sp.dept),
+    status: first(sp.status),
+    sort: first(sp.sort),
+  });
 
   if (!view) {
     return (

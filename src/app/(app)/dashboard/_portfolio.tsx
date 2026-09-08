@@ -235,7 +235,7 @@ function Row({ r }: { r: PortfolioRow }) {
       </td>
       <td>
         {r.overduePlans > 0 ? (
-          <Link href="/workspace?status=overdue" className="mono" style={{ color: "var(--s-overdue)" }}>
+          <Link href={`/workspace?job=${r.id}&status=overdue`} className="mono" style={{ color: "var(--s-overdue)" }}>
             {r.overduePlans}
           </Link>
         ) : (

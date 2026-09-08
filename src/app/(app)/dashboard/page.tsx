@@ -200,12 +200,12 @@ export default async function Dashboard({
           sub={<><span className="mono">{completeCount} of {k.totalPlans}</span> plans complete</>}
         />
 
-        <MetricCard label="On track" value={onTrack} href="/workspace" sub="not currently overdue" />
+        <MetricCard label="On track" value={onTrack} href={`/workspace?job=${jobId}`} sub="not currently overdue" />
 
         <MetricCard
           label="At-risk / overdue"
           value={k.overdue}
-          href="/workspace?status=overdue"
+          href={`/workspace?job=${jobId}&status=overdue`}
           alert={k.overdue > 0}
           valueColor={k.overdue > 0 ? "var(--s-overdue)" : undefined}
           sub="click to review"
@@ -268,7 +268,7 @@ export default async function Dashboard({
             <p className="note" style={{ margin: "16px 0" }}>No items on the critical path are currently overdue.</p>
           ) : (
             k.criticalPathBlocking.map((r) => (
-              <Link key={r.planId} href={`/workspace?dept=${r.departmentId}`} className="cp-row">
+              <Link key={r.planId} href={`/workspace?job=${jobId}&dept=${r.departmentId}`} className="cp-row">
                 <div className="t">
                   <b>{r.processName}</b>
                   <span>Unit {r.serialNo} · <span className="dept-tag">{r.deptName}</span></span>
@@ -278,7 +278,7 @@ export default async function Dashboard({
             ))
           )}
           <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)" }}>
-            <Link href="/workspace" className="btn btn-ghost">Open in workspace →</Link>
+            <Link href={`/workspace?job=${jobId}`} className="btn btn-ghost">Open in workspace →</Link>
           </div>
         </div>
       </div>
@@ -306,7 +306,7 @@ export default async function Dashboard({
                     return (
                       <td key={s}>
                         <Link
-                          href={`/workspace?dept=${row.departmentId}&status=${STATUS_FILTER[s]}`}
+                          href={`/workspace?job=${jobId}&dept=${row.departmentId}&status=${STATUS_FILTER[s]}`}
                           className={`mx-cell${count === 0 ? " mx-zero" : ""}`}
                           style={count > 0 ? { background: STATUS_COLOR[s], opacity: 0.16 + Math.min(count, 20) * 0.03, color: "var(--text)" } : undefined}
                         >
@@ -396,7 +396,7 @@ export default async function Dashboard({
               {k.overdueAgingByDept.map((d) => {
                 const total = d.d1to3 + d.d3to7 + d.d7plus;
                 return (
-                  <Link href={`/workspace?dept=${d.departmentId}&status=overdue`} className="age-row" key={d.departmentId}>
+                  <Link href={`/workspace?job=${jobId}&dept=${d.departmentId}&status=overdue`} className="age-row" key={d.departmentId}>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.department}</span>
                     <div className="agebar">
                       {d.d1to3 > 0 && <i style={{ width: `${(d.d1to3 / total) * 100}%`, background: "var(--s-hold)" }} />}
