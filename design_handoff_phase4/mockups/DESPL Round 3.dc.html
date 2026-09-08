@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0b0c0e;-webkit-font-smoothing:antialiased}
+a{color:#ff7a1a;text-decoration:none}
+a:hover{color:#ffa05e}
+*{box-sizing:border-box}
+button{font-family:inherit}
+</style>
+</helmet>
+
+<div style="padding:20px;background:#1a1b1d;display:flex;justify-content:center">
+<div style="width:1360px;flex:none;background:#0b0c0e;color:#e7e9ec;font:400 13px/1.45 Inter,system-ui,sans-serif;border:1px solid #2e3034;border-radius:8px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5)">
+
+<div style="display:flex;align-items:center;gap:14px;padding:9px 18px;background:#141619;border-bottom:1px solid #262a30;flex-wrap:wrap">
+<span style="font:700 10px 'JetBrains Mono',monospace;letter-spacing:.14em;color:#ff7a1a">ROUND 3</span>
+<span style="font-size:11.5px;color:#8b919a">Analytics, reporting &amp; visualisation · every chart traces to a real read model, never a decorative metric</span>
+<div style="margin-left:auto;display:flex;gap:5px;flex-wrap:wrap">
+<sc-for list="{{ tabs }}" as="t" hint-placeholder-count="10">
+<button onClick="{{ t.go }}" style="border:1px solid;border-radius:4px;padding:5px 9px;font-size:11px;font-weight:500;cursor:pointer;background:{{ t.bg }};color:{{ t.fg }};border-color:{{ t.bd }}">{{ t.label }}</button>
+</sc-for>
+</div>
+</div>
+
+<div style="display:flex;align-items:stretch;min-height:900px">
+
+<aside style="width:224px;min-width:224px;border-right:1px solid #262a30;background:#0b0c0e;display:flex;flex-direction:column">
+<div style="padding:16px;border-bottom:1px solid #262a30">
+<b style="font-size:15px;letter-spacing:.5px">DESPL</b>
+<span style="display:block;color:#8b919a;font-size:10.5px;margin-top:2px;text-transform:uppercase;letter-spacing:1px">Production Tracker</span>
+</div>
+<div style="padding:8px 8px 3px">
+<sc-for list="{{ nav }}" as="n" hint-placeholder-count="9">
+<div>
+<sc-if value="{{ n.isHead }}" hint-placeholder-val="{{ false }}">
+<h6 style="font:600 10px Inter;color:#8b919a;text-transform:uppercase;letter-spacing:1.2px;padding:12px 10px 6px;margin:0">{{ n.label }}</h6>
+</sc-if>
+<sc-if value="{{ n.isItem }}" hint-placeholder-val="{{ true }}">
+<div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:9px;padding:7px 10px;font-weight:500;cursor:pointer;font-size:13px;border-radius:6px;background:{{ n.bg }};color:{{ n.fg }};border-left:2px solid {{ n.bd }}" style-hover="background:#141619">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="{{ n.icon }}"></path></svg>{{ n.label }}
+<sc-if value="{{ n.hasBadge }}" hint-placeholder-val="{{ false }}">
+<span style="margin-left:auto;background:{{ n.badgeBg }};color:{{ n.badgeFg }};font:600 10.5px 'JetBrains Mono',monospace;padding:1px 6px;border-radius:8px">{{ n.badge }}</span>
+</sc-if>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<div style="margin-top:auto;border-top:1px solid #262a30;padding:12px 14px;display:flex;gap:10px;align-items:center">
+<div style="width:28px;height:28px;border-radius:6px;background:#1c1f24;display:flex;align-items:center;justify-content:center;font:600 11px 'JetBrains Mono',monospace;color:#ff7a1a;flex:none">SJ</div>
+<div style="min-width:0">
+<b style="font-weight:500;display:block;font-size:12.5px">S. Jadeja</b>
+<small style="display:block;color:#8b919a;font-size:10.5px">Production Head</small>
+</div>
+</div>
+</aside>
+
+<div style="flex:1;min-width:0;display:flex;flex-direction:column">
+<div style="height:48px;min-height:48px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:14px;padding:0 20px;background:rgba(11,12,14,.92)">
+<span style="color:#8b919a;font-size:12.5px">{{ crumbRoot }} / <b style="color:#e7e9ec;font-weight:500">{{ crumbLeaf }}</b></span>
+<div style="margin-left:auto;display:flex;gap:12px;align-items:center">
+<span style="font:500 11px 'JetBrains Mono',monospace;color:#8b919a">MON 07 SEPT</span>
+</div>
+</div>
+
+<div style="padding:22px 26px 52px;flex:1;background:#0b0c0e;min-width:0">
+
+<sc-if value="{{ isMgmt }}" hint-placeholder-val="{{ true }}">
+<div data-screen-label="01 Management Dashboard">
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+<div>
+<h1 style="font:600 20px Inter;margin:0">Portfolio</h1>
+<div style="color:#8b919a;font-size:12px;margin-top:3px">Where should management intervene?</div>
+</div>
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+<button style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:32px;padding:0 12px;font:500 12px Inter;cursor:pointer;display:flex;align-items:center;gap:6px">All projects <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2.5"><path d="M6 9l6 6 6-6"></path></svg></button>
+<button style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:32px;padding:0 12px;font:500 12px Inter;cursor:pointer;display:flex;align-items:center;gap:6px">Last 30 days <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2.5"><path d="M6 9l6 6 6-6"></path></svg></button>
+<span style="color:#8b919a;font-size:11.5px">Updated 6 min ago</span>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px">
+<sc-for list="{{ mgmtTiles }}" as="t" hint-placeholder-count="5">
+<div style="background:#141619;border:1px solid #262a30;border-top:2px solid {{ t.top }};border-radius:6px;padding:13px 15px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:7px">{{ t.label }}</div>
+<div style="font:600 24px 'JetBrains Mono',monospace;line-height:1;color:{{ t.fg }}">{{ t.value }}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden;margin-bottom:14px">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Project health</h3>
+<span style="color:#8b919a;font-size:11.5px">Planned vs actual completion, worst-first</span>
+</div>
+<div style="display:grid;grid-template-columns:120px minmax(0,1fr) 70px 130px 110px;gap:14px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<div>Project</div><div>Planned vs actual</div><div style="text-align:right">Variance</div><div>Forecast</div><div>Health</div>
+</div>
+<sc-for list="{{ healthRows }}" as="r" hint-placeholder-count="4">
+<div onClick="{{ r.go }}" style="display:grid;grid-template-columns:120px minmax(0,1fr) 70px 130px 110px;gap:14px;align-items:center;min-height:52px;padding:6px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<div><div style="font:600 13px 'JetBrains Mono',monospace">{{ r.job }}</div><div style="color:#8b919a;font-size:10.5px">{{ r.client }}</div></div>
+<div style="position:relative;height:9px;border-radius:2px;background:#1c1f24">
+<i style="position:absolute;left:0;top:0;bottom:0;width:{{ r.actualW }};background:{{ r.barFg }};border-radius:2px;display:block"></i>
+<i style="position:absolute;left:{{ r.plannedX }};top:-3px;bottom:-3px;width:2px;background:#e7e9ec;display:block"></i>
+</div>
+<div style="text-align:right;font:600 12.5px 'JetBrains Mono',monospace;color:{{ r.varFg }}">{{ r.variance }}</div>
+<div style="font-size:11.5px;color:#8b919a">{{ r.forecast }}</div>
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:10px;font:600 10.5px Inter;background:{{ r.healthBg }};color:{{ r.healthFg }};width:fit-content"><i style="width:5px;height:5px;border-radius:50%;background:{{ r.healthFg }};display:block"></i>{{ r.healthLabel }}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-left:2px solid #ff7a1a;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#ff7a1a;margin:0">Needs attention</h3>
+<span style="color:#8b919a;font-size:11.5px">{{ attentionCount }} items require a decision today — sorted worst-first, same rule as the tiles above</span>
+</div>
+<sc-for list="{{ attentionRows }}" as="a" hint-placeholder-count="5">
+<div onClick="{{ a.go }}" style="display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<i style="width:8px;height:8px;border-radius:2px;background:{{ a.sevFg }};display:block;flex:none"></i>
+<span style="font:600 12px 'JetBrains Mono',monospace;color:#8b919a;width:66px;flex:none">{{ a.job }}</span>
+<div style="min-width:0;flex:1"><div style="font-size:12.5px;font-weight:500">{{ a.title }}</div><div style="color:#8b919a;font-size:11px;margin-top:2px">{{ a.dept }} · {{ a.age }}</div></div>
+<span style="color:#ff7a1a;font-size:12px;font-weight:600;flex:none">{{ a.actionLabel }} →</span>
+</div>
+</sc-for>
+</div>
+<div style="color:#8b919a;font-size:11px;margin-top:10px">Health follows one classification rule shared by the dashboard, the project list and the daily digest — they cannot disagree.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isPortfolio }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="02 Portfolio Analysis">
+<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+<div><h1 style="font:600 20px Inter;margin:0">Portfolio Analysis</h1><div style="color:#8b919a;font-size:12px;margin-top:3px">Cross-project trend and the full hierarchy — deeper than the dashboard, still not a single-project view</div></div>
+<div style="display:flex;gap:5px">
+<sc-for list="{{ trendChips }}" as="c" hint-placeholder-count="4">
+<button onClick="{{ c.pick }}" style="border-radius:20px;height:27px;padding:0 12px;font:500 11.5px Inter;cursor:pointer;background:{{ c.bg }};color:{{ c.fg }};border:1px solid {{ c.bd }}">{{ c.label }}</button>
+</sc-for>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px">
+<sc-for list="{{ trendCards }}" as="c" hint-placeholder-count="4">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:13px 15px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:6px">{{ c.label }}</div>
+<div style="display:flex;align-items:baseline;gap:7px;margin-bottom:6px"><span style="font:600 20px 'JetBrains Mono',monospace">{{ c.value }}</span><span style="font:600 11px Inter;color:{{ c.deltaFg }}">{{ c.delta }}</span></div>
+<svg width="100%" height="28" viewBox="0 0 120 28" preserveAspectRatio="none"><path d="{{ c.path }}" fill="none" stroke="{{ c.stroke }}" stroke-width="2"></path></svg>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden;margin-bottom:10px">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:10px">
+<h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Portfolio hierarchy</h3>
+<span style="color:#8b919a;font-size:11.5px">Portfolio → Project → Department, expand-in-place. Chosen over a Sunburst — see the comparison</span>
+<a href="#" onClick="{{ goSunburst }}" style="margin-left:auto;font-size:11.5px">Sunburst vs table →</a>
+</div>
+<sc-for list="{{ hierRows }}" as="j" hint-placeholder-count="4">
+<div>
+<div onClick="{{ j.toggle }}" style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2.5" style="transform:{{ j.caret }};flex:none"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+<span style="font:600 12.5px 'JetBrains Mono',monospace;width:74px;flex:none">{{ j.job }}</span>
+<div style="position:relative;height:8px;border-radius:2px;background:#1c1f24;flex:1;max-width:320px">
+<i style="position:absolute;left:0;top:0;bottom:0;width:{{ j.pctW }};background:{{ j.barFg }};border-radius:2px;display:block"></i>
+</div>
+<span style="font:600 12px 'JetBrains Mono',monospace;color:#8b919a;width:38px">{{ j.pct }}%</span>
+<span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font:600 10px Inter;background:{{ j.healthBg }};color:{{ j.healthFg }}">{{ j.healthLabel }}</span>
+<span style="margin-left:auto;color:#8b919a;font-size:11px">{{ j.expandNote }}</span>
+</div>
+<sc-if value="{{ j.expanded }}" hint-placeholder-val="{{ false }}">
+<sc-for list="{{ j.depts }}" as="d" hint-placeholder-count="6">
+<div onClick="{{ d.go }}" style="display:flex;align-items:center;gap:12px;padding:8px 16px 8px 46px;border-bottom:1px solid rgba(38,42,48,.4);cursor:pointer" style-hover="background:#1c1f24">
+<span style="font-size:12px;color:#c7cad0;width:220px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ d.name }}</span>
+<div style="position:relative;height:6px;border-radius:2px;background:#1c1f24;flex:1;max-width:280px">
+<i style="position:absolute;left:0;top:0;bottom:0;width:{{ d.pctW }};background:#8b919a;border-radius:2px;display:block"></i>
+</div>
+<span style="font:500 11.5px 'JetBrains Mono',monospace;color:#8b919a;width:80px">{{ d.note }}</span>
+</div>
+</sc-for>
+</sc-if>
+</div>
+</sc-for>
+</div>
+<div style="color:#8b919a;font-size:11px">Trend cards are derived from the same event stream as the throughput chart on Schedule Performance — weekly buckets from <code>domain_events</code>, not a stored snapshot. 90-day history is thin until more weeks accumulate.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isProject }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="03 Project Analytics">
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px">
+<h1 style="font:600 20px 'JetBrains Mono',monospace;margin:0;letter-spacing:.5px">DESPL-320</h1>
+<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:10px;font:600 10.5px Inter;text-transform:uppercase;letter-spacing:.5px;background:rgba(217,166,46,.12);color:#d9a62e"><i style="width:5px;height:5px;border-radius:50%;background:#d9a62e;display:block"></i>At risk</span>
+</div>
+<div style="color:#8b919a;font-size:12.5px;margin-bottom:16px">Pressure vessel · HP air receiver · 9 units · 225 scheduled stages</div>
+
+<div style="display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px">
+<sc-for list="{{ projTiles }}" as="t" hint-placeholder-count="6">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:12px 14px">
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:7px">{{ t.label }}</div>
+<div style="font:600 21px 'JetBrains Mono',monospace;line-height:1;color:{{ t.fg }}">{{ t.value }}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden;margin-bottom:12px">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Department performance on this project</h3></div>
+<div style="display:grid;grid-template-columns:minmax(0,1.4fr) 80px 80px 80px minmax(0,1fr);gap:12px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10px Inter;text-transform:uppercase;letter-spacing:.8px;color:#8b919a">
+<div>Department</div><div style="text-align:right">Planned</div><div style="text-align:right">Actual</div><div style="text-align:right">Variance</div><div>Status</div>
+</div>
+<sc-for list="{{ projDeptRows }}" as="d" hint-placeholder-count="7">
+<div style="display:grid;grid-template-columns:minmax(0,1.4fr) 80px 80px 80px minmax(0,1fr);gap:12px;align-items:center;min-height:38px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6)" style-hover="background:#1c1f24">
+<div style="font-size:12.5px">{{ d.name }}</div>
+<div style="text-align:right;font:500 12.5px 'JetBrains Mono',monospace;color:#8b919a">{{ d.planned }}%</div>
+<div style="text-align:right;font:500 12.5px 'JetBrains Mono',monospace">{{ d.actual }}%</div>
+<div style="text-align:right;font:600 12.5px 'JetBrains Mono',monospace;color:{{ d.varFg }}">{{ d.variance }}</div>
+<div style="font-size:11.5px;color:{{ d.statusFg }}">{{ d.status }}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:8px"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Cycle-time offenders</h3><span style="color:#8b919a;font-size:11px">actual vs standard, completed stages this project</span></div>
+<sc-for list="{{ cycleOffenders }}" as="c" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid rgba(38,42,48,.5)">
+<div style="min-width:0;flex:1"><div style="font-size:12px">{{ c.proc }}</div><div style="color:#8b919a;font-size:10.5px">{{ c.dept }} · standard {{ c.std }}d · n={{ c.n }}</div></div>
+<span style="font:600 12.5px 'JetBrains Mono',monospace;color:#d9a62e">+{{ c.delta }}d</span>
+</div>
+</sc-for>
+</div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px;display:flex;flex-direction:column">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:10px">Where this leads</div>
+<div style="font-size:12.5px;line-height:1.6;color:#c7cad0;margin-bottom:14px">Nozzle Welding is running 3.8 days over standard on this job, the same process flagged on the portfolio bottleneck chart. Schedule Performance shows the effect on the finish date.</div>
+<div style="display:flex;gap:8px;margin-top:auto">
+<button onClick="{{ goSched }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:34px;padding:0 13px;font:500 12px Inter;cursor:pointer">Schedule Performance →</button>
+<button onClick="{{ goBottleneckFab }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:34px;padding:0 13px;font:500 12px Inter;cursor:pointer">Bottleneck Analysis →</button>
+</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDept }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="04 Department Analytics">
+<h1 style="font:600 20px Inter;margin:0 0 3px">Department Analytics</h1>
+<div style="color:#8b919a;font-size:12px;margin-bottom:16px">Which departments are performing well or poorly, across every active project</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px;margin-bottom:12px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">On-time completion, last 30 days</div>
+<sc-for list="{{ deptBars }}" as="b" hint-placeholder-count="6">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:9px">
+<span style="width:170px;flex:none;font-size:12px">{{ b.name }}</span>
+<div style="position:relative;height:14px;border-radius:2px;background:#1c1f24;flex:1">
+<i style="position:absolute;left:0;top:0;bottom:0;width:{{ b.w }};background:{{ b.fg }};border-radius:2px;display:block"></i>
+<i style="position:absolute;left:85%;top:-3px;bottom:-3px;width:1px;background:#4a4f57;display:block"></i>
+</div>
+<span style="font:600 12.5px 'JetBrains Mono',monospace;width:38px;text-align:right">{{ b.pct }}%</span>
+</div>
+</sc-for>
+<div style="color:#8b919a;font-size:10.5px;margin-top:4px">Thin line marks the 85% target used elsewhere in the app.</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Department comparison</h3></div>
+<div style="display:grid;grid-template-columns:minmax(0,1.3fr) 64px 70px 70px 74px 90px 26px;gap:10px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10px Inter;text-transform:uppercase;letter-spacing:.7px;color:#8b919a">
+<div>Department</div><div style="text-align:right">Open</div><div style="text-align:right">Overdue</div><div style="text-align:right">Rework</div><div style="text-align:right">On-time</div><div style="text-align:right">Cycle Δ</div><div></div>
+</div>
+<sc-for list="{{ deptTable }}" as="d" hint-placeholder-count="6">
+<div>
+<div onClick="{{ d.toggle }}" style="display:grid;grid-template-columns:minmax(0,1.3fr) 64px 70px 70px 74px 90px 26px;gap:10px;align-items:center;min-height:42px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<div style="font-size:12.5px">{{ d.name }}</div>
+<div style="text-align:right;font:500 12.5px 'JetBrains Mono',monospace">{{ d.open }}</div>
+<div style="text-align:right;font:600 12.5px 'JetBrains Mono',monospace;color:{{ d.overFg }}">{{ d.overdue }}</div>
+<div style="text-align:right;font:500 12.5px 'JetBrains Mono',monospace;color:{{ d.reworkFg }}">{{ d.rework }}</div>
+<div style="text-align:right;font:600 12.5px 'JetBrains Mono',monospace;color:{{ d.onTimeFg }}">{{ d.onTime }}%</div>
+<div style="text-align:right;font:500 12.5px 'JetBrains Mono',monospace;color:{{ d.cycleFg }}">{{ d.cycleLabel }}</div>
+<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2.5" style="transform:{{ d.caret }}"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+</div>
+<sc-if value="{{ d.expanded }}" hint-placeholder-val="{{ false }}">
+<div style="padding:14px 16px 16px 16px;border-bottom:1px solid rgba(38,42,48,.6);background:#111317;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px">
+<div>
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:8px">Cycle time vs standard</div>
+<sc-for list="{{ d.cycle }}" as="c" hint-placeholder-count="2">
+<div style="display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid rgba(38,42,48,.5);font-size:12px">
+<span>{{ c.proc }}</span><span style="color:#8b919a">standard {{ c.std }}d · n={{ c.n }}</span><span style="font:600 12px 'JetBrains Mono',monospace;color:{{ c.deltaFg }}">{{ c.deltaLabel }}</span>
+</div>
+</sc-for>
+</div>
+<div>
+<div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:8px">Delay reasons filed, this department</div>
+<sc-for list="{{ d.reasons }}" as="r" hint-placeholder-count="2">
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+<span style="width:150px;flex:none;font-size:11.5px;color:#c7cad0">{{ r.cat }}</span>
+<div style="position:relative;height:7px;border-radius:2px;background:#1c1f24;flex:1"><i style="position:absolute;left:0;top:0;bottom:0;width:{{ r.w }};background:#8b919a;border-radius:2px;display:block"></i></div>
+<span style="font:500 11px 'JetBrains Mono',monospace;color:#8b919a;width:16px">{{ r.n }}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSched }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="05 Schedule Performance">
+<h1 style="font:600 20px Inter;margin:0 0 3px">Schedule Performance — DESPL-320</h1>
+<div style="color:#8b919a;font-size:12px;margin-bottom:16px">Planned vs actual cumulative completion, and whether throughput can still hit the promised date</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:16px 18px;margin-bottom:12px">
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:12px">
+<span style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Planned vs actual (S-curve)</span>
+<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8b919a"><i style="width:14px;height:2px;background:#8b919a;display:block"></i>Planned</span>
+<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8b919a"><i style="width:14px;height:2px;background:#4c8dff;display:block"></i>Actual</span>
+<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8b919a"><i style="width:14px;height:2px;background:#f0524d;display:block;border-top:2px dashed #f0524d;background:none"></i>Forecast</span>
+</div>
+<svg width="100%" height="180" viewBox="0 0 400 150" preserveAspectRatio="none">
+<line x1="0" y1="0" x2="0" y2="130" stroke="#262a30"></line>
+<line x1="0" y1="130" x2="400" y2="130" stroke="#262a30"></line>
+<path d="{{ sPlannedPath }}" fill="none" stroke="#8b919a" stroke-width="1.6" stroke-dasharray="4,3"></path>
+<path d="{{ sActualPath }}" fill="none" stroke="#4c8dff" stroke-width="2"></path>
+<path d="{{ sForecastPath }}" fill="none" stroke="#f0524d" stroke-width="1.6" stroke-dasharray="3,3"></path>
+<line x1="{{ sTodayX }}" y1="0" x2="{{ sTodayX }}" y2="130" stroke="#e7e9ec" stroke-width="1" stroke-dasharray="2,3"></line>
+<line x1="{{ sPromiseX }}" y1="0" x2="{{ sPromiseX }}" y2="130" stroke="#d9a62e" stroke-width="1" stroke-dasharray="2,3"></line>
+<sc-for list="{{ sMonthLabels }}" as="m" hint-placeholder-count="9">
+<text x="{{ m.x }}" y="144" fill="#8b919a" font-size="9" text-anchor="middle" font-family="Inter">{{ m.label }}</text>
+</sc-for>
+</svg>
+<div style="display:flex;gap:26px;flex-wrap:wrap;font-size:11.5px;color:#8b919a;margin-top:6px">
+<span>184 of 225 stages complete</span><span>plan line 88%</span><span style="color:#f0524d">forecast 08 Dec · +6 working days vs the 30 Nov promise</span>
+</div>
+<div style="color:#c7cad0;font-size:12px;margin-top:10px;line-height:1.6">Actual has tracked below plan since mid-August, when the Weld NDE queue grew to five units. <a href="#" onClick="{{ goBottleneckQc }}">See it on the Bottleneck chart →</a></div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:12px">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Verified stages per week, last 7 weeks</div>
+<div style="display:flex;align-items:flex-end;gap:10px;height:90px">
+<sc-for list="{{ throughputBars }}" as="b" hint-placeholder-count="7">
+<div style="display:flex;flex-direction:column;align-items:center;gap:5px;flex:1">
+<div style="width:100%;background:#4c8dff;border-radius:2px 2px 0 0;height:{{ b.h }}"></div>
+<span style="font-size:10px;color:#8b919a">{{ b.week }}</span>
+</div>
+</sc-for>
+</div>
+<div style="color:#8b919a;font-size:11px;margin-top:8px">Dashed target line at 9/week — the pace needed from today to hit 30 Nov. Averaging 6.4.</div>
+</div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px;display:flex;flex-direction:column;gap:12px">
+<div><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">Cycle time vs standard</div><div style="font:600 18px 'JetBrains Mono',monospace;color:#d9a62e">+2.1d</div><div style="color:#8b919a;font-size:11px">avg over 42 completed stages, last 30d</div></div>
+<div><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:4px">First-pass yield</div><div style="font:600 18px 'JetBrains Mono',monospace">94%</div><div style="color:#8b919a;font-size:11px">51 submissions, last 30d</div></div>
+<div style="color:#8b919a;font-size:11px;padding-top:4px;border-top:1px solid #262a30">Forecast is the schedule engine's computed makespan from current durations — not a live re-forecast from today's actual progress.</div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isBottleneck }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="06 Bottleneck Analysis">
+<h1 style="font:600 20px Inter;margin:0 0 3px">Bottleneck Analysis</h1>
+<div style="color:#8b919a;font-size:12px;margin-bottom:16px">Which department is creating the most delay across the portfolio, right now</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:16px 18px;margin-bottom:12px">
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+<span style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a">Overdue work-in-progress by department</span>
+<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8b919a"><i style="width:9px;height:9px;background:#f0c05a;display:block;border-radius:1px"></i>1–3d</span>
+<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8b919a"><i style="width:9px;height:9px;background:#d9a62e;display:block;border-radius:1px"></i>3–7d</span>
+<span style="display:flex;align-items:center;gap:5px;font-size:11px;color:#8b919a"><i style="width:9px;height:9px;background:#f0524d;display:block;border-radius:1px"></i>7d+</span>
+</div>
+<sc-for list="{{ bnBars }}" as="b" hint-placeholder-count="5">
+<div onClick="{{ b.pick }}" style="display:flex;align-items:center;gap:12px;margin-bottom:11px;cursor:pointer" style-hover="opacity:.85">
+<span style="width:190px;flex:none;font-size:12.5px;font-weight:{{ b.fw }};color:{{ b.nameFg }}">{{ b.name }}</span>
+<div style="position:relative;height:18px;border-radius:2px;background:#1c1f24;flex:1;display:flex;overflow:hidden">
+<i style="height:100%;width:{{ b.w1 }};background:#f0c05a;display:block"></i>
+<i style="height:100%;width:{{ b.w2 }};background:#d9a62e;display:block"></i>
+<i style="height:100%;width:{{ b.w3 }};background:#f0524d;display:block"></i>
+</div>
+<span style="font:600 14px 'JetBrains Mono',monospace;width:34px;text-align:right">{{ b.total }}</span>
+</div>
+</sc-for>
+<div style="color:#8b919a;font-size:11px;margin-top:2px">Overdue plans owned by each department, summed across every active project, aged since planned finish. Click a bar to drill in.</div>
+</div>
+
+<sc-if value="{{ bnHasDrill }}" hint-placeholder-val="{{ false }}">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:10px 16px;border-bottom:1px solid #262a30;display:flex;align-items:center;gap:8px;font-size:12px">
+<sc-for list="{{ bnCrumbs }}" as="c" hint-placeholder-count="4">
+<span><a href="#" onClick="{{ c.go }}" style="color:{{ c.fg }}">{{ c.label }}</a><sc-if value="{{ c.sep }}" hint-placeholder-val="{{ true }}"><span style="color:#4a4f57"> / </span></sc-if></span>
+</sc-for>
+<button onClick="{{ bnReset }}" style="margin-left:auto;background:transparent;border:1px solid #262a30;color:#8b919a;border-radius:4px;height:26px;padding:0 10px;font:500 11px Inter;cursor:pointer">Close ×</button>
+</div>
+
+<sc-if value="{{ bnShowProjects }}" hint-placeholder-val="{{ false }}">
+<div style="padding:8px 16px 4px;color:#8b919a;font-size:11px">Projects affected</div>
+<sc-for list="{{ bnProjects }}" as="p" hint-placeholder-count="3">
+<div onClick="{{ p.go }}" style="display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<span style="font:600 12.5px 'JetBrains Mono',monospace;width:90px">{{ p.job }}</span>
+<span style="flex:1;font-size:12px;color:#8b919a">oldest {{ p.oldest }} days overdue</span>
+<span style="font:600 13px 'JetBrains Mono',monospace;color:#f0524d">{{ p.count }}</span>
+</div>
+</sc-for>
+</sc-if>
+
+<sc-if value="{{ bnShowActivities }}" hint-placeholder-val="{{ false }}">
+<div style="padding:8px 16px 4px;color:#8b919a;font-size:11px">Activities</div>
+<sc-for list="{{ bnActivities }}" as="a" hint-placeholder-count="2">
+<div onClick="{{ a.go }}" style="display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<div style="min-width:0;flex:1"><div style="font-size:12.5px">{{ a.process }} · stage {{ a.stage }}</div><div style="color:#8b919a;font-size:11px">{{ a.unit }} · {{ a.status }}</div></div>
+<span style="font:600 13px 'JetBrains Mono',monospace;color:#f0524d">{{ a.days }}d</span>
+</div>
+</sc-for>
+</sc-if>
+
+<sc-if value="{{ bnShowAction }}" hint-placeholder-val="{{ false }}">
+<div style="padding:16px">
+<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+<div style="flex:1;min-width:220px">
+<div style="font-size:13px;font-weight:600;margin-bottom:4px">{{ bnAction.process }} · {{ bnAction.unit }}</div>
+<div style="color:#8b919a;font-size:12px;margin-bottom:10px">{{ bnAction.status }}</div>
+<div style="color:#8b919a;font-size:11px">Owner</div>
+<div style="font-size:12.5px;margin-top:2px">{{ bnAction.owner }}</div>
+</div>
+<button style="background:#ff7a1a;border:1px solid #ff7a1a;color:#000;border-radius:4px;height:40px;padding:0 18px;font:600 13px Inter;cursor:pointer">{{ bnAction.action }}</button>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+<sc-if value="{{ bnNoDrill }}" hint-placeholder-val="{{ true }}">
+<div style="color:#8b919a;font-size:12.5px;padding:18px 4px">Click a department bar above to see which projects and activities are driving its overdue count, and who owns the next action. <a href="#" onClick="{{ goDrillExp }}">See the full drill-down model →</a></div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ isReports }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="07 Reports">
+<h1 style="font:600 20px Inter;margin:0 0 3px">Reports</h1>
+<div style="color:#8b919a;font-size:12px;margin-bottom:16px">Organised by what you're trying to decide, not an alphabetical list</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-left:2px solid #ff7a1a;border-radius:6px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+<div style="flex:1;min-width:220px"><div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#ff7a1a;margin-bottom:4px">Daily Digest</div><div style="font-size:12.5px;color:#c7cad0">The one report already wired end-to-end today — stages verified, new overdue, holds opened/cleared, tomorrow's due list. Everything below shares its filters and read model.</div></div>
+<span style="color:#8b919a;font-size:11.5px">Last sent 07 Sept, 07:00</span>
+<button style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:32px;padding:0 13px;font:500 12px Inter;cursor:pointer">Open</button>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+<sc-for list="{{ reportGroups }}" as="g" hint-placeholder-count="4">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">{{ g.title }}</h3></div>
+<sc-for list="{{ g.items }}" as="i" hint-placeholder-count="3">
+<div onClick="{{ i.go }}" style="display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid rgba(38,42,48,.6);cursor:pointer" style-hover="background:#1c1f24">
+<div style="min-width:0;flex:1"><div style="font-size:12.5px;font-weight:500">{{ i.name }}</div><div style="color:#8b919a;font-size:11px;margin-top:2px">{{ i.desc }}</div></div>
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2"><path d="M9 5.5l6.5 6.5L9 18.5"></path></svg>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isReportDetail }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="08 Report Detail">
+<div style="color:#8b919a;font-size:11.5px;margin-bottom:4px"><a href="#" onClick="{{ goReports }}">Reports</a> / {{ rdCategory }}</div>
+<h1 style="font:600 20px Inter;margin:0 0 12px">{{ rdTitle }} Report</h1>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+<sc-for list="{{ rdFilters }}" as="f" hint-placeholder-count="4">
+<button style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:30px;padding:0 11px;font:500 12px Inter;cursor:pointer;display:flex;align-items:center;gap:6px">{{ f }} <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#8b919a" stroke-width="2.5"><path d="M6 9l6 6 6-6"></path></svg></button>
+</sc-for>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px">
+<sc-for list="{{ rdSummary }}" as="t" hint-placeholder-count="5">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:12px 14px"><div style="font:600 10px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:6px">{{ t.label }}</div><div style="font:600 19px 'JetBrains Mono',monospace;color:{{ t.fg }}">{{ t.value }}</div></div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:15px 17px;margin-bottom:12px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Visual analysis — planned vs actual by department</div>
+<sc-for list="{{ rdBars }}" as="b" hint-placeholder-count="6">
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+<span style="width:160px;flex:none;font-size:12px">{{ b.name }}</span>
+<div style="position:relative;height:12px;border-radius:2px;background:#1c1f24;flex:1"><i style="position:absolute;left:0;top:0;bottom:0;width:{{ b.w }};background:{{ b.fg }};border-radius:2px;display:block"></i></div>
+<span style="font:600 12px 'JetBrains Mono',monospace;width:36px;text-align:right">{{ b.pct }}%</span>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden;margin-bottom:12px">
+<div style="padding:11px 16px;border-bottom:1px solid #262a30"><h3 style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin:0">Detailed data</h3></div>
+<div style="display:grid;grid-template-columns:minmax(0,1.3fr) 74px 74px 74px minmax(0,1fr);gap:12px;padding:8px 16px;border-bottom:1px solid #262a30;font:600 10px Inter;text-transform:uppercase;letter-spacing:.7px;color:#8b919a">
+<div>Department</div><div style="text-align:right">Planned</div><div style="text-align:right">Actual</div><div style="text-align:right">Variance</div><div>Status</div>
+</div>
+<sc-for list="{{ rdTable }}" as="r" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:minmax(0,1.3fr) 74px 74px 74px minmax(0,1fr);gap:12px;align-items:center;min-height:36px;padding:5px 16px;border-bottom:1px solid rgba(38,42,48,.6)" style-hover="background:#1c1f24">
+<div style="font-size:12.5px">{{ r.name }}</div><div style="text-align:right;font:500 12px 'JetBrains Mono',monospace;color:#8b919a">{{ r.planned }}%</div><div style="text-align:right;font:500 12px 'JetBrains Mono',monospace">{{ r.actual }}%</div><div style="text-align:right;font:600 12px 'JetBrains Mono',monospace;color:{{ r.varFg }}">{{ r.variance }}</div><div style="font-size:11.5px;color:{{ r.statusFg }}">{{ r.status }}</div>
+</div>
+</sc-for>
+</div>
+
+<div style="display:flex;align-items:center;gap:12px;justify-content:flex-end">
+<span style="color:#8b919a;font-size:11px;margin-right:auto">Generated just now, from live data — never cached</span>
+<button style="background:transparent;border:1px solid #262a30;color:#8b919a;border-radius:4px;height:28px;padding:0 10px;font:500 11px Inter;cursor:pointer">Export CSV</button>
+<button style="background:transparent;border:1px solid #262a30;color:#8b919a;border-radius:4px;height:28px;padding:0 10px;font:500 11px Inter;cursor:pointer">Export PDF</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isSunburst }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="09 Sunburst vs alternative">
+<h1 style="font:600 20px Inter;margin:0 0 3px">Sunburst vs hierarchical table</h1>
+<div style="color:#8b919a;font-size:12px;margin-bottom:16px">The team proposed a Sunburst for the dashboard. Evaluated, not adopted by default — here is why.</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin-bottom:12px">
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:16px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Option A — Sunburst</div>
+<svg width="100%" height="180" viewBox="0 0 200 200">
+<circle cx="100" cy="100" r="22" fill="#1c1f24" stroke="#262a30"></circle>
+<path d="M100,100 L100,46 A54,54 0 0,1 148,74 Z" fill="#3fb950" opacity=".8"></path>
+<path d="M100,100 L148,74 A54,54 0 0,1 154,100 Z" fill="#d9a62e" opacity=".8"></path>
+<path d="M100,100 L154,100 A54,54 0 0,1 108,153 Z" fill="#f0524d" opacity=".8"></path>
+<path d="M100,100 L108,153 A54,54 0 0,1 46,100 Z" fill="#4c8dff" opacity=".8"></path>
+<path d="M100,100 L46,100 A54,54 0 0,1 100,46 Z" fill="#8b919a" opacity=".6"></path>
+<circle cx="100" cy="100" r="76" fill="none" stroke="#262a30" stroke-width="1"></circle>
+</svg>
+<div style="color:#8b919a;font-size:11px;text-align:center">Portfolio → Project → Department → Stage, as rings</div>
+</div>
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:16px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#8b919a;margin-bottom:12px">Option B — Hierarchical table</div>
+<sc-for list="{{ sbTablePreview }}" as="r" hint-placeholder-count="4">
+<div style="display:flex;align-items:center;gap:10px;padding:6px 0 6px {{ r.indent }};border-bottom:1px solid rgba(38,42,48,.5)">
+<span style="font-size:12px;flex:1">{{ r.label }}</span>
+<div style="position:relative;height:6px;border-radius:2px;background:#1c1f24;width:90px"><i style="position:absolute;left:0;top:0;bottom:0;width:{{ r.w }};background:#8b919a;border-radius:2px;display:block"></i></div>
+<span style="font:500 11.5px 'JetBrains Mono',monospace;color:#8b919a;width:34px;text-align:right">{{ r.pct }}%</span>
+</div>
+</sc-for>
+<div style="color:#8b919a;font-size:11px;text-align:center;margin-top:8px">Same hierarchy, expand-in-place — this ships on Portfolio Analysis</div>
+</div>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;overflow:hidden;margin-bottom:12px">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(0,1.3fr);gap:12px;padding:9px 16px;border-bottom:1px solid #262a30;font:600 10px Inter;text-transform:uppercase;letter-spacing:.7px;color:#8b919a">
+<div>Criterion</div><div>Sunburst</div><div>Hierarchical table</div>
+</div>
+<sc-for list="{{ sbCompare }}" as="c" hint-placeholder-count="6">
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr) minmax(0,1.3fr);gap:12px;padding:9px 16px;border-bottom:1px solid rgba(38,42,48,.6);align-items:start">
+<div style="font-size:12px;font-weight:500;padding-top:1px">{{ c.criterion }}</div>
+<div style="font-size:11.5px;color:{{ c.aFg }}">{{ c.a }}</div>
+<div style="font-size:11.5px;color:{{ c.bFg }}">{{ c.b }}</div>
+</div>
+</sc-for>
+</div>
+<div style="background:#141619;border:1px solid #262a30;border-left:2px solid #3fb950;border-radius:6px;padding:14px 16px;font-size:12.5px;line-height:1.6;color:#c7cad0">Decision: the hierarchical table ships on Portfolio Analysis. A Sunburst is a fourth chart grammar in an app that already reads tables, bars and one S-curve everywhere else — for a comparison task, tables win. Kept here as the record of why, not on the operational dashboard.</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isDrill }}" hint-placeholder-val="{{ false }}">
+<div data-screen-label="10 Drill-down experience">
+<h1 style="font:600 20px Inter;margin:0 0 3px">Drill-down model</h1>
+<div style="color:#8b919a;font-size:12px;margin-bottom:18px">Every analytical view follows the same chain. No chart is a dead end.</div>
+
+<div style="display:flex;align-items:center;margin-bottom:20px">
+<sc-for list="{{ drillSteps }}" as="s" hint-placeholder-count="7">
+<div style="display:flex;align-items:center;flex:1">
+<div onClick="{{ s.go }}" style="display:flex;flex-direction:column;align-items:center;gap:6px;cursor:pointer;flex:none">
+<div style="width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 11px 'JetBrains Mono',monospace;background:{{ s.bg }};color:{{ s.fg }};border:1px solid {{ s.bd }}">{{ s.n }}</div>
+<span style="font-size:10.5px;color:{{ s.labelFg }};white-space:nowrap">{{ s.label }}</span>
+</div>
+<sc-if value="{{ s.hasLine }}" hint-placeholder-val="{{ true }}"><div style="flex:1;height:1px;background:#262a30;margin:0 6px 16px"></div></sc-if>
+</div>
+</sc-for>
+</div>
+
+<div style="background:#141619;border:1px solid #262a30;border-radius:6px;padding:20px 22px;margin-bottom:14px">
+<div style="font:600 10.5px Inter;text-transform:uppercase;letter-spacing:1px;color:#ff7a1a;margin-bottom:10px">{{ drillPanel.title }}</div>
+<div style="font-size:14px;font-weight:500;margin-bottom:6px">{{ drillPanel.main }}</div>
+<div style="color:#8b919a;font-size:12.5px;margin-bottom:12px">{{ drillPanel.sub }}</div>
+<div style="color:#c7cad0;font-size:12px;line-height:1.6;padding-top:12px;border-top:1px solid #262a30">{{ drillPanel.why }}</div>
+</div>
+
+<div style="display:flex;gap:8px">
+<button onClick="{{ drillPrev }}" style="background:#1c1f24;border:1px solid #262a30;color:#e7e9ec;border-radius:4px;height:34px;padding:0 14px;font:500 12.5px Inter;cursor:pointer">← Back</button>
+<button onClick="{{ drillNext }}" style="background:#ff7a1a;border:1px solid #ff7a1a;color:#000;border-radius:4px;height:34px;padding:0 14px;font:600 12.5px Inter;cursor:pointer">Next →</button>
+</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { screen: "mgmt", trendRange: "30", bnDept: null, bnProject: null, bnActivity: null, deptExpand: null, portfolioExpand: "DESPL-320", reportFocus: null, drillStep: 0 };
+
+  TABS = [
+    { id: "mgmt", label: "1 · Dashboard" },
+    { id: "portfolio", label: "2 · Portfolio" },
+    { id: "project", label: "3 · Project" },
+    { id: "dept", label: "4 · Department" },
+    { id: "sched", label: "5 · Schedule" },
+    { id: "bottleneck", label: "6 · Bottleneck" },
+    { id: "reports", label: "7 · Reports" },
+    { id: "reportDetail", label: "8 · Report detail" },
+    { id: "sunburst", label: "9 · Sunburst" },
+    { id: "drill", label: "10 · Drill-down" },
+  ];
+
+  NAV = [
+    { head: "Analytics" },
+    { id: "mgmt", label: "Management Dashboard", icon: "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z" },
+    { id: "portfolio", label: "Portfolio Analysis", icon: "M12 3l9 5-9 5-9-5 9-5zM3 12l9 5 9-5M3 17l9 5 9-5" },
+    { id: "project", label: "Project Analytics", icon: "M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" },
+    { id: "dept", label: "Department Analytics", icon: "M4 20V9l8-5 8 5v11M9 20v-6h6v6" },
+    { id: "sched", label: "Schedule Performance", icon: "M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" },
+    { id: "bottleneck", label: "Bottlenecks", icon: "M5 21V10M12 21V3M19 21v-7", badge: "36", badgeKind: "red" },
+    { head: "Records" },
+    { id: "reports", label: "Reports", icon: "M5 20V6h14v14zM8 16v-4M12 16V9M16 16v-2" },
+  ];
+
+  HEALTH = {
+    ON_TRACK: { label: "On track", fg: "#3fb950", bg: "rgba(63,185,80,.12)" },
+    AT_RISK: { label: "At risk", fg: "#d9a62e", bg: "rgba(217,166,46,.12)" },
+    DELAYED: { label: "Delayed", fg: "#f0524d", bg: "rgba(240,82,77,.12)" },
+    ON_HOLD: { label: "On hold", fg: "#8b919a", bg: "rgba(139,145,154,.12)" },
+  };
+
+  JOBS = [
+    { job: "DE0467", client: "Client B", planned: 74, actual: 61, variance: -13, forecast: "22 Sept · +11d", health: "DELAYED", verified24h: 0, newlyOverdue24h: 2 },
+    { job: "DESPL-320", client: "Confidential · pressure vessel", planned: 88, actual: 82, variance: -6, forecast: "08 Dec · +6d", health: "AT_RISK", verified24h: 3, newlyOverdue24h: 1 },
+    { job: "12548", client: "Client C", planned: 64, actual: 66, variance: 2, forecast: "on schedule", health: "ON_TRACK", verified24h: 2, newlyOverdue24h: 0 },
+    { job: "DE0463", client: "Client A", planned: 41, actual: 41, variance: 0, forecast: "paused", health: "ON_HOLD", verified24h: 0, newlyOverdue24h: 0 },
+  ];
+
+  ATTENTION = [
+    { sev: "critical", job: "DESPL-320", title: "Weld NDE — 5 units awaiting verification", dept: "Quality Control / QA", age: "5 days in queue", actionLabel: "Open QC queue" },
+    { sev: "critical", job: "DE0467", title: "Shell Fit-Up & Welding overdue, no delay reason filed", dept: "Fabrication / Welding", age: "8 days overdue", actionLabel: "Review" },
+    { sev: "critical", job: "DESPL-320", title: "Hydrostatic test — client witness (TPI) pending", dept: "Quality Control / QA", age: "12 days late", actionLabel: "Review" },
+    { sev: "warning", job: "DESPL-320", title: "Weld NDE rejection — NCR-0041 awaiting disposition", dept: "Quality Control / QA", age: "2 days", actionLabel: "Open NCR" },
+    { sev: "warning", job: "DE0467", title: "Material kit not issued", dept: "Stores", age: "1 day", actionLabel: "Review" },
+  ];
+
+  DEPTS = [
+    { code: "ENGINEERING", name: "Design & Detail Engineering", open: 11, overdue: 0, blocked: 0, rework: 0, onTime: 96, cycleDelta: -1.0 },
+    { code: "DISPATCH", name: "Dispatch & Logistics", open: 6, overdue: 2, blocked: 0, rework: 0, onTime: 94, cycleDelta: -0.3 },
+    { code: "QC", name: "Quality Control / QA", open: 58, overdue: 18, blocked: 2, rework: 1, onTime: 88, cycleDelta: 0.6 },
+    { code: "STORES", name: "Stores", open: 9, overdue: 5, blocked: 1, rework: 0, onTime: 82, cycleDelta: 1.5 },
+    { code: "PROCUREMENT", name: "Procurement", open: 18, overdue: 9, blocked: 0, rework: 0, onTime: 81, cycleDelta: 3.2 },
+    { code: "FABRICATION", name: "Fabrication / Welding", open: 112, overdue: 12, blocked: 9, rework: 4, onTime: 78, cycleDelta: 2.1 },
+  ];
+
+  DEPT_DETAIL = {
+    QC: { cycle: [{ proc: "Weld NDE", std: 3, n: 22, delta: 2.1 }, { proc: "Hydrostatic / Pressure Test", std: 2, n: 9, delta: 0.4 }], reasons: [{ cat: "Client hold", n: 6 }, { cat: "Rework / quality", n: 5 }, { cat: "Other", n: 3 }] },
+    FABRICATION: { cycle: [{ proc: "Nozzle Welding", std: 3, n: 14, delta: 3.8 }, { proc: "Shell Fit-Up & Welding", std: 4, n: 18, delta: 1.2 }], reasons: [{ cat: "Manpower", n: 7 }, { cat: "Machine breakdown", n: 4 }, { cat: "Material delay", n: 3 }] },
+    PROCUREMENT: { cycle: [{ proc: "Plate & Pipe Procurement", std: 14, n: 6, delta: 5.6 }], reasons: [{ cat: "Material delay", n: 8 }, { cat: "Other", n: 1 }] },
+    STORES: { cycle: [{ proc: "Material Issue & Kitting", std: 6, n: 9, delta: 2.1 }], reasons: [{ cat: "Material delay", n: 4 }, { cat: "Manpower", n: 1 }] },
+    ENGINEERING: { cycle: [{ proc: "Manufacturing Drawings", std: 24, n: 9, delta: -1.2 }], reasons: [{ cat: "Drawing / engineering hold", n: 2 }] },
+    DISPATCH: { cycle: [{ proc: "Packing & Dispatch", std: 3, n: 11, delta: 0.1 }], reasons: [{ cat: "Client hold", n: 1 }] },
+  };
+
+  BOTTLENECK = [
+    { code: "QC", name: "Quality Control / QA", total: 18, d1: 6, d2: 7, d3: 5 },
+    { code: "FABRICATION", name: "Fabrication / Welding", total: 12, d1: 5, d2: 4, d3: 3 },
+    { code: "PROCUREMENT", name: "Procurement", total: 9, d1: 4, d2: 3, d3: 2 },
+    { code: "STORES", name: "Stores", total: 5, d1: 3, d2: 2, d3: 0 },
+    { code: "DISPATCH", name: "Dispatch & Logistics", total: 2, d1: 2, d2: 0, d3: 0 },
+  ];
+
+  BN_PROJECTS = {
+    QC: [{ job: "DE0467", count: 8, oldest: 9 }, { job: "DESPL-320", count: 5, oldest: 5 }, { job: "12548", count: 3, oldest: 2 }, { job: "DE0463", count: 2, oldest: 1 }],
+    FABRICATION: [{ job: "DE0467", count: 6, oldest: 8 }, { job: "DESPL-320", count: 4, oldest: 4 }, { job: "12548", count: 2, oldest: 2 }],
+    PROCUREMENT: [{ job: "DE0467", count: 5, oldest: 6 }, { job: "DESPL-320", count: 4, oldest: 3 }],
+    STORES: [{ job: "DE0467", count: 3, oldest: 4 }, { job: "DESPL-320", count: 2, oldest: 2 }],
+    DISPATCH: [{ job: "DESPL-320", count: 2, oldest: 1 }],
+  };
+
+  BN_ACTIVITIES = {
+    "QC|DE0467": [{ process: "Final Dimension Check", unit: "DE0467-06", stage: "20", days: 9, status: "Overdue, no reason filed", owner: "Unassigned QC reviewer", action: "Assign reviewer" }],
+    "QC|DESPL-320": [{ process: "Weld NDE", unit: "320SR02", stage: "14", days: 5, status: "Awaiting verification", owner: "Imran Shaikh → A. Mehta (QC)", action: "Review submission" }],
+    "QC|12548": [{ process: "Head / Dish-End Assembly QC", unit: "de00101", stage: "11", days: 2, status: "Awaiting verification", owner: "R. Nair (QC)", action: "Review submission" }],
+    "QC|DE0463": [{ process: "Dimensional check", unit: "DE0463-02", stage: "15", days: 1, status: "On hold — TPI pending", owner: "A. Mehta (QC)", action: "Open hold point" }],
+    "FABRICATION|DE0467": [{ process: "Shell Fit-Up & Welding", unit: "DE0467-04", stage: "10", days: 8, status: "Overdue, no reason filed", owner: "Suresh Bhatt", action: "File delay reason & start" }],
+    "FABRICATION|DESPL-320": [{ process: "Nozzle Welding", unit: "320SR07", stage: "13", days: 4, status: "Overdue, no reason filed", owner: "Imran Shaikh", action: "File delay reason & start" }],
+    "FABRICATION|12548": [{ process: "Nozzle Fabrication & Fit-Up", stage: "12", unit: "de00101", days: 2, status: "On hold — machine breakdown", owner: "Mahesh Rathod", action: "Resume" }],
+    "PROCUREMENT|DE0467": [{ process: "Plate & Pipe Procurement", unit: "DE0467 (equipment)", stage: "4", days: 6, status: "PO placed, receipt overdue", owner: "Procurement desk", action: "Review" }],
+    "PROCUREMENT|DESPL-320": [{ process: "Plate & Pipe Procurement", unit: "320 (equipment)", stage: "5", days: 3, status: "PO placed, receipt overdue", owner: "Procurement desk", action: "Review" }],
+    "STORES|DE0467": [{ process: "Material Issue & Kitting", unit: "DE0467-02", stage: "6", days: 4, status: "Kit not issued", owner: "Stores desk", action: "Review" }],
+    "STORES|DESPL-320": [{ process: "Material Issue & Kitting", unit: "320SR03", stage: "6", days: 2, status: "Kit not issued", owner: "Stores desk", action: "Review" }],
+    "DISPATCH|DESPL-320": [{ process: "Packing & Dispatch", unit: "320SR01", stage: "25", days: 1, status: "Awaiting MDR compilation", owner: "Dispatch desk", action: "Review" }],
+  };
+
+  REPORT_GROUPS = [
+    { title: "Project performance", items: [
+      { name: "Project Progress", desc: "Planned vs actual, every open project" },
+      { name: "Schedule Variance", desc: "Days ahead or behind, by project" },
+      { name: "Project Health", desc: "RAG classification history" },
+    ] },
+    { title: "Operations", items: [
+      { name: "Department Performance", desc: "Cross-job comparison, all departments" },
+      { name: "Production Performance", desc: "Fabrication / Welding floor output" },
+      { name: "Bottlenecks", desc: "Overdue work by department, drill to owner" },
+    ] },
+    { title: "Quality", items: [
+      { name: "QC Performance", desc: "Verification turnaround, first-pass yield" },
+      { name: "Hold Points", desc: "Open QCP holds, age, TPI status" },
+      { name: "Rejections", desc: "NCRs raised, disposition, rework owner" },
+    ] },
+    { title: "Schedule", items: [
+      { name: "Planned vs Actual", desc: "S-curve, every open project" },
+      { name: "Cycle Time", desc: "Actual vs standard, by process" },
+      { name: "Completion Trends", desc: "Weekly verified-stage trend" },
+    ] },
+  ];
+
+  DRILL_STEPS = [
+    { n: 1, label: "Portfolio", title: "Level: Portfolio", main: "Quality Control / QA — 18 overdue plans", sub: "The tallest bar on Bottleneck Analysis.", why: "The entry point is always a comparison across the whole portfolio — never a single project's number, or the level below has no context." },
+    { n: 2, label: "Project", title: "Level: Project", main: "DE0467 — 8 of the 18 overdue, oldest 9 days", sub: "DESPL-320 (5), 12548 (3) and DE0463 (2) make up the rest.", why: "Splitting by project answers 'which job is actually hurting' — the department total alone cannot." },
+    { n: 3, label: "Department", title: "Level: Department (job-scoped)", main: "Quality Control / QA on DE0467", sub: "Same department, now scoped to one job — the Awaiting Verification queue for DE0467 only.", why: "The cross-job number and the job-scoped number are deliberately different views — mixing them was the one thing Round 2 flagged as a labelling trap." },
+    { n: 4, label: "Stage", title: "Level: Stage", main: "Final Dimension Check · stage 20", sub: "The specific process in the job's spine, not the department as a whole.", why: "A department can be behind for one stage and fine everywhere else. Stage is where that becomes visible." },
+    { n: 5, label: "Activity", title: "Level: Activity", main: "DE0467-06 · overdue 9 days, no delay reason filed", sub: "Unit × stage — the grain every write action operates on.", why: "This is the only grain with a real primary key to act on. Everything above it is an aggregate." },
+    { n: 6, label: "Owner", title: "Level: Owner", main: "Unassigned QC reviewer", sub: "No one currently holds this activity.", why: "An aggregate chart can hide 'nobody owns this.' The owner level cannot — it is either a name or a gap." },
+    { n: 7, label: "Action", title: "Level: Action", main: "Assign reviewer", sub: "The one action available for an unassigned, overdue QC activity — same action vocabulary as Round 2's Assignment screen.", why: "Every drill-down ends in one of the six real transitions or three assignment operations. Never a dead-end chart." },
+  ];
+
+  set = (p) => this.setState(p);
+  go = (screen) => () => this.set({ screen, bnDept: null, bnProject: null, bnActivity: null, deptExpand: null });
+
+  pctW(v, max) { return `${Math.max(2, Math.min(100, (v / max) * 100))}%`; }
+
+  sparkPath(vals) {
+    const max = Math.max(...vals, 1), min = Math.min(...vals, 0);
+    const range = Math.max(max - min, 1);
+    return vals.map((v, i) => `${i === 0 ? "M" : "L"}${(i / (vals.length - 1)) * 118 + 1},${26 - ((v - min) / range) * 22}`).join(" ");
+  }
+
+  curvePath(vals, x0, xs, y0) {
+    let d = "", started = false;
+    vals.forEach((v, i) => {
+      if (v == null) return;
+      const x = x0 + i * xs, y = y0 - (v / 100) * y0;
+      d += (started ? "L" : "M") + x + "," + y + " ";
+      started = true;
+    });
+    return d.trim();
+  }
+
+  renderVals() {
+    const s = this.state;
+    const sc = s.screen || "mgmt";
+
+    const tabs = this.TABS.map((t) => ({ key: t.id, label: t.label, go: this.go(t.id), bg: sc === t.id ? "#ff7a1a" : "#1c1f24", fg: sc === t.id ? "#000" : "#8b919a", bd: sc === t.id ? "#ff7a1a" : "#262a30" }));
+
+    const nav = this.NAV.map((n, i) => {
+      if (n.head) return { key: "h" + i, isHead: true, isItem: false, label: n.head };
+      const on = sc === n.id;
+      return { key: n.id, isHead: false, isItem: true, label: n.label, icon: n.icon, go: this.go(n.id), bg: on ? "rgba(255,122,26,.1)" : "transparent", fg: on ? "#ff7a1a" : "#c7cad0", bd: on ? "#ff7a1a" : "transparent", hasBadge: !!n.badge, badge: n.badge, badgeBg: "rgba(240,82,77,.15)", badgeFg: "#f0524d" };
+    });
+
+    const CRUMB = { mgmt: "Management Dashboard", portfolio: "Portfolio Analysis", project: "Project Analytics", dept: "Department Analytics", sched: "Schedule Performance", bottleneck: "Bottleneck Analysis", reports: "Reports", reportDetail: "Report Detail", sunburst: "Sunburst evaluation", drill: "Drill-down model" };
+
+    // ── Management Dashboard ──────────────────────────────────────────
+    const mgmtTiles = [
+      { label: "Active projects", value: "3", fg: "#e7e9ec", top: "#262a30" },
+      { label: "Delayed", value: "1", fg: "#f0524d", top: "#f0524d" },
+      { label: "At risk", value: "1", fg: "#d9a62e", top: "#d9a62e" },
+      { label: "On hold", value: "1", fg: "#8b919a", top: "#4a4f57" },
+      { label: "Actions required", value: String(this.ATTENTION.length), fg: "#ff7a1a", top: "#ff7a1a" },
+    ];
+    const healthRows = this.JOBS.map((j) => {
+      const h = this.HEALTH[j.health];
+      return {
+        key: j.job, job: j.job, client: j.client, actualW: `${j.actual}%`, plannedX: `${j.planned}%`,
+        barFg: j.variance < -8 ? "#f0524d" : j.variance < 0 ? "#d9a62e" : "#3fb950",
+        variance: `${j.variance > 0 ? "+" : ""}${j.variance}%`, varFg: j.variance < 0 ? "#f0524d" : j.variance > 0 ? "#3fb950" : "#8b919a",
+        forecast: j.forecast, healthLabel: h.label, healthBg: h.bg, healthFg: h.fg,
+        go: this.go("project"),
+      };
+    });
+    const attentionRows = this.ATTENTION.map((a, i) => ({ key: i, ...a, sevFg: a.sev === "critical" ? "#f0524d" : "#d9a62e", go: this.go("drill") }));
+
+    // ── Portfolio Analysis ─────────────────────────────────────────────
+    const trendChips = ["7d", "30d", "90d", "Custom"].map((label) => ({
+      key: label, label, pick: () => this.set({ trendRange: label }),
+      bg: (s.trendRange + "d" === label || s.trendRange === label) ? "rgba(255,122,26,.14)" : "#1c1f24",
+      fg: (s.trendRange + "d" === label || s.trendRange === label) ? "#ff7a1a" : "#8b919a",
+      bd: (s.trendRange + "d" === label || s.trendRange === label) ? "rgba(255,122,26,.45)" : "#262a30",
+    }));
+    const TREND_DATA = [
+      { label: "Completion / week", value: "6.4", delta: "+0.8", deltaFg: "#3fb950", vals: [4, 5, 6, 5, 7, 8, 6], stroke: "#3fb950" },
+      { label: "Overdue (open)", value: "36", delta: "+9", deltaFg: "#f0524d", vals: [22, 24, 27, 30, 33, 35, 36], stroke: "#f0524d" },
+      { label: "Blocked (holds)", value: "4", delta: "+1", deltaFg: "#d9a62e", vals: [2, 2, 3, 3, 2, 4, 4], stroke: "#d9a62e" },
+      { label: "On-time completion", value: "85%", delta: "−3pt", deltaFg: "#f0524d", vals: [92, 90, 89, 88, 87, 86, 85], stroke: "#4c8dff" },
+    ];
+    const trendCards = TREND_DATA.map((c, i) => ({ key: i, label: c.label, value: c.value, delta: c.delta, deltaFg: c.deltaFg, stroke: c.stroke, path: this.sparkPath(c.vals) }));
+
+    const PORTFOLIO_DEPTS = {
+      "DESPL-320": [
+        { name: "Design & Detail Engineering", pct: 96, note: "on track" }, { name: "Procurement", pct: 89, note: "watch" },
+        { name: "Fabrication / Welding", pct: 76, note: "bottleneck" }, { name: "Quality Control / QA", pct: 88, note: "queue: 5" },
+        { name: "Heat Treatment", pct: 91, note: "blocked: 2" }, { name: "Documentation / MDR", pct: 94, note: "on track" },
+      ],
+    };
+    const hierRows = this.JOBS.map((j) => {
+      const h = this.HEALTH[j.health];
+      const expanded = s.portfolioExpand === j.job && !!PORTFOLIO_DEPTS[j.job];
+      return {
+        key: j.job, job: j.job, pct: j.actual, pctW: `${j.actual}%`, barFg: j.variance < -8 ? "#f0524d" : j.variance < 0 ? "#d9a62e" : "#3fb950",
+        healthLabel: h.label, healthBg: h.bg, healthFg: h.fg,
+        toggle: PORTFOLIO_DEPTS[j.job] ? () => this.set({ portfolioExpand: s.portfolioExpand === j.job ? null : j.job }) : () => {},
+        caret: expanded ? "rotate(90deg)" : "none",
+        expandNote: PORTFOLIO_DEPTS[j.job] ? (expanded ? "" : "expand for departments") : "not yet modelled at department grain",
+        expanded,
+        depts: (PORTFOLIO_DEPTS[j.job] || []).map((d, i2) => ({ key: i2, name: d.name, pctW: `${d.pct}%`, note: `${d.pct}% · ${d.note}`, go: this.go("dept") })),
+      };
+    });
+
+    // ── Project Analytics (DESPL-320) ───────────────────────────────────
+    const projTiles = [
+      { label: "Overall progress", value: "82%", fg: "#e7e9ec" }, { label: "Schedule variance", value: "−6%", fg: "#f0524d" },
+      { label: "On-time performance", value: "84%", fg: "#d9a62e" }, { label: "Open blockers", value: "2", fg: "#d9a62e" },
+      { label: "QC holds", value: "2", fg: "#d9a62e" }, { label: "Overdue activities", value: "4", fg: "#f0524d" },
+    ];
+    const PROJ_DEPTS = [
+      { name: "Design & Detail Engineering", planned: 100, actual: 100, status: "Complete", statusFg: "#3fb950" },
+      { name: "Procurement", planned: 100, actual: 100, status: "Complete, +5d", statusFg: "#3fb950" },
+      { name: "Stores", planned: 100, actual: 100, status: "Complete, +5d", statusFg: "#3fb950" },
+      { name: "Fabrication / Welding", planned: 92, actual: 76, status: "In progress — bottleneck", statusFg: "#f0524d" },
+      { name: "Quality Control / QA", planned: 70, actual: 88, status: "5 in verification queue", statusFg: "#d9a62e" },
+      { name: "Heat Treatment", planned: 40, actual: 91, status: "Blocked by Weld NDE", statusFg: "#d9a62e" },
+      { name: "Documentation / MDR", planned: 10, actual: 94, status: "Not started", statusFg: "#8b919a" },
+    ];
+    const projDeptRows = PROJ_DEPTS.map((d, i) => ({ key: i, ...d, variance: `${d.actual - d.planned > 0 ? "+" : ""}${d.actual - d.planned}%`, varFg: d.actual - d.planned < 0 ? "#f0524d" : d.actual - d.planned > 0 ? "#3fb950" : "#8b919a" }));
+    const cycleOffenders = [
+      { proc: "Nozzle Welding", dept: "Fabrication / Welding", std: 3, n: 14, delta: "3.8" },
+      { proc: "Weld NDE", dept: "Quality Control / QA", std: 3, n: 22, delta: "2.1" },
+      { proc: "Plate Rolling / Forming", dept: "Fabrication Prep", std: 8, n: 9, delta: "4.4" },
+      { proc: "Material Issue & Kitting", dept: "Stores", std: 6, n: 9, delta: "2.1" },
+    ].map((c, i) => ({ key: i, ...c }));
+
+    // ── Department Analytics ───────────────────────────────────────────
+    const deptSorted = [...this.DEPTS].sort((a, b) => b.onTime - a.onTime);
+    const deptBars = deptSorted.map((d, i) => ({ key: i, name: d.name, pct: d.onTime, w: `${d.onTime}%`, fg: d.onTime >= 85 ? "#3fb950" : d.onTime >= 80 ? "#d9a62e" : "#f0524d" }));
+    const deptTable = this.DEPTS.map((d) => {
+      const expanded = s.deptExpand === d.code;
+      const det = this.DEPT_DETAIL[d.code];
+      const maxReason = det ? Math.max(...det.reasons.map((r) => r.n)) : 1;
+      return {
+        key: d.code, name: d.name, open: d.open, overdue: d.overdue, overFg: d.overdue > 8 ? "#f0524d" : d.overdue > 0 ? "#d9a62e" : "#4a4f57",
+        rework: d.rework, reworkFg: d.rework > 0 ? "#d9a62e" : "#4a4f57", onTime: d.onTime, onTimeFg: d.onTime >= 85 ? "#3fb950" : d.onTime >= 80 ? "#d9a62e" : "#f0524d",
+        cycleLabel: `${d.cycleDelta > 0 ? "+" : ""}${d.cycleDelta}d`, cycleFg: d.cycleDelta > 1 ? "#f0524d" : d.cycleDelta > 0 ? "#d9a62e" : "#3fb950",
+        toggle: () => this.set({ deptExpand: expanded ? null : d.code }), caret: expanded ? "rotate(90deg)" : "none", expanded,
+        cycle: (det?.cycle || []).map((c, i) => ({ key: i, proc: c.proc, std: c.std, n: c.n, deltaLabel: `${c.delta > 0 ? "+" : ""}${c.delta}d`, deltaFg: c.delta > 1 ? "#f0524d" : c.delta > 0 ? "#d9a62e" : "#3fb950" })),
+        reasons: (det?.reasons || []).map((r, i) => ({ key: i, cat: r.cat, n: r.n, w: this.pctW(r.n, maxReason) })),
+      };
+    });
+
+    // ── Schedule Performance ───────────────────────────────────────────
+    const months = ["Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
+    const planned = [3, 10, 18, 32, 55, 75, 88, 96, 100];
+    const actual = [3, 9, 16, 28, 48, 82, null, null, null];
+    const forecast = [null, null, null, null, null, 82, 90, 96, 100];
+    const x0 = 10, xs = 45, y0 = 130;
+    const sPlannedPath = this.curvePath(planned, x0, xs, y0);
+    const sActualPath = this.curvePath(actual, x0, xs, y0);
+    const sForecastPath = this.curvePath(forecast, x0, xs, y0);
+    const sMonthLabels = months.map((label, i) => ({ key: i, label, x: x0 + i * xs }));
+    const throughputWeeks = [5, 7, 4, 8, 6, 9, 6];
+    const throughputBars = throughputWeeks.map((v, i) => ({ key: i, week: `W-${6 - i}`, h: `${(v / 10) * 90}px` }));
+
+    // ── Bottleneck Analysis ────────────────────────────────────────────
+    const bnMax = Math.max(...this.BOTTLENECK.map((b) => b.total));
+    const bnBars = this.BOTTLENECK.map((b) => ({
+      key: b.code, name: b.name, total: b.total, fw: s.bnDept === b.code ? "700" : "500", nameFg: s.bnDept === b.code ? "#ff7a1a" : "#e7e9ec",
+      w1: this.pctW(b.d1, bnMax), w2: this.pctW(b.d2, bnMax), w3: this.pctW(b.d3, bnMax),
+      pick: () => this.set({ bnDept: b.code, bnProject: null, bnActivity: null }),
+    }));
+    const bnDeptName = s.bnDept ? this.DEPTS.find((d) => d.code === s.bnDept)?.name : null;
+    const bnCrumbs = [];
+    if (s.bnDept) {
+      bnCrumbs.push({ key: "d", label: bnDeptName, fg: "#e7e9ec", sep: !!s.bnProject, go: () => this.set({ bnProject: null, bnActivity: null }) });
+      if (s.bnProject) bnCrumbs.push({ key: "p", label: s.bnProject, fg: "#e7e9ec", sep: !!s.bnActivity, go: () => this.set({ bnActivity: null }) });
+      if (s.bnActivity) bnCrumbs.push({ key: "a", label: s.bnActivity.process, fg: "#ff7a1a", sep: false, go: () => {} });
+    }
+    const bnProjects = (this.BN_PROJECTS[s.bnDept] || []).map((p, i) => ({ key: i, ...p, go: () => this.set({ bnProject: p.job, bnActivity: null }) }));
+    const bnActivities = (this.BN_ACTIVITIES[`${s.bnDept}|${s.bnProject}`] || []).map((a, i) => ({ key: i, ...a, go: () => this.set({ bnActivity: a }) }));
+
+    // ── Reports ─────────────────────────────────────────────────────────
+    const reportGroups = this.REPORT_GROUPS.map((g, i) => ({ key: i, title: g.title, items: g.items.map((it, j) => ({ key: j, ...it, go: () => this.set({ screen: "reportDetail", reportFocus: it.name }) })) }));
+
+    // ── Report Detail ────────────────────────────────────────────────
+    const rdTitle = s.reportFocus || "Project Progress";
+    const rdCat = (this.REPORT_GROUPS.find((g) => g.items.some((i) => i.name === rdTitle)) || {}).title || "Project performance";
+    const rdSummary = [
+      { label: "Total plans", value: "225", fg: "#e7e9ec" }, { label: "% complete", value: "82%", fg: "#e7e9ec" },
+      { label: "Variance", value: "−6%", fg: "#f0524d" }, { label: "On-time", value: "84%", fg: "#d9a62e" }, { label: "Overdue", value: "4", fg: "#f0524d" },
+    ];
+    const rdBars = PROJ_DEPTS.map((d, i) => ({ key: i, name: d.name, pct: d.actual, w: `${d.actual}%`, fg: d.actual - d.planned < -5 ? "#f0524d" : d.actual - d.planned < 0 ? "#d9a62e" : "#3fb950" }));
+    const rdTable = projDeptRows;
+
+    // ── Sunburst comparison ──────────────────────────────────────────
+    const sbTablePreview = [
+      { key: 1, label: "Portfolio", indent: "0", w: "100%", pct: 71 },
+      { key: 2, label: "DESPL-320", indent: "16px", w: "82%", pct: 82 },
+      { key: 3, label: "Fabrication / Welding", indent: "32px", w: "76%", pct: 76 },
+      { key: 4, label: "Quality Control / QA", indent: "32px", w: "88%", pct: 88 },
+    ];
+    const SB_COMPARE = [
+      { criterion: "Readability", a: "Ring labels rotate and reverse past 180° — small outer segments become unreadable", aFg: "#f0524d", b: "Every value reads horizontally, no rotation, at any segment size", bFg: "#3fb950" },
+      { criterion: "Comparison", a: "Comparing two arc lengths across different rings is visually unreliable", aFg: "#f0524d", b: "Numbers align in a column — direct, precise comparison", bFg: "#3fb950" },
+      { criterion: "Drill-down", a: "Click-to-zoom works, but the parent ring's context shrinks or disappears", aFg: "#d9a62e", b: "Expand-in-place keeps every sibling row visible", bFg: "#3fb950" },
+      { criterion: "Screen space", a: "Needs a large square area; wastes space at this app's 1280–1360px shell width", aFg: "#f0524d", b: "Fits the existing row-based density used everywhere else", bFg: "#3fb950" },
+      { criterion: "Usefulness", a: "One real strength: a single glance at how the whole breaks down by ring", aFg: "#d9a62e", b: "Good for the glance and for the decision that follows it", bFg: "#3fb950" },
+      { criterion: "Cognitive load", a: "A fourth chart grammar; no other DESPL screen uses a radial layout", aFg: "#f0524d", b: "Same table language as every other analytics screen in this round", bFg: "#3fb950" },
+    ];
+    const sbCompare = SB_COMPARE.map((c, i) => ({ key: i, ...c }));
+
+    // ── Drill-down experience ──────────────────────────────────────────
+    const step = Math.min(s.drillStep, this.DRILL_STEPS.length - 1);
+    const drillSteps = this.DRILL_STEPS.map((d, i) => ({
+      key: i, n: d.n, label: d.label, hasLine: i < this.DRILL_STEPS.length - 1,
+      go: () => this.set({ drillStep: i }),
+      bg: i === step ? "#ff7a1a" : i < step ? "#1c1f24" : "#141619", fg: i === step ? "#000" : i < step ? "#8b919a" : "#4a4f57",
+      bd: i === step ? "#ff7a1a" : "#262a30", labelFg: i === step ? "#e7e9ec" : "#8b919a",
+    }));
+    const drillPanel = this.DRILL_STEPS[step];
+
+    return {
+      sc, crumbRoot: "Analytics", crumbLeaf: CRUMB[sc] || "Dashboard", tabs, nav,
+      isMgmt: sc === "mgmt", isPortfolio: sc === "portfolio", isProject: sc === "project", isDept: sc === "dept",
+      isSched: sc === "sched", isBottleneck: sc === "bottleneck", isReports: sc === "reports", isReportDetail: sc === "reportDetail",
+      isSunburst: sc === "sunburst", isDrill: sc === "drill",
+
+      mgmtTiles, healthRows, attentionRows, attentionCount: this.ATTENTION.length,
+
+      trendChips, trendCards, hierRows, goSunburst: this.go("sunburst"),
+
+      projTiles, projDeptRows, cycleOffenders, goSched: this.go("sched"), goBottleneckFab: () => this.set({ screen: "bottleneck", bnDept: "FABRICATION" }),
+
+      deptBars, deptTable,
+
+      sPlannedPath, sActualPath, sForecastPath, sMonthLabels, sTodayX: x0 + 5 * xs, sPromiseX: x0 + 7 * xs, throughputBars,
+      goBottleneckQc: () => this.set({ screen: "bottleneck", bnDept: "QC" }),
+
+      bnBars, bnCrumbs, bnProjects, bnActivities, bnAction: s.bnActivity,
+      bnHasDrill: !!s.bnDept, bnNoDrill: !s.bnDept,
+      bnShowProjects: !!s.bnDept && !s.bnProject, bnShowActivities: !!s.bnProject && !s.bnActivity, bnShowAction: !!s.bnActivity,
+      bnReset: () => this.set({ bnDept: null, bnProject: null, bnActivity: null }),
+      goDrillExp: this.go("drill"),
+
+      reportGroups, goReports: this.go("reports"),
+
+      rdTitle, rdCategory: rdCat, rdFilters: ["Project: DESPL-320", "Department: All", "Date range: Last 30 days", "Status: All"], rdSummary, rdBars, rdTable,
+
+      sbTablePreview, sbCompare,
+
+      drillSteps, drillPanel,
+      drillPrev: () => this.set({ drillStep: Math.max(0, step - 1) }),
+      drillNext: () => this.set({ drillStep: Math.min(this.DRILL_STEPS.length - 1, step + 1) }),
+    };
+  }
+}
+</script>
+</body>
+</html>

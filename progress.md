@@ -5570,3 +5570,37 @@ Its real scheduled tick (01:00 UTC) hasn't happened since the cron was created (
 **Committed and pushed directly to `main`** (`2c4ecf6`, per explicit instruction) — no PR, no migration (the new `componentType` import field maps to the existing `BomItem.componentTypeId` column via a code lookup; no schema change). Railway auto-deploys from `main`, so this is already live pending the next deploy cycle.
 
 **Not done, deliberately**: `CLAUDE.md`'s "Known state" section still describes the old gap verbatim ("`bom.service.ts`'s `importBomItems` doesn't even accept `componentTypeId` yet") — worth a follow-up correction now that it's closed, not touched this session since it wasn't asked for. No live browser verification of the new template/import UI — this was a service+schema change verified by tests, not clicked through `/jobs/[id]`'s BOM panel in a real browser this session.
+
+## Session — Phase 4 design-handoff implementation, step 0 repo audit, 8 Sep 2026
+
+**Starting `design_handoff_phase4/` implementation** (README.md + DESIGN_SYSTEM.md + COMPONENT_INVENTORY.md + RESPONSIVE_GUIDELINES.md + ACCESSIBILITY_AUDIT.md + UX_FINAL_REVIEW.md — a Phase 4 design-system hardening pass over Rounds 1-3's already-approved screens, spec for "Phase 5" production implementation). Per the prompt's own step 0, audited what already exists before assuming any screen is greenfield.
+
+**CLAUDE.md pointer updated** (this session): the "Frontend & Design System" section's pixel/spec reference now points at `design_handoff_phase4/` instead of the stale `design/despl-tracker-mockup.html` + `docs/DESIGN_SPEC.md` §9 build order. The rest of that section (invariants, functional-first rules, tokens, hard bans) stays intact — it's still accurate, just the *build order* and *pixel reference* pointer were stale.
+
+**Screen → existing route mapping** (via Explore agent, full detail in that agent's report — not re-duplicated here):
+
+| Design screen | Existing route | Verdict |
+|---|---|---|
+| Employee My Day + Supervisor My Day | `src/app/(app)/my-day/_client.tsx` (1183 ln) | One combined file already role-branches (isQc/canAssign) across both — not two separate screens as the design doc implies. Refactor in place, keep the merge. |
+| Supervisor Team | none 1:1 | `command/[dept]/_client.tsx` (282 ln, one office dept's "Decide today"/pipeline) and `workspace/_client.tsx` (402 ln, per-dept worklist) are partial analogues. Needs a real build, refactoring from these two rather than greenfield. |
+| Management Dashboard | `dashboard/page.tsx` (511 ln) | High-confidence match, refactor in place. |
+| Project Control Centre | `jobs/[id]/_client.tsx` (307 ln) "Overview" tab | High-confidence match, refactor in place. |
+| Project Schedule/Gantt | `jobs/[id]` "gantt" tab → `components/industrial/job-gantt.tsx` | High-confidence match. |
+| Activity Detail | `jobs/[id]` "activity" tab (log view) | Exists only as a tab showing a log, NOT a standalone per-unit×stage execution screen with a state-driven Start/Update/Complete primary action. Real gap — build new, wiring into `StageSheetLauncher`'s existing action logic rather than duplicating it. |
+| Department Overview | `departments/page.tsx` + `departments/[id]/_client.tsx` | High-confidence match. |
+| QC & Hold Points | `qc/_client.tsx` (345 ln) | High-confidence match. |
+| QC Detail | none standalone | Exists as the `qcp-grid.tsx` tab + `StageSheetLauncher` drawer, not a dedicated page. |
+| Welding/Production | `welding/_client.tsx` (502 ln) | High-confidence match. |
+| Portfolio/Project/Department Analytics, Schedule Performance, Bottleneck Analysis | none, or embedded fragments only | `dashboard/_portfolio.tsx` and dashboard's S-curve/critical-path/cycle-time cards are the only existing fragments; Round 3's dedicated analytics screens don't exist as routes yet. Real gap — Step 7. |
+| Reports / Report Detail | `reports/page.tsx` + `_client.tsx` (150 ln) | High-confidence match; "Report Detail" is folded into Reports already (history row re-fetches inline), no separate drill-in page needed. |
+
+Not named in the design doc but load-bearing: `workspace/_client.tsx` is the shared ancestor whose server actions (`startAction`/`holdAction`/`submitAction`/`verifyAction`/`rejectAction`/`fileDelayAction`) `my-day`, `command/[dept]`, `departments`, and `qc` all already call — any refactor must keep calling these, not fork new action wiring per screen.
+
+**Component reuse inventory** (full detail in the Explore agent's report):
+- **Reuse as-is**: `AppShell` → Nav, `StatusChip`/`HealthChip` → StatusBadge, `StageSheet`/`StageSheetLauncher` → Drawer (built on the one `@radix-ui/react-dialog` dependency already installed), `KpiTile` (`components/viz`) → MetricCard, `sonner` (already installed, used everywhere) → Toast.
+- **Extend**: `ResponsiveTable` is a pure CSS breakpoint-swap wrapper (table ≥1024px / cards below), not a column-config/sort/filter grid — needs real DataTable behavior layered on top, not a rebuild.
+- **Build new**: Button (every page hand-rolls `.btn`/`.btn-accent`/`.btn-ghost` CSS classes, no component), PageHeader (same `<div className="page-h">` markup repeats verbatim across 6+ pages), FilterBar (only bespoke, non-generic filter bits exist: `my-day/_project-filter.tsx`, `workspace/_client.tsx`'s `FilterChip`/`SortSelect`), Tabs (every tabbed UI hand-rolls `.tabs`/`.tab`/`.on` classes), Modal (only `StageSheet`'s 460px right-side sheet exists — no centered dialog variant).
+- **Flagged, not fixed this session**: two parallel status-color vocabularies exist (`industrial/stage-status.ts`'s `StageDisplayStatus` vs `viz/status.ts`'s `Status`, both 6 values, different names) — a future consolidation should pick one, not add a third when building the canonical StatusBadge.
+- `components.json` is already configured for shadcn (`style: base-nova`, `baseColor: neutral`) but `src/components/ui/` doesn't exist yet — no primitives generated. Will use `npx shadcn add` for primitives per the build prompt's step 0 instruction, rather than hand-rolling what shadcn already solves.
+
+**Next**: Step 1, canonical components.
