@@ -1,6 +1,6 @@
 # 19 — MASTER ISSUE REGISTER
 
-*114 findings, de-duplicated across seven audit streams. Sorted by severity, then
+*115 findings, de-duplicated across seven audit streams. Sorted by severity, then
 by domain. Full evidence for each is in the referenced document.*
 
 **Severity:** P0 = production blocker · P1 = critical · P2 = important · P3 = improvement
@@ -133,7 +133,7 @@ by domain. Full evidence for each is in the referenced document.*
 
 ---
 
-## P3 — improvement (10)
+## P3 — improvement (11)
 
 | ID | Title | Module | Cx | Detail |
 |---|---|---|---|---|
@@ -147,6 +147,7 @@ by domain. Full evidence for each is in the referenced document.*
 | AUD-112 | Welding is a card wall with an unreadable 70×20px sparkline and a `max` recomputed in the render loop | `welding/_client.tsx` | S | `06` §9 |
 | AUD-113 | Nineteen operational date columns across seven hot tables are entirely unindexed | `schema.prisma` | S | `11` §7 |
 | AUD-114 | `dispatch_batch_units.unit_id` has no leading index, on a query that runs on every verification | `schema.prisma:2204` | S | `14` §3 |
+| **AUD-115** | ☑ **CLOSED — same PR.** `myday.read.test.ts`'s `onTimePct30d` fixture fed `isOnTime` a raw, untruncated `now()` as `plannedFinish` — `istCalendarDayMarker`'s IST shift then flips the comparison false once UTC wall-clock time crosses 18:30 (IST has already rolled to the next calendar day). **Test-fixture-only, never a live bug**: every real writer of `ProcessPlan.plannedFinish` (`schedule.service.ts:148`, `override.service.ts:173`) sources it exclusively from `addWorkingDays`/`computeEnvelope`, which always route through `toDateOnly` and return a UTC-midnight-truncated marker — production never writes the untruncated shape this fixture accidentally used. Fixed by truncating the fixture's `plannedFinish` via `istCalendarDayMarker`; pinned with two new deterministic (fixed-instant, no wall-clock dependency) cases in `business-day.test.ts`. | `myday.read.test.ts`, `business-day.test.ts` | S | this session |
 
 ---
 
