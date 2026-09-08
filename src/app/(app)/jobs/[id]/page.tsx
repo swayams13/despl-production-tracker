@@ -44,6 +44,9 @@ export default async function JobDetail({
   // S6 gated all five dispatch mutations (create/add/approve/record) to the
   // same PRODUCTION_HEAD/ADMIN pair — one boolean covers all of them.
   const canManageDispatch = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  // AUD-003: approveQcpWaiver's own role gate — same pair as
+  // createDispatchBatch/approveDispatchRelease.
+  const canApproveQcpWaiver = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   const { id } = await params;
   const jobId = Number(id);
@@ -92,6 +95,7 @@ export default async function JobDetail({
       canEditJobDates={canEditJobDates}
       canManagePacking={canManagePacking}
       canManageDispatch={canManageDispatch}
+      canApproveQcpWaiver={canApproveQcpWaiver}
       tab={tab}
       openUnit={openUnit}
       openStage={openStage}

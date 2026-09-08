@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES, isAppError } from "@/lib/shared/errors";
 
@@ -160,6 +160,246 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
     await expectCode(
       recordQcpExecution(supervisor, { qcpItemId: 1, unitId: 1, result: "ACCEPTED" }),
       ERROR_CODES.FORBIDDEN,
+    );
+  });
+});
+
+/**
+ * AUD-003 — NA is a pending waiver, not a clearance. `recordQcpExecution`
+ * refuses NA outright when the item's blocking code is not `waivable`; when
+ * it IS waivable, NA is recorded but leaves `waiverApprovedBy` null, and the
+ * hold-point gate (`assertUnitHasNoOpenHoldPoint`) must keep reporting it
+ * open until a Production Head/Admin calls `approveQcpWaiver`. Uses its own
+ * throwaway Organization (not the shared DESPL-320 seed) because it needs
+ * two `QcpCodeRef` rows with a specific blocksCompletion/waivable
+ * combination the seed data doesn't happen to carry together, and
+ * `clearedBy`/`waiverApprovedBy` are real FKs to `users`.
+ */
+describe.skipIf(!RUN_DB)("recordQcpExecution + approveQcpWaiver — NA/waiver gating (AUD-003, DB)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { withTenant } = await import("@/lib/db");
+  const { assertUnitHasNoOpenHoldPoint } = await import("./_shared");
+  const { recordQcpExecution, approveQcpWaiver } = await import("./qcp.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  async function expectCode(p: Promise<unknown>, expected: string): Promise<void> {
+    let thrown: unknown;
+    try {
+      await p;
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isAppError(thrown) && thrown.code).toBe(expected);
+  }
+
+  async function deleteOrgAndChildren(tenantId: number) {
+    await owner.qcpExecution.deleteMany({ where: { job: { tenantId } } });
+    await owner.qcpItemPartyCode.deleteMany({ where: { qcpItem: { qcpTemplate: { job: { tenantId } } } } });
+    await owner.qcpItem.deleteMany({ where: { qcpTemplate: { job: { tenantId } } } });
+    await owner.inspectionParty.deleteMany({ where: { qcpTemplate: { job: { tenantId } } } });
+    await owner.qcpCodeRef.deleteMany({ where: { tenantId } });
+    await owner.qcpTemplate.deleteMany({ where: { job: { tenantId } } });
+    await owner.unit.deleteMany({ where: { equipment: { job: { tenantId } } } });
+    await owner.equipment.deleteMany({ where: { job: { tenantId } } });
+    await owner.job.deleteMany({ where: { tenantId } });
+    await owner.processTemplateVersion.deleteMany({ where: { template: { tenantId } } });
+    await owner.processTemplate.deleteMany({ where: { tenantId } });
+    await owner.productFamily.deleteMany({ where: { tenantId } });
+    await owner.client.deleteMany({ where: { tenantId } });
+    await owner.user.deleteMany({ where: { tenantId } });
+    await owner.organization.delete({ where: { id: tenantId } });
+  }
+
+  let tenantId = 0;
+  let jobId = 0;
+  let unitId = 0;
+  let qcActor: Actor;
+  let phActor: Actor;
+  let holdItemId = 0; // blocking, NOT waivable — real "H" semantics
+  let witnessItemId = 0; // blocking AND waivable — real "RW"/"W" semantics
+  let untouchedItemId = 0; // never executed, non-blocking — see note below
+
+  // All DB writes live here, not at the describe body's top level: vitest
+  // still CALLS a skipIf'd describe's callback during collection (to
+  // discover its `it()`s) even when the suite itself won't run — only `it`
+  // bodies (and beforeAll/afterAll) are actually skipped. Top-level awaited
+  // DB calls would fire against whatever DATABASE_URL `pnpm test` (no
+  // RUN_DB_TESTS) happens to be pointed at, same convention every other
+  // DB-backed suite in this codebase already follows (see assembly.service.test.ts).
+  beforeAll(async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-AUD003-${Date.now()}-${Math.random()}`, name: "AUD-003 waiver test" },
+    });
+    tenantId = org.id;
+    const client = await owner.client.create({
+      data: { tenantId, name: "ACME", code: `ACME-${Date.now()}-${Math.random()}` },
+    });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-aud003-${Date.now()}-${Math.random()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DE-AUD003-${Date.now()}-${Math.random()}`,
+      },
+    });
+    jobId = job.id;
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: "Air Receiver" } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
+    unitId = unit.id;
+
+    const qcUser = await owner.user.create({
+      data: {
+        tenantId,
+        email: `qc-${Date.now()}-${Math.random()}@test.local`,
+        username: `qc-${Date.now()}-${Math.random()}`,
+        passwordHash: "x",
+        name: "Test QC",
+        themePreference: "SYSTEM",
+      },
+    });
+    const phUser = await owner.user.create({
+      data: {
+        tenantId,
+        email: `ph-${Date.now()}-${Math.random()}@test.local`,
+        username: `ph-${Date.now()}-${Math.random()}`,
+        passwordHash: "x",
+        name: "Test PH",
+        themePreference: "SYSTEM",
+      },
+    });
+
+    qcActor = {
+      userId: qcUser.id,
+      tenantId,
+      clientId: null,
+      name: qcUser.name,
+      email: qcUser.email,
+      roles: [ROLES.QC],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+    phActor = { ...qcActor, userId: phUser.id, name: phUser.name, email: phUser.email, roles: [ROLES.PRODUCTION_HEAD] };
+
+    const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "V", vessel: "V" } });
+    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "QC" } });
+
+    // Blocking, NOT waivable — a hard hold (real "H" semantics): NA must
+    // never clear this one, no matter who approves it.
+    const holdCode = await owner.qcpCodeRef.create({
+      data: { tenantId, code: "H", label: "Hold", blocksCompletion: true, waivable: false },
+    });
+    // Blocking AND waivable — a witness point sampled at reduced frequency
+    // (real "RW"/"W" semantics): NA is legal here, but only clears once a
+    // Production Head approves it.
+    const witnessCode = await owner.qcpCodeRef.create({
+      data: { tenantId, code: "RW", label: "10% Witness", blocksCompletion: true, waivable: true, requiresCall: true },
+    });
+    // Never executed at all, and NOT a blocking code — used only to prove
+    // approveQcpWaiver refuses a checkpoint that was never recorded as NA
+    // (test 7). blocksCompletion: false is deliberate: if this item DID
+    // block, it would confound test 3/5's hold-point assertions (they'd stay
+    // "open" because of THIS item, not because of witnessItem's pending NA —
+    // masking the actual regression the two tests exist to catch).
+    const untouchedCode = await owner.qcpCodeRef.create({
+      data: { tenantId, code: "R2", label: "Review 2", blocksCompletion: false, waivable: false },
+    });
+
+    const holdItem = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Hydrotest witness" },
+    });
+    await owner.qcpItemPartyCode.create({ data: { qcpItemId: holdItem.id, inspectionPartyId: party.id, qcpCodeId: holdCode.id } });
+    holdItemId = holdItem.id;
+
+    const witnessItem = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 2, srNo: "2", kind: "CHECKPOINT", activity: "10% witness point" },
+    });
+    await owner.qcpItemPartyCode.create({ data: { qcpItemId: witnessItem.id, inspectionPartyId: party.id, qcpCodeId: witnessCode.id } });
+    witnessItemId = witnessItem.id;
+
+    const untouchedItem = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, sequence: 3, srNo: "3", kind: "CHECKPOINT", activity: "Never inspected" },
+    });
+    await owner.qcpItemPartyCode.create({ data: { qcpItemId: untouchedItem.id, inspectionPartyId: party.id, qcpCodeId: untouchedCode.id } });
+    untouchedItemId = untouchedItem.id;
+  });
+
+  afterAll(async () => {
+    if (tenantId) await deleteOrgAndChildren(tenantId).catch(() => {});
+    await owner.$disconnect();
+  });
+
+  it("1: NA on a checkpoint whose only blocking code is not waivable is refused before any write", async () => {
+    await expectCode(
+      recordQcpExecution(qcActor, { qcpItemId: holdItemId, unitId, result: "NA" }),
+      ERROR_CODES.QCP_CODE_NOT_WAIVABLE,
+    );
+    expect(await owner.qcpExecution.count({ where: { qcpItemId: holdItemId, unitId } })).toBe(0);
+  });
+
+  it("9: ACCEPTED is unaffected by the AUD-003 change — clears the same hard-hold item immediately", async () => {
+    const exec = await recordQcpExecution(qcActor, { qcpItemId: holdItemId, unitId, result: "ACCEPTED" });
+    expect(exec.result).toBe("ACCEPTED");
+    expect(exec.waiverApprovedBy).toBeNull();
+  });
+
+  it("2: NA on a checkpoint whose blocking code IS waivable succeeds, but leaves waiverApprovedBy null (pending, not cleared)", async () => {
+    const exec = await recordQcpExecution(qcActor, { qcpItemId: witnessItemId, unitId, result: "NA" });
+    expect(exec.result).toBe("NA");
+    expect(exec.waiverApprovedBy).toBeNull();
+    expect(exec.clearedBy).toBe(qcActor.userId);
+  });
+
+  it("3: after (2), the hold-point gate still reports open — the core AUD-003 regression guard", async () => {
+    // holdItem was ACCEPTED in test 9 above, so witnessItem's unapproved NA is
+    // the only thing that can still be open here — isolates exactly what this
+    // session changed rather than any other unrelated open checkpoint.
+    await withTenant(tenantId, async (tx) => {
+      await expectCode(
+        assertUnitHasNoOpenHoldPoint(tx, unitId, jobId),
+        ERROR_CODES.HOLD_POINT_OPEN,
+      );
+    });
+  });
+
+  it("6: a QC-role actor (not PRODUCTION_HEAD/ADMIN) cannot approve a waiver", async () => {
+    await expectCode(
+      approveQcpWaiver(qcActor, { qcpItemId: witnessItemId, unitId }),
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("7: approveQcpWaiver refuses an item with no NA execution at all", async () => {
+    await expectCode(
+      approveQcpWaiver(phActor, { qcpItemId: untouchedItemId, unitId }),
+      ERROR_CODES.INVALID_STATE_TRANSITION,
+    );
+  });
+
+  it("4: a Production Head approves the pending waiver — waiverApprovedBy is stamped, audit row written", async () => {
+    const before = await owner.auditLog.count({ where: { entityType: "QcpExecution", action: "qcp.waiver_approve" } });
+    const updated = await approveQcpWaiver(phActor, { qcpItemId: witnessItemId, unitId });
+    expect(updated.waiverApprovedBy).toBe(phActor.userId);
+    const after = await owner.auditLog.count({ where: { entityType: "QcpExecution", action: "qcp.waiver_approve" } });
+    expect(after).toBe(before + 1);
+  });
+
+  it("5: after (4), the hold-point gate now reports clear", async () => {
+    await withTenant(tenantId, async (tx) => {
+      await assertUnitHasNoOpenHoldPoint(tx, unitId, jobId); // does not throw
+    });
+  });
+
+  it("8: approving the same execution a second time is refused", async () => {
+    await expectCode(
+      approveQcpWaiver(phActor, { qcpItemId: witnessItemId, unitId }),
+      ERROR_CODES.INVALID_STATE_TRANSITION,
     );
   });
 });

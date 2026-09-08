@@ -26,6 +26,11 @@ export interface QcpGridRow {
   tpiCode: string | null;
   status: string;
   ageDays: number;
+  /** AUD-003: latest execution is NA but waiverApprovedBy is still null — a
+   * Production Head/Admin must call approveQcpWaiver before this actually
+   * clears. Distinct from "Cleared" so the grid never implies a witness
+   * waiver was signed off when it wasn't. */
+  pendingWaiver: boolean;
 }
 
 export interface QcpSection {
@@ -106,10 +111,10 @@ export async function loadQcpGrid(actor: Actor, jobId: number, unitId?: number):
     const execs = await tx.qcpExecution.findMany({
       where: { unitId: targetUnit.id, qcpItemId: { in: itemIds } },
       orderBy: { attemptNo: "desc" },
-      select: { qcpItemId: true, result: true, recordedAt: true },
+      select: { qcpItemId: true, result: true, recordedAt: true, waiverApprovedBy: true },
     });
-    const latestByItem = new Map<number, { result: string; recordedAt: Date }>();
-    for (const e of execs) if (!latestByItem.has(e.qcpItemId)) latestByItem.set(e.qcpItemId, { result: e.result, recordedAt: e.recordedAt });
+    const latestByItem = new Map<number, { result: string; recordedAt: Date; waiverApprovedBy: number | null }>();
+    for (const e of execs) if (!latestByItem.has(e.qcpItemId)) latestByItem.set(e.qcpItemId, e);
 
     const linkedProcessIds = [...new Set(items.map((i) => i.processLinks[0]?.jobProcess.id).filter((x): x is number => x != null))];
     const plans = linkedProcessIds.length
@@ -132,10 +137,17 @@ export async function loadQcpGrid(actor: Actor, jobId: number, unitId?: number):
       const attempt = latestByItem.get(item.id);
       let status: string;
       let ageRef: Date | null;
+      // AUD-003: NA is a pending waiver, not a clearance, until
+      // waiverApprovedBy is stamped by approveQcpWaiver — same predicate as
+      // assertUnitHasNoOpenHoldPoint (_shared.ts).
+      const pendingWaiver = attempt?.result === "NA" && attempt.waiverApprovedBy == null;
       if (!attempt) {
         status = requiresCall ? "Awaiting TPI" : "Pending";
         const jpId = item.processLinks[0]?.jobProcess.id;
         ageRef = jpId != null ? (plannedStartByProcess.get(jpId) ?? null) : null;
+      } else if (pendingWaiver) {
+        status = "Pending waiver";
+        ageRef = attempt.recordedAt;
       } else if (attempt.result === "ACCEPTED" || attempt.result === "NA") {
         status = "Cleared";
         ageRef = null;
@@ -158,6 +170,7 @@ export async function loadQcpGrid(actor: Actor, jobId: number, unitId?: number):
         tpiCode,
         status,
         ageDays,
+        pendingWaiver,
       };
       const sec = item.section ?? "0";
       const list = rowsBySection.get(sec) ?? [];

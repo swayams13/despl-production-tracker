@@ -4,9 +4,11 @@ import { requireRole, assertNotClientUser, ROLES, type Actor } from "@/lib/authz
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import {
   recordQcpExecutionSchema,
+  approveQcpWaiverSchema,
   createQcpTemplateLibrarySchema,
   addQcpItemToLibraryTemplateSchema,
   type RecordQcpExecutionInput,
+  type ApproveQcpWaiverInput,
   type CreateQcpTemplateLibraryInput,
   type AddQcpItemToLibraryTemplateInput,
 } from "@/lib/shared/schemas";
@@ -47,10 +49,19 @@ export async function recordQcpExecutionTx(
 
 /**
  * Minimal QCP checkpoint execution (CLAUDE.md invariant #4). Recording an
- * ACCEPTED/NA result for a unit clears a blocking hold point so the owning
- * process may complete; REJECTED leaves it open (the rework signal). This is
- * the smallest surface that lets per-unit hold points be cleared — TPI
- * call-given/attended and witness-waiver approval stay Phase 2.
+ * ACCEPTED result for a unit clears a blocking hold point so the owning
+ * process may complete; REJECTED leaves it open (the rework signal).
+ *
+ * NA (AUD-003) is a *pending waiver*, not a clearance: it is refused outright
+ * at submission time — before any write — if the item carries a blocking
+ * code that is not `waivable` (a hydrotest witness point, a final
+ * inspection). If every blocking code on the item is waivable (or there is
+ * no blocking code at all), the NA is recorded exactly as before, but with
+ * `waiverApprovedBy` left null — `approveQcpWaiver` below is the only thing
+ * that can turn it into an actual clearance, and only a Production Head/Admin
+ * may call it. This gives the audit trail two separate actors and two
+ * separate timestamps (QC flags, PH signs off) instead of collapsing both
+ * into one QC act.
  *
  * QC-role-gated: recording an inspection result is inherently a QC act. The
  * maker-checker rule (#3) sits on process verify, not on the execution itself.
@@ -73,6 +84,17 @@ export async function recordQcpExecution(
     });
     if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
 
+    if (result === "NA") {
+      const partyCodes = await tx.qcpItemPartyCode.findMany({
+        where: { qcpItemId },
+        select: { qcpCode: { select: { blocksCompletion: true, waivable: true } } },
+      });
+      const hasNonWaivableBlock = partyCodes.some((pc) => pc.qcpCode.blocksCompletion && !pc.qcpCode.waivable);
+      if (hasNonWaivableBlock) {
+        throw new AppError(ERROR_CODES.QCP_CODE_NOT_WAIVABLE, { qcpItemId, unitId });
+      }
+    }
+
     return audited(tx, actor, async () => {
       const exec = await recordQcpExecutionTx(tx, actor, { qcpItemId, unitId, result, remarks, jobId: unit.jobId });
       return {
@@ -84,6 +106,61 @@ export async function recordQcpExecution(
           after: { qcpItemId, unitId, attemptNo: exec.attemptNo, result },
           eventType: "QcpExecutionRecorded",
           eventPayload: { qcpItemId, unitId, attemptNo: exec.attemptNo, result },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * AUD-003 step two: Production Head/Admin approves a pending NA waiver,
+ * stamping `waiverApprovedBy`. Only after this stamp do
+ * `assertNoOpenHoldPoint`/`assertUnitHasNoOpenHoldPoint` (_shared.ts) treat
+ * the checkpoint as cleared — an unapproved NA still blocks, identically to
+ * PENDING/REJECTED.
+ *
+ * Maker-checker (#3) is deliberately not enforced between the QC submitter
+ * and the approving Production Head here — see `recordQcpExecution`'s own
+ * comment: that rule sits on process verify, not on the execution itself.
+ */
+export async function approveQcpWaiver(actor: Actor, input: ApproveQcpWaiverInput): Promise<QcpExecution> {
+  const { qcpItemId, unitId } = approveQcpWaiverSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const unit = await tx.unit.findFirst({
+      where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
+    });
+    if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+
+    // Latest attempt for this (item, unit) — same "latest wins" convention
+    // as assertNoOpenHoldPoint's own resolution.
+    const latest = await tx.qcpExecution.findFirst({
+      where: { qcpItemId, unitId },
+      orderBy: { attemptNo: "desc" },
+    });
+    if (!latest || latest.result !== "NA") {
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, { qcpItemId, unitId, actual: latest?.result ?? null });
+    }
+    if (latest.waiverApprovedBy != null) {
+      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, { qcpItemId, unitId, reason: "already approved" });
+    }
+
+    return audited(tx, actor, async () => {
+      const updated = await tx.qcpExecution.update({
+        where: { id: latest.id },
+        data: { waiverApprovedBy: actor.userId },
+      });
+      return {
+        result: updated,
+        audit: {
+          action: "qcp.waiver_approve",
+          entityType: "QcpExecution",
+          entityId: updated.id,
+          after: { qcpItemId, unitId, waiverApprovedBy: actor.userId },
+          eventType: "QcpWaiverApproved",
+          eventPayload: { qcpItemId, unitId },
         },
       };
     });

@@ -224,6 +224,10 @@ export const recordQcpExecutionSchema = z
   .strict();
 export type RecordQcpExecutionInput = z.infer<typeof recordQcpExecutionSchema>;
 
+/** Production Head/Admin approves a pending NA (AUD-003) — stamps waiverApprovedBy so the hold point actually clears (#4). */
+export const approveQcpWaiverSchema = z.object({ qcpItemId: id, unitId: id }).strict();
+export type ApproveQcpWaiverInput = z.infer<typeof approveQcpWaiverSchema>;
+
 /** QC records/updates a heat number + MTC ref + PMI result for a BOM item (§4.3 "MTC status editable by QC"). */
 export const recordMtcSchema = z
   .object({

@@ -544,16 +544,21 @@ export async function assertNoOpenHoldPoint(
   const execs = await tx.qcpExecution.findMany({
     where: { unitId: args.unitId, qcpItemId: { in: itemIds } },
     orderBy: { attemptNo: "desc" },
-    select: { qcpItemId: true, result: true },
+    select: { qcpItemId: true, result: true, waiverApprovedBy: true },
   });
 
   // Latest attempt per item.
-  const latestByItem = new Map<number, string>();
-  for (const e of execs) if (!latestByItem.has(e.qcpItemId)) latestByItem.set(e.qcpItemId, e.result);
+  const latestByItem = new Map<number, { result: string; waiverApprovedBy: number | null }>();
+  for (const e of execs) if (!latestByItem.has(e.qcpItemId)) latestByItem.set(e.qcpItemId, e);
 
+  // AUD-003: NA is a pending waiver, not a clearance — it only clears once
+  // approveQcpWaiver (qcp.service.ts) has stamped waiverApprovedBy.
   const open = itemIds.filter((itemId) => {
-    const r = latestByItem.get(itemId);
-    return r !== "ACCEPTED" && r !== "NA"; // undefined (no exec), PENDING, REJECTED all block
+    const e = latestByItem.get(itemId);
+    if (!e) return true; // no execution at all — blocks
+    if (e.result === "ACCEPTED") return false;
+    if (e.result === "NA") return e.waiverApprovedBy == null; // NA clears only once approved
+    return true; // PENDING / REJECTED block
   });
   if (open.length > 0) {
     throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, {
@@ -812,15 +817,24 @@ export async function assertUnitHasNoOpenHoldPoint(tx: Tx, unitId: number, jobId
   const execs = await tx.qcpExecution.findMany({
     where: { unitId, qcpItemId: { in: itemIds } },
     orderBy: { attemptNo: "desc" },
-    select: { qcpItemId: true, result: true },
+    select: { qcpItemId: true, result: true, waiverApprovedBy: true },
   });
 
-  const latestByItem = new Map<number, string>();
-  for (const e of execs) if (!latestByItem.has(e.qcpItemId)) latestByItem.set(e.qcpItemId, e.result);
+  const latestByItem = new Map<number, { result: string; waiverApprovedBy: number | null }>();
+  for (const e of execs) if (!latestByItem.has(e.qcpItemId)) latestByItem.set(e.qcpItemId, e);
 
+  // AUD-003: NA is a pending waiver, not a clearance — it only clears once
+  // approveQcpWaiver (qcp.service.ts) has stamped waiverApprovedBy. Kept
+  // identical to assertNoOpenHoldPoint's own copy of this predicate above —
+  // the two are independently maintained (jobProcess-grain vs whole-unit
+  // grain) and this audit already treats their divergence as a risk; do not
+  // let them drift again.
   const open = itemIds.filter((itemId) => {
-    const r = latestByItem.get(itemId);
-    return r !== "ACCEPTED" && r !== "NA";
+    const e = latestByItem.get(itemId);
+    if (!e) return true;
+    if (e.result === "ACCEPTED") return false;
+    if (e.result === "NA") return e.waiverApprovedBy == null;
+    return true;
   });
   if (open.length > 0) {
     throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, { unitId, jobId, openQcpItemIds: open });
