@@ -106,6 +106,74 @@ test("client user gets 403 from internal read APIs, not internal data (audit H3)
   expect(body.error.code).toBe("FORBIDDEN");
 });
 
+// AUD-025: `/board` and `/profile` were missing the `clientId !== null`
+// redirect every other (app) page has, and the (app) layout itself loaded
+// internal job telemetry (percentComplete, forecastVarianceDays,
+// overduePlans, openHoldPoints) for any actor before any page guard ran.
+// Fix: the redirect now also lives in `src/app/(app)/layout.tsx`, ahead of
+// that load, plus the per-page copies on board/profile for defence in depth.
+// This loops every route in the (app) group, per the audit's own note that
+// the previous suite "only exercises `/` and `/api/jobs`".
+const APP_GROUP_ROUTES = [
+  "/board",
+  "/profile",
+  "/workspace",
+  "/admin",
+  "/departments",
+  "/alerts",
+  "/dashboard",
+  "/welding",
+  "/my-day",
+  "/jobs",
+  "/qc",
+  "/reports",
+];
+
+test("client user is redirected to /portal from every route in the (app) group", async ({
+  page,
+}) => {
+  await signIn(page, "client@example.local");
+  await expect(page).toHaveURL("/portal");
+
+  for (const route of APP_GROUP_ROUTES) {
+    await page.goto(route);
+    await expect(page).toHaveURL("/portal");
+  }
+});
+
+test("client user navigating to /portal itself renders normally (no redirect loop)", async ({
+  page,
+}) => {
+  await signIn(page, "client@example.local");
+  await page.goto("/portal");
+  await expect(page).toHaveURL("/portal");
+  await expect(page.getByRole("heading", { name: "Your orders" })).toBeVisible();
+});
+
+test("internal staff user is unaffected: /board and /profile render normally", async ({
+  page,
+}) => {
+  await signIn(page, "sup.fabrication@despl.local");
+
+  await page.goto("/board");
+  await expect(page).toHaveURL("/board");
+  await expect(page.getByRole("heading", { name: "Board" })).toBeVisible();
+
+  await page.goto("/profile");
+  await expect(page).toHaveURL("/profile");
+  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+});
+
+test("unauthenticated request to /board or /profile still redirects to /login", async ({
+  page,
+}) => {
+  await page.goto("/board");
+  await expect(page).toHaveURL(/\/login/);
+
+  await page.goto("/profile");
+  await expect(page).toHaveURL(/\/login/);
+});
+
 test("signing out clears the session and re-protects the app", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
   await expect(page).toHaveURL("/");
