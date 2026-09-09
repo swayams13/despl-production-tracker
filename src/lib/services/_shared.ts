@@ -5,7 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
 import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
-import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
+import { explodeBomItem, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
 import type {
   ScheduleProcess,
   ScheduleEdge,
@@ -980,11 +980,20 @@ export const KNOWN_GATE_PRODUCERS: Record<string, boolean> = {
  * (`explodeBomItem`) is re-walked inline against `tx`, the same way
  * `bom.read.ts`'s `loadBomTree` already does it for the same reason (see its
  * comment above `itemsById`) — not a divergent copy, the established pattern
- * for "needs the same numbers but from inside a transaction." The available
- * side is NOT re-implemented here: it calls the shared, tx-free
- * `computeAvailableForShortage` (`bom-explosion.ts`) that `loadBomTree` and
- * `availableQty` also call, so the SCRAP-only arithmetic (fix wave, Critical
- * #1) lives in exactly one place.
+ * for "needs the same numbers but from inside a transaction."
+ *
+ * AUD-032: this gate checks the ONE component being started, not the whole
+ * equipment's kit — `explodeBomItem` is called with `unitCount=1` (the
+ * per-unit basis), not the equipment's total `Unit` count, which used to
+ * demand a multi-unit job's ENTIRE kit be on hand before starting work on
+ * unit 1, blocking normal staged material delivery. The available side also
+ * no longer calls the shared, display-only `computeAvailableForShortage`
+ * (`bom-explosion.ts`, SCRAP-only, fix wave Critical #1) — that arithmetic
+ * intentionally never nets ISSUE, which is right for a display but made
+ * this gate permanently toothless (pass once, pass forever regardless of
+ * consumption since). This gate uses `computeAvailableToIssue` instead,
+ * which nets ISSUE and SCRAP and adds back RETURN. `bom.read.ts`'s displays
+ * are untouched — same SCRAP-only convention as before.
  */
 export async function assertKitReady(tx: Tx, componentId: number, tenantId: number): Promise<void> {
   const component = await tx.component.findFirst({
@@ -1013,23 +1022,23 @@ export async function assertKitReady(tx: Tx, componentId: number, tenantId: numb
   // wants to show blank/"never tracked" rather than "0 available"; that
   // convention is untouched. This gate just treats a null available as 0.)
 
-  const [unitCount, siblingItems] = await Promise.all([
-    tx.unit.count({ where: { equipmentId: bomItem.equipmentId } }),
-    tx.bomItem.findMany({
-      where: { equipmentId: bomItem.equipmentId },
-      select: { id: true, qtyPer: true, parentBomItemId: true },
-    }),
-  ]);
+  // AUD-032: no `tx.unit.count` here anymore — this gate checks the ONE
+  // component being started, so `explodeBomItem` gets the per-unit basis
+  // (unitCount=1) below, not the equipment's total Unit count.
+  const siblingItems = await tx.bomItem.findMany({
+    where: { equipmentId: bomItem.equipmentId },
+    select: { id: true, qtyPer: true, parentBomItemId: true },
+  });
   const itemsById = new Map<number, ExplodableBomItem>(siblingItems.map((it) => [it.id, it]));
 
   let required: Decimal;
   try {
-    required = explodeBomItem(itemsById.get(bomItem.id)!, unitCount, itemsById);
+    required = explodeBomItem(itemsById.get(bomItem.id)!, 1, itemsById);
   } catch {
     return; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to check (same fallback as loadBomTree)
   }
 
-  const available = computeAvailableForShortage(bomItem.stockLots) ?? new Decimal(0);
+  const available = computeAvailableToIssue(bomItem.stockLots) ?? new Decimal(0);
 
   const shortfall = required.minus(available);
   if (shortfall.gt(0)) {
