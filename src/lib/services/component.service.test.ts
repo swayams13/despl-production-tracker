@@ -142,13 +142,18 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
   // BomItem lookup is only ever tenant-scoped, never job-scoped in code —
   // job_isolation RLS is the only thing that can catch this).
   let kitCrossJobOp = 0;
-  // Fix wave, Critical #1 regression: a full kit (received === required),
-  // issuing part of it to the component the first op starts on must not
-  // manufacture a false shortage that then refuses the SAME component's next op.
+  // Fix wave, Critical #1 regression, superseded by AUD-032 (see the test
+  // itself): a full kit (received === required for ONE unit) — issuing part
+  // of it against the SAME component's next op now IS reflected as reduced
+  // availability, on purpose (AUD-032's whole point is that ISSUE must move
+  // this number or the gate is toothless forever after the first pass).
   let kitIssueRegressionOp1 = 0;
   let kitIssueRegressionOp2 = 0;
   let kitIssueRegressionLotId = 0;
   let kitIssueRegressionComponentId = 0;
+  // AUD-032 regression fixtures.
+  let kitMultiUnitOp = 0; // 4-Unit equipment, BomItem stocked for ONE unit's worth but not all four → succeeds (no longer demands the whole equipment's kit)
+  let kitConsumedOp = 0; // BomItem received enough once, but since fully ISSUEd → refused (the gate must not stay toothless forever)
   // B9 — assertDrawingReleased fixtures, wired into startComponentOperation's CUTTING-only gate.
   let drawingGatedCuttingOp = 0; // governingDrawingId → a drawing whose current revision is DRAFT → refused
   let drawingReleasedCuttingOp = 0; // governingDrawingId → a drawing whose current revision is RELEASED → allowed, stamps builtToRevisionId
@@ -289,9 +294,10 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
       await owner.welder.create({ data: { tenantId, name: "Welder One", employeeCode: `W-${Date.now()}` } })
     ).id;
 
-    // B7 — assertKitReady fixtures. explodeBomItem's `required` is
-    // qtyPer * unitCount, so this equipment needs exactly one Unit row (no
-    // other test above depends on unitCount, so adding it here is safe).
+    // B7 — assertKitReady fixtures. AUD-032: the gate now always explodes
+    // against unitCount=1 (one component's own need), never the equipment's
+    // real Unit count, so adding more Unit rows below (for the multi-unit
+    // regression fixture) cannot affect any other kit-gate test's numbers.
     await owner.unit.create({ data: { jobId, equipmentId: equipment.id, serialNo: "KIT-1" } });
 
     const bomItemShort = await owner.bomItem.create({
@@ -430,6 +436,51 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     kitIssueRegressionOp2 = (
       await owner.componentOperation.create({
         data: { jobId, componentId: componentIssueRegression.id, seq: 2, operationId: opCutting.id },
+      })
+    ).id;
+
+    // AUD-032 fixture 1: equipment now has 4 Unit rows total (KIT-1..4), but
+    // a BomItem stocked for only ONE unit's worth (qtyPer=10, on hand 15)
+    // must still let a component start — the gate no longer demands the
+    // whole equipment's kit (10 * 4 = 40) be on hand.
+    await owner.unit.create({ data: { jobId, equipmentId: equipment.id, serialNo: "KIT-2" } });
+    await owner.unit.create({ data: { jobId, equipmentId: equipment.id, serialNo: "KIT-3" } });
+    await owner.unit.create({ data: { jobId, equipmentId: equipment.id, serialNo: "KIT-4" } });
+    const bomItemMultiUnit = await owner.bomItem.create({
+      data: { jobId, equipmentId: equipment.id, itemNo: 5, partName: "Gasket, Multi-Unit", sourceQty: "10 NOS.", qtyPer: 10, uom: "NOS." },
+    });
+    await owner.stockLot.create({ data: { jobId, bomItemId: bomItemMultiUnit.id, location: "Yard A", qty: 15 } });
+    const componentMultiUnit = await owner.component.create({
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-MULTI-UNIT", componentTypeId: componentType.id, bomItemId: bomItemMultiUnit.id },
+    });
+    kitMultiUnitOp = (
+      await owner.componentOperation.create({
+        data: { jobId, componentId: componentMultiUnit.id, seq: 1, operationId: opReceipt.id },
+      })
+    ).id;
+
+    // AUD-032 fixture 2: a BomItem that received exactly enough once (5
+    // on hand for a qtyPer=5 requirement — would have passed the gate) but
+    // has since been fully ISSUEd out (consumed elsewhere) — must now be
+    // refused, not pass forever on the strength of the original receipt.
+    const bomItemConsumed = await owner.bomItem.create({
+      data: { jobId, equipmentId: equipment.id, itemNo: 6, partName: "Gasket, Fully Consumed", sourceQty: "5 NOS.", qtyPer: 5, uom: "NOS." },
+    });
+    const consumedLot = await owner.stockLot.create({
+      data: { jobId, bomItemId: bomItemConsumed.id, location: "Yard A", qty: 5 },
+    });
+    const consumedTxnUser = await owner.user.create({
+      data: { tenantId, email: `co-consumed-${Date.now()}@x`, username: `co-consumed-${Date.now()}`, name: "Consumed Fixture User", passwordHash: "x" },
+    });
+    await owner.stockTxn.create({
+      data: { jobId, stockLotId: consumedLot.id, type: "ISSUE", qty: 5, by: consumedTxnUser.id },
+    });
+    const componentConsumed = await owner.component.create({
+      data: { jobId, equipmentId: equipment.id, tag: "KIT-CONSUMED", componentTypeId: componentType.id, bomItemId: bomItemConsumed.id },
+    });
+    kitConsumedOp = (
+      await owner.componentOperation.create({
+        data: { jobId, componentId: componentConsumed.id, seq: 1, operationId: opReceipt.id },
       })
     ).id;
 
@@ -890,16 +941,16 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     await expectCode(startComponentOperation(supA, { componentOperationId: kitCrossJobOp }), ERROR_CODES.NOT_FOUND);
   });
 
-  it("kit gate regression (fix wave Critical #1): issuing material to a component after starting its first operation does not manufacture a false shortage for its NEXT operation on that same component", async () => {
-    // Full kit received (qty 9 === required 9): first op starts clean.
+  it("kit gate, AUD-032 supersedes the fix-wave Critical #1 regression test: issuing material against a component now DOES reduce its availability for that component's NEXT op — the old test asserted the exact toothless-gate behavior AUD-032 fixes", async () => {
+    // Full kit received (qty 9 === required 9 for one unit): first op starts clean.
     const started1 = await startComponentOperation(supA, { componentOperationId: kitIssueRegressionOp1 });
     expect(started1.status).toBe("IN_PROGRESS");
 
-    // Issue 1 unit's worth of material to that component — the normal,
-    // correct action. Before the fix, ISSUE decremented the shortage-relevant
-    // `available`, manufacturing a shortage that then refused EVERY
-    // subsequent start on any component linked to this BomItem — including
-    // this very component's next operation.
+    // Issue 1 unit's worth of material to that component — real consumption.
+    // Fix-wave Critical #1 made ISSUE never move the shortage-relevant
+    // `available` number, so this stayed at 9 forever regardless of
+    // consumption — permanently toothless (AUD-032). Now available drops to
+    // 8, below the 9 still required, so op2 is correctly refused.
     const ph: Actor = { ...supA, roles: [ROLES.PRODUCTION_HEAD] };
     await issueStock(ph, { stockLotId: kitIssueRegressionLotId, qty: 1, componentId: kitIssueRegressionComponentId });
 
@@ -907,8 +958,22 @@ describe.skipIf(!RUN_DB)("component operation state machine (DB-backed)", async 
     await submitComponentOperation(supA, { componentOperationId: kitIssueRegressionOp1 });
     await verifyComponentOperation(qc, { componentOperationId: kitIssueRegressionOp1 });
 
-    const started2 = await startComponentOperation(supA, { componentOperationId: kitIssueRegressionOp2 });
-    expect(started2.status).toBe("IN_PROGRESS");
+    await expectCode(
+      startComponentOperation(supA, { componentOperationId: kitIssueRegressionOp2 }),
+      ERROR_CODES.MATERIAL_NOT_AVAILABLE,
+    );
+  });
+
+  it("AUD-032: a 4-Unit equipment's BomItem stocked for only ONE unit's worth still lets that unit's component start — the gate no longer demands the whole equipment's kit up front", async () => {
+    const started = await startComponentOperation(supA, { componentOperationId: kitMultiUnitOp });
+    expect(started.status).toBe("IN_PROGRESS");
+  });
+
+  it("AUD-032: a BomItem that received enough once (would have passed historically) but has since been fully issued/consumed is refused — the gate must not stay toothless forever after the first pass", async () => {
+    await expectCode(
+      startComponentOperation(supA, { componentOperationId: kitConsumedOp }),
+      ERROR_CODES.MATERIAL_NOT_AVAILABLE,
+    );
   });
 
   // ── B9: assertDrawingReleased, wired into startComponentOperation's CUTTING-only gate ────

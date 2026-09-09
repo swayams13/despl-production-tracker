@@ -1,5 +1,6 @@
 import { workingDaysBetween } from "./calendar";
 import type { WorkCalendarInput } from "./types";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 
 /**
  * Feasibility check (BUILD-SPEC-v2 §1.5), run at tender stage before an order
@@ -35,8 +36,10 @@ export function checkFeasibility(
   calendar: WorkCalendarInput,
 ): FeasibilityResult {
   if (requiredMinDays > requiredMaxDays) {
-    throw new Error(
-      `checkFeasibility: requiredMinDays (${requiredMinDays}) exceeds requiredMaxDays (${requiredMaxDays})`,
+    throw new AppError(
+      ERROR_CODES.SCHEDULE_ENVELOPE_INVALID,
+      { requiredMinDays, requiredMaxDays },
+      "Envelope data is inconsistent: minimum duration exceeds maximum.",
     );
   }
   const available = workingDaysBetween(poDate, requiredDeliveryDate, calendar);

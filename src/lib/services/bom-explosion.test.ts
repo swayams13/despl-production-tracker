@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem, type StockLotForAvailability } from "./bom-explosion";
+import {
+  explodeBomItem,
+  computeAvailableForShortage,
+  computeAvailableToIssue,
+  type ExplodableBomItem,
+  type StockLotForAvailability,
+} from "./bom-explosion";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 
 /** Pure — no DB. B3's qty-explosion walk: parentBomItemId up to the root,
@@ -90,5 +96,37 @@ describe("computeAvailableForShortage", () => {
     ];
     // (9 - 1 SCRAP) + (5 - 0) = 8 + 5 = 13
     expect(computeAvailableForShortage(lots)!.toNumber()).toBe(13);
+  });
+});
+
+/**
+ * Pure — no DB. AUD-032: the gate-specific counterpart to
+ * `computeAvailableForShortage` — this one DOES net ISSUE (and adds back
+ * RETURN), because a gate deciding "is there still material to start this
+ * work" must reflect what has actually been consumed since receipt, unlike
+ * a display showing a lot's remaining quantity.
+ */
+describe("computeAvailableToIssue", () => {
+  it("zero lots → null (same SEAM convention as computeAvailableForShortage)", () => {
+    expect(computeAvailableToIssue([])).toBeNull();
+  });
+
+  it("a lot with qty=10, one ISSUE of 3 → 7", () => {
+    const lots: StockLotForAvailability[] = [{ qty: 10, txns: [{ type: "ISSUE", qty: 3 }] }];
+    expect(computeAvailableToIssue(lots)!.toNumber()).toBe(7);
+  });
+
+  it("a lot with qty=10, ISSUE of 3, RETURN of 1 → 8", () => {
+    const lots: StockLotForAvailability[] = [
+      { qty: 10, txns: [{ type: "ISSUE", qty: 3 }, { type: "RETURN", qty: 1 }] },
+    ];
+    expect(computeAvailableToIssue(lots)!.toNumber()).toBe(8);
+  });
+
+  it("a lot with qty=10, SCRAP of 2, ISSUE of 3 → 5", () => {
+    const lots: StockLotForAvailability[] = [
+      { qty: 10, txns: [{ type: "SCRAP", qty: 2 }, { type: "ISSUE", qty: 3 }] },
+    ];
+    expect(computeAvailableToIssue(lots)!.toNumber()).toBe(5);
   });
 });
