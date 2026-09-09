@@ -224,15 +224,15 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
    * execution for the unit, the same chain assertUnitHasNoOpenHoldPoint reads. */
   async function openHoldPoint(tenantId: number, job: { id: number }) {
     const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "V", vessel: "V" } });
-    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "QC" } });
+    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, tenantId, code: "QC" } });
     const qcpCode = await owner.qcpCodeRef.create({
       data: { tenantId, code: "H", label: "Hold", blocksCompletion: true },
     });
     const qcpItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Weld visual" },
+      data: { qcpTemplateId: qcpTemplate.id, tenantId, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Weld visual" },
     });
     await owner.qcpItemPartyCode.create({
-      data: { qcpItemId: qcpItem.id, inspectionPartyId: party.id, qcpCodeId: qcpCode.id },
+      data: { qcpItemId: qcpItem.id, inspectionPartyId: party.id, qcpCodeId: qcpCode.id, tenantId },
     });
   }
 
@@ -242,15 +242,22 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
    * describes, not just an item nobody has attempted yet. */
   async function rejectHoldPoint(tenantId: number, job: { id: number }, unit: { id: number }) {
     const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "V", vessel: "V" } });
-    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "QC" } });
+    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, tenantId, code: "QC" } });
     const qcpCode = await owner.qcpCodeRef.create({
       data: { tenantId, code: "H", label: "Hold", blocksCompletion: true },
     });
     const qcpItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Hydrotest witness" },
+      data: {
+        qcpTemplateId: qcpTemplate.id,
+        tenantId,
+        sequence: 1,
+        srNo: "1",
+        kind: "CHECKPOINT",
+        activity: "Hydrotest witness",
+      },
     });
     await owner.qcpItemPartyCode.create({
-      data: { qcpItemId: qcpItem.id, inspectionPartyId: party.id, qcpCodeId: qcpCode.id },
+      data: { qcpItemId: qcpItem.id, inspectionPartyId: party.id, qcpCodeId: qcpCode.id, tenantId },
     });
     await owner.qcpExecution.create({
       data: { jobId: job.id, qcpItemId: qcpItem.id, unitId: unit.id, attemptNo: 1, result: "REJECTED" },
