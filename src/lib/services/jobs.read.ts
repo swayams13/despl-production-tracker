@@ -122,7 +122,7 @@ export async function loadJobs(
     const activity = await tx.$queryRaw<ActivityRow[]>`
       SELECT jp.job_id, max(de.at) AS last_at
       FROM domain_events de
-      JOIN process_plans pp ON pp.id = de.aggregate_id::int
+      JOIN process_plans pp ON pp.id::text = de.aggregate_id
       JOIN job_processes jp ON jp.id = pp.job_process_id
       WHERE de.aggregate_type = 'ProcessPlan' AND jp.job_id = ANY(${jobIds}::int[])
       GROUP BY jp.job_id
@@ -131,7 +131,7 @@ export async function loadJobs(
 
       SELECT jp.job_id, max(de.at) AS last_at
       FROM domain_events de
-      JOIN delay_reasons dr ON dr.id = de.aggregate_id::int
+      JOIN delay_reasons dr ON dr.id::text = de.aggregate_id
       JOIN process_plans pp ON pp.id = dr.process_plan_id
       JOIN job_processes jp ON jp.id = pp.job_process_id
       WHERE de.aggregate_type = 'DelayReason' AND jp.job_id = ANY(${jobIds}::int[])

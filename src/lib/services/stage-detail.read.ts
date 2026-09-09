@@ -279,11 +279,11 @@ export async function loadStageDetail(
       ? await tx.$queryRaw<{ at: Date; payload: { reason?: string }; actor_name: string | null; process_name: string }[]>`
           SELECT de.at, de.payload, u.name AS actor_name, jp.name AS process_name
           FROM domain_events de
-          JOIN process_plans pp ON pp.id = de.aggregate_id::int
+          JOIN process_plans pp ON pp.id::text = de.aggregate_id
           JOIN job_processes jp ON jp.id = pp.job_process_id
           LEFT JOIN users u ON u.id = de.actor_id
           WHERE de.aggregate_type = 'ProcessPlan' AND de.type = 'ProcessRejected'
-            AND de.aggregate_id::int = ANY(${planIds}::int[])
+            AND de.aggregate_id = ANY(${planIds.map(String)}::text[])
           ORDER BY de.at DESC
         `
       : [];
