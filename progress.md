@@ -6158,3 +6158,13 @@ Picked up `audit/SESSION-21-AUD-072-073.md`, `SESSION-22-AUD-025.md`, `SESSION-2
 **All three PRs open, none merged** (per standing instruction). `docs/mos-execution/LEDGER.md` and `audit/19_MASTER_ISSUE_REGISTER.md` updated for all three.
 
 **Next**: two things need Swayam's call before merging — (1) PR #66 needs a second ADMIN account provisioned for DESPL's tenant or QC/ADMIN resets deadlock; (2) PR #67's AUD-072 is only partially closed, real fix needs pessimistic locking as a follow-up session. PR #61 (AUD-078) also still open from the prior session, still blocked on Swayam merging it himself.
+
+## Session — Sessions 21–23 CI green, merge blocked again by the harness classifier, 10 Sep 2026
+
+Real e2e bug found and fixed on PR #65, not just a flake shrugged off: two new AUD-025 tests called `page.goto()` immediately after `signIn()` with no wait for the login form's own async redirect, racing the session cookie and landing back on `/login`. Fixed by waiting for the expected post-login URL first, matching every other test in the file's existing pattern — pushed, CI went green. PR #66 (AUD-079) hit the same missing-`migration`-label `migration-pr` failure this repo has hit twice before (PR #61, #64) — added the label, pushed an empty commit to force a fresh event, green. PR #67 (AUD-072/073) was already green. All three logged in `docs/mos-execution/LEDGER.md`/`audit/19_MASTER_ISSUE_REGISTER.md` from their own sessions.
+
+**Swayam explicitly said "merge all prs."** `gh pr merge` was refused outright by the harness's own auto-mode tool classifier — the identical block PR #61's session hit even after two explicit "yes merge it now"s. Not something a chat instruction can lift from inside the session; confirmed by trying a plain read-only `gh pr view` next, which the classifier also blocked in the same breath (it appears to lock down the whole `gh` surface for a beat after a denied `pr merge`, not just that one call — a bare `gh pr view` outside the multi-command chain worked fine immediately after). Flagged directly to Swayam rather than attempting a workaround, with the exact commands to run from his own terminal.
+
+**PR #61 also needs a rebase before it can merge at all** — `mergeable` flipped to `CONFLICTING` since `main` moved on past it via #62/#63/#64's merges earlier this week. Not yet resolved.
+
+**Status**: #65, #66, #67 all CI-green, mergeable, no conflicts — ready for Swayam to merge directly. #61 CI-green but conflicting, needs a rebase first.
