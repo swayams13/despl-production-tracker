@@ -22,16 +22,28 @@ import {
  * mandatory reason. This:
  *   1. recomputes the CPM plan (Layer 2) from the override — reason enforced by
  *      the pure engine (applyOverride);
- *   2. FIXES the Layer-1↔Layer-2 desync: restamps this job's MAX envelope
- *      offsets (Layer 1) from the recomputed CPM so the authoritative window and
- *      the plan agree, instead of leaving the printed offsets stale (the flagged
- *      medium bug — see the restamp block). MIN offsets are deliberately left
- *      untouched (audit C2 — see the restamp block for why);
- *   3. persists a NEW ScheduleRun version (mode OVERRIDE) whose planned dates
+ *   2. persists a NEW ScheduleRun version (mode OVERRIDE) whose planned dates
  *      are the recomputed plan and whose baseline carries the prior run's
  *      baseline forward — the old baseline is never mutated (invariant #6);
- *   4. audits the JobProcess change; persistScheduleRun audits the new run.
+ *   3. audits the override; persistScheduleRun audits the new run.
  * All in one transaction.
+ *
+ * AUD-035 — the printed envelope (`JobProcess`'s four `envelope*Days`
+ * columns) is Layer 1 and invariant #10 makes it authoritative and immutable
+ * after intake: it is written once, by intake/`generateSchedule`, never
+ * again. An earlier version of this function restamped the MAX offsets from
+ * the recomputed CPM on every override "to fix the Layer-1↔Layer-2 desync" —
+ * that was itself the AUD-035 bug (a destructive in-place edit to Layer 1),
+ * not a fix for one. Nothing reads these columns back for a "current CPM
+ * position" question: `generateSchedule`'s `checkFeasibility` call reads them
+ * fresh at intake/regeneration time, against the job's originally committed
+ * order window — restamping them mid-project doesn't serve that reader, it
+ * just corrupts the printed commitment feasibility is supposed to be checked
+ * against. Anything that wants the override-adjusted current position reads
+ * Layer 2 instead: this run's `ProcessPlan.plannedStart`/`plannedFinish`,
+ * computed below from the same CPM recompute. `durationOverrideDays` and
+ * `overrideReason` on the target `JobProcess` row are the override's own
+ * recorded input, not a derived envelope value, and stay written here.
  */
 
 export async function applyDurationOverride(
@@ -90,53 +102,13 @@ export async function applyDurationOverride(
     const maxNodes = overridePlan.current;
     const maxByPid = new Map(maxNodes.map((n) => [n.processId, n]));
 
-    // ── Fix the Layer-1↔Layer-2 desync (flagged medium bug) ────────────────
-    // Once a duration override exists the printed MAX envelope offsets are
-    // stale; restamp them from the recomputed CPM so computeEnvelope (Layer 1)
-    // and the CPM plan (Layer 2) agree on MAX. Unchanged processes get
-    // identical MAX offsets (CPM-max reproduces the printed finishByMax exactly
-    // — cpm.ts); the overridden process and everything downstream shift.
-    //
-    // MIN offsets are intentionally left untouched (audit C2). A min-space CPM
-    // pass here would use the SAME lags the schedule was fitted against for
-    // MAX durations only — in min space those lags corrupt the terminal node
-    // (P36 collapses to ~36 days instead of the real ~119), so every job with
-    // one override reads requiredMinDays ≈ 36 forever after and checkFeasibility
-    // can never again return INFEASIBLE. The printed min envelope from job
-    // intake is the authoritative Layer-1 figure (BUILD-SPEC-v2 §1's two-layer
-    // model); recomputing it from CPM is not more correct, just differently wrong.
-    // Every restamped row overwrites authoritative Layer-1 offsets in place, so
-    // capture its before/after for the audit payload (invariant #5/#6) — not just
-    // the target's. One audit row (below) carries the whole {processId,before,after}
-    // list, so the prior printed envelope of downstream processes stays recoverable.
-    const restamped: Array<{
-      processId: number;
-      before: Record<string, number | null>;
-      after: Record<string, number | null>;
-    }> = [];
-    for (const p of spine.rawProcesses) {
-      const mx = maxByPid.get(p.id);
-      if (!mx) continue; // excluded — spliced out of the CPM, offsets unused
-      const after = {
-        envelopeStartByMaxDays: mx.earlyStart,
-        envelopeFinishByMaxDays: mx.earlyFinish,
-      };
-      restamped.push({
-        processId: p.id,
-        before: {
-          envelopeStartByMaxDays: p.envelopeStartByMaxDays,
-          envelopeFinishByMaxDays: p.envelopeFinishByMaxDays,
-        },
-        after,
-      });
-      await tx.jobProcess.update({
-        where: { id: p.id },
-        data: {
-          ...after,
-          ...(p.id === jobProcessId ? { durationOverrideDays, overrideReason: reason } : {}),
-        },
-      });
-    }
+    // Record the override's own input on the target row only (invariant #10 —
+    // the four envelope* columns are never written here; see the function
+    // comment for why restamping them was itself the AUD-035 bug).
+    await tx.jobProcess.update({
+      where: { id: jobProcessId },
+      data: { durationOverrideDays, overrideReason: reason },
+    });
 
     // Prior run: carry its baseline forward, never mutate it (invariant #6).
     // AUD-034: getCurrentScheduleRun no longer takes equipmentId — one
@@ -181,17 +153,14 @@ export async function applyDurationOverride(
       before: {
         durationOverrideDays: target.durationOverrideDays,
         overrideReason: target.overrideReason,
-        envelopeStartByMaxDays: target.envelopeStartByMaxDays,
-        envelopeFinishByMaxDays: target.envelopeFinishByMaxDays,
       },
       after: {
         durationOverrideDays,
         overrideReason: reason,
-        envelopeStartByMaxDays: maxByPid.get(jobProcessId)?.earlyStart ?? null,
-        envelopeFinishByMaxDays: maxByPid.get(jobProcessId)?.earlyFinish ?? null,
-        restampedProcessCount: restamped.length,
-        // before/after of every restamped downstream row — Layer-1 recoverable.
-        restamped,
+        // Layer-2 position resulting from this override — recorded for
+        // traceability, not written back to Layer 1 (invariant #10).
+        recomputedEarlyStart: maxByPid.get(jobProcessId)?.earlyStart ?? null,
+        recomputedEarlyFinish: maxByPid.get(jobProcessId)?.earlyFinish ?? null,
       },
       eventType: "DurationOverridden",
       eventPayload: { jobId, equipmentId, jobProcessId, durationOverrideDays },
