@@ -220,28 +220,71 @@ model Organization {
   name      String
   createdAt DateTime @default(now()) @map("created_at")
 
-  clients           Client[]
-  users             User[]
-  roles             Role[]
-  departments       Department[]
-  productFamilies   ProductFamily[]
-  processTemplates  ProcessTemplate[]
-  jobs              Job[]
-  componentTypes    ComponentTypeRef[]
-  equipmentTypes    EquipmentTypeRef[]
-  workOrderStages   WorkOrderStage[]
-  operations        OperationRef[]
-  operationRefSeqs  OperationRefFamilySeq[]
-  testTypes         TestTypeRef[]
-  drawingTypes      DrawingTypeRef[]
-  delayCategories   DelayCategoryRef[]
-  qcpCodes          QcpCodeRef[]
-  routeTemplates    RouteTemplate[]
-  calendars         WorkCalendar[]
-  snapshots         ProgressSnapshot[]
-  notifications     Notification[]
-  welders           Welder[]
-  assemblyTemplates AssemblyTemplate[]
+  clients                      Client[]
+  users                        User[]
+  roles                        Role[]
+  departments                  Department[]
+  productFamilies              ProductFamily[]
+  processTemplates             ProcessTemplate[]
+  jobs                         Job[]
+  componentTypes               ComponentTypeRef[]
+  equipmentTypes               EquipmentTypeRef[]
+  workOrderStages              WorkOrderStage[]
+  operations                   OperationRef[]
+  operationRefSeqs             OperationRefFamilySeq[]
+  testTypes                    TestTypeRef[]
+  drawingTypes                 DrawingTypeRef[]
+  delayCategories              DelayCategoryRef[]
+  qcpCodes                     QcpCodeRef[]
+  routeTemplates               RouteTemplate[]
+  calendars                    WorkCalendar[]
+  snapshots                    ProgressSnapshot[]
+  notifications                Notification[]
+  welders                      Welder[]
+  assemblyTemplates            AssemblyTemplate[]
+  // AUD-001 tenant-grain RLS backstop: back-relations for the 28 denormalized
+  // tenant_id columns added alongside H1's job_id columns (see
+  // prisma/migrations/20260909100000_aud001_tenant_id_backstop_add_column).
+  units                        Unit[]
+  bomRevisions                 BomRevision[]
+  bomItems                     BomItem[]
+  components                   Component[]
+  jobProcessEdges              JobProcessEdge[]
+  processPlans                 ProcessPlan[]
+  weldJointWelders             WeldJointWelder[]
+  ndtResults                   NdtResult[]
+  drawingRevisions             DrawingRevision[]
+  dispatchBatchUnits           DispatchBatchUnit[]
+  inspectionParties            InspectionParty[]
+  qcpItems                     QcpItem[]
+  componentOperations          ComponentOperation[]
+  componentOperationRejections ComponentOperationRejection[]
+  paintRecords                 PaintRecord[]
+  dftReadings                  DftReading[]
+  assemblySteps                AssemblyStep[]
+  assemblyStepRejections       AssemblyStepRejection[]
+  ncrs                         Ncr[]
+  qcpExecutions                QcpExecution[]
+  qcpItemProcesses             QcpItemProcess[]
+  qcpItemPartyCodes            QcpItemPartyCode[]
+  delayReasons                 DelayReason[]
+  stockLots                    StockLot[]
+  stockTxns                    StockTxn[]
+  procurementEvents            ProcurementEvent[]
+  materialIdentifications      MaterialIdentification[]
+  itemTests                    ItemTest[]
+  // AUD-080: back-relations for the tenant_id columns added to the nine
+  // job_id-carrying tables H1/AUD-001 omitted (see
+  // prisma/migrations/20260909140000_aud080_tenant_id_add_column).
+  equipments                   Equipment[]
+  packages                     Package[]
+  jobProcesses                 JobProcess[]
+  scheduleRuns                 ScheduleRun[]
+  weldJoints                   WeldJoint[]
+  weldLogs                     WeldLog[]
+  assemblyDrawings             AssemblyDrawing[]
+  dispatchBatches              DispatchBatch[]
+  qcpTemplates                 QcpTemplate[]
 
   @@map("organizations")
 }
@@ -892,8 +935,14 @@ model Equipment {
   /// labels and no catalog entry. Backfilling them would mean inventing
   /// catalog rows, so they stay unlinked.
   equipmentTypeId Int?    @map("equipment_type_id")
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId        Int     @default(0) @map("tenant_id")
 
   job           Job                @relation(fields: [jobId], references: [id])
+  tenant        Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   equipmentType EquipmentTypeRef?  @relation(fields: [equipmentTypeId], references: [id])
   units         Unit[]
   bomItems      BomItem[]
@@ -904,6 +953,7 @@ model Equipment {
 
   @@index([jobId])
   @@index([equipmentTypeId])
+  @@index([tenantId])
   @@map("equipments")
 }
 
@@ -916,11 +966,17 @@ model Unit {
   /// H1 job-level RLS backstop: denormalized from equipment.jobId. Nullable
   /// during migration only — backfilled by scripts/h1-backfill-job-ids.ts.
   jobId       Int      @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId    Int      @default(0) @map("tenant_id")
   createdAt   DateTime @default(now()) @map("created_at")
 
   equipment          Equipment           @relation(fields: [equipmentId], references: [id])
   package            Package?            @relation(fields: [packageId], references: [id])
   job                Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant             Organization        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   qcpExecutions      QcpExecution[]
   processPlans       ProcessPlan[]
   components         Component[]
@@ -933,6 +989,7 @@ model Unit {
   @@index([equipmentId])
   @@index([packageId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("units")
 }
 
@@ -951,13 +1008,20 @@ model Package {
   preservationNotes String?  @map("preservation_notes")
   createdBy         Int      @map("created_by")
   createdAt         DateTime @default(now()) @map("created_at")
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId          Int      @default(0) @map("tenant_id")
 
-  job           Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  createdByUser User   @relation(fields: [createdBy], references: [id])
+  job           Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant        Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdByUser User         @relation(fields: [createdBy], references: [id])
   units         Unit[]
 
   @@unique([jobId, packageNo])
   @@index([jobId])
+  @@index([tenantId])
   @@map("packages")
 }
 
@@ -986,8 +1050,14 @@ model JobProcess {
   durationOverrideDays    Int?    @map("duration_override_days")
   overrideReason          String? @map("override_reason")
   provisional             Boolean @default(false)
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId                Int     @default(0) @map("tenant_id")
 
   job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant             Organization     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   templateProcess    TemplateProcess? @relation(fields: [templateProcessId], references: [id])
   department         Department       @relation(fields: [departmentId], references: [id])
   edgesAsProcess     JobProcessEdge[] @relation("JobEdgeProcess")
@@ -999,6 +1069,7 @@ model JobProcess {
   @@index([jobId])
   @@index([departmentId])
   @@index([templateProcessId])
+  @@index([tenantId])
   @@map("job_processes")
 }
 
@@ -1010,14 +1081,21 @@ model JobProcessEdge {
   lagDays       Int             @map("lag_days")
   /// H1 job-level RLS backstop: denormalized from process.jobId.
   jobId         Int             @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId      Int             @default(0) @map("tenant_id")
 
-  process     JobProcess @relation("JobEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
-  predecessor JobProcess @relation("JobEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
-  job         Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  process     JobProcess   @relation("JobEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
+  predecessor JobProcess   @relation("JobEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  job         Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant      Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([processId, predecessorId])
   @@index([predecessorId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("job_process_edges")
 }
 
@@ -1055,8 +1133,14 @@ model ScheduleRun {
   overrideReason       String?              @map("override_reason")
   createdBy            Int?                 @map("created_by")
   createdAt            DateTime             @default(now()) @map("created_at")
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId             Int                  @default(0) @map("tenant_id")
 
   job          Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant       Organization  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   equipment    Equipment?    @relation(fields: [equipmentId], references: [id])
   processPlans ProcessPlan[]
   creator      User?         @relation(fields: [createdBy], references: [id])
@@ -1064,6 +1148,7 @@ model ScheduleRun {
   @@unique([jobId, equipmentId, version])
   @@index([jobId])
   @@index([equipmentId])
+  @@index([tenantId])
   @@map("schedule_runs")
 }
 
@@ -1104,6 +1189,11 @@ model ProcessPlan {
   /// docs/superpowers/plans/2026-09-05-h1-job-level-rls-backstop.md's
   /// dual-path note).
   jobId             Int               @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId          Int               @default(0) @map("tenant_id")
 
   scheduleRun     ScheduleRun   @relation(fields: [scheduleRunId], references: [id], onDelete: Cascade)
   jobProcess      JobProcess    @relation(fields: [jobProcessId], references: [id])
@@ -1113,6 +1203,7 @@ model ProcessPlan {
   submitter       User?         @relation("ProcessPlanSubmittedBy", fields: [submittedBy], references: [id])
   verifier        User?         @relation("ProcessPlanVerifiedBy", fields: [verifiedBy], references: [id])
   job             Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant          Organization  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   delayReasons    DelayReason[]
 
   @@index([scheduleRunId])
@@ -1123,6 +1214,7 @@ model ProcessPlan {
   @@index([status])
   @@index([assigneeUserId, status])
   @@index([jobId])
+  @@index([tenantId])
   @@map("process_plans")
 }
 
@@ -1143,16 +1235,23 @@ model BomRevision {
   createdBy   Int?              @map("created_by")
   /// H1 job-level RLS backstop: denormalized from equipment.jobId.
   jobId       Int               @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId    Int               @default(0) @map("tenant_id")
   createdAt   DateTime          @default(now()) @map("created_at")
 
-  equipment Equipment @relation(fields: [equipmentId], references: [id])
-  creator   User?     @relation(fields: [createdBy], references: [id])
-  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  equipment Equipment    @relation(fields: [equipmentId], references: [id])
+  creator   User?        @relation(fields: [createdBy], references: [id])
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   bomItems  BomItem[]
 
   @@unique([equipmentId, revisionNo])
   @@index([equipmentId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("bom_revisions")
 }
 
@@ -1191,11 +1290,17 @@ model BomItem {
   bomRevisionId   Int?     @map("bom_revision_id")
   /// H1 job-level RLS backstop: denormalized from equipment.jobId.
   jobId           Int      @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId        Int      @default(0) @map("tenant_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   componentType           ComponentTypeRef?        @relation(fields: [componentTypeId], references: [id])
   bomRevision             BomRevision?             @relation(fields: [bomRevisionId], references: [id])
   job                     Job                      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant                  Organization             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   procurementEvents       ProcurementEvent[]
   materialIdentifications MaterialIdentification[]
   stockLots               StockLot[]
@@ -1215,6 +1320,7 @@ model BomItem {
   @@index([componentTypeId])
   @@index([parentBomItemId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("bom_items")
 }
 
@@ -1245,15 +1351,22 @@ model ProcurementEvent {
   by        Int
   /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
   jobId     Int                  @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId  Int                  @default(0) @map("tenant_id")
 
-  bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
-  actor     User       @relation(fields: [by], references: [id])
-  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  bomItem   BomItem      @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  actor     User         @relation(fields: [by], references: [id])
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   stockLots StockLot[]
 
   @@index([bomItemId])
   @@index([bomItemId, at])
   @@index([jobId])
+  @@index([tenantId])
   @@map("procurement_events")
 }
 
@@ -1277,15 +1390,22 @@ model MaterialIdentification {
   qtyIssued   Decimal?   @map("qty_issued") @db.Decimal(12, 3)
   /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
   jobId       Int        @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId    Int        @default(0) @map("tenant_id")
 
-  bomItem   BomItem    @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
-  component Component? @relation(fields: [componentId], references: [id], onDelete: SetNull)
-  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  bomItem   BomItem      @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  component Component?   @relation(fields: [componentId], references: [id], onDelete: SetNull)
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([bomItemId])
   @@index([componentId])
   @@index([heatNumber])
   @@index([jobId])
+  @@index([tenantId])
   @@map("material_identifications")
 }
 
@@ -1308,15 +1428,22 @@ model StockLot {
   sourceProcurementEventId Int?     @map("source_procurement_event_id")
   /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
   jobId                    Int      @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId                 Int      @default(0) @map("tenant_id")
 
   bomItem                BomItem           @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
   sourceProcurementEvent ProcurementEvent? @relation(fields: [sourceProcurementEventId], references: [id])
   job                    Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant                 Organization      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   txns                   StockTxn[]
 
   @@index([bomItemId])
   @@index([sourceProcurementEventId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("stock_lots")
 }
 
@@ -1338,15 +1465,22 @@ model StockTxn {
   note        String?
   /// H1 job-level RLS backstop: denormalized from stockLot.bomItem.equipment.jobId.
   jobId       Int          @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId    Int          @default(0) @map("tenant_id")
 
-  stockLot  StockLot   @relation(fields: [stockLotId], references: [id], onDelete: Cascade)
-  actor     User       @relation(fields: [by], references: [id])
-  component Component? @relation(fields: [componentId], references: [id])
-  job       Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  stockLot  StockLot     @relation(fields: [stockLotId], references: [id], onDelete: Cascade)
+  actor     User         @relation(fields: [by], references: [id])
+  component Component?   @relation(fields: [componentId], references: [id])
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([stockLotId])
   @@index([componentId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("stock_txns")
 }
 
@@ -1442,6 +1576,11 @@ model Component {
   builtToRevisionId  Int?   @map("built_to_revision_id")
   /// H1 job-level RLS backstop: denormalized from equipment.jobId.
   jobId              Int    @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId           Int    @default(0) @map("tenant_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   unit                    Unit?                    @relation(fields: [unitId], references: [id])
@@ -1451,6 +1590,7 @@ model Component {
   parent                  Component?               @relation("ComponentHierarchy", fields: [parentComponentId], references: [id])
   children                Component[]              @relation("ComponentHierarchy")
   job                     Job                      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant                  Organization             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   operations              ComponentOperation[]
   weldJoints              WeldJoint[]
   stockTxns               StockTxn[]
@@ -1477,6 +1617,7 @@ model Component {
   @@index([governingDrawingId])
   @@index([builtToRevisionId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("components")
 }
 
@@ -1513,6 +1654,11 @@ model ComponentOperation {
   qtyRejected         Int?
   /// H1 job-level RLS backstop: denormalized from component.jobId.
   jobId               Int             @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId            Int             @default(0) @map("tenant_id")
 
   component         Component                     @relation(fields: [componentId], references: [id], onDelete: Cascade)
   operation         OperationRef                  @relation(fields: [operationId], references: [id])
@@ -1521,6 +1667,7 @@ model ComponentOperation {
   submitter         User?                         @relation("ComponentOperationSubmittedBy", fields: [submittedBy], references: [id])
   verifier          User?                         @relation("ComponentOperationVerifiedBy", fields: [verifiedBy], references: [id])
   job               Job                           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant            Organization                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rejections        ComponentOperationRejection[]
   paintRecord       PaintRecord?
   dftReadings       DftReading[]
@@ -1532,6 +1679,7 @@ model ComponentOperation {
   @@index([performedByWelderId])
   @@index([performedByUserId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("component_operations")
 }
 
@@ -1549,16 +1697,23 @@ model ComponentOperationRejection {
   rejectedAt           DateTime @default(now()) @map("rejected_at")
   /// H1 job-level RLS backstop: denormalized from componentOperation.jobId.
   jobId                Int      @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId             Int      @default(0) @map("tenant_id")
 
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
   category           DelayCategoryRef   @relation(fields: [categoryId], references: [id])
   rejector           User               @relation(fields: [rejectedBy], references: [id])
   job                Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant             Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   ncr                Ncr?
 
   @@index([componentOperationId])
   @@index([categoryId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("component_operation_rejections")
 }
 
@@ -1572,11 +1727,18 @@ model PaintRecord {
   coatsPlanned         Int?   @map("coats_planned")
   /// H1 job-level RLS backstop: denormalized from componentOperation.jobId.
   jobId                Int    @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId             Int    @default(0) @map("tenant_id")
 
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
   job                Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant             Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([jobId])
+  @@index([tenantId])
   @@map("paint_records")
 }
 
@@ -1596,13 +1758,20 @@ model DftReading {
   recordedAt           DateTime @default(now()) @map("recorded_at")
   /// H1 job-level RLS backstop: denormalized from componentOperation.jobId.
   jobId                Int      @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId             Int      @default(0) @map("tenant_id")
 
   componentOperation ComponentOperation @relation(fields: [componentOperationId], references: [id], onDelete: Cascade)
   recordedByUser     User               @relation(fields: [recordedBy], references: [id])
   job                Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant             Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([componentOperationId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("dft_readings")
 }
 
@@ -1615,14 +1784,21 @@ model ItemTest {
   result     TestResult @default(PENDING)
   /// H1 job-level RLS backstop: denormalized from bomItem.equipment.jobId.
   jobId      Int        @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId   Int        @default(0) @map("tenant_id")
 
-  bomItem  BomItem     @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
-  testType TestTypeRef @relation(fields: [testTypeId], references: [id])
-  job      Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  bomItem  BomItem      @relation(fields: [bomItemId], references: [id], onDelete: Cascade)
+  testType TestTypeRef  @relation(fields: [testTypeId], references: [id])
+  job      Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant   Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([bomItemId])
   @@index([testTypeId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("item_tests")
 }
 
@@ -1680,8 +1856,14 @@ model WeldJoint {
   componentId Int?     @map("component_id")
   loggedBy    Int      @map("logged_by")
   createdAt   DateTime @default(now()) @map("created_at")
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId    Int      @default(0) @map("tenant_id")
 
   job           Job               @relation(fields: [jobId], references: [id])
+  tenant        Organization      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   unit          Unit?             @relation(fields: [unitId], references: [id])
   component     Component?        @relation(fields: [componentId], references: [id])
   logger        User              @relation(fields: [loggedBy], references: [id])
@@ -1692,23 +1874,31 @@ model WeldJoint {
   @@index([jobId])
   @@index([unitId])
   @@index([componentId])
+  @@index([tenantId])
   @@map("weld_joints")
 }
 
 /// A joint may name more than one welder (spec: "welder(s)").
 model WeldJointWelder {
-  weldJointId Int  @map("weld_joint_id")
-  welderId    Int  @map("welder_id")
+  weldJointId Int @map("weld_joint_id")
+  welderId    Int @map("welder_id")
   /// H1 job-level RLS backstop: denormalized from weldJoint.jobId.
-  jobId       Int  @map("job_id")
+  jobId       Int @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId    Int @default(0) @map("tenant_id")
 
-  weldJoint WeldJoint @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
-  welder    Welder    @relation(fields: [welderId], references: [id])
-  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  weldJoint WeldJoint    @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
+  welder    Welder       @relation(fields: [welderId], references: [id])
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@id([weldJointId, welderId])
   @@index([welderId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("weld_joint_welders")
 }
 
@@ -1724,13 +1914,20 @@ model WeldLog {
   note      String?
   loggedBy  Int      @map("logged_by")
   createdAt DateTime @default(now()) @map("created_at")
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId  Int      @default(0) @map("tenant_id")
 
-  welder Welder @relation(fields: [welderId], references: [id])
-  job    Job    @relation(fields: [jobId], references: [id])
-  logger User   @relation(fields: [loggedBy], references: [id])
+  welder Welder       @relation(fields: [welderId], references: [id])
+  job    Job          @relation(fields: [jobId], references: [id])
+  tenant Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  logger User         @relation(fields: [loggedBy], references: [id])
 
   @@index([welderId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("weld_logs")
 }
 
@@ -1751,15 +1948,22 @@ model NdtResult {
   createdAt   DateTime   @default(now()) @map("created_at")
   /// H1 job-level RLS backstop: denormalized from weldJoint.jobId.
   jobId       Int        @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId    Int        @default(0) @map("tenant_id")
 
-  weldJoint WeldJoint   @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
-  testType  TestTypeRef @relation(fields: [testTypeId], references: [id])
-  recorder  User?       @relation(fields: [recordedBy], references: [id])
-  job       Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  weldJoint WeldJoint    @relation(fields: [weldJointId], references: [id], onDelete: Cascade)
+  testType  TestTypeRef  @relation(fields: [testTypeId], references: [id])
+  recorder  User?        @relation(fields: [recordedBy], references: [id])
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([weldJointId])
   @@index([testTypeId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("ndt_results")
 }
 
@@ -1879,6 +2083,11 @@ model AssemblyStep {
   remarks             String?
   /// H1 job-level RLS backstop: denormalized from unit.equipment.jobId.
   jobId               Int             @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId            Int             @default(0) @map("tenant_id")
 
   unit              Unit                    @relation(fields: [unitId], references: [id])
   templateStep      AssemblyTemplateStep    @relation(fields: [templateStepId], references: [id])
@@ -1889,6 +2098,7 @@ model AssemblyStep {
   submitter         User?                   @relation("AssemblyStepSubmittedBy", fields: [submittedBy], references: [id])
   verifier          User?                   @relation("AssemblyStepVerifiedBy", fields: [verifiedBy], references: [id])
   job               Job                     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant            Organization            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rejections        AssemblyStepRejection[]
 
   @@unique([unitId, seq])
@@ -1900,6 +2110,7 @@ model AssemblyStep {
   @@index([performedByWelderId])
   @@index([performedByUserId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("assembly_steps")
 }
 
@@ -1914,16 +2125,23 @@ model AssemblyStepRejection {
   rejectedAt     DateTime @default(now()) @map("rejected_at")
   /// H1 job-level RLS backstop: denormalized from assemblyStep.jobId.
   jobId          Int      @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId       Int      @default(0) @map("tenant_id")
 
   assemblyStep AssemblyStep     @relation(fields: [assemblyStepId], references: [id], onDelete: Cascade)
   category     DelayCategoryRef @relation(fields: [categoryId], references: [id])
   rejector     User             @relation(fields: [rejectedBy], references: [id])
   job          Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant       Organization     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   ncr          Ncr?
 
   @@index([assemblyStepId])
   @@index([categoryId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("assembly_step_rejections")
 }
 
@@ -1954,6 +2172,11 @@ model Ncr {
   /// H1 job-level RLS backstop: denormalized from whichever of
   /// componentOperationRejection/assemblyStepRejection's jobId is set (XOR).
   jobId                         Int             @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId                      Int             @default(0) @map("tenant_id")
 
   componentOperationRejection ComponentOperationRejection? @relation(fields: [componentOperationRejectionId], references: [id], onDelete: Cascade)
   assemblyStepRejection       AssemblyStepRejection?       @relation(fields: [assemblyStepRejectionId], references: [id], onDelete: Cascade)
@@ -1961,9 +2184,11 @@ model Ncr {
   reworkOwner                 User?                        @relation("NcrReworkOwner", fields: [reworkOwnerId], references: [id])
   closedByUser                User?                        @relation("NcrClosedBy", fields: [closedBy], references: [id])
   job                         Job                          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant                      Organization                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([status])
   @@index([jobId])
+  @@index([tenantId])
   @@map("ncrs")
 }
 
@@ -1971,18 +2196,31 @@ model Ncr {
 
 model QcpTemplate {
   id         Int     @id @default(autoincrement())
+  /// AUD-069: RESTRICT, not the original SET NULL — deleting a job with QCP
+  /// rows attached must be refused, not silently promote them into the
+  /// shared library where the (fail-open, by design) job_isolation policy
+  /// makes them cross-tenant readable. See qcp_items/inspection_parties/
+  /// qcp_item_party_codes for the same change.
   jobId      Int?    @map("job_id")
   /// Raw label from the source document; may not resolve to a job.
   jobLabel   String  @map("job_label")
   vessel     String
   revision   Int     @default(0)
   designCode String? @map("design_code")
+  /// AUD-080: nullable, mirroring qcpItem/inspectionParty/qcpItemPartyCode —
+  /// a genuine library row (jobId IS NULL) has no owning job and therefore no
+  /// tenant to derive one from. The BEFORE INSERT trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) sets this from job_id when present; when
+  /// job_id is null this stays whatever was supplied (normally null).
+  tenantId   Int?    @map("tenant_id")
 
-  job     Job?              @relation(fields: [jobId], references: [id])
+  job     Job?              @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  tenant  Organization?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parties InspectionParty[]
   items   QcpItem[]
 
   @@index([jobId])
+  @@index([tenantId])
   @@map("qcp_templates")
 }
 
@@ -1995,15 +2233,19 @@ model InspectionParty {
   name          String?
   /// H1 job-level RLS backstop: denormalized from qcpTemplate.jobId. Stays
   /// null for library templates (qcpTemplate.jobId IS NULL) — never forced.
+  /// AUD-069: RESTRICT, not the original SET NULL — see QcpTemplate.job.
   jobId         Int?    @map("job_id")
+  tenantId      Int?    @map("tenant_id")
 
   qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
-  job         Job?               @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  job         Job?               @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  tenant      Organization?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   itemCodes   QcpItemPartyCode[]
 
   @@unique([qcpTemplateId, code])
   @@index([qcpTemplateId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("inspection_parties")
 }
 
@@ -2032,10 +2274,13 @@ model QcpItem {
   libraryProcessCodes String[]    @default([]) @map("library_process_codes")
   /// H1 job-level RLS backstop: denormalized from qcpTemplate.jobId. Stays
   /// null for library templates (qcpTemplate.jobId IS NULL) — never forced.
+  /// AUD-069: RESTRICT, not the original SET NULL — see QcpTemplate.job.
   jobId               Int?        @map("job_id")
+  tenantId            Int?        @map("tenant_id")
 
   qcpTemplate   QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
-  job           Job?               @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  job           Job?               @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  tenant        Organization?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   partyCodes    QcpItemPartyCode[]
   executions    QcpExecution[]
   processLinks  QcpItemProcess[]
@@ -2044,24 +2289,32 @@ model QcpItem {
   @@unique([qcpTemplateId, sequence])
   @@index([qcpTemplateId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("qcp_items")
 }
 
 /// Real join table replacing the unenforced Int[] crosswalk.
 model QcpItemProcess {
-  qcpItemId    Int  @map("qcp_item_id")
-  jobProcessId Int  @map("job_process_id")
+  qcpItemId    Int @map("qcp_item_id")
+  jobProcessId Int @map("job_process_id")
   /// H1 job-level RLS backstop: denormalized from qcpItem.jobId OR
   /// jobProcess.jobId (whichever is non-null — see the plan's dual-path note).
-  jobId        Int  @map("job_id")
+  jobId        Int @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId     Int @default(0) @map("tenant_id")
 
-  qcpItem    QcpItem    @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
-  jobProcess JobProcess @relation(fields: [jobProcessId], references: [id], onDelete: Cascade)
-  job        Job        @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  qcpItem    QcpItem      @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
+  jobProcess JobProcess   @relation(fields: [jobProcessId], references: [id], onDelete: Cascade)
+  job        Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant     Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@id([qcpItemId, jobProcessId])
   @@index([jobProcessId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("qcp_item_processes")
 }
 
@@ -2072,17 +2325,21 @@ model QcpItemPartyCode {
   /// H1 job-level RLS backstop: denormalized from qcpItem.jobId. Nullable —
   /// library rows (parent QcpItem.jobId IS NULL) have no job, same as QcpItem
   /// and InspectionParty.
+  /// AUD-069: RESTRICT, not the original SET NULL — see QcpTemplate.job.
   jobId             Int? @map("job_id")
+  tenantId          Int? @map("tenant_id")
 
   qcpItem         QcpItem         @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   inspectionParty InspectionParty @relation(fields: [inspectionPartyId], references: [id], onDelete: Cascade)
   qcpCode         QcpCodeRef      @relation(fields: [qcpCodeId], references: [id])
-  job             Job?            @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  job             Job?            @relation(fields: [jobId], references: [id], onDelete: Restrict)
+  tenant          Organization?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@id([qcpItemId, inspectionPartyId])
   @@index([inspectionPartyId])
   @@index([qcpCodeId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("qcp_item_party_codes")
 }
 
@@ -2108,18 +2365,25 @@ model QcpExecution {
   /// (cross-checked against qcpItem.jobId at backfill time when the item is
   /// job-scoped — see the plan's dual-path note).
   jobId             Int                @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId          Int                @default(0) @map("tenant_id")
 
-  qcpItem QcpItem @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
-  unit    Unit    @relation(fields: [unitId], references: [id])
-  clearer User?   @relation("QcpExecutionClearedBy", fields: [clearedBy], references: [id])
-  waiver  User?   @relation("QcpExecutionWaiverApprovedBy", fields: [waiverApprovedBy], references: [id])
-  job     Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  qcpItem QcpItem      @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
+  unit    Unit         @relation(fields: [unitId], references: [id])
+  clearer User?        @relation("QcpExecutionClearedBy", fields: [clearedBy], references: [id])
+  waiver  User?        @relation("QcpExecutionWaiverApprovedBy", fields: [waiverApprovedBy], references: [id])
+  job     Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant  Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([qcpItemId, unitId, attemptNo])
   @@index([qcpItemId])
   @@index([unitId])
   @@index([result])
   @@index([jobId])
+  @@index([tenantId])
   @@map("qcp_executions")
 }
 
@@ -2131,14 +2395,21 @@ model AssemblyDrawing {
   drawingTypeId Int     @map("drawing_type_id")
   drawingNo     String? @map("drawing_no")
   remarks       String?
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId      Int     @default(0) @map("tenant_id")
 
   job                 Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant              Organization      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   drawingType         DrawingTypeRef    @relation(fields: [drawingTypeId], references: [id])
   revisions           DrawingRevision[]
   governingComponents Component[]       @relation("ComponentGoverningDrawing")
 
   @@index([jobId])
   @@index([drawingTypeId])
+  @@index([tenantId])
   @@map("assembly_drawings")
 }
 
@@ -2165,14 +2436,21 @@ model DrawingRevision {
   createdAt         DateTime      @default(now()) @map("created_at")
   /// H1 job-level RLS backstop: denormalized from assemblyDrawing.jobId.
   jobId             Int           @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId          Int           @default(0) @map("tenant_id")
 
   assemblyDrawing   AssemblyDrawing @relation(fields: [assemblyDrawingId], references: [id], onDelete: Cascade)
   job               Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant            Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   builtByComponents Component[]     @relation("ComponentBuiltToRevision")
 
   @@unique([assemblyDrawingId, revisionNo])
   @@index([assemblyDrawingId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("drawing_revisions")
 }
 
@@ -2197,30 +2475,44 @@ model DispatchBatch {
   releaseApprovedAt  DateTime? @map("release_approved_at")
   /// SERVER CLOCK ONLY (invariant #1)
   actualDispatchDate DateTime? @map("actual_dispatch_date")
+  /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId           Int       @default(0) @map("tenant_id")
 
   job                   Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant                Organization        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   releaseApprovedByUser User?               @relation("DispatchBatchReleaseApprovedBy", fields: [releaseApprovedBy], references: [id])
   dispatchBatchUnits    DispatchBatchUnit[]
 
   @@unique([jobId, seq])
   @@index([jobId])
+  @@index([tenantId])
   @@map("dispatch_batches")
 }
 
 model DispatchBatchUnit {
-  id              Int  @id @default(autoincrement())
-  dispatchBatchId Int  @map("dispatch_batch_id")
-  unitId          Int  @map("unit_id")
+  id              Int @id @default(autoincrement())
+  dispatchBatchId Int @map("dispatch_batch_id")
+  unitId          Int @map("unit_id")
   /// H1 job-level RLS backstop: denormalized from dispatchBatch.jobId.
-  jobId           Int  @map("job_id")
+  jobId           Int @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId        Int @default(0) @map("tenant_id")
 
   dispatchBatch DispatchBatch @relation(fields: [dispatchBatchId], references: [id], onDelete: Cascade)
   unit          Unit          @relation(fields: [unitId], references: [id])
   job           Job           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant        Organization  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([dispatchBatchId, unitId])
   @@index([dispatchBatchId])
   @@index([jobId])
+  @@index([tenantId])
   @@map("dispatch_batch_units")
 }
 
@@ -2237,17 +2529,24 @@ model DelayReason {
   reviewedBy    Int?              @map("reviewed_by")
   /// H1 job-level RLS backstop: denormalized from processPlan.jobId.
   jobId         Int               @map("job_id")
+  /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
+  /// optional in create() input. The BEFORE INSERT DB trigger
+  /// (aud001_derive_tenant_id) always overwrites it from job_id before
+  /// any constraint check runs — 0 is never actually persisted.
+  tenantId      Int               @default(0) @map("tenant_id")
 
   processPlan ProcessPlan      @relation(fields: [processPlanId], references: [id], onDelete: Cascade)
   category    DelayCategoryRef @relation(fields: [categoryId], references: [id])
   filer       User             @relation("DelayReasonFiledBy", fields: [filedBy], references: [id])
   reviewer    User?            @relation("DelayReasonReviewedBy", fields: [reviewedBy], references: [id])
   job         Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant      Organization     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([processPlanId])
   @@index([categoryId])
   @@index([reviewStatus])
   @@index([jobId])
+  @@index([tenantId])
   @@map("delay_reasons")
 }
 

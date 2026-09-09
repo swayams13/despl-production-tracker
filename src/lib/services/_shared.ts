@@ -1066,6 +1066,21 @@ export async function assertDrawingReleased(
   if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
   if (component.governingDrawingId == null) return null; // SEAM: no drawing link, nothing to check
 
+  // AUD-080 (9 Sep 2026): assembly_drawings gained a job_isolation RLS policy
+  // in this session. Callers that reach this function via a job-scoped
+  // transaction (lockComponentOperationForUpdate sets app.job_id to the
+  // COMPONENT's own job before this runs) would otherwise have that policy
+  // silently hide a drawing belonging to a DIFFERENT job — exactly the row
+  // this cross-job check exists to read, so it could inspect the mismatch
+  // and report DRAWING_NOT_RELEASED instead of degrading to a generic
+  // NOT_FOUND. Tenant scoping (the WHERE clause's job: { tenantId }, backed
+  // by assembly_drawings' own RESTRICTIVE tenant_isolation policy) is the
+  // real boundary for this read — job_isolation must not additionally narrow
+  // it here. Clear app.job_id for the duration of this one query, restore it
+  // immediately after so any code running later in the same transaction
+  // keeps its job-scoped defense-in-depth.
+  const [priorJobGuc] = await tx.$queryRaw<{ v: string | null }[]>`SELECT NULLIF(current_setting('app.job_id', true), '') AS v`;
+  await tx.$executeRaw`SELECT set_config('app.job_id', '', true)`;
   const drawing = await tx.assemblyDrawing.findFirst({
     where: { id: component.governingDrawingId, job: { tenantId } },
     select: {
@@ -1074,6 +1089,7 @@ export async function assertDrawingReleased(
       revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true, status: true } },
     },
   });
+  await tx.$executeRaw`SELECT set_config('app.job_id', ${priorJobGuc?.v ?? ""}, true)`;
   if (!drawing) {
     throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId: component.governingDrawingId });
   }

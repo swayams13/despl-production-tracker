@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadPortfolio } from "./portfolio.read";
 import { HEALTH_ORDER } from "./job-health";
 import { ROLES, type Actor } from "@/lib/authz";
@@ -134,5 +134,85 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("portfolio.read (DB)", async () => {
     }
 
     for (const row of rows) expect(row!.health).toBe("DELAYED");
+  });
+});
+
+/**
+ * Session 14 (AUD-028/AUD-059): the `verified` sub-select inside `changes`
+ * (portfolio.read.ts:69) used to join `pp.id = de.aggregate_id::int` —
+ * casting the polymorphic `domain_events.aggregate_id` column itself. Fixed
+ * to `pp.id::text = de.aggregate_id`, matching reports.read.ts/myday.read.ts.
+ * Fresh tenant + own job (delay.service.test.ts's shape) so this is
+ * independent of the shared-seed rows the describe block above reads.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadPortfolio — verifiedLast24h from domain_events (DB, AUD-028/059)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  let tenantId = 0;
+  let jobId = 0;
+
+  beforeAll(async () => {
+    const org = await owner.organization.create({ data: { code: `PORTACT-${Date.now()}`, name: "portfolio.read activity test" } });
+    tenantId = org.id;
+    const dept = await owner.department.create({ data: { tenantId, code: "PROD", name: "Production" } });
+    const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-portact-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-PORTACT-${Date.now()}`,
+      },
+    });
+    jobId = job.id;
+    const jp = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 10, code: "10", name: "Rolling", departmentId: dept.id },
+    });
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date("2026-01-01"), isCurrent: true },
+    });
+    const plan = await owner.processPlan.create({
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
+    });
+
+    // Inside the rolling 24h window — must count.
+    await owner.domainEvent.create({
+      data: { tenantId, aggregateType: "ProcessPlan", aggregateId: String(plan.id), type: "ProcessVerified", payload: {}, at: new Date() },
+    });
+    // Outside the window — must NOT count.
+    await owner.domainEvent.create({
+      data: { tenantId, aggregateType: "ProcessPlan", aggregateId: String(plan.id), type: "ProcessVerified", payload: {}, at: new Date(Date.now() - 48 * 3600 * 1000) },
+    });
+    // A row for a different aggregate_type with a non-numeric aggregate_id —
+    // proves AUD-059's correctness fix (no cast-of-the-column runtime error).
+    await owner.domainEvent.create({
+      data: { tenantId, aggregateType: "Ncr", aggregateId: "ncr-not-numeric", type: "NcrRaised", payload: {}, at: new Date() },
+    });
+  });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  async function sjActor(): Promise<Actor> {
+    return {
+      userId: 1, tenantId, clientId: null, name: "SJ", email: "sj@despl.test",
+      roles: [ROLES.PRODUCTION_HEAD], departmentIds: [], mustChangePassword: false,
+      themePreference: "SYSTEM", outdoorMode: false,
+    };
+  }
+
+  it("counts only the in-window ProcessVerified event, without throwing on the unrelated non-numeric row", async () => {
+    const p = await loadPortfolio(await sjActor());
+    const row = p.rows.find((r) => r.id === jobId);
+    expect(row).toBeDefined();
+    expect(row!.verifiedLast24h).toBe(1);
   });
 });
