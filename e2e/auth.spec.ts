@@ -145,6 +145,11 @@ test("client user navigating to /portal itself renders normally (no redirect loo
   page,
 }) => {
   await signIn(page, "client@example.local");
+  // signIn's click triggers the login redirect asynchronously — wait for it
+  // to land before navigating again, or the immediate goto below races the
+  // still-in-flight redirect and can hit /portal before the session cookie
+  // is actually set, bouncing to /login instead.
+  await expect(page).toHaveURL("/portal");
   await page.goto("/portal");
   await expect(page).toHaveURL("/portal");
   await expect(page.getByRole("heading", { name: "Your orders" })).toBeVisible();
@@ -154,6 +159,8 @@ test("internal staff user is unaffected: /board and /profile render normally", a
   page,
 }) => {
   await signIn(page, "sup.fabrication@despl.local");
+  // same race as above — wait for the post-login redirect to land first.
+  await expect(page).toHaveURL(/\/my-day$/);
 
   await page.goto("/board");
   await expect(page).toHaveURL("/board");
