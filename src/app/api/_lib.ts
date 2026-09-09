@@ -65,6 +65,7 @@ const STATUS: Record<ErrorCode, number> = {
   QCP_CODE_NOT_WAIVABLE: 409,
   PROCESS_NOT_OPTIONAL: 409,
   EXCLUSION_REASON_REQUIRED: 409,
+  SCHEDULE_ENVELOPE_INVALID: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

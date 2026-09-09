@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { checkFeasibility } from "./feasibility";
 import { addWorkingDays, DEFAULT_CALENDAR } from "./calendar";
 import { PRESSURE_VESSEL_TOTAL_DAYS } from "./__fixtures__/pressure-vessel-v1";
+import { isAppError, ERROR_CODES } from "@/lib/shared/errors";
 
 function d(iso: string): Date {
   return new Date(`${iso}T12:00:00.000Z`);
@@ -63,7 +64,20 @@ describe("checkFeasibility — FEASIBLE / TIGHT / INFEASIBLE boundaries", () => 
 });
 
 describe("checkFeasibility — input validation", () => {
-  it("rejects requiredMinDays greater than requiredMaxDays", () => {
-    expect(() => checkFeasibility(d("2026-01-01"), d("2026-02-01"), 30, 20, DEFAULT_CALENDAR)).toThrow();
+  // AUD-035: this used to throw a bare `Error` — an unexplained 500 with no
+  // application-level recovery path, since the caller had no stable code to
+  // branch on. It must now be a real AppError (invariant #12).
+  it("rejects requiredMinDays greater than requiredMaxDays with a stable AppError, not a bare Error", () => {
+    const err = (() => {
+      try {
+        checkFeasibility(d("2026-01-01"), d("2026-02-01"), 30, 20, DEFAULT_CALENDAR);
+        return null;
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(isAppError(err)).toBe(true);
+    expect(isAppError(err) && err.code).toBe(ERROR_CODES.SCHEDULE_ENVELOPE_INVALID);
+    expect(isAppError(err) && err.detail).toEqual({ requiredMinDays: 30, requiredMaxDays: 20 });
   });
 });

@@ -121,6 +121,8 @@ export const ERROR_CODES = {
   PROCESS_NOT_OPTIONAL: "PROCESS_NOT_OPTIONAL",
   /** createJob (AUD-033): excludedProcessCodes is non-empty but exclusionReason was not supplied — a permanent scope change needs a reason on record. */
   EXCLUSION_REASON_REQUIRED: "EXCLUSION_REASON_REQUIRED",
+  /** checkFeasibility (AUD-035): requiredMinDays exceeds requiredMaxDays — the envelope data fed in is internally inconsistent (distinct from SCHEDULE_DATA_MISSING's "no envelope at all"). */
+  SCHEDULE_ENVELOPE_INVALID: "SCHEDULE_ENVELOPE_INVALID",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -206,6 +208,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This process is mandatory on this route and cannot be excluded from the job's scope.",
   EXCLUSION_REASON_REQUIRED:
     "Excluding a process from the job's scope requires a reason, which is recorded.",
+  SCHEDULE_ENVELOPE_INVALID:
+    "This job's envelope data is inconsistent (minimum duration exceeds maximum) and cannot be scheduled. Contact an administrator.",
 };
 
 /**

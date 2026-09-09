@@ -102,7 +102,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride refuses jobs w
   });
 });
 
-describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + desync fix (DB)", async () => {
+describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + envelope immutability (DB)", async () => {
   // Owner (DIRECT_URL) client for direct verification reads — bypasses RLS so a
   // bare read finds the seed row. Service calls scope themselves via withTenant.
   const { PrismaClient } = await import("@/generated/prisma/client");
@@ -112,7 +112,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + d
     await owner.$disconnect();
   });
 
-  it("versions up, preserves the old baseline, and reconciles Layer 1 with Layer 2", async () => {
+  it("versions up, preserves the old baseline, and never touches the printed Layer-1 envelope (AUD-035)", async () => {
     const job = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
     if (!job) throw new Error("seed missing DE0467 — run pnpm db:seed");
     const a = actor({ tenantId: job.tenantId, clientId: null });
@@ -126,15 +126,19 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + d
     });
     if (!proc) throw new Error("seed job has no schedulable process");
 
-    // Snapshot every process's MIN envelope offsets before the override, so we
-    // can assert they're untouched after — the corrupting min-space CPM restamp
-    // audit C2 flagged (terminal ≈36 days instead of ≈119, defeating
-    // checkFeasibility's INFEASIBLE path forever after one override) must stay
-    // removed, not just the plans.
-    const minBefore = new Map(
+    // Snapshot every process's four printed envelope columns before the
+    // override — AUD-035's regression guard for invariant #10: none of them
+    // may move, not even the target's own, and not even MAX (the earlier,
+    // now-removed "fix" restamped MAX only; this asserts nothing is restamped).
+    const envelopeBefore = new Map(
       (await owner.jobProcess.findMany({ where: { jobId: job.id } })).map((p) => [
         p.id,
-        { min: p.envelopeStartByMinDays, minFinish: p.envelopeFinishByMinDays },
+        {
+          startMin: p.envelopeStartByMinDays,
+          startMax: p.envelopeStartByMaxDays,
+          finishMin: p.envelopeFinishByMinDays,
+          finishMax: p.envelopeFinishByMaxDays,
+        },
       ]),
     );
 
@@ -169,25 +173,68 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("applyDurationOverride versioning + d
       expect(pp.baselineStart?.getTime()).toBe(src.baselineStart?.getTime());
     }
 
-    // MIN envelope offsets are byte-for-byte unchanged (audit C2 fix): the
-    // override must not run a min-space CPM pass over lags fitted for MAX only.
+    // All four printed envelope columns are byte-for-byte unchanged on every
+    // process, including the overridden one and everything downstream — the
+    // core AUD-035 regression guard. Only durationOverrideDays/overrideReason
+    // on the target row may have changed.
     const afterProcesses = await owner.jobProcess.findMany({ where: { jobId: job.id } });
     for (const p of afterProcesses) {
-      const before = minBefore.get(p.id);
-      expect(p.envelopeStartByMinDays).toBe(before?.min);
-      expect(p.envelopeFinishByMinDays).toBe(before?.minFinish);
+      const before = envelopeBefore.get(p.id);
+      expect(p.envelopeStartByMinDays).toBe(before?.startMin);
+      expect(p.envelopeStartByMaxDays).toBe(before?.startMax);
+      expect(p.envelopeFinishByMinDays).toBe(before?.finishMin);
+      expect(p.envelopeFinishByMaxDays).toBe(before?.finishMax);
+    }
+    const target = afterProcesses.find((p) => p.id === proc.id);
+    expect(target?.durationOverrideDays).toBe((proc.durationMaxDays ?? 5) + 5);
+    expect(target?.overrideReason).toBe("supplier confirmed a longer forging lead time");
+
+    // Layer 2 (this run's ProcessPlan) DOES reflect the override's CPM
+    // recompute — the override's effect is visible, just not on Layer 1.
+    const overriddenPlan = run2.processPlans.find((pp) => pp.jobProcessId === proc.id);
+    const priorPlan = run1.processPlans.find((pp) => pp.jobProcessId === proc.id);
+    expect(overriddenPlan?.plannedFinish?.getTime()).not.toBe(priorPlan?.plannedFinish?.getTime());
+  });
+
+  it("a large shortening override followed by a fresh generateSchedule either succeeds or throws SCHEDULE_ENVELOPE_INVALID cleanly — never a bare Error", async () => {
+    const job = await owner.job.findFirst({ where: { jobNumber: "DE0467" } });
+    if (!job) throw new Error("seed missing DE0467 — run pnpm db:seed");
+    const a = actor({ tenantId: job.tenantId, clientId: null });
+
+    await generateSchedule(a, { jobId: job.id, mode: "FORWARD" });
+
+    const proc = await owner.jobProcess.findFirst({
+      where: { jobId: job.id, included: true, provisional: false, durationMaxDays: { not: null } },
+      orderBy: { seq: "asc" },
+    });
+    if (!proc) throw new Error("seed job has no schedulable process");
+
+    // A large shortening override — the scenario the removed restamp's own
+    // comment warned would corrupt requiredMinDays to ~36 if a min-space CPM
+    // pass had been added. With the restamp removed entirely, this must not
+    // corrupt anything: the printed envelope stays exactly as intake wrote it.
+    await applyDurationOverride(a, {
+      jobId: job.id,
+      jobProcessId: proc.id,
+      durationOverrideDays: 1,
+      reason: "AUD-035 regression: large shortening override must not corrupt the printed envelope",
+    });
+
+    // Re-running generateSchedule for the same job must never throw the old
+    // bare Error — either it succeeds cleanly (feasibility checked against the
+    // untouched, still-consistent printed envelope) or it refuses with the new
+    // stable AppError code.
+    const result = await generateSchedule(a, { jobId: job.id, mode: "FORWARD" }).catch((e) => e);
+    if (isAppError(result)) {
+      expect(result.code).toBe(ERROR_CODES.SCHEDULE_ENVELOPE_INVALID);
+    } else {
+      expect(result).not.toBeInstanceOf(Error);
     }
 
-    // Layer 1 (envelope from the restamped offsets) == Layer 2 (CPM planned).
+    // Whichever branch fired, the printed envelope itself is still exactly
+    // what intake wrote — computeEnvelope over it doesn't throw.
     const spineAfter = await withTenant(a.tenantId, (tx) => loadJobSpine(tx, job.id));
-    const env = computeEnvelope(spineAfter.processes, run2.projectStartDate, spineAfter.calendar);
-    const envByPid = new Map(env.map((e) => [e.processId, e]));
-    for (const pp of run2.processPlans) {
-      const e = envByPid.get(pp.jobProcessId);
-      if (!e) continue; // excluded process — no envelope row
-      expect(pp.plannedStart?.getTime()).toBe(e.plannedStartMax.getTime());
-      expect(pp.plannedFinish?.getTime()).toBe(e.plannedFinishMax.getTime());
-    }
+    expect(() => computeEnvelope(spineAfter.processes, new Date(), spineAfter.calendar)).not.toThrow();
   });
 });
 
