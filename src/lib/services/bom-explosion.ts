@@ -90,3 +90,30 @@ export function computeAvailableForShortage(lots: StockLotForAvailability[]): De
   }
   return available;
 }
+
+/**
+ * AUD-032: available-to-issue for a gate DECISION, distinct from
+ * `computeAvailableForShortage` (display-only; only nets SCRAP, by design —
+ * see that function's doc comment). `computeAvailableForShortage` never
+ * deducting ISSUE is correct for `bom.read.ts`'s displays but makes a gate
+ * built on it permanently toothless: once enough material was ever received
+ * to pass the gate once, it keeps passing forever regardless of how much
+ * has since actually been issued and consumed. This function nets ISSUE and
+ * SCRAP (both real deductions from what's still on hand for the gate's
+ * purposes) and adds back RETURN (material genuinely given back —
+ * `stock.service.ts`'s `returnStock`, the only writer of a RETURN txn).
+ *
+ * Returns `null` — not `0` — for zero lots, same SEAM convention as
+ * `computeAvailableForShortage`.
+ */
+export function computeAvailableToIssue(lots: StockLotForAvailability[]): Decimal | null {
+  if (lots.length === 0) return null;
+  let available = lots.reduce((sum, lot) => sum.plus(lot.qty), new Decimal(0));
+  for (const lot of lots) {
+    for (const t of lot.txns) {
+      if (t.type === "SCRAP" || t.type === "ISSUE") available = available.minus(t.qty);
+      if (t.type === "RETURN") available = available.plus(t.qty);
+    }
+  }
+  return available;
+}
