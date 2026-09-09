@@ -84,6 +84,26 @@ export async function recordQcpExecution(
     });
     if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
 
+    // AUD-077 (12_SECURITY_RBAC.md §6): qcpItemId was taken as given and
+    // never checked against the unit's own job — a QcpItem from a different
+    // job (same tenant) could be recorded against this unit, polluting the
+    // inspection record. QcpItem.jobId is the H1 backstop column, already
+    // denormalized from qcpTemplate.jobId by the only two real writers
+    // (job-intake.service.ts's cloneQcpTemplate, scripts/h1-backfill-job-ids.ts)
+    // — null there means a genuine library item (never linked into any job's
+    // processes), which can never legitimately match a real unit.jobId.
+    // Same pattern as dispatch.service.ts's addUnitToBatch.
+    const qcpItem = await tx.qcpItem.findFirst({ where: { id: qcpItemId }, select: { jobId: true } });
+    if (!qcpItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "QcpItem", qcpItemId });
+    if (qcpItem.jobId !== unit.jobId) {
+      throw new AppError(ERROR_CODES.CROSS_JOB_ASSIGNMENT, {
+        qcpItemId,
+        qcpItemJobId: qcpItem.jobId,
+        unitId,
+        unitJobId: unit.jobId,
+      });
+    }
+
     if (result === "NA") {
       const partyCodes = await tx.qcpItemPartyCode.findMany({
         where: { qcpItemId },
