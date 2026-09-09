@@ -284,6 +284,66 @@ describe.skipIf(!RUN_DB)("client-snapshot.service (DB-backed)", async () => {
     expect(rows).toHaveLength(0); // no row left half-verified or re-readable as still-pending
   });
 
+  /**
+   * AUD-073 regression guard: publishSnapshot's per-row write used to be a
+   * plain `upsert`, whose `update` branch had no predicate re-checking
+   * status — so a publish landing between a verify's read and its own write
+   * could silently flip a just-VERIFIED row back to PUBLISHED. Race two real
+   * transactions: T1 verifies today's batch; T2 (a second, concurrent
+   * publishSnapshot) races to land its per-unit write between T1's read and
+   * its own commit. T2 must be refused with SNAPSHOT_ALREADY_VERIFIED (either
+   * from its own `existing` check up front, or — the actual regression this
+   * test guards — from the per-row updateMany/create fallback if the race
+   * window is exactly between T1's commit and T2's write), never silently
+   * reverting the row.
+   */
+  it("a concurrent publishSnapshot cannot revert a row a verifySnapshot just froze to VERIFIED", async () => {
+    const { job } = await fixture();
+    await cleanup(job.id);
+    await publishSnapshot(ph(job.tenantId), { jobId: job.id });
+
+    const results = await Promise.allSettled([
+      verifySnapshot(md(job.tenantId), { jobId: job.id }),
+      publishSnapshot(ph(job.tenantId), { jobId: job.id }),
+    ]);
+    const [verifyResult, publishResult] = results;
+
+    // Whichever interleaving actually happened, the end state must never be
+    // a VERIFIED row reverted to PUBLISHED. If the publish lost the race, it
+    // must have failed with SNAPSHOT_ALREADY_VERIFIED (or the same
+    // SNAPSHOT_PRIOR_DAY_PENDING/whole-batch checks already in place) rather
+    // than silently succeeding after the verify committed.
+    if (verifyResult.status === "fulfilled" && publishResult.status === "rejected") {
+      const code = (publishResult.reason as { code?: string }).code;
+      expect(code).toBe(ERROR_CODES.SNAPSHOT_ALREADY_VERIFIED);
+    }
+
+    const rows = await owner.progressSnapshot.findMany({ where: { jobId: job.id } });
+    expect(rows.every((r) => r.status !== "VERIFIED" || (r.verifiedBy != null && r.verifiedAt != null))).toBe(true);
+    // The invariant that actually matters: no VERIFIED row was ever
+    // observed reverted to PUBLISHED by this test — if a verify committed,
+    // every row it touched must still read VERIFIED now.
+    if (verifyResult.status === "fulfilled") {
+      const verifiedRows = await owner.progressSnapshot.findMany({ where: { jobId: job.id, asOf: verifyResult.value.asOf } });
+      expect(verifiedRows.every((r) => r.status === "VERIFIED")).toBe(true);
+    }
+  });
+
+  it("publishSnapshot behaves exactly as before when run non-concurrently (AUD-073 fix is a no-op on the normal path)", async () => {
+    const { job, unitCount } = await fixture();
+    await cleanup(job.id);
+    const first = await publishSnapshot(ph(job.tenantId), { jobId: job.id });
+    expect(first.unitCount).toBe(unitCount);
+    const rows = await owner.progressSnapshot.findMany({ where: { jobId: job.id, asOf: first.asOf } });
+    expect(rows).toHaveLength(unitCount);
+    expect(rows.every((r) => r.status === "PUBLISHED")).toBe(true);
+
+    // republishing the same day still overwrites in place, same as before
+    const second = await publishSnapshot(ph(job.tenantId), { jobId: job.id });
+    const secondRows = await owner.progressSnapshot.findMany({ where: { jobId: job.id, asOf: second.asOf } });
+    expect(secondRows.map((r) => r.id).sort()).toEqual(rows.map((r) => r.id).sort());
+  });
+
   it("rejectSnapshot moves every row to REJECTED, and a fresh publish flips it back to PUBLISHED", async () => {
     const { job, unitCount } = await fixture();
     await cleanup(job.id);

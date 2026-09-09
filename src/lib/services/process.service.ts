@@ -1,4 +1,4 @@
-import { withTenant, type Tx } from "@/lib/db";
+import { withTenant, withSerializationRetry, type Tx } from "@/lib/db";
 import {
   type Actor,
   assertMakerChecker,
@@ -229,36 +229,67 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
   const { processPlanId } = verifyProcessSchema.parse(input);
   assertNotClientUser(actor);
 
-  return withTenant(actor.tenantId, async (tx) => {
-    const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
-    assertMakerChecker(actor, plan.submittedBy);
-    const to = assertTransition("verify", plan.status);
+  // AUD-072: assertNoOpenHoldPoint/assertNoOpenNcr below are plain reads with
+  // no row lock — under the default READ COMMITTED isolation, a concurrent
+  // transaction opening an NCR/hold point (e.g. a QC rejection) between this
+  // read and this transaction's commit can slip through undetected. Run at
+  // RepeatableRead and retry the whole transaction on a Postgres
+  // serialization failure — see withSerializationRetry's doc comment for the
+  // exact error shape this guards against.
+  //
+  // KNOWN RESIDUAL GAP (confirmed by live reproduction, not assumed): this
+  // closes same-row conflicts (e.g. two concurrent verifies of this exact
+  // ProcessPlan, already serialized today via lockProcessPlanForUpdate's
+  // `FOR UPDATE`, now failing fast with 40001 instead of silently
+  // continuing on the post-commit row). It does NOT close the specific
+  // cross-table race AUD-072 was written against — this transaction only
+  // READS the Ncr/QcpExecution tables and never writes them, while
+  // rejectComponentOperation's transaction only writes them; two
+  // transactions with a single one-directional read-write dependency and no
+  // shared row are a legal serial history (verify-then-reject) under
+  // Postgres's MVCC, so neither RepeatableRead NOR full Serializable aborts
+  // either side (verified against Postgres 16 with both isolation levels).
+  // Actually preventing "verify completes while a reject is landing" needs
+  // pessimistic locking shared with the NCR/hold-point WRITERS
+  // (rejectComponentOperation, dispositionNcr, approveQcpWaiver, …) — e.g. an
+  // advisory lock keyed on (jobId, unitId) taken by both sides — which is
+  // out of this session's scope (see PR description / LEDGER.md entry).
+  return withSerializationRetry(() =>
+    withTenant(
+      actor.tenantId,
+      async (tx) => {
+        const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
+        assertMakerChecker(actor, plan.submittedBy);
+        const to = assertTransition("verify", plan.status);
 
-    const { edges, states } = await loadGate(tx, plan);
-    assertCanComplete(edges, states);
-    await assertNoOpenHoldPoint(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
-    await assertNoOpenNcr(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
-    await assertEvidenceSatisfied(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
+        const { edges, states } = await loadGate(tx, plan);
+        assertCanComplete(edges, states);
+        await assertNoOpenHoldPoint(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
+        await assertNoOpenNcr(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
+        await assertEvidenceSatisfied(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId });
 
-    return audited(tx, actor, async () => {
-      const updated = await tx.processPlan.update({
-        where: { id: plan.id },
-        data: { status: to, actualFinish: new Date(), verifiedBy: actor.userId },
-      });
-      return {
-        result: updated,
-        audit: {
-          action: "process.verify",
-          entityType: "ProcessPlan",
-          entityId: plan.id,
-          before: { status: plan.status, verifiedBy: plan.verifiedBy },
-          after: { status: updated.status, verifiedBy: updated.verifiedBy, actualFinish: updated.actualFinish },
-          eventType: "ProcessVerified",
-          eventPayload: { processPlanId: plan.id, submittedBy: plan.submittedBy, verifiedBy: actor.userId },
-        },
-      };
-    });
-  });
+        return audited(tx, actor, async () => {
+          const updated = await tx.processPlan.update({
+            where: { id: plan.id },
+            data: { status: to, actualFinish: new Date(), verifiedBy: actor.userId },
+          });
+          return {
+            result: updated,
+            audit: {
+              action: "process.verify",
+              entityType: "ProcessPlan",
+              entityId: plan.id,
+              before: { status: plan.status, verifiedBy: plan.verifiedBy },
+              after: { status: updated.status, verifiedBy: updated.verifiedBy, actualFinish: updated.actualFinish },
+              eventType: "ProcessVerified",
+              eventPayload: { processPlanId: plan.id, submittedBy: plan.submittedBy, verifiedBy: actor.userId },
+            },
+          };
+        });
+      },
+      { isolationLevel: "RepeatableRead" },
+    ),
+  );
 }
 
 /**

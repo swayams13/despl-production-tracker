@@ -1,4 +1,4 @@
-import { withTenant, type Tx } from "@/lib/db";
+import { withTenant, withSerializationRetry, type Tx } from "@/lib/db";
 import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -73,45 +73,54 @@ export async function assignUnitToPackage(actor: Actor, input: AssignUnitToPacka
   requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
-  return withTenant(actor.tenantId, async (tx) => {
-    const pkg = await tx.package.findFirst({ where: { id: packageId, job: { tenantId: actor.tenantId } } });
-    if (!pkg) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Package", packageId });
+  // AUD-072: assertUnitHasNoOpenHoldPoint/assertUnitHasNoOpenNcr are plain
+  // reads with no row lock — see process.service.ts's verifyProcess for the
+  // full rationale. RepeatableRead + retry closes the same gap here.
+  return withSerializationRetry(() =>
+    withTenant(
+      actor.tenantId,
+      async (tx) => {
+        const pkg = await tx.package.findFirst({ where: { id: packageId, job: { tenantId: actor.tenantId } } });
+        if (!pkg) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Package", packageId });
 
-    const unit = await tx.unit.findFirst({
-      where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
-      include: { equipment: { select: { jobId: true } } },
-    });
-    if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+        const unit = await tx.unit.findFirst({
+          where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
+          include: { equipment: { select: { jobId: true } } },
+        });
+        if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
 
-    if (unit.equipment.jobId !== pkg.jobId) {
-      throw new AppError(ERROR_CODES.CROSS_JOB_ASSIGNMENT, {
-        unitId,
-        unitJobId: unit.equipment.jobId,
-        packageId,
-        packageJobId: pkg.jobId,
-      });
-    }
+        if (unit.equipment.jobId !== pkg.jobId) {
+          throw new AppError(ERROR_CODES.CROSS_JOB_ASSIGNMENT, {
+            unitId,
+            unitJobId: unit.equipment.jobId,
+            packageId,
+            packageJobId: pkg.jobId,
+          });
+        }
 
-    // S10 — the reverse quality gate: a unit carrying an open NCR or an
-    // uncleared blocking hold point is refused at the earliest point it
-    // could otherwise be sealed into a shippable crate.
-    await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
-    await assertUnitHasNoOpenNcr(tx, unit.id, unit.equipment.jobId);
+        // S10 — the reverse quality gate: a unit carrying an open NCR or an
+        // uncleared blocking hold point is refused at the earliest point it
+        // could otherwise be sealed into a shippable crate.
+        await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
+        await assertUnitHasNoOpenNcr(tx, unit.id, unit.equipment.jobId);
 
-    return audited(tx, actor, async () => {
-      const updated = await tx.unit.update({ where: { id: unit.id }, data: { packageId: pkg.id } });
-      return {
-        result: updated,
-        audit: {
-          action: "unit.assignToPackage",
-          entityType: "Unit",
-          entityId: unit.id,
-          before: { packageId: unit.packageId },
-          after: { packageId: updated.packageId },
-          eventType: "UnitAssignedToPackage",
-          eventPayload: { unitId: unit.id, packageId: pkg.id },
-        },
-      };
-    });
-  });
+        return audited(tx, actor, async () => {
+          const updated = await tx.unit.update({ where: { id: unit.id }, data: { packageId: pkg.id } });
+          return {
+            result: updated,
+            audit: {
+              action: "unit.assignToPackage",
+              entityType: "Unit",
+              entityId: unit.id,
+              before: { packageId: unit.packageId },
+              after: { packageId: updated.packageId },
+              eventType: "UnitAssignedToPackage",
+              eventPayload: { unitId: unit.id, packageId: pkg.id },
+            },
+          };
+        });
+      },
+      { isolationLevel: "RepeatableRead" },
+    ),
+  );
 }

@@ -351,6 +351,58 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     expect(resumed.status).toBe("IN_PROGRESS");
     expect(await auditCount(planC)).toBe(before + 2);
   });
+
+  /**
+   * AUD-072 — genuine two-transaction race, not simulated: two different QC
+   * checkers call verifyProcess on the SAME SUBMITTED plan at once.
+   * lockProcessPlanForUpdate's `SELECT ... FOR UPDATE` already forced the
+   * loser to wait for the winner's row lock even before this session (so the
+   * end state was always correct — never a double-COMPLETE); what
+   * RepeatableRead (this session's change) does differently is HOW the
+   * loser finds out: at READ COMMITTED it would silently re-read the
+   * winner's committed row and continue; at RepeatableRead, Postgres instead
+   * raises a 40001 serialization failure at the lock wait, which
+   * withSerializationRetry catches and retries the whole transaction — the
+   * retry then correctly re-reads COMPLETE and refuses cleanly. Verifies the
+   * outcome is unchanged (one winner, one clean refusal, exactly one audit
+   * row) with the new mechanism wired in.
+   */
+  it("AUD-072: concurrent verify race on the same plan — one wins, the other is cleanly refused, never double-verified", async () => {
+    const deptA = await owner.department.findFirstOrThrow({ where: { tenantId, code: "A" } });
+    const run = await owner.scheduleRun.findFirstOrThrow({ where: { jobId } });
+    const jp = await owner.jobProcess.create({
+      data: { jobId, seq: 40, code: "40", name: "RaceTest", departmentId: deptA.id },
+    });
+    const plan = await owner.processPlan.create({
+      data: { jobId, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: deptA.id, status: "NOT_STARTED" },
+    });
+    await startProcess(supA, { processPlanId: plan.id });
+    await submitProcess(supA, { processPlanId: plan.id });
+
+    const userQc2 = await owner.user.create({
+      data: { tenantId, email: `qc2-${Date.now()}@x`, username: `qc2-${Date.now()}`, name: "Qc2", passwordHash: "x" },
+    });
+    const qc2: Actor = { ...qc, userId: userQc2.id, name: "Qc2", email: `qc2-${Date.now()}@x` };
+
+    const results = await Promise.allSettled([
+      verifyProcess(qc, { processPlanId: plan.id }),
+      verifyProcess(qc2, { processPlanId: plan.id }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(isAppError(rejected[0].reason) && rejected[0].reason.code).toBe(ERROR_CODES.INVALID_STATE_TRANSITION);
+
+    const final = await owner.processPlan.findUniqueOrThrow({ where: { id: plan.id } });
+    expect(final.status).toBe("COMPLETE");
+    // Exactly one verify audit row — a retried-then-successful duplicate
+    // would show up here as two.
+    const verifyAuditRows = await owner.auditLog.count({
+      where: { tenantId, entityType: "ProcessPlan", entityId: String(plan.id), action: "process.verify" },
+    });
+    expect(verifyAuditRows).toBe(1);
+  });
 });
 
 /**

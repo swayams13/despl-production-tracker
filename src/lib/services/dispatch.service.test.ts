@@ -404,6 +404,35 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     );
   });
 
+  /**
+   * AUD-072 — genuine two-transaction race on the SAME DispatchBatch row:
+   * lockDispatchBatchForUpdate's `SELECT ... FOR UPDATE` already forces the
+   * loser to wait for the winner's lock; at RepeatableRead (this session's
+   * change) the loser gets a 40001 the moment it wakes up onto a row that
+   * changed since its snapshot began, instead of silently continuing on the
+   * post-commit row — withSerializationRetry retries it transparently, and
+   * the retry then correctly sees RELEASED and refuses with
+   * INVALID_STATE_TRANSITION instead of double-approving the release.
+   */
+  it("AUD-072: concurrent approveDispatchRelease race on the same batch — one wins, the other is cleanly refused", async () => {
+    const { tenantId, job, user } = await fixture();
+    const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+    const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+
+    const results = await Promise.allSettled([
+      approveDispatchRelease(ph, { dispatchBatchId: batch.id }),
+      approveDispatchRelease(ph, { dispatchBatchId: batch.id }),
+    ]);
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(isAppError(rejected[0].reason) && rejected[0].reason.code).toBe(ERROR_CODES.INVALID_STATE_TRANSITION);
+
+    const final = await owner.dispatchBatch.findUniqueOrThrow({ where: { id: batch.id } });
+    expect(final.releaseApprovedAt).not.toBeNull();
+  });
+
   it("approveDispatchRelease refuses a non-Production-Head, non-Admin caller (FORBIDDEN)", async () => {
     const { tenantId, job, user } = await fixture();
     const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
