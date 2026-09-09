@@ -247,6 +247,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPredecessorStates — per-unit i
           unitId: unitA.id,
           ownerDepartmentId: predProcess.departmentId,
           status: "COMPLETE",
+          // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish here.
+          actualFinish: new Date(),
         },
       });
       await tx.processPlan.create({

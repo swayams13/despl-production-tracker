@@ -179,7 +179,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPortfolio — verifiedLast24h fr
       data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date("2026-01-01"), isCurrent: true },
     });
     const plan = await owner.processPlan.create({
-      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
+      // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish when status=COMPLETE.
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE", actualFinish: new Date() },
     });
 
     // Inside the rolling 24h window — must count.

@@ -437,7 +437,8 @@ describe.skipIf(!RUN_DB)("S1: excluded process does not deadlock its successor (
     // No ProcessPlan is created for jpB — mirrors generateSchedule, which
     // never materialises a plan for an included:false JobProcess.
     await owner.processPlan.create({
-      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpA.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE" },
+      // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish when status=COMPLETE.
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jpA.id, unitId: null, ownerDepartmentId: dept.id, status: "COMPLETE", actualFinish: new Date() },
     });
     planC = (
       await owner.processPlan.create({

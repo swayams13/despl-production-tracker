@@ -106,6 +106,11 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ladder (DB-backed, isolated fixtur
       data: {
         ...(patch.status ? { status: patch.status as never } : {}),
         ...(patch.plannedFinish ? { plannedFinish: patch.plannedFinish } : {}),
+        // AUD-006: process_plans_complete_has_finish CHECK constraint now requires
+        // actual_finish whenever status=COMPLETE — this fixture sets status directly
+        // (not through the real verifyProcess path, which stamps both atomically),
+        // so it must stamp actualFinish too. Cleared on any non-COMPLETE reset.
+        ...(patch.status === "COMPLETE" ? { actualFinish: new Date() } : patch.status ? { actualFinish: null } : {}),
       },
     });
   }

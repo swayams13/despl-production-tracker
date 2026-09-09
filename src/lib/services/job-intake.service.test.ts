@@ -764,6 +764,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
           jobProcessId: jp.id,
           ownerDepartmentId: jp.departmentId,
           status: planStatuses[i],
+          // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish when status=COMPLETE.
+          actualFinish: planStatuses[i] === "COMPLETE" ? new Date() : null,
         },
       });
     }
