@@ -64,7 +64,7 @@ export async function loadEvents(
              u.serial_no AS serial_no,
              NULL::text  AS category_name
       FROM domain_events de
-      LEFT JOIN process_plans pp ON pp.id = de.aggregate_id::int
+      LEFT JOIN process_plans pp ON pp.id::text = de.aggregate_id
       LEFT JOIN job_processes jp ON jp.id = pp.job_process_id
       LEFT JOIN units u          ON u.id = pp.unit_id
       LEFT JOIN users usr        ON usr.id = de.actor_id
@@ -79,7 +79,7 @@ export async function loadEvents(
              u.serial_no AS serial_no,
              dc.name     AS category_name
       FROM domain_events de
-      JOIN delay_reasons dr           ON dr.id = de.aggregate_id::int
+      JOIN delay_reasons dr           ON dr.id::text = de.aggregate_id
       LEFT JOIN delay_category_refs dc ON dc.id = dr.category_id
       LEFT JOIN process_plans pp      ON pp.id = dr.process_plan_id
       LEFT JOIN job_processes jp      ON jp.id = pp.job_process_id

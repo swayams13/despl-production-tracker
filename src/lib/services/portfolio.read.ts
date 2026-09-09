@@ -66,7 +66,7 @@ export async function loadPortfolio(actor: Actor): Promise<Portfolio> {
           SELECT j.id AS job_id,
                  (SELECT count(*)::int
                     FROM domain_events de
-                    JOIN process_plans pp ON pp.id = de.aggregate_id::int
+                    JOIN process_plans pp ON pp.id::text = de.aggregate_id
                     JOIN job_processes jp ON jp.id = pp.job_process_id
                    WHERE de.aggregate_type = 'ProcessPlan'
                      AND de.type = 'ProcessVerified'
