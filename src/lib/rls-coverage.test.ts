@@ -19,30 +19,17 @@ import { prisma } from "@/lib/db";
  * new job-owned table without wiring its tenant floor now fails this test
  * instead of reproducing AUD-001 silently.
  *
- * KNOWN_UNPROTECTED_JOB_TABLES below is a live, load-bearing allowlist, not
- * decoration: switching the query from tenant_id to job_id surfaced 9 tables
- * (equipments, job_processes, schedule_runs, qcp_templates, weld_joints,
- * weld_logs, assembly_drawings, dispatch_batches, packages) that carry job_id
- * and have ZERO RLS of any kind — these predate H1 and were never part of its
- * 28-table backstop. This is AUD-080, an already-identified, explicitly
- * separate follow-up session (Session 17) — fixing it is out of scope here
- * (see this session's own brief). Without the allowlist this test would fail
- * CI immediately on a pre-existing, already-tracked gap instead of on a *new*
- * one, which defeats the point. When AUD-080 lands, delete the entry (and,
- * once the list is empty, delete the allowlist mechanism itself) rather than
- * adding to it — growing this list is itself a signal something regressed.
+ * KNOWN_UNPROTECTED_JOB_TABLES was a live, load-bearing allowlist for the 9
+ * tables AUD-080 has now enrolled (equipments, job_processes, schedule_runs,
+ * qcp_templates, weld_joints, weld_logs, assembly_drawings, dispatch_batches,
+ * packages — see prisma/migrations/20260909140000_aud080_job_isolation_
+ * remaining_tables through 20260909180000_aud080_tenant_id_autofill_trigger).
+ * Per its own instruction ("delete the entry... once the list is empty,
+ * delete the allowlist mechanism itself"), the mechanism is removed now that
+ * it's empty — a future job-grain table landing with no policy fails this
+ * test directly instead of needing a new allowlist entry first.
  */
-const KNOWN_UNPROTECTED_JOB_TABLES = new Set([
-  "equipments",
-  "job_processes",
-  "schedule_runs",
-  "qcp_templates",
-  "weld_joints",
-  "weld_logs",
-  "assembly_drawings",
-  "dispatch_batches",
-  "packages",
-]);
+const KNOWN_UNPROTECTED_JOB_TABLES = new Set<string>([]);
 
 describe.skipIf(!process.env.RUN_DB_TESTS)("tenant RLS coverage (DB)", () => {
   it("every table with a job_id column has RLS enabled, job_isolation, and a tenant_isolation policy (except the tracked AUD-080 gap)", async () => {
