@@ -312,19 +312,19 @@ describe.skipIf(!RUN_DB)("recordQcpExecution + approveQcpWaiver — NA/waiver ga
     });
 
     const holdItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Hydrotest witness" },
+      data: { qcpTemplateId: qcpTemplate.id, jobId, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Hydrotest witness" },
     });
     await owner.qcpItemPartyCode.create({ data: { qcpItemId: holdItem.id, inspectionPartyId: party.id, qcpCodeId: holdCode.id } });
     holdItemId = holdItem.id;
 
     const witnessItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 2, srNo: "2", kind: "CHECKPOINT", activity: "10% witness point" },
+      data: { qcpTemplateId: qcpTemplate.id, jobId, sequence: 2, srNo: "2", kind: "CHECKPOINT", activity: "10% witness point" },
     });
     await owner.qcpItemPartyCode.create({ data: { qcpItemId: witnessItem.id, inspectionPartyId: party.id, qcpCodeId: witnessCode.id } });
     witnessItemId = witnessItem.id;
 
     const untouchedItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 3, srNo: "3", kind: "CHECKPOINT", activity: "Never inspected" },
+      data: { qcpTemplateId: qcpTemplate.id, jobId, sequence: 3, srNo: "3", kind: "CHECKPOINT", activity: "Never inspected" },
     });
     await owner.qcpItemPartyCode.create({ data: { qcpItemId: untouchedItem.id, inspectionPartyId: party.id, qcpCodeId: untouchedCode.id } });
     untouchedItemId = untouchedItem.id;
@@ -400,6 +400,156 @@ describe.skipIf(!RUN_DB)("recordQcpExecution + approveQcpWaiver — NA/waiver ga
     await expectCode(
       approveQcpWaiver(phActor, { qcpItemId: witnessItemId, unitId }),
       ERROR_CODES.INVALID_STATE_TRANSITION,
+    );
+  });
+});
+
+/**
+ * AUD-077 (12_SECURITY_RBAC.md §6 — the finding's own numbering; this
+ * session's brief inverted 077/078 relative to that doc and
+ * `19_MASTER_ISSUE_REGISTER.md`, which are treated as canonical): before
+ * this fix, `recordQcpExecution` took `qcpItemId` as given and never
+ * checked it belonged to `unitId`'s own job. Two jobs under the SAME tenant
+ * — the case AUD-078's future tenantId/RLS work does not cover on its own —
+ * each with their own QcpTemplate/QcpItem chain, deliberately constructed so
+ * job2's item can be tried against job1's unit.
+ */
+describe.skipIf(!RUN_DB)("recordQcpExecution — cross-job qcpItemId is refused (AUD-077)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const { recordQcpExecution } = await import("./qcp.service");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  async function expectCode(p: Promise<unknown>, expected: string): Promise<void> {
+    let thrown: unknown;
+    try {
+      await p;
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isAppError(thrown) && thrown.code).toBe(expected);
+  }
+
+  let tenantId = 0;
+  let qcActor: Actor;
+  let unit1Id = 0;
+  let item1Id = 0; // belongs to job1, same job as unit1
+  let item2Id = 0; // belongs to job2 — a different job, same tenant
+  let libraryItemId = 0; // belongs to no job at all (jobId null)
+  let libraryTemplateId = 0;
+
+  async function makeJobWithItem(tenantId: number, tag: string) {
+    const client = await owner.client.create({
+      data: { tenantId, name: `ACME-${tag}`, code: `ACME-${tag}-${Date.now()}-${Math.random()}` },
+    });
+    const family = await owner.productFamily.create({ data: { tenantId, code: `PV-${tag}`, name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: `T-${tag}` } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-aud077-${tag}-${Date.now()}-${Math.random()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DE-AUD077-${tag}-${Date.now()}-${Math.random()}`,
+      },
+    });
+    const equipment = await owner.equipment.create({ data: { jobId: job.id, name: `Vessel-${tag}` } });
+    const unit = await owner.unit.create({ data: { jobId: job.id, equipmentId: equipment.id, serialNo: "01" } });
+    const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: tag, vessel: tag } });
+    const item = await owner.qcpItem.create({
+      data: { qcpTemplateId: qcpTemplate.id, jobId: job.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Check" },
+    });
+    return { jobId: job.id, unitId: unit.id, itemId: item.id, qcpTemplateId: qcpTemplate.id };
+  }
+
+  async function deleteOrgAndChildren(tenantId: number) {
+    await owner.qcpExecution.deleteMany({ where: { job: { tenantId } } });
+    await owner.qcpItem.deleteMany({ where: { qcpTemplate: { job: { tenantId } } } });
+    await owner.qcpTemplate.deleteMany({ where: { job: { tenantId } } });
+    await owner.unit.deleteMany({ where: { equipment: { job: { tenantId } } } });
+    await owner.equipment.deleteMany({ where: { job: { tenantId } } });
+    await owner.job.deleteMany({ where: { tenantId } });
+    await owner.processTemplateVersion.deleteMany({ where: { template: { tenantId } } });
+    await owner.processTemplate.deleteMany({ where: { tenantId } });
+    await owner.productFamily.deleteMany({ where: { tenantId } });
+    await owner.client.deleteMany({ where: { tenantId } });
+    await owner.user.deleteMany({ where: { tenantId } });
+    await owner.organization.delete({ where: { id: tenantId } });
+  }
+
+  beforeAll(async () => {
+    const org = await owner.organization.create({
+      data: { code: `TEST-AUD077-${Date.now()}-${Math.random()}`, name: "AUD-077 cross-job test" },
+    });
+    tenantId = org.id;
+
+    const job1 = await makeJobWithItem(tenantId, "J1");
+    const job2 = await makeJobWithItem(tenantId, "J2");
+    unit1Id = job1.unitId;
+    item1Id = job1.itemId;
+    item2Id = job2.itemId;
+
+    // A genuine library item — no owning job at all — must also be refused
+    // against a real unit; it is never linked into any job's processes and
+    // recordQcpExecution against it would be meaningless.
+    const libraryTemplate = await owner.qcpTemplate.create({ data: { jobId: null, jobLabel: "LIB", vessel: "LIB" } });
+    const libraryItem = await owner.qcpItem.create({
+      data: { qcpTemplateId: libraryTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Library check" },
+    });
+    libraryItemId = libraryItem.id;
+    libraryTemplateId = libraryTemplate.id;
+
+    const qcUser = await owner.user.create({
+      data: {
+        tenantId,
+        email: `qc-aud077-${Date.now()}-${Math.random()}@test.local`,
+        username: `qc-aud077-${Date.now()}-${Math.random()}`,
+        passwordHash: "x",
+        name: "Test QC",
+        themePreference: "SYSTEM",
+      },
+    });
+    qcActor = {
+      userId: qcUser.id,
+      tenantId,
+      clientId: null,
+      name: qcUser.name,
+      email: qcUser.email,
+      roles: [ROLES.QC],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+  });
+
+  afterAll(async () => {
+    if (libraryItemId) await owner.qcpItem.delete({ where: { id: libraryItemId } }).catch(() => {});
+    if (libraryTemplateId) await owner.qcpTemplate.delete({ where: { id: libraryTemplateId } }).catch(() => {});
+    if (tenantId) await deleteOrgAndChildren(tenantId).catch(() => {});
+    await owner.$disconnect();
+  });
+
+  it("3: qcpItemId whose owning job matches unitId's job succeeds, unchanged from today", async () => {
+    const exec = await recordQcpExecution(qcActor, { qcpItemId: item1Id, unitId: unit1Id, result: "ACCEPTED" });
+    expect(exec.result).toBe("ACCEPTED");
+  });
+
+  it("4: qcpItemId whose owning job does NOT match unitId's job is refused — CROSS_JOB_ASSIGNMENT, no row created", async () => {
+    const before = await owner.qcpExecution.count({ where: { qcpItemId: item2Id, unitId: unit1Id } });
+    await expectCode(
+      recordQcpExecution(qcActor, { qcpItemId: item2Id, unitId: unit1Id, result: "ACCEPTED" }),
+      ERROR_CODES.CROSS_JOB_ASSIGNMENT,
+    );
+    const after = await owner.qcpExecution.count({ where: { qcpItemId: item2Id, unitId: unit1Id } });
+    expect(after).toBe(before);
+  });
+
+  it("a genuine library item (jobId null) is also refused against a real unit", async () => {
+    await expectCode(
+      recordQcpExecution(qcActor, { qcpItemId: libraryItemId, unitId: unit1Id, result: "ACCEPTED" }),
+      ERROR_CODES.CROSS_JOB_ASSIGNMENT,
     );
   });
 });

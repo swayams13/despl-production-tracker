@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadJobs } from "./jobs.read";
 import { ROLES, type Actor } from "@/lib/authz";
 
@@ -61,5 +61,101 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadJobs — pagination (DB)", async
     } finally {
       await owner.$disconnect();
     }
+  });
+});
+
+/**
+ * Session 14 (AUD-028/AUD-059): `lastActivityAt`'s two `domain_events` UNION
+ * branches (jobs.read.ts:125,134) used to join with
+ * `de.aggregate_id::int = pp.id` / `dr.id` — casting the polymorphic text
+ * column itself instead of casting the int column to text. Fixed to
+ * `pp.id::text = de.aggregate_id` / `dr.id::text = de.aggregate_id`, matching
+ * reports.read.ts/myday.read.ts's reference pattern. Fresh tenant per file
+ * (delay.service.test.ts's shape) so this is independent of shared-seed
+ * drift and of the other describe blocks above.
+ */
+describe.skipIf(!process.env.RUN_DB_TESTS)("loadJobs — lastActivityAt from domain_events (DB, AUD-028/059)", async () => {
+  const { PrismaClient } = await import("@/generated/prisma/client");
+  const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+
+  let tenantId = 0;
+  let jobId = 0;
+  let planId = 0;
+  let delayReasonId = 0;
+  let planEventAt: Date;
+  let delayEventAt: Date;
+
+  beforeAll(async () => {
+    const org = await owner.organization.create({ data: { code: `JOBSACT-${Date.now()}`, name: "jobs.read activity test" } });
+    tenantId = org.id;
+    const dept = await owner.department.create({ data: { tenantId, code: "PROD", name: "Production" } });
+    const client = await owner.client.create({ data: { tenantId, name: "ACME", code: `ACME-${Date.now()}` } });
+    const family = await owner.productFamily.create({ data: { tenantId, code: "PRESSURE_VESSEL", name: "PV" } });
+    const template = await owner.processTemplate.create({ data: { tenantId, familyId: family.id, name: "PV Template" } });
+    const tv = await owner.processTemplateVersion.create({ data: { templateId: template.id, version: 1 } });
+    const user = await owner.user.create({ data: { tenantId, email: `jobsact-${Date.now()}@x`, username: `jobsact-${Date.now()}`, name: "Filer", passwordHash: "x" } });
+    const category = await owner.delayCategoryRef.create({ data: { tenantId, code: "MATERIAL", name: "Material shortage" } });
+
+    const job = await owner.job.create({
+      data: {
+        tenantId,
+        publicId: `pub-jobsact-${Date.now()}`,
+        clientId: client.id,
+        familyId: family.id,
+        templateVersionId: tv.id,
+        jobNumber: `DESPL-JOBSACT-${Date.now()}`,
+      },
+    });
+    jobId = job.id;
+    const jp = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 10, code: "10", name: "Rolling", departmentId: dept.id },
+    });
+    const run = await owner.scheduleRun.create({
+      data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date("2026-01-01"), isCurrent: true },
+    });
+    const plan = await owner.processPlan.create({
+      data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status: "IN_PROGRESS" },
+    });
+    planId = plan.id;
+    const delayReason = await owner.delayReason.create({
+      data: { processPlanId: plan.id, categoryId: category.id, filedBy: user.id, jobId: job.id },
+    });
+    delayReasonId = delayReason.id;
+
+    // Two branches — ProcessPlan event 5 minutes ago, DelayReason event now
+    // (the later of the two) — so lastActivityAt must reflect the DelayReason
+    // branch's max(), proving the UNION ALL still merges correctly post-fix.
+    planEventAt = new Date(Date.now() - 5 * 60 * 1000);
+    delayEventAt = new Date();
+    await owner.domainEvent.create({
+      data: { tenantId, aggregateType: "ProcessPlan", aggregateId: String(planId), type: "ProcessStarted", payload: {}, at: planEventAt },
+    });
+    await owner.domainEvent.create({
+      data: { tenantId, aggregateType: "DelayReason", aggregateId: String(delayReasonId), type: "DelayReasonFiled", payload: {}, at: delayEventAt },
+    });
+
+    // A domain_events row for a THIRD, unrelated aggregate type carrying a
+    // deliberately non-numeric aggregate_id. Before the fix, `de.aggregate_id
+    // ::int` cast the column itself — Postgres could attempt (and fail) that
+    // cast against this row depending on predicate evaluation order, even
+    // though it belongs to neither UNION branch's aggregate_type. After the
+    // fix, only `pp.id`/`dr.id` (real ints) are ever cast, so this row is
+    // inert no matter when the planner touches it. Proves AUD-059.
+    await owner.domainEvent.create({
+      data: { tenantId, aggregateType: "DispatchBatch", aggregateId: "not-a-number-abc", type: "DispatchPacked", payload: {}, at: new Date() },
+    });
+  });
+
+  afterAll(async () => {
+    await owner.$disconnect();
+  });
+
+  it("reflects the later of the two UNION branches without throwing on the unrelated non-numeric row", async () => {
+    const list = await loadJobs(actor({ tenantId }));
+    const row = list.find((j) => j.id === jobId);
+    expect(row).toBeDefined();
+    expect(row!.lastActivityAt).not.toBeNull();
+    // Within 1s of the DelayReason event (the later one) — not the earlier ProcessPlan one.
+    expect(Math.abs(new Date(row!.lastActivityAt!).getTime() - delayEventAt.getTime())).toBeLessThan(1000);
   });
 });
