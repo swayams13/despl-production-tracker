@@ -141,14 +141,15 @@ describe.skipIf(!RUN_DB)("v_unit_stage_status ignores excluded JobProcess rows (
 
   it("test 2: a stage shared with an excluded process still reaches 'complete' once the included process finishes", async () => {
     expect((await rollup(SHARED_STAGE))[0]?.fill_status).toBe("idle"); // NOT_STARTED baseline
-    await owner.processPlan.update({ where: { id: planIncludedShared }, data: { status: "COMPLETE" } });
+    // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish when status=COMPLETE.
+    await owner.processPlan.update({ where: { id: planIncludedShared }, data: { status: "COMPLETE", actualFinish: new Date() } });
     // Pre-fix: the excluded sibling's NULL status kept `IS DISTINCT FROM 'COMPLETE'`
     // count above zero, so this was stuck at 'progress' forever, never 'complete'.
     expect((await rollup(SHARED_STAGE))[0]?.fill_status).toBe("complete");
   });
 
   it("test 3: percent-complete counts only included processes, reaching 100% once they finish", async () => {
-    await owner.processPlan.update({ where: { id: planIncludedControl }, data: { status: "COMPLETE" } });
+    await owner.processPlan.update({ where: { id: planIncludedControl }, data: { status: "COMPLETE", actualFinish: new Date() } });
     // planIncludedShared was already set COMPLETE in test 2; both included plans
     // done, and the excluded siblings never had a ProcessPlan row to weigh in.
     expect(await percentComplete([planIncludedShared, planIncludedControl])).toBe(100);

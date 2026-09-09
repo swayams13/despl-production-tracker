@@ -309,6 +309,8 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
         status,
         ownerDepartmentId: department.id,
         jobId: job.id,
+        // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish when status=COMPLETE.
+        actualFinish: status === "COMPLETE" ? new Date() : null,
       },
     });
   }

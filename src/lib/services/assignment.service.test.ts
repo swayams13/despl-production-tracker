@@ -121,6 +121,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("assignment service — claim/assign/
         unitId: null,
         ownerDepartmentId: deptId,
         status,
+        // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish when status=COMPLETE.
+        actualFinish: status === "COMPLETE" ? new Date() : null,
       },
     });
   }

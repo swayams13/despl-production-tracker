@@ -56,7 +56,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("admin.read — Employees table exten
         data: { jobId: job.id, seq: seq++, code: String(seq), name: "Test process", departmentId: dept.id },
       });
       return owner.processPlan.create({
-        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status, assigneeUserId },
+        // AUD-006: process_plans_complete_has_finish CHECK requires actualFinish when status=COMPLETE.
+        data: { jobId: job.id, scheduleRunId: run.id, jobProcessId: jp.id, unitId: null, ownerDepartmentId: dept.id, status, assigneeUserId, actualFinish: status === "COMPLETE" ? new Date() : null },
       });
     };
 
