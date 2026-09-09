@@ -765,7 +765,20 @@ describe.skipIf(!RUN_DB)("qcp.service — library authoring (DB)", async () => {
   });
 
   it("refuses to add an item to a job-owned template — authoring is library-only", async () => {
-    const jobOwnedTemplate = await owner.qcpTemplate.findFirstOrThrow({ where: { jobId: { not: null } } });
+    // AUD-080 (9 Sep 2026): this lookup used to have no tenant/job scoping at
+    // all — a bare findFirst with no ORDER BY, relying on despl_test's
+    // implicit row order to land on a same-tenant row. That assumption broke
+    // the moment any bulk UPDATE touched qcp_templates (this session's own
+    // tenant_id backfill did exactly that across all 318 job-owned rows),
+    // since Postgres gives no ordering guarantee without ORDER BY — the query
+    // started returning an arbitrary OTHER tenant's row, which is correctly
+    // refused as NOT_FOUND by addQcpItemToLibraryTemplate's own tenant check,
+    // not the VALIDATION_FAILED this test intends to exercise. Scope
+    // explicitly to actor()'s own tenant so the test is deterministic
+    // regardless of what else exists in the shared despl_test database.
+    const jobOwnedTemplate = await owner.qcpTemplate.findFirstOrThrow({
+      where: { jobId: { not: null }, job: { tenantId: actor().tenantId } },
+    });
     await expectRejects(
       addQcpItemToLibraryTemplate(actor(), {
         qcpTemplateId: jobOwnedTemplate.id,
