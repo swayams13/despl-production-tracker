@@ -392,7 +392,7 @@ model Role {
   code     String
   name     String
 
-  tenant Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Organization @relation(fields: [tenantId], references: [id])
   users  UserRole[]
 
   @@unique([tenantId, code])
@@ -699,7 +699,7 @@ model WorkOrderStage {
   stageNo  Int    @map("stage_no")
   name     String
 
-  tenant Organization  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Organization  @relation(fields: [tenantId], references: [id])
   family ProductFamily @relation(fields: [familyId], references: [id])
 
   @@unique([tenantId, familyId, stageNo])
@@ -2480,7 +2480,7 @@ model Notification {
   readAt      DateTime? @map("read_at")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  tenant Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Organization @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId])
   @@index([recipientId, readAt])
