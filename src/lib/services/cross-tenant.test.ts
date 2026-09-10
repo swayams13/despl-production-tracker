@@ -77,7 +77,14 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("cross-tenant write/read holes (DB, a
     });
     const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "Test QAP", vessel: "Air Receiver" } });
     const qcpItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1.1", kind: "CHECKPOINT", activity: "Visual weld inspection" },
+      data: {
+        qcpTemplateId: qcpTemplate.id,
+        tenantId,
+        sequence: 1,
+        srNo: "1.1",
+        kind: "CHECKPOINT",
+        activity: "Visual weld inspection",
+      },
     });
     const jobProcess = await owner.jobProcess.create({
       data: { jobId: job.id, seq: 1, code: "1", name: "Receipt", departmentId: dept.id },

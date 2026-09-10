@@ -337,6 +337,10 @@ async function seedQcpTemplate(
   const qcpTemplate = await tx.qcpTemplate.create({
     data: {
       jobId: spec.jobId,
+      // AUD-078: tenantId NOT NULL. The aud001_derive_tenant_id trigger
+      // overwrites this from jobId when spec.jobId is set; this script only
+      // ever seeds one tenant, so passing it explicitly is correct either way.
+      tenantId: refs.tenantId,
       jobLabel: spec.jobLabel,
       vessel: spec.vessel,
       revision: spec.revision ?? 0,
@@ -354,7 +358,9 @@ async function seedQcpTemplate(
   // autoincrement values, same as every other seeded row in this file.
   const partyIdByCode = new Map<string, number>();
   for (const code of spec.parties) {
-    const party = await tx.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code } });
+    const party = await tx.inspectionParty.create({
+      data: { qcpTemplateId: qcpTemplate.id, tenantId: refs.tenantId, code },
+    });
     partyIdByCode.set(code, party.id);
   }
 
@@ -370,6 +376,7 @@ async function seedQcpTemplate(
     data: spec.items.map((item, i) => ({
       id: itemIds[i],
       qcpTemplateId: qcpTemplate.id,
+      tenantId: refs.tenantId,
       sequence: i + 1,
       srNo: item.srNo,
       kind: item.kind as QcpItemKind,
@@ -384,7 +391,7 @@ async function seedQcpTemplate(
     })),
   });
 
-  const partyCodeRows: { qcpItemId: number; inspectionPartyId: number; qcpCodeId: number }[] = [];
+  const partyCodeRows: { qcpItemId: number; inspectionPartyId: number; qcpCodeId: number; tenantId: number }[] = [];
   const processLinkRows: { jobId: number; qcpItemId: number; jobProcessId: number }[] = [];
   spec.items.forEach((item, i) => {
     const qcpItemId = itemIds[i];
@@ -394,7 +401,7 @@ async function seedQcpTemplate(
         if (!inspectionPartyId) throw new Error(`QcpItem ${item.srNo}: unknown party "${partyCode}"`);
         const qcpCodeId = refs.qcpCodeIdByCode.get(code);
         if (!qcpCodeId) throw new Error(`QcpItem ${item.srNo}: unknown QCP code "${code}"`);
-        partyCodeRows.push({ qcpItemId, inspectionPartyId, qcpCodeId });
+        partyCodeRows.push({ qcpItemId, inspectionPartyId, qcpCodeId, tenantId: refs.tenantId });
       }
     }
     if (spec.jobProcessIdByCode) {

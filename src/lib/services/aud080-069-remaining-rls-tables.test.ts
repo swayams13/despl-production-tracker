@@ -7,10 +7,12 @@ import { afterAll, describe, expect, it } from "vitest";
  * proves existence; this proves behavior, same split as
  * aud001-tenant-isolation-rls.test.ts vs rls-coverage.test.ts).
  *
- * Covers a representative slice, not all nine: `equipments` (a strict,
- * NOT-NULL tenant_id table) and `qcp_templates` (the one library-exempt,
- * nullable tenant_id table in this batch — same shape as qcp_items/
- * inspection_parties/qcp_item_party_codes from the AUD-001 batch).
+ * Covers a representative slice, not all nine: `equipments` and
+ * `qcp_templates`, both strict NOT-NULL tenant_id tables. `qcp_templates`
+ * was library-exempt (nullable, fail-open for `tenant_id IS NULL`) when this
+ * file was first written; AUD-078 closed that — see
+ * aud078-qcp-library-tenant-isolation.test.ts for the library-row behavior
+ * this batch's own tests never exercised (every fixture here is job-owned).
  *
  * AUD-069 — proves the four job FKs off qcp_templates/qcp_items/
  * inspection_parties/qcp_item_party_codes now RESTRICT job deletion instead
@@ -129,7 +131,7 @@ describe.skipIf(!RUN_DB)("AUD-080 RLS on the remaining nine tables + AUD-069 QCP
     expect(rows).toHaveLength(0);
   });
 
-  it("library-exempt table (qcp_templates): a real job-owned row is still tenant-scoped", async () => {
+  it("qcp_templates: a real job-owned row is tenant-scoped", async () => {
     const a = await fixture("A5");
     const b = await fixture("B5");
     await withTenant(a.tenantId, async (tx) => {

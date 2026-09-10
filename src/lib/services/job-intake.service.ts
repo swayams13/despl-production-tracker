@@ -530,13 +530,11 @@ async function cloneQcpTemplate(
   tenantId: number,
 ): Promise<{ qcpTemplateId: number; itemCount: number; unmatchedProcessCodes: string[] }> {
   const source = await tx.qcpTemplate.findFirst({
-    // Anchored through job → tenant: qcp_templates is a job-child with no
-    // tenant_id of its own, so a bare findUnique would happily return another
-    // tenant's row (the ProcessPlan lesson in _shared.ts).
-    where: {
-      id: sourceId,
-      OR: [{ job: { tenantId } }, { jobId: null }],
-    },
+    // AUD-078: qcp_templates now carries its own real tenant_id (job-owned
+    // rows via the derive trigger, library rows set directly at authoring
+    // time) — a bare findUnique would still happily return another
+    // tenant's row (the ProcessPlan lesson in _shared.ts), so filter on it.
+    where: { id: sourceId, tenantId },
     include: {
       parties: true,
       items: {

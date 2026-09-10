@@ -2207,15 +2207,19 @@ model QcpTemplate {
   vessel     String
   revision   Int     @default(0)
   designCode String? @map("design_code")
-  /// AUD-080: nullable, mirroring qcpItem/inspectionParty/qcpItemPartyCode —
-  /// a genuine library row (jobId IS NULL) has no owning job and therefore no
-  /// tenant to derive one from. The BEFORE INSERT trigger
-  /// (aud001_derive_tenant_id, reused as-is by AUD-080) sets this from job_id when present; when
-  /// job_id is null this stays whatever was supplied (normally null).
-  tenantId   Int?    @map("tenant_id")
+  /// AUD-078: NOT NULL. The BEFORE INSERT trigger (aud001_derive_tenant_id)
+  /// derives this from job_id when present; for a genuine library row
+  /// (jobId IS NULL) there is no job to derive from, so the app must supply
+  /// a real tenantId at create time (createQcpTemplateLibrary does). The
+  /// `@default(0)` placeholder only exists so Prisma treats this as
+  /// optional on job-owned creates that rely on the trigger — 0 is never
+  /// actually persisted there. Library templates used to leave this null
+  /// and were readable/clonable by every tenant; the 3 pre-existing rows
+  /// were backfilled from their creator's audit_log entry.
+  tenantId   Int     @default(0) @map("tenant_id")
 
   job     Job?              @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  tenant  Organization?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant  Organization      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parties InspectionParty[]
   items   QcpItem[]
 
@@ -2235,11 +2239,12 @@ model InspectionParty {
   /// null for library templates (qcpTemplate.jobId IS NULL) — never forced.
   /// AUD-069: RESTRICT, not the original SET NULL — see QcpTemplate.job.
   jobId         Int?    @map("job_id")
-  tenantId      Int?    @map("tenant_id")
+  /// AUD-078: NOT NULL, same trigger/placeholder shape as QcpTemplate.tenantId.
+  tenantId      Int     @default(0) @map("tenant_id")
 
   qcpTemplate QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
   job         Job?               @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  tenant      Organization?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   itemCodes   QcpItemPartyCode[]
 
   @@unique([qcpTemplateId, code])
@@ -2276,11 +2281,12 @@ model QcpItem {
   /// null for library templates (qcpTemplate.jobId IS NULL) — never forced.
   /// AUD-069: RESTRICT, not the original SET NULL — see QcpTemplate.job.
   jobId               Int?        @map("job_id")
-  tenantId            Int?        @map("tenant_id")
+  /// AUD-078: NOT NULL, same trigger/placeholder shape as QcpTemplate.tenantId.
+  tenantId            Int         @default(0) @map("tenant_id")
 
   qcpTemplate   QcpTemplate        @relation(fields: [qcpTemplateId], references: [id], onDelete: Cascade)
   job           Job?               @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  tenant        Organization?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   partyCodes    QcpItemPartyCode[]
   executions    QcpExecution[]
   processLinks  QcpItemProcess[]
@@ -2327,13 +2333,14 @@ model QcpItemPartyCode {
   /// and InspectionParty.
   /// AUD-069: RESTRICT, not the original SET NULL — see QcpTemplate.job.
   jobId             Int? @map("job_id")
-  tenantId          Int? @map("tenant_id")
+  /// AUD-078: NOT NULL, same trigger/placeholder shape as QcpTemplate.tenantId.
+  tenantId          Int  @default(0) @map("tenant_id")
 
   qcpItem         QcpItem         @relation(fields: [qcpItemId], references: [id], onDelete: Cascade)
   inspectionParty InspectionParty @relation(fields: [inspectionPartyId], references: [id], onDelete: Cascade)
   qcpCode         QcpCodeRef      @relation(fields: [qcpCodeId], references: [id])
   job             Job?            @relation(fields: [jobId], references: [id], onDelete: Restrict)
-  tenant          Organization?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant          Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@id([qcpItemId, inspectionPartyId])
   @@index([inspectionPartyId])

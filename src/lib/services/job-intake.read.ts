@@ -87,7 +87,7 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
         },
       }),
       tx.qcpTemplate.findMany({
-        where: { OR: [{ job: { tenantId: actor.tenantId } }, { jobId: null }] },
+        where: { tenantId: actor.tenantId },
         orderBy: { jobLabel: "asc" },
         include: { _count: { select: { items: true } } },
       }),
@@ -459,9 +459,9 @@ export interface QcpTemplateLibraryAdminRow {
 
 /**
  * Every library `QcpTemplate` (jobId null) with its parties and items, for
- * the from-scratch authoring admin screen (list + detail). Same missing-
- * tenant-anchor caveat as `cloneQcpTemplate`/`loadIntakeOptions` — a
- * library row genuinely has no tenantId column to scope by.
+ * the from-scratch authoring admin screen (list + detail). AUD-078: scoped
+ * to the actor's own tenant — library rows are tenant-owned now, not a
+ * shared cross-tenant catalog.
  */
 export async function loadQcpTemplateLibraryAdmin(actor: Actor): Promise<QcpTemplateLibraryAdminRow[]> {
   assertNotClientUser(actor);
@@ -469,7 +469,7 @@ export async function loadQcpTemplateLibraryAdmin(actor: Actor): Promise<QcpTemp
 
   return withTenant(actor.tenantId, async (tx) => {
     const templates = await tx.qcpTemplate.findMany({
-      where: { jobId: null },
+      where: { jobId: null, tenantId: actor.tenantId },
       orderBy: { jobLabel: "asc" },
       include: {
         parties: { orderBy: { code: "asc" } },

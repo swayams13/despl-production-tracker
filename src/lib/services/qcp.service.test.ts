@@ -288,7 +288,12 @@ describe.skipIf(!RUN_DB)("recordQcpExecution + approveQcpWaiver — NA/waiver ga
     phActor = { ...qcActor, userId: phUser.id, name: phUser.name, email: phUser.email, roles: [ROLES.PRODUCTION_HEAD] };
 
     const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "V", vessel: "V" } });
-    const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "QC" } });
+    // AUD-078: jobId set so the aud001_derive_tenant_id trigger can derive
+    // tenant_id — InspectionParty has no other way to get one now that it's
+    // NOT NULL.
+    const party = await owner.inspectionParty.create({
+      data: { qcpTemplateId: qcpTemplate.id, jobId: job.id, code: "QC" },
+    });
 
     // Blocking, NOT waivable — a hard hold (real "H" semantics): NA must
     // never clear this one, no matter who approves it.
@@ -314,19 +319,25 @@ describe.skipIf(!RUN_DB)("recordQcpExecution + approveQcpWaiver — NA/waiver ga
     const holdItem = await owner.qcpItem.create({
       data: { qcpTemplateId: qcpTemplate.id, jobId, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Hydrotest witness" },
     });
-    await owner.qcpItemPartyCode.create({ data: { qcpItemId: holdItem.id, inspectionPartyId: party.id, qcpCodeId: holdCode.id } });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: holdItem.id, inspectionPartyId: party.id, qcpCodeId: holdCode.id, tenantId },
+    });
     holdItemId = holdItem.id;
 
     const witnessItem = await owner.qcpItem.create({
       data: { qcpTemplateId: qcpTemplate.id, jobId, sequence: 2, srNo: "2", kind: "CHECKPOINT", activity: "10% witness point" },
     });
-    await owner.qcpItemPartyCode.create({ data: { qcpItemId: witnessItem.id, inspectionPartyId: party.id, qcpCodeId: witnessCode.id } });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: witnessItem.id, inspectionPartyId: party.id, qcpCodeId: witnessCode.id, tenantId },
+    });
     witnessItemId = witnessItem.id;
 
     const untouchedItem = await owner.qcpItem.create({
       data: { qcpTemplateId: qcpTemplate.id, jobId, sequence: 3, srNo: "3", kind: "CHECKPOINT", activity: "Never inspected" },
     });
-    await owner.qcpItemPartyCode.create({ data: { qcpItemId: untouchedItem.id, inspectionPartyId: party.id, qcpCodeId: untouchedCode.id } });
+    await owner.qcpItemPartyCode.create({
+      data: { qcpItemId: untouchedItem.id, inspectionPartyId: party.id, qcpCodeId: untouchedCode.id, tenantId },
+    });
     untouchedItemId = untouchedItem.id;
   });
 
@@ -493,9 +504,18 @@ describe.skipIf(!RUN_DB)("recordQcpExecution — cross-job qcpItemId is refused 
     // A genuine library item — no owning job at all — must also be refused
     // against a real unit; it is never linked into any job's processes and
     // recordQcpExecution against it would be meaningless.
-    const libraryTemplate = await owner.qcpTemplate.create({ data: { jobId: null, jobLabel: "LIB", vessel: "LIB" } });
+    const libraryTemplate = await owner.qcpTemplate.create({
+      data: { jobId: null, tenantId, jobLabel: "LIB", vessel: "LIB" },
+    });
     const libraryItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: libraryTemplate.id, sequence: 1, srNo: "1", kind: "CHECKPOINT", activity: "Library check" },
+      data: {
+        qcpTemplateId: libraryTemplate.id,
+        tenantId,
+        sequence: 1,
+        srNo: "1",
+        kind: "CHECKPOINT",
+        activity: "Library check",
+      },
     });
     libraryItemId = libraryItem.id;
     libraryTemplateId = libraryTemplate.id;
@@ -720,6 +740,7 @@ describe.skipIf(!RUN_DB)("qcp.service — library authoring (DB)", async () => {
     await owner.qcpItem.createMany({
       data: srNoBearingSteps.map((s, i) => ({
         qcpTemplateId: template.id,
+        tenantId: actor().tenantId,
         sequence: 1000 + i,
         srNo: s.srNo!,
         kind: "CHECKPOINT" as const,
