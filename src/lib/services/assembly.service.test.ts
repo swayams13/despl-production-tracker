@@ -193,7 +193,14 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     // the QCP checkpoint this step's verify/reject is supposed to record.
     const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: job.id, jobLabel: "Vessel", vessel: "Vessel" } });
     const qcpItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "4.5", kind: "CHECKPOINT", activity: "Weld Visual Of LS-1" },
+      data: {
+        qcpTemplateId: qcpTemplate.id,
+        tenantId,
+        sequence: 1,
+        srNo: "4.5",
+        kind: "CHECKPOINT",
+        activity: "Weld Visual Of LS-1",
+      },
     });
     qcpItemId = qcpItem.id;
     const ts4 = await owner.assemblyTemplateStep.create({
@@ -229,8 +236,12 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     // tenant's own Organization.code marks the internal party (see
     // seed/qcp-templates.json's observedPartySets) — here that's org.code
     // itself, not the literal string "DESPL".
-    const internalParty = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: org.code } });
-    const externalParty = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "CLIENT_TPI" } });
+    const internalParty = await owner.inspectionParty.create({
+      data: { qcpTemplateId: qcpTemplate.id, tenantId, code: org.code },
+    });
+    const externalParty = await owner.inspectionParty.create({
+      data: { qcpTemplateId: qcpTemplate.id, tenantId, code: "CLIENT_TPI" },
+    });
     const holdCode = await owner.qcpCodeRef.create({
       data: { tenantId, code: "H", label: "Hold", blocksCompletion: true },
     });
@@ -239,27 +250,41 @@ describe.skipIf(!RUN_DB)("assembly step state machine (DB-backed)", async () => 
     });
 
     const qcpItemInternalOnly = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 2, srNo: "4.6", kind: "CHECKPOINT", activity: "Internal-only hold" },
+      data: {
+        qcpTemplateId: qcpTemplate.id,
+        tenantId,
+        sequence: 2,
+        srNo: "4.6",
+        kind: "CHECKPOINT",
+        activity: "Internal-only hold",
+      },
     });
     await owner.qcpItemPartyCode.create({
-      data: { qcpItemId: qcpItemInternalOnly.id, inspectionPartyId: internalParty.id, qcpCodeId: holdCode.id },
+      data: { qcpItemId: qcpItemInternalOnly.id, inspectionPartyId: internalParty.id, qcpCodeId: holdCode.id, tenantId },
     });
 
     const qcpItemExternalBlocking = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 3, srNo: "4.7", kind: "CHECKPOINT", activity: "External TPI hold" },
+      data: {
+        qcpTemplateId: qcpTemplate.id,
+        tenantId,
+        sequence: 3,
+        srNo: "4.7",
+        kind: "CHECKPOINT",
+        activity: "External TPI hold",
+      },
     });
     await owner.qcpItemPartyCode.create({
-      data: { qcpItemId: qcpItemExternalBlocking.id, inspectionPartyId: externalParty.id, qcpCodeId: holdCode.id },
+      data: { qcpItemId: qcpItemExternalBlocking.id, inspectionPartyId: externalParty.id, qcpCodeId: holdCode.id, tenantId },
     });
 
     const qcpItemMixed = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 4, srNo: "4.8", kind: "CHECKPOINT", activity: "Mixed hold" },
+      data: { qcpTemplateId: qcpTemplate.id, tenantId, sequence: 4, srNo: "4.8", kind: "CHECKPOINT", activity: "Mixed hold" },
     });
     await owner.qcpItemPartyCode.create({
-      data: { qcpItemId: qcpItemMixed.id, inspectionPartyId: externalParty.id, qcpCodeId: holdCode.id },
+      data: { qcpItemId: qcpItemMixed.id, inspectionPartyId: externalParty.id, qcpCodeId: holdCode.id, tenantId },
     });
     await owner.qcpItemPartyCode.create({
-      data: { qcpItemId: qcpItemMixed.id, inspectionPartyId: internalParty.id, qcpCodeId: performCode.id },
+      data: { qcpItemId: qcpItemMixed.id, inspectionPartyId: internalParty.id, qcpCodeId: performCode.id, tenantId },
     });
 
     const ts6 = await owner.assemblyTemplateStep.create({

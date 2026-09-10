@@ -1332,6 +1332,11 @@ async function seedDemo(
         const qcpTemplate = await tx.qcpTemplate.create({
           data: {
             jobId: spec.jobId,
+            // AUD-078: tenantId NOT NULL now. The aud001_derive_tenant_id
+            // trigger overwrites this from jobId when spec.jobId is set;
+            // this seed only ever runs for one tenant, so passing it
+            // explicitly is correct either way (job-owned or library).
+            tenantId,
             jobLabel: spec.jobLabel,
             vessel: spec.vessel,
             revision: spec.revision ?? 0,
@@ -1342,7 +1347,7 @@ async function seedDemo(
         const partyIdByCode = new Map<string, number>();
         for (const code of spec.parties) {
           const party = await tx.inspectionParty.create({
-            data: { qcpTemplateId: qcpTemplate.id, code },
+            data: { qcpTemplateId: qcpTemplate.id, tenantId, code },
           });
           partyIdByCode.set(code, party.id);
         }
@@ -1357,6 +1362,7 @@ async function seedDemo(
           const qcpItem = await tx.qcpItem.create({
             data: {
               qcpTemplateId: qcpTemplate.id,
+              tenantId,
               sequence: ++sequence,
               srNo: item.srNo,
               kind: item.kind as QcpItemKind,
@@ -1382,7 +1388,7 @@ async function seedDemo(
                 throw new Error(`QcpItem ${item.srNo} (${spec.jobLabel}): unknown QCP code "${code}"`);
               }
               await tx.qcpItemPartyCode.create({
-                data: { qcpItemId: qcpItem.id, inspectionPartyId, qcpCodeId },
+                data: { qcpItemId: qcpItem.id, inspectionPartyId, qcpCodeId, tenantId },
               });
               partyCodeCount++;
             }

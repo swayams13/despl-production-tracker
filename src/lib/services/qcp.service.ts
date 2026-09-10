@@ -195,14 +195,11 @@ export async function approveQcpWaiver(actor: Actor, input: ApproveQcpWaiverInpu
 // authoring-only — refused once the target template belongs to a real job,
 // where items are managed through that job's own execution flow instead.
 //
-// Known gap, not this item's job to fix: QcpTemplate/InspectionParty carry no
-// tenantId of their own (a job-owned row is anchored through job.tenantId;
-// a library row with jobId null has NO tenant anchor in the schema at all).
-// cloneQcpTemplate already lives with this (`OR: [{ job: { tenantId } },
-// { jobId: null }]`) — every tenant can see and clone every OTHER tenant's
-// library rows today. createQcpTemplateLibrary below doesn't relax anything
-// further, but it does add more such rows. Fixing it means adding a
-// tenantId column to QcpTemplate, a bigger, unscoped migration.
+// AUD-078 (closed): QcpTemplate/InspectionParty/QcpItem/QcpItemPartyCode all
+// carry a real, NOT NULL tenantId now. A library row (jobId null) is
+// tenant-owned by whoever authored it — createQcpTemplateLibrary sets it
+// from actor.tenantId, and every read/lookup below matches on it directly
+// instead of falling open on `jobId: null`.
 
 /**
  * Create a brand-new library `QcpTemplate` (jobId: null) plus its
@@ -222,10 +219,11 @@ export async function createQcpTemplateLibrary(
       const created = await tx.qcpTemplate.create({
         data: {
           jobId: null,
+          tenantId: actor.tenantId,
           jobLabel,
           vessel,
           designCode: designCode ?? null,
-          parties: { create: parties.map((p) => ({ code: p.code, name: p.name ?? null })) },
+          parties: { create: parties.map((p) => ({ code: p.code, name: p.name ?? null, tenantId: actor.tenantId })) },
         },
       });
       return {
@@ -261,10 +259,8 @@ export async function addQcpItemToLibraryTemplate(
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
   return withTenant(actor.tenantId, async (tx) => {
-    // qcp_templates has no tenant_id of its own — anchored the same way
-    // cloneQcpTemplate does (see the file-level note above).
     const template = await tx.qcpTemplate.findFirst({
-      where: { id: parsed.qcpTemplateId, OR: [{ job: { tenantId: actor.tenantId } }, { jobId: null }] },
+      where: { id: parsed.qcpTemplateId, tenantId: actor.tenantId },
     });
     if (!template) {
       throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "QcpTemplate", qcpTemplateId: parsed.qcpTemplateId });
@@ -277,7 +273,7 @@ export async function addQcpItemToLibraryTemplate(
       });
     }
 
-    const resolvedPartyCodes: Array<{ inspectionPartyId: number; qcpCodeId: number }> = [];
+    const resolvedPartyCodes: Array<{ inspectionPartyId: number; qcpCodeId: number; tenantId: number }> = [];
     for (const pc of parsed.partyCodes) {
       const party =
         (await tx.inspectionParty.findFirst({
@@ -287,7 +283,7 @@ export async function addQcpItemToLibraryTemplate(
         // above) — leave jobId unset. InspectionParty stays nullable in
         // Task 3 for exactly this reason; do not backfill a job id here.
         (await tx.inspectionParty.create({
-          data: { qcpTemplateId: template.id, code: pc.partyCode, name: null },
+          data: { qcpTemplateId: template.id, code: pc.partyCode, name: null, tenantId: actor.tenantId },
         }));
       const qcpCode = await tx.qcpCodeRef.findFirst({
         where: { tenantId: actor.tenantId, code: pc.qcpCode },
@@ -295,7 +291,7 @@ export async function addQcpItemToLibraryTemplate(
       if (!qcpCode) {
         throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "QcpCodeRef", code: pc.qcpCode });
       }
-      resolvedPartyCodes.push({ inspectionPartyId: party.id, qcpCodeId: qcpCode.id });
+      resolvedPartyCodes.push({ inspectionPartyId: party.id, qcpCodeId: qcpCode.id, tenantId: actor.tenantId });
     }
 
     return audited(tx, actor, async () => {
@@ -305,6 +301,7 @@ export async function addQcpItemToLibraryTemplate(
       const created = await tx.qcpItem.create({
         data: {
           qcpTemplateId: template.id,
+          tenantId: actor.tenantId,
           sequence: parsed.sequence,
           srNo: parsed.srNo,
           kind: parsed.kind,
