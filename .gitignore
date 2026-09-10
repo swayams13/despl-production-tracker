@@ -47,3 +47,4 @@ next-env.d.ts
 # superpowers SDD scratch workspace
 /.superpowers/
 .worktrees/
+.env.rehearse
