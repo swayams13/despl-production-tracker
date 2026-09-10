@@ -38,12 +38,16 @@ const ROLE_LABEL: Record<string, string> = {
 function useRun() {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const run = (fn: () => Promise<{ ok: boolean; message?: string }>, ok: string, after?: () => void) =>
+  const run = <R extends { ok: boolean; message?: string }>(
+    fn: () => Promise<R>,
+    ok: string | ((r: R) => string),
+    after?: () => void,
+  ) =>
     start(async () => {
       const r = await fn();
       if (!r.ok) toast.error(r.message);
       else {
-        toast.success(ok);
+        toast.success(typeof ok === "function" ? ok(r) : ok);
         router.refresh();
         after?.();
       }
@@ -93,10 +97,16 @@ function EmployeesSection({ view, canEdit, actorUserId }: { view: AdminView; can
     run(
       async () => {
         const r = await generateResetPasswordAction(u.id);
-        if (r.ok) setCredential({ username: u.username, tempPassword: r.tempPassword! });
+        // AUD-079: a QC/Admin target returns `pending` instead of a
+        // password — a different admin must approve it before any
+        // credential exists to show.
+        if (r.ok && !r.pending) setCredential({ username: u.username, tempPassword: r.tempPassword! });
         return r;
       },
-      "Password reset. They are signed out and must set a new one at next login.",
+      (r) =>
+        r.pending
+          ? "Password reset requested — a different admin must approve it before it takes effect."
+          : "Password reset. They are signed out and must set a new one at next login.",
     );
 
   return (

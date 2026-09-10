@@ -242,6 +242,7 @@ model Organization {
   notifications                Notification[]
   welders                      Welder[]
   assemblyTemplates            AssemblyTemplate[]
+  pendingPasswordResets        PendingPasswordReset[]
   // AUD-001 tenant-grain RLS backstop: back-relations for the 28 denormalized
   // tenant_id columns added alongside H1's job_id columns (see
   // prisma/migrations/20260909100000_aud001_tenant_id_backstop_add_column).
@@ -388,6 +389,9 @@ model User {
   recordedDftReadings          DftReading[]
   dispatchBatchesApproved      DispatchBatch[]               @relation("DispatchBatchReleaseApprovedBy")
   createdPackages              Package[]
+  passwordResetRequestsAsTarget    PendingPasswordReset[]     @relation("PendingPasswordResetTarget")
+  passwordResetRequestsRequested   PendingPasswordReset[]     @relation("PendingPasswordResetRequester")
+  passwordResetRequestsApproved    PendingPasswordReset[]     @relation("PendingPasswordResetApprover")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -422,6 +426,36 @@ model UserRole {
   @@id([userId, roleId])
   @@index([roleId])
   @@map("user_roles")
+}
+
+/// AUD-079: an admin resetting a QC or ADMIN user's password can no longer
+/// reset it directly (see resetUserPassword) — this records that request so
+/// a DIFFERENT admin can perform the actual reset via approvePasswordReset.
+/// No plaintext password lives here or anywhere until approval (SPEC §9).
+model PendingPasswordReset {
+  id           Int                        @id @default(autoincrement())
+  tenantId     Int                        @map("tenant_id")
+  targetUserId Int                        @map("target_user_id")
+  requestedBy  Int                        @map("requested_by")
+  requestedAt  DateTime                   @default(now()) @map("requested_at")
+  status       PendingPasswordResetStatus @default(PENDING)
+  approvedBy   Int?                       @map("approved_by")
+  approvedAt   DateTime?                  @map("approved_at")
+
+  tenant    Organization @relation(fields: [tenantId], references: [id])
+  target    User         @relation("PendingPasswordResetTarget", fields: [targetUserId], references: [id])
+  requester User         @relation("PendingPasswordResetRequester", fields: [requestedBy], references: [id])
+  approver  User?        @relation("PendingPasswordResetApprover", fields: [approvedBy], references: [id])
+
+  @@index([tenantId])
+  @@index([targetUserId])
+  @@map("pending_password_resets")
+}
+
+enum PendingPasswordResetStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model Department {

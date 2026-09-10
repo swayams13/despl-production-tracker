@@ -132,7 +132,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   GATING_BLOCKED:
     "This process cannot start yet — one or more predecessors are not complete.",
   MAKER_CHECKER_VIOLATION:
-    "The person who submitted an entry cannot also verify it. A different QC user must verify.",
+    "The same person cannot complete both steps of this two-person control. A different person must complete the second step.",
   HOLD_POINT_OPEN:
     "An inspection hold point on this item is still open. It must be cleared before completion.",
   NCR_OPEN:
