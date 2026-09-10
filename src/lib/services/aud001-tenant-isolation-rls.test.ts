@@ -15,13 +15,15 @@ import { afterAll, describe, expect, it } from "vitest";
  * fixtures across TWO real tenants; `prisma`/`withTenant` (despl_web,
  * RLS-subject) makes the assertions.
  *
- * Covers a representative slice of the 28 tables, not all of them — units
- * and process_plans (the two strict, NOT-NULL tenant_id tables the audit's
- * own reproduction used) plus qcp_items (the library-exempt, nullable
- * tenant_id case). Full breadth across all 28 is rls-coverage.test.ts's job
- * (policy presence, not behavior); this file proves the policy actually
- * behaves correctly for the write path and the exact audit reproduction,
- * which a coverage-only check can't.
+ * Covers a representative slice of the 28 tables, not all of them — units,
+ * process_plans, and qcp_items, all strict NOT-NULL tenant_id tables (the
+ * first two are the audit's own reproduction; qcp_items was library-exempt,
+ * nullable, when this file was first written — AUD-078 closed that, see
+ * aud078-qcp-library-tenant-isolation.test.ts for the library-row behavior).
+ * Full breadth across all 28 is rls-coverage.test.ts's job (policy presence,
+ * not behavior); this file proves the policy actually behaves correctly for
+ * the write path and the exact audit reproduction, which a coverage-only
+ * check can't.
  */
 const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
@@ -184,7 +186,7 @@ describe.skipIf(!RUN_DB)("AUD-001 tenant_isolation RLS policy", async () => {
     expect(rows).toHaveLength(0);
   });
 
-  it("library-exempt table (qcp_items): a real job-owned row is still tenant-scoped like any strict table", async () => {
+  it("qcp_items: a real job-owned row is tenant-scoped like any strict table", async () => {
     const a = await fixture("A6");
     const b = await fixture("B6");
     await withTenant(a.tenantId, async (tx) => {

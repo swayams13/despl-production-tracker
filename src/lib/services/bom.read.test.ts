@@ -104,7 +104,14 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     });
     const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId, jobLabel: "Test QAP", vessel: "Air Receiver" } });
     const qcpItem = await owner.qcpItem.create({
-      data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "1.1", kind: "CHECKPOINT", activity: "Visual weld inspection" },
+      data: {
+        qcpTemplateId: qcpTemplate.id,
+        tenantId,
+        sequence: 1,
+        srNo: "1.1",
+        kind: "CHECKPOINT",
+        activity: "Visual weld inspection",
+      },
     });
     await owner.qcpItemProcess.create({ data: { jobId, qcpItemId: qcpItem.id, jobProcessId: jobProcess.id } });
 
