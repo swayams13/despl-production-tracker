@@ -18,7 +18,16 @@ import { toasterTheme } from "@/lib/theme";
  * Individual pages own their own unauthenticated redirect (each does
  * `if (!actor) redirect("/login")`) — this layout doesn't duplicate that, it
  * only needs the actor's identity + the two cross-cutting shell reads: the
- * sidebar's overdue badge and the bell's notifications. Overdue-stage/aged-hold-point reconciliation
+ * sidebar's overdue badge and the bell's notifications. It DOES duplicate the
+ * client-user redirect (`if (actor.clientId != null) redirect("/portal")`,
+ * AUD-025): every page in this group loads internal job telemetry
+ * (percentComplete, forecastVarianceDays, overduePlans, openHoldPoints) via
+ * the `Promise.all` below and hands it to `AppShell`'s job switcher, so a
+ * client actor must never reach that far — the per-page copies of this
+ * check (kept for defence in depth) are too late by the time this layout
+ * has already loaded and rendered the data into the shell. `/portal` lives
+ * outside this route group (`src/app/portal/page.tsx`), so this redirect
+ * cannot loop. Overdue-stage/aged-hold-point reconciliation
  * (§9.8) used to run here on every page load; it's now an hourly cron
  * (`/api/cron/alerts`, see cron.service.ts) instead, so this layout only
  * reads already-written Notification rows, it doesn't compute them.
@@ -32,6 +41,7 @@ import { toasterTheme } from "@/lib/theme";
 export default async function AppGroupLayout({ children }: { children: ReactNode }) {
   const actor = await getActor();
   if (actor?.mustChangePassword) redirect("/account/password");
+  if (actor?.clientId != null) redirect("/portal");
 
   let overdueCount = 0;
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };
