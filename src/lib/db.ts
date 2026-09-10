@@ -1,4 +1,4 @@
-import { PrismaClient } from "@/generated/prisma/client";
+import { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 /**
  * Prisma singleton.
@@ -68,7 +68,7 @@ export type Tx = Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0];
 export async function withTenant<T>(
   tenantId: number,
   fn: (tx: Tx) => Promise<T>,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
 ): Promise<T> {
   if (!Number.isInteger(tenantId) || tenantId <= 0) {
     throw new Error(`withTenant: invalid tenantId ${tenantId}`);
@@ -79,7 +79,9 @@ export async function withTenant<T>(
       await tx.$executeRaw`SELECT set_config('TimeZone', 'UTC', true)`;
       return fn(tx);
     },
-    opts?.timeoutMs ? { timeout: opts.timeoutMs } : undefined,
+    opts?.timeoutMs || opts?.isolationLevel
+      ? { timeout: opts?.timeoutMs, isolationLevel: opts?.isolationLevel }
+      : undefined,
   );
 }
 
@@ -100,7 +102,7 @@ export async function withJob<T>(
   tenantId: number,
   jobId: number,
   fn: (tx: Tx) => Promise<T>,
-  opts?: { timeoutMs?: number },
+  opts?: { timeoutMs?: number; isolationLevel?: Prisma.TransactionIsolationLevel },
 ): Promise<T> {
   if (!Number.isInteger(jobId) || jobId <= 0) {
     throw new Error(`withJob: invalid jobId ${jobId}`);
@@ -113,4 +115,42 @@ export async function withJob<T>(
     },
     opts,
   );
+}
+
+/**
+ * Retries a transaction callback on a Postgres serialization failure
+ * (SQLSTATE 40001, "could not serialize access due to concurrent update") —
+ * the error a `RepeatableRead` transaction is EXPECTED to throw when it
+ * loses a real concurrent-write race. Postgres's own docs say the correct
+ * response is to retry the whole transaction, not surface it as a 500.
+ *
+ * Confirmed live (not assumed) against Prisma 6.19.3 + Postgres 16 with two
+ * concurrent RepeatableRead transactions racing an update on the same row —
+ * Prisma surfaces this in two different shapes depending on whether the
+ * conflicting statement was a raw query or a normal Prisma Client call:
+ *   - Normal Prisma Client method (tx.model.update/updateMany/etc, what
+ *     every gating service here actually uses): `PrismaClientKnownRequestError`
+ *     with `code === "P2034"` ("Transaction failed due to a write conflict
+ *     or a deadlock. Please retry your transaction"). `meta` here is just
+ *     `{ modelName }` — the raw `40001`/Postgres message is NOT preserved.
+ *   - A raw query (`$executeRaw`/`$queryRaw`): `PrismaClientKnownRequestError`
+ *     with `code === "P2010"` and `meta.code === "40001"`.
+ * Both are checked below since `_shared.ts`'s assertions mix `findMany`-style
+ * Prisma calls with the occasional raw `SELECT ... FOR UPDATE`.
+ */
+function isSerializationFailure(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError)) return false;
+  if (err.code === "P2034") return true;
+  if (err.code === "P2010" && (err.meta as { code?: string } | undefined)?.code === "40001") return true;
+  return false;
+}
+
+export async function withSerializationRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isSerializationFailure(err) || attempt >= maxAttempts) throw err;
+    }
+  }
 }
