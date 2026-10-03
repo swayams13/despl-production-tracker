@@ -213,6 +213,27 @@ Set `DATABASE_URL` and other secrets in Railway's environment settings (never co
 
 ---
 
+## STEP 15 — Production readiness gate
+
+This step didn't exist in the original guide — it stopped at Step 14. Per `docs/ARCHITECTURE.md` §4/§8, shipping to production needs explicit, checkable criteria rather than "it merged, so it's live."
+
+**This matters more here than in a normal promote model**, because of how deployment actually works now (see CLAUDE.md's Stack section): there is **one** Railway `production` environment auto-deploying from `main`, with **no staging environment**, and **migrations are applied by hand** — merging to `main` ships code without its schema. So there is no staging buffer to catch any of the below; the gate has to run *before* the merge, against `docs/mos-execution/MERGE-RUNBOOK.md`.
+
+Before merging anything that touches a gating, RBAC, audit or migration path:
+
+1. **Violation-case and concurrency tests green** (`pnpm test` + `pnpm test:db`) — including the concurrency tests required by CLAUDE.md's Conventions: simultaneous conflicting transitions on one row must leave exactly one winner.
+2. **Migration rehearsed on a restored copy, then applied by hand, watched** — per MERGE-RUNBOOK.md. Never let a migration reach `main` unrehearsed; on 2 Sep 2026, 20 migrations sat unapplied while code that needed them ran in production.
+3. **Backup/DR configured to the target in `docs/ARCHITECTURE.md` §4** — continuous WAL/PITR (RPO ≤15min), not just daily `pg_dump`. PITR is Railway Pro-only; see ARCHITECTURE.md's open-confirmations note on the Hobby→Pro timing.
+4. **Restore drill passed** — restore the latest backup to a fresh instance and confirm the data matches. Pass/fail, not "we tried it."
+5. **Load/concurrency test executed** against prod-sized data: ~100 users converging in a shift-start-style burst, submitting and verifying on overlapping units. Check p95 holds, zero gating/maker-checker violations, connection pool doesn't exhaust.
+6. **Audit-log grant verification passes** — the app DB role still has no UPDATE/DELETE on `audit_log` (invariant #5). This should fail the pipeline, not just log, if the grant ever reappears.
+7. **Security review pass** — secrets distinct per environment and rotated off any shared value, encryption-at-rest confirmed, dependency/SCA scan clean.
+8. **Named-approver sign-off** — a specific person, not CI, approves. Since Railway auto-deploys `main`, the enforceable form of this is a branch-protection rule requiring review on `main` itself.
+
+**Check:** all 8 ticked before the merge that ships it. Log the outcome in `docs/mos-execution/LEDGER.md` per the execution-plan rule.
+
+---
+
 ## After every step
 
 Update `progress.md` per CLAUDE.md's session-discipline rule: what shipped, decisions made, blockers, next steps — even mid-sprint. Don't wait for end of day if you're pausing mid-step.
