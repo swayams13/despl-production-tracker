@@ -200,5 +200,36 @@ describe.skipIf(!RUN_DB)("packing.service (DB-backed)", async () => {
       const updated = await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
       expect(updated.packageId).toBe(pkg.id);
     });
+
+    /**
+     * AUD-072 — genuine two-transaction race: the same unit assigned to two
+     * different packages concurrently, both writing `Unit.packageId`. Before
+     * this session, a concurrent write here at READ COMMITTED would just
+     * silently last-writer-wins with no error. At RepeatableRead (this
+     * session's change), whichever transaction's write lands second sees a
+     * 40001 the moment it tries to update a row already changed since its
+     * snapshot began — withSerializationRetry retries it transparently, so
+     * the caller still never sees a raw Postgres error, and the final state
+     * is deterministic (one package, not a corrupted mix).
+     */
+    it("AUD-072: assigning the same unit to two packages concurrently never crashes or corrupts state", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkgA = await createPackage(ph, { jobId: job.id, packageNo: "PKG-RACE-A" });
+      const pkgB = await createPackage(ph, { jobId: job.id, packageNo: "PKG-RACE-B" });
+
+      const results = await Promise.allSettled([
+        assignUnitToPackage(ph, { packageId: pkgA.id, unitId: unit.id }),
+        assignUnitToPackage(ph, { packageId: pkgB.id, unitId: unit.id }),
+      ]);
+      // withSerializationRetry absorbs the 40001 transparently — neither
+      // caller should see a raw serialization failure surfaced.
+      for (const r of results) {
+        if (r.status === "rejected") throw new Error(`unexpected rejection: ${String(r.reason)}`);
+      }
+
+      const finalUnit = await owner.unit.findUniqueOrThrow({ where: { id: unit.id } });
+      expect([pkgA.id, pkgB.id]).toContain(finalUnit.packageId);
+    });
   });
 });

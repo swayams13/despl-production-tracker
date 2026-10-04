@@ -1,4 +1,4 @@
-import { withTenant, type Tx } from "@/lib/db";
+import { withTenant, withSerializationRetry, type Tx } from "@/lib/db";
 import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -112,62 +112,71 @@ export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): 
   requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
-  return withTenant(actor.tenantId, async (tx) => {
-    const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
+  // AUD-072: assertUnitHasNoOpenHoldPoint/assertUnitHasNoOpenNcr are plain
+  // reads with no row lock — see process.service.ts's verifyProcess for the
+  // full rationale. RepeatableRead + retry closes the same gap here.
+  return withSerializationRetry(() =>
+    withTenant(
+      actor.tenantId,
+      async (tx) => {
+        const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
 
-    if (deriveDispatchBatchStatus(batch) !== "PLANNED") {
-      throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
-        entity: "DispatchBatch",
-        dispatchBatchId: batch.id,
-        status: deriveDispatchBatchStatus(batch),
-        action: "addUnit",
-      });
-    }
+        if (deriveDispatchBatchStatus(batch) !== "PLANNED") {
+          throw new AppError(ERROR_CODES.INVALID_STATE_TRANSITION, {
+            entity: "DispatchBatch",
+            dispatchBatchId: batch.id,
+            status: deriveDispatchBatchStatus(batch),
+            action: "addUnit",
+          });
+        }
 
-    const unit = await tx.unit.findFirst({
-      where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
-      include: { equipment: { select: { jobId: true } } },
-    });
-    if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+        const unit = await tx.unit.findFirst({
+          where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
+          include: { equipment: { select: { jobId: true } } },
+        });
+        if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
 
-    if (unit.equipment.jobId !== batch.jobId) {
-      throw new AppError(ERROR_CODES.CROSS_JOB_ASSIGNMENT, {
-        unitId,
-        unitJobId: unit.equipment.jobId,
-        dispatchBatchId: batch.id,
-        dispatchBatchJobId: batch.jobId,
-      });
-    }
+        if (unit.equipment.jobId !== batch.jobId) {
+          throw new AppError(ERROR_CODES.CROSS_JOB_ASSIGNMENT, {
+            unitId,
+            unitJobId: unit.equipment.jobId,
+            dispatchBatchId: batch.id,
+            dispatchBatchJobId: batch.jobId,
+          });
+        }
 
-    if (unit.packageId == null) {
-      throw new AppError(ERROR_CODES.UNIT_NOT_PACKED, { unitId });
-    }
+        if (unit.packageId == null) {
+          throw new AppError(ERROR_CODES.UNIT_NOT_PACKED, { unitId });
+        }
 
-    // S10 — same reverse quality gate as packing.service.ts's
-    // assignUnitToPackage: a unit already packed clean could develop an NCR
-    // (or a checkpoint could reopen) before it's ever added to a batch, so
-    // this is a genuinely separate check, not a redundant re-run of
-    // packing's own gate.
-    await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
-    await assertUnitHasNoOpenNcr(tx, unit.id, unit.equipment.jobId);
+        // S10 — same reverse quality gate as packing.service.ts's
+        // assignUnitToPackage: a unit already packed clean could develop an NCR
+        // (or a checkpoint could reopen) before it's ever added to a batch, so
+        // this is a genuinely separate check, not a redundant re-run of
+        // packing's own gate.
+        await assertUnitHasNoOpenHoldPoint(tx, unit.id, unit.equipment.jobId);
+        await assertUnitHasNoOpenNcr(tx, unit.id, unit.equipment.jobId);
 
-    return audited(tx, actor, async () => {
-      const link = await tx.dispatchBatchUnit.create({
-        data: { dispatchBatchId: batch.id, unitId: unit.id, jobId: batch.jobId },
-      });
-      return {
-        result: link,
-        audit: {
-          action: "dispatchBatch.addUnit",
-          entityType: "DispatchBatchUnit",
-          entityId: link.id,
-          after: { dispatchBatchId: batch.id, unitId: unit.id },
-          eventType: "UnitAddedToDispatchBatch",
-          eventPayload: { dispatchBatchId: batch.id, unitId: unit.id },
-        },
-      };
-    });
-  });
+        return audited(tx, actor, async () => {
+          const link = await tx.dispatchBatchUnit.create({
+            data: { dispatchBatchId: batch.id, unitId: unit.id, jobId: batch.jobId },
+          });
+          return {
+            result: link,
+            audit: {
+              action: "dispatchBatch.addUnit",
+              entityType: "DispatchBatchUnit",
+              entityId: link.id,
+              after: { dispatchBatchId: batch.id, unitId: unit.id },
+              eventType: "UnitAddedToDispatchBatch",
+              eventPayload: { dispatchBatchId: batch.id, unitId: unit.id },
+            },
+          };
+        });
+      },
+      { isolationLevel: "RepeatableRead" },
+    ),
+  );
 }
 
 /**
@@ -183,58 +192,65 @@ export async function approveDispatchRelease(
   requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
-  return withTenant(actor.tenantId, async (tx) => {
-    const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
-    assertDispatchBatchTransition("approveRelease", deriveDispatchBatchStatus(batch));
+  // AUD-072 — see addUnitToBatch's comment above.
+  return withSerializationRetry(() =>
+    withTenant(
+      actor.tenantId,
+      async (tx) => {
+        const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
+        assertDispatchBatchTransition("approveRelease", deriveDispatchBatchStatus(batch));
 
-    // AUD-005 — addUnitToBatch's gate ran at batching time; a unit's quality
-    // state and production completeness are both mutable after that (an NCR
-    // can open, a hold point can flip, days can pass before release), so
-    // this is a genuinely separate re-check, not a redundant re-run.
-    const links = await tx.dispatchBatchUnit.findMany({
-      where: { dispatchBatchId: batch.id },
-      select: { unitId: true },
-    });
-    for (const { unitId } of links) {
-      await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
-      await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);
-      await assertUnitProductionComplete(tx, unitId, batch.jobId);
-    }
+        // AUD-005 — addUnitToBatch's gate ran at batching time; a unit's quality
+        // state and production completeness are both mutable after that (an NCR
+        // can open, a hold point can flip, days can pass before release), so
+        // this is a genuinely separate re-check, not a redundant re-run.
+        const links = await tx.dispatchBatchUnit.findMany({
+          where: { dispatchBatchId: batch.id },
+          select: { unitId: true },
+        });
+        for (const { unitId } of links) {
+          await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
+          await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);
+          await assertUnitProductionComplete(tx, unitId, batch.jobId);
+        }
 
-    return audited(tx, actor, async () => {
-      const now = new Date();
-      const updated = await tx.dispatchBatch.update({
-        where: { id: batch.id },
-        data: {
-          dispatchNoteNo: dispatchNoteNo ?? undefined,
-          gatePassNo: gatePassNo ?? undefined,
-          vehicleNo: vehicleNo ?? undefined,
-          lrNo: lrNo ?? undefined,
-          releaseApprovedBy: actor.userId,
-          releaseApprovedAt: now,
-        },
-      });
-      return {
-        result: updated,
-        audit: {
-          action: "dispatchBatch.approveRelease",
-          entityType: "DispatchBatch",
-          entityId: batch.id,
-          before: { releaseApprovedAt: batch.releaseApprovedAt },
-          after: {
-            releaseApprovedBy: updated.releaseApprovedBy,
-            releaseApprovedAt: updated.releaseApprovedAt,
-            dispatchNoteNo: updated.dispatchNoteNo,
-            gatePassNo: updated.gatePassNo,
-            vehicleNo: updated.vehicleNo,
-            lrNo: updated.lrNo,
-          },
-          eventType: "DispatchReleaseApproved",
-          eventPayload: { dispatchBatchId: batch.id, releaseApprovedBy: actor.userId },
-        },
-      };
-    });
-  });
+        return audited(tx, actor, async () => {
+          const now = new Date();
+          const updated = await tx.dispatchBatch.update({
+            where: { id: batch.id },
+            data: {
+              dispatchNoteNo: dispatchNoteNo ?? undefined,
+              gatePassNo: gatePassNo ?? undefined,
+              vehicleNo: vehicleNo ?? undefined,
+              lrNo: lrNo ?? undefined,
+              releaseApprovedBy: actor.userId,
+              releaseApprovedAt: now,
+            },
+          });
+          return {
+            result: updated,
+            audit: {
+              action: "dispatchBatch.approveRelease",
+              entityType: "DispatchBatch",
+              entityId: batch.id,
+              before: { releaseApprovedAt: batch.releaseApprovedAt },
+              after: {
+                releaseApprovedBy: updated.releaseApprovedBy,
+                releaseApprovedAt: updated.releaseApprovedAt,
+                dispatchNoteNo: updated.dispatchNoteNo,
+                gatePassNo: updated.gatePassNo,
+                vehicleNo: updated.vehicleNo,
+                lrNo: updated.lrNo,
+              },
+              eventType: "DispatchReleaseApproved",
+              eventPayload: { dispatchBatchId: batch.id, releaseApprovedBy: actor.userId },
+            },
+          };
+        });
+      },
+      { isolationLevel: "RepeatableRead" },
+    ),
+  );
 }
 
 /**
@@ -249,43 +265,50 @@ export async function recordDispatch(actor: Actor, input: RecordDispatchInput): 
   requireRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   assertNotClientUser(actor);
 
-  return withTenant(actor.tenantId, async (tx) => {
-    const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
-    assertDispatchBatchTransition("recordDispatch", deriveDispatchBatchStatus(batch));
+  // AUD-072 — see addUnitToBatch's comment above.
+  return withSerializationRetry(() =>
+    withTenant(
+      actor.tenantId,
+      async (tx) => {
+        const batch = await lockDispatchBatchForUpdate(tx, dispatchBatchId, actor.tenantId);
+        assertDispatchBatchTransition("recordDispatch", deriveDispatchBatchStatus(batch));
 
-    // AUD-005 — re-checked independently of approveDispatchRelease's own
-    // re-check: a unit released clean can still develop an open NCR, an
-    // uncleared hold point, or an incomplete ProcessPlan before the physical
-    // dispatch actually happens, and this is the last gate standing between
-    // that unit and a dispatch note/gate pass/LR number.
-    const links = await tx.dispatchBatchUnit.findMany({
-      where: { dispatchBatchId: batch.id },
-      select: { unitId: true },
-    });
-    for (const { unitId } of links) {
-      await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
-      await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);
-      await assertUnitProductionComplete(tx, unitId, batch.jobId);
-    }
+        // AUD-005 — re-checked independently of approveDispatchRelease's own
+        // re-check: a unit released clean can still develop an open NCR, an
+        // uncleared hold point, or an incomplete ProcessPlan before the physical
+        // dispatch actually happens, and this is the last gate standing between
+        // that unit and a dispatch note/gate pass/LR number.
+        const links = await tx.dispatchBatchUnit.findMany({
+          where: { dispatchBatchId: batch.id },
+          select: { unitId: true },
+        });
+        for (const { unitId } of links) {
+          await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
+          await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);
+          await assertUnitProductionComplete(tx, unitId, batch.jobId);
+        }
 
-    return audited(tx, actor, async () => {
-      const now = new Date();
-      const updated = await tx.dispatchBatch.update({
-        where: { id: batch.id },
-        data: { actualDispatchDate: now },
-      });
-      return {
-        result: updated,
-        audit: {
-          action: "dispatchBatch.recordDispatch",
-          entityType: "DispatchBatch",
-          entityId: batch.id,
-          before: { actualDispatchDate: batch.actualDispatchDate },
-          after: { actualDispatchDate: updated.actualDispatchDate },
-          eventType: "DispatchRecorded",
-          eventPayload: { dispatchBatchId: batch.id },
-        },
-      };
-    });
-  });
+        return audited(tx, actor, async () => {
+          const now = new Date();
+          const updated = await tx.dispatchBatch.update({
+            where: { id: batch.id },
+            data: { actualDispatchDate: now },
+          });
+          return {
+            result: updated,
+            audit: {
+              action: "dispatchBatch.recordDispatch",
+              entityType: "DispatchBatch",
+              entityId: batch.id,
+              before: { actualDispatchDate: batch.actualDispatchDate },
+              after: { actualDispatchDate: updated.actualDispatchDate },
+              eventType: "DispatchRecorded",
+              eventPayload: { dispatchBatchId: batch.id },
+            },
+          };
+        });
+      },
+      { isolationLevel: "RepeatableRead" },
+    ),
+  );
 }
