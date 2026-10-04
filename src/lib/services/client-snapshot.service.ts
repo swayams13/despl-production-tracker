@@ -99,31 +99,54 @@ export async function publishSnapshot(actor: Actor, input: PublishSnapshotInput)
       for (const spine of spines) {
         const stage = currentStage(spine);
         const percentComplete = await unitPercentComplete(tx, spine.unitId);
-        await tx.progressSnapshot.upsert({
-          where: { jobId_unitId_asOf: { jobId, unitId: spine.unitId, asOf } },
-          create: {
-            tenantId: actor.tenantId,
-            jobId,
-            unitId: spine.unitId,
-            asOf,
+        const detail = { stageNo: stage.stageNo, stageName: stage.stageName, status: stage.status, serialNo: spine.serialNo };
+
+        // AUD-073: an `upsert` here would unconditionally overwrite a row's
+        // `update` branch regardless of its current status — if a concurrent
+        // verifySnapshot commits between the `existing` read above and this
+        // write, that row is now VERIFIED, and a plain upsert would silently
+        // revert it to PUBLISHED, violating the schema's "VERIFIED is frozen
+        // forever" guarantee (the exact thing verifySnapshot/rejectSnapshot's
+        // own count-checked updateMany already protects against on their
+        // side). `upsert` can't carry an extra WHERE on its update branch, so
+        // split it: try an update that only matches non-VERIFIED rows, and
+        // only create when this row didn't exist at all.
+        const { count } = await tx.progressSnapshot.updateMany({
+          where: { jobId, unitId: spine.unitId, asOf, status: { not: "VERIFIED" } },
+          data: {
             overallPct: percentComplete,
-            detail: { stageNo: stage.stageNo, stageName: stage.stageName, status: stage.status, serialNo: spine.serialNo },
-            status: "PUBLISHED",
-            publishedBy: actor.userId,
-            publishedAt: new Date(),
-            verifiedBy: null,
-            verifiedAt: null,
-            rejectionReason: null,
-          },
-          update: {
-            overallPct: percentComplete,
-            detail: { stageNo: stage.stageNo, stageName: stage.stageName, status: stage.status, serialNo: spine.serialNo },
+            detail,
             status: "PUBLISHED",
             publishedBy: actor.userId,
             publishedAt: new Date(),
             rejectionReason: null,
           },
         });
+        if (count === 0) {
+          const current = await tx.progressSnapshot.findUnique({
+            where: { jobId_unitId_asOf: { jobId, unitId: spine.unitId, asOf } },
+          });
+          if (current) {
+            // Row exists and is VERIFIED — a concurrent verify won this race.
+            throw new AppError(ERROR_CODES.SNAPSHOT_ALREADY_VERIFIED, { jobId, asOf, unitId: spine.unitId });
+          }
+          await tx.progressSnapshot.create({
+            data: {
+              tenantId: actor.tenantId,
+              jobId,
+              unitId: spine.unitId,
+              asOf,
+              overallPct: percentComplete,
+              detail,
+              status: "PUBLISHED",
+              publishedBy: actor.userId,
+              publishedAt: new Date(),
+              verifiedBy: null,
+              verifiedAt: null,
+              rejectionReason: null,
+            },
+          });
+        }
       }
 
       const managementIds = await userIdsWithRole(tx, actor.tenantId, "MANAGEMENT");
