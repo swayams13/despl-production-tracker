@@ -380,6 +380,10 @@ export const resetPasswordSchema = z
   .strict();
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
+/** AUD-079: a second, distinct ADMIN completes a pending password reset request. */
+export const approvePasswordResetSchema = z.object({ requestId: id }).strict();
+export type ApprovePasswordResetInput = z.infer<typeof approvePasswordResetSchema>;
+
 const roleCodeEnum = z.enum(["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVISOR", "QC", "CLIENT_VIEWER"]);
 
 /**

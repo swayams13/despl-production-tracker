@@ -147,25 +147,66 @@ const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 
 describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  const { createUser, resetUserPassword } = await import("./admin.service");
+  const { createUser, resetUserPassword, approvePasswordReset } = await import("./admin.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
   let admin: Actor;
+  let secondAdmin: Actor;
 
   beforeAll(async () => {
     const org = await owner.organization.create({
       data: { code: `TEST-ADMIN-${Date.now()}`, name: "Admin svc test" },
     });
     tenantId = org.id;
-    await owner.role.create({ data: { tenantId, code: "ADMIN", name: "Admin" } });
+    const adminRole = await owner.role.create({ data: { tenantId, code: "ADMIN", name: "Admin" } });
 
+    // AUD-079's PendingPasswordReset FKs (requestedBy/approvedBy/targetUserId
+    // all reference real users.id) mean the actor used against
+    // resetUserPassword/approvePasswordReset must be backed by a real row,
+    // not the synthetic `userId: 1` this file used before that model
+    // existed — so both admins below are real rows.
+    const adminRow = await owner.user.create({
+      data: {
+        tenantId,
+        email: "admin@test.local",
+        username: `admin-${Date.now()}`,
+        name: "Test Admin",
+        passwordHash: "x",
+      },
+    });
+    await owner.userRole.create({ data: { userId: adminRow.id, roleId: adminRole.id } });
     admin = {
-      userId: 1,
+      userId: adminRow.id,
       tenantId,
       clientId: null,
       name: "Test Admin",
-      email: "admin@test.local",
+      email: adminRow.email,
+      roles: [ROLES.ADMIN],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+
+    // A SECOND, distinct admin — resetting an ADMIN/QC target needs one to
+    // approve (AUD-079).
+    const secondAdminRow = await owner.user.create({
+      data: {
+        tenantId,
+        email: `second-admin-${Date.now()}@test.local`,
+        username: `second-admin-${Date.now()}`,
+        name: "Second Admin",
+        passwordHash: "x",
+      },
+    });
+    await owner.userRole.create({ data: { userId: secondAdminRow.id, roleId: adminRole.id } });
+    secondAdmin = {
+      userId: secondAdminRow.id,
+      tenantId,
+      clientId: null,
+      name: "Second Admin",
+      email: secondAdminRow.email,
       roles: [ROLES.ADMIN],
       departmentIds: [],
       mustChangePassword: false,
@@ -215,12 +256,15 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
   });
 
   /**
-   * Final-review Finding 2: an admin reset is a temp credential the admin
-   * knows, and is the path most likely to be undoing a COMPROMISED one — so
-   * it must both kill existing sessions (sessionVersion bump, which getActor()
-   * compares against the token) and force the user to replace it.
+   * AUD-079 (test #5 of the session's table): resetting another ADMIN's
+   * password is one of the two roles that requires a second, distinct
+   * admin's approval — same pending/approval flow as a QC target (test #2/#4
+   * below, in the Task 4.1 describe block, cover QC specifically). Also
+   * covers the original Final-review Finding 2 assertions (sessionVersion
+   * bump, mustChangePassword re-armed) at the point they now actually land:
+   * on approval, not on request.
    */
-  it("resetUserPassword bumps sessionVersion and re-arms mustChangePassword", async () => {
+  it("resetUserPassword on an ADMIN target goes pending; a second admin's approval performs the real reset", async () => {
     const user = await createUser(admin, {
       name: "Reset Target",
       email: "resettarget@x.com",
@@ -239,21 +283,87 @@ describe.skipIf(!RUN_DB)("admin.service createUser (DB-backed)", async () => {
       data: { mustChangePassword: false, sessionVersion: 3 },
     });
 
-    await resetUserPassword(admin, { userId: user.id, password: "admin-chosen-1" });
+    const requested = await resetUserPassword(admin, { userId: user.id, password: "admin-chosen-1" });
+    if (!("pending" in requested) || !requested.pending) throw new Error("expected a pending result");
+
+    // Nothing changed yet — the whole point of the pending step.
+    const unchangedRow = await owner.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(unchangedRow.sessionVersion).toBe(3);
+    expect(unchangedRow.mustChangePassword).toBe(false);
+    expect(unchangedRow.passwordHash).toBe(user.passwordHash);
+
+    // The same admin who requested it cannot approve their own request.
+    await expect(
+      approvePasswordReset(admin, { requestId: requested.requestId }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.MAKER_CHECKER_VIOLATION);
+
+    const approval = await approvePasswordReset(secondAdmin, { requestId: requested.requestId });
+    expect(approval.tempPassword).toBeTruthy();
 
     const row = await owner.user.findUniqueOrThrow({ where: { id: user.id } });
     expect(row.sessionVersion).toBe(4); // every pre-reset session token now fails getActor()
     expect(row.mustChangePassword).toBe(true);
     expect(row.passwordHash).not.toBe(user.passwordHash);
 
-    // Invariant #5 + no password material in the trail.
-    const auditRow = await owner.auditLog.findFirst({
-      where: { tenantId, entityType: "User", entityId: String(user.id), action: "admin.resetPassword" },
+    // Invariant #5 + no password material in the trail, at either step.
+    const requestAuditRow = await owner.auditLog.findFirst({
+      where: { tenantId, entityType: "User", entityId: String(user.id), action: "admin.passwordReset.requested" },
       orderBy: { id: "desc" },
     });
-    expect(auditRow).toBeTruthy();
-    expect(auditRow?.before).toBeFalsy();
-    expect(auditRow?.after).toBeFalsy();
+    expect(requestAuditRow).toBeTruthy();
+    expect(JSON.stringify(requestAuditRow?.after ?? "")).not.toContain("admin-chosen-1");
+
+    const approveAuditRow = await owner.auditLog.findFirst({
+      where: { tenantId, entityType: "User", entityId: String(user.id), action: "admin.passwordReset.approved" },
+      orderBy: { id: "desc" },
+    });
+    expect(approveAuditRow).toBeTruthy();
+    expect(JSON.stringify(approveAuditRow?.after ?? "")).not.toContain(approval.tempPassword);
+  });
+
+  it("approvePasswordReset refuses an already-approved or nonexistent request id", async () => {
+    const user = await createUser(admin, {
+      name: "Reset Target Two",
+      email: "resettarget2@x.com",
+      roleCodes: ["ADMIN"],
+      departmentIds: [],
+      password: "password123",
+      mustChangePassword: true,
+    });
+    const requested = await resetUserPassword(admin, { userId: user.id });
+    if (!("pending" in requested) || !requested.pending) throw new Error("expected a pending result");
+
+    await approvePasswordReset(secondAdmin, { requestId: requested.requestId });
+
+    // Already APPROVED — a second approval attempt must not find it PENDING.
+    await expect(
+      approvePasswordReset(secondAdmin, { requestId: requested.requestId }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.NOT_FOUND);
+
+    // A request id that never existed.
+    await expect(
+      approvePasswordReset(secondAdmin, { requestId: 999_999_999 }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.NOT_FOUND);
+  });
+
+  it("resetUserPassword on a QC/Admin target notifies other admins (detective control)", async () => {
+    const user = await createUser(admin, {
+      name: "Reset Target Three",
+      email: "resettarget3@x.com",
+      roleCodes: ["ADMIN"],
+      departmentIds: [],
+      password: "password123",
+      mustChangePassword: true,
+    });
+    await resetUserPassword(admin, { userId: user.id });
+
+    // secondAdmin is a different, active ADMIN in this tenant — the alert
+    // must reach them, not the requester.
+    const alert = await owner.notification.findFirst({
+      where: { tenantId, recipientId: secondAdmin.userId, type: "PASSWORD_RESET_SENSITIVE_TARGET", entityId: user.id },
+      orderBy: { id: "desc" },
+    });
+    expect(alert).toBeTruthy();
   });
 });
 
@@ -321,13 +431,21 @@ describe.skipIf(!RUN_DB)("admin.service createProductFamily (DB-backed)", async 
  */
 describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-backed)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
-  const { createEmployee, createUser, setUserActive, resetUserPassword, updateUserRolesDepts, bulkImportEmployees } =
-    await import("./admin.service");
+  const {
+    createEmployee,
+    createUser,
+    setUserActive,
+    resetUserPassword,
+    approvePasswordReset,
+    updateUserRolesDepts,
+    bulkImportEmployees,
+  } = await import("./admin.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
   let deptId = 0;
   let admin: Actor;
+  let secondAdmin: Actor;
 
   beforeAll(async () => {
     const org = await owner.organization.create({
@@ -362,6 +480,30 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
       clientId: null,
       name: "Test Admin",
       email: adminUser.email,
+      roles: [ROLES.ADMIN],
+      departmentIds: [],
+      mustChangePassword: false,
+      themePreference: "SYSTEM",
+      outdoorMode: false,
+    };
+
+    // AUD-079: a second, distinct admin to approve QC/Admin-target resets.
+    const secondAdminUser = await owner.user.create({
+      data: {
+        tenantId,
+        email: `second-admin-${Date.now()}@test.local`,
+        username: `second-admin-${Date.now()}`,
+        name: "Second Admin",
+        passwordHash: "x",
+      },
+    });
+    await owner.userRole.create({ data: { userId: secondAdminUser.id, roleId: adminRole.id } });
+    secondAdmin = {
+      userId: secondAdminUser.id,
+      tenantId,
+      clientId: null,
+      name: "Second Admin",
+      email: secondAdminUser.email,
       roles: [ROLES.ADMIN],
       departmentIds: [],
       mustChangePassword: false,
@@ -518,16 +660,54 @@ describe.skipIf(!RUN_DB)("admin.service — Task 4.1 employee management (DB-bac
     ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.VALIDATION_FAILED);
   });
 
-  it("resetUserPassword generates a temp password when omitted, and re-arms mustChangePassword", async () => {
+  // AUD-079 test table, #1: a SUPERVISOR target is NOT a QC/Admin account —
+  // unaffected by the pending-approval flow, immediate reset exactly as
+  // before this session.
+  it("resetUserPassword generates a temp password when omitted, and re-arms mustChangePassword — SUPERVISOR target unaffected", async () => {
     const created = await createEmployee(admin, {
       displayName: "Reset Me",
       username: `resetme-${Date.now()}`,
+      roles: ["SUPERVISOR"],
+      departmentIds: [deptId],
+    });
+    await owner.user.update({ where: { id: created.userId }, data: { mustChangePassword: false } });
+
+    const result = await resetUserPassword(admin, { userId: created.userId });
+    if ("pending" in result && result.pending) throw new Error("SUPERVISOR target should reset immediately");
+    expect(result.tempPassword).toMatch(/^[a-z]+-[a-z]+-[a-z]+-\d{2}$/);
+    expect(result.tempPassword).not.toBe(created.tempPassword);
+
+    const row = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
+    expect(row.mustChangePassword).toBe(true);
+  });
+
+  // AUD-079 test table, #2/#3/#4: a QC target goes pending, the requesting
+  // admin cannot approve their own request, and a second distinct admin's
+  // approval performs the real reset.
+  it("resetUserPassword on a QC target goes pending; same-admin approval is refused; a different admin's approval resets it", async () => {
+    const created = await createEmployee(admin, {
+      displayName: "Reset QC",
+      username: `resetqc-${Date.now()}`,
       roles: ["QC"],
       departmentIds: [],
     });
     await owner.user.update({ where: { id: created.userId }, data: { mustChangePassword: false } });
 
-    const { tempPassword } = await resetUserPassword(admin, { userId: created.userId });
+    const requested = await resetUserPassword(admin, { userId: created.userId });
+    if (!("pending" in requested) || !requested.pending) throw new Error("expected a pending result for a QC target");
+
+    // #2: no password returned to the requesting admin.
+    expect("tempPassword" in requested).toBe(false);
+    const unchanged = await owner.user.findUniqueOrThrow({ where: { id: created.userId } });
+    expect(unchanged.mustChangePassword).toBe(false);
+
+    // #3: the requesting admin cannot approve their own request.
+    await expect(
+      approvePasswordReset(admin, { requestId: requested.requestId }),
+    ).rejects.toSatisfy((e: unknown) => isAppError(e) && e.code === ERROR_CODES.MAKER_CHECKER_VIOLATION);
+
+    // #4: a distinct admin approves — the real reset happens now.
+    const { tempPassword } = await approvePasswordReset(secondAdmin, { requestId: requested.requestId });
     expect(tempPassword).toMatch(/^[a-z]+-[a-z]+-[a-z]+-\d{2}$/);
     expect(tempPassword).not.toBe(created.tempPassword);
 

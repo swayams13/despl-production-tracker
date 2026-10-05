@@ -1,13 +1,15 @@
 import { randomInt } from "node:crypto";
-import { withTenant } from "@/lib/db";
+import { withTenant, type Tx } from "@/lib/db";
 import { audited } from "@/lib/audit";
 import { requireRole, assertNotClientUser, hasRole, ROLES, type Actor, type RoleCode } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { hashPassword } from "@/lib/auth/password";
 import { validateSpecs } from "@/lib/shared/specs";
+import { notify, userIdsWithRole } from "./notifications.service";
 import {
   createUserSchema,
   resetPasswordSchema,
+  approvePasswordResetSchema,
   createDelayCategorySchema,
   updateDelayCategorySchema,
   updateStandardDurationsSchema,
@@ -30,6 +32,7 @@ import {
   type UpdateEquipmentTypeInput,
   type CreateClientInput,
   type CreateProductFamilyInput,
+  type ApprovePasswordResetInput,
 } from "@/lib/shared/schemas";
 import type { User, DelayCategoryRef, ProcessTemplateVersion, EquipmentTypeRef, Client, ProductFamily } from "@/generated/prisma/client";
 import { copyVersionContents } from "./template-copy";
@@ -146,26 +149,69 @@ export async function createUser(actor: Actor, input: CreateUserInput): Promise<
   });
 }
 
+/** Roles whose password reset requires a second, distinct ADMIN (AUD-079). */
+const RESET_APPROVAL_REQUIRED_ROLES: RoleCode[] = [ROLES.QC, ROLES.ADMIN];
+
+export type ResetUserPasswordResult = { tempPassword: string; pending?: false } | { pending: true; requestId: number };
+
 /**
  * Reset a user's password. `password` lets an admin set a specific one;
  * omitted, a readable temp password is generated the same way `createEmployee`
  * does. Either way the plaintext is returned ONCE — SPEC §9: never persisted,
  * never logged, never in the audit payload — and the caller is responsible
  * for handing it to the employee (print slip / CSV) and discarding it.
+ *
+ * AUD-079: an admin who can also reset a QC user's password can sign in as
+ * that (now admin-controlled) identity and manufacture a fake independent
+ * verification — `assertMakerChecker` only ever compares actor ids, it
+ * cannot tell a "different user" from "the same admin wearing a second
+ * hat". So when the target holds QC or ADMIN, this does NOT reset anything:
+ * it records a PendingPasswordReset and a DIFFERENT admin must call
+ * `approvePasswordReset` to actually perform it. Every other target
+ * (SUPERVISOR, PRODUCTION_HEAD, MANAGEMENT, CLIENT_VIEWER — the overwhelming
+ * majority) is unaffected: immediate reset, exactly as before.
+ *
+ * Any admin-supplied `password` is discarded, not stored, when the request
+ * goes pending — the whole point is that the approving admin (a distinct
+ * person) generates the real credential, at approval time, not the
+ * requester up front.
  */
-export async function resetUserPassword(
-  actor: Actor,
-  input: ResetPasswordInput,
-): Promise<{ tempPassword: string }> {
+export async function resetUserPassword(actor: Actor, input: ResetPasswordInput): Promise<ResetUserPasswordResult> {
   const { userId, password } = resetPasswordSchema.parse(input);
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN);
-  const tempPassword = password ?? generateTempPassword();
 
   return withTenant(actor.tenantId, async (tx) => {
-    const user = await tx.user.findFirst({ where: { id: userId, tenantId: actor.tenantId } });
+    const user = await tx.user.findFirst({
+      where: { id: userId, tenantId: actor.tenantId },
+      include: { roles: { include: { role: true } } },
+    });
     if (!user) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "User", userId });
 
+    const targetRoleCodes = user.roles.map((r) => r.role.code as RoleCode);
+    const needsApproval = targetRoleCodes.some((c) => RESET_APPROVAL_REQUIRED_ROLES.includes(c));
+
+    if (needsApproval) {
+      return audited(tx, actor, async () => {
+        const request = await tx.pendingPasswordReset.create({
+          data: { tenantId: actor.tenantId, targetUserId: userId, requestedBy: actor.userId },
+        });
+        await notifyPasswordResetSensitiveTarget(tx, actor, { userId, targetRoleCodes, requestId: request.id });
+        return {
+          result: { pending: true as const, requestId: request.id },
+          audit: {
+            action: "admin.passwordReset.requested",
+            entityType: "User",
+            entityId: userId,
+            // No plaintext exists yet at this step — nothing to omit.
+            eventType: "UserPasswordResetRequested",
+            eventPayload: { userId, targetRoleCodes, requestId: request.id },
+          },
+        };
+      });
+    }
+
+    const tempPassword = password ?? generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
     await audited(tx, actor, async () => {
       // An admin-chosen (or generated) password is a temp credential the
@@ -189,11 +235,94 @@ export async function resetUserPassword(
           // are password material and its two locks — nothing safe or useful
           // to diff, and the plaintext must never reach the audit trail.
           eventType: "UserPasswordReset",
-          eventPayload: { userId },
+          eventPayload: { userId, targetRoleCodes },
         },
       };
     });
     return { tempPassword };
+  });
+}
+
+/**
+ * Detective control (AUD-079 item 4): any reset touching a QC/ADMIN account
+ * — pending here, or approved below — alerts every OTHER admin, so the risk
+ * is visible even before (or regardless of) a second approval. Reuses the
+ * existing in-app notification mechanism (`notifications.service.ts`); no
+ * new delivery channel.
+ */
+async function notifyPasswordResetSensitiveTarget(
+  tx: Tx,
+  actor: Actor,
+  args: { userId: number; targetRoleCodes: RoleCode[]; requestId: number },
+): Promise<void> {
+  const adminIds = (await userIdsWithRole(tx, actor.tenantId, ROLES.ADMIN)).filter((id) => id !== actor.userId);
+  if (adminIds.length === 0) return;
+  await notify(
+    tx,
+    actor.tenantId,
+    adminIds.map((recipientId) => ({
+      recipientId,
+      type: "PASSWORD_RESET_SENSITIVE_TARGET",
+      entityType: "User",
+      entityId: args.userId,
+      title: "Password reset requested for a QC/Admin account",
+      body: `Roles: ${args.targetRoleCodes.join(", ")}. Requires a different admin's approval.`,
+      payload: { userId: args.userId, targetRoleCodes: args.targetRoleCodes, requestId: args.requestId },
+    })),
+  );
+}
+
+/**
+ * Completes a pending password reset (AUD-079). Requires ADMIN, and refuses
+ * when the approver is the same person who requested it — that same-actor
+ * check is the entire point of this function; without it, the "second
+ * approver" step is just a rubber stamp the requesting admin can also press.
+ * Reuses `generateTempPassword`/`hashPassword` unchanged — only the caller
+ * (this function, instead of `resetUserPassword` directly) changes for a
+ * QC/ADMIN target.
+ */
+export async function approvePasswordReset(
+  actor: Actor,
+  input: ApprovePasswordResetInput,
+): Promise<{ tempPassword: string }> {
+  const { requestId } = approvePasswordResetSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const request = await tx.pendingPasswordReset.findFirst({
+      where: { id: requestId, tenantId: actor.tenantId, status: "PENDING" },
+    });
+    if (!request) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "PendingPasswordReset", requestId });
+
+    if (request.requestedBy === actor.userId) {
+      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { requestedBy: request.requestedBy });
+    }
+
+    const tempPassword = generateTempPassword();
+    const passwordHash = await hashPassword(tempPassword);
+
+    return audited(tx, actor, async () => {
+      await tx.user.update({
+        where: { id: request.targetUserId },
+        data: { passwordHash, sessionVersion: { increment: 1 }, mustChangePassword: true },
+      });
+      await tx.pendingPasswordReset.update({
+        where: { id: request.id },
+        data: { status: "APPROVED", approvedBy: actor.userId, approvedAt: new Date() },
+      });
+      return {
+        result: { tempPassword },
+        audit: {
+          action: "admin.passwordReset.approved",
+          entityType: "User",
+          entityId: request.targetUserId,
+          // Plaintext never enters the trail, at either step (SPEC §9).
+          eventType: "UserPasswordResetApproved",
+          eventPayload: { userId: request.targetUserId, requestedBy: request.requestedBy, approvedBy: actor.userId },
+        },
+      };
+    });
   });
 }
 

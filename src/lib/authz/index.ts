@@ -140,6 +140,19 @@ export function assertNotClientUser(actor: Actor): void {
  * The same human can never submit and verify. Verification needs the QC role.
  * This holds for admins too — that is the point of the rule, so ADMIN is
  * deliberately absent from the role check below.
+ *
+ * Scope, precisely (AUD-079): this checks actor IDENTITY only — that
+ * `actor.userId` differs from `submittedBy`. It says nothing about how the
+ * acting session's credential came to exist. An admin who resets a QC
+ * user's password and signs in as them presents a genuinely distinct
+ * `userId` and passes this check cleanly, even though no independent human
+ * actually verified anything — the "checker" identity is admin-controlled.
+ * Credential provenance is a separate concern from identity comparison; this
+ * function does not and cannot address it. `resetUserPassword` /
+ * `approvePasswordReset` (admin.service.ts) are the control for that gap —
+ * they require a second, distinct ADMIN to complete a reset against a QC or
+ * ADMIN account, so a single admin cannot unilaterally mint a "checker"
+ * identity they secretly control.
  */
 export function assertMakerChecker(actor: Actor, submittedBy: number | null): void {
   requireRole(actor, ROLES.QC);

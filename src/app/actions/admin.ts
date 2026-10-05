@@ -4,6 +4,7 @@ import { requireActor } from "@/lib/authz";
 import {
   createUser,
   resetUserPassword,
+  approvePasswordReset,
   createDelayCategory,
   updateDelayCategory,
   updateStandardDurations,
@@ -26,16 +27,26 @@ export async function createUserAction(input: CreateUserInput): Promise<ActionRe
   }
 }
 
-export async function resetPasswordAction(userId: number, password: string): Promise<ActionResult> {
+/**
+ * AUD-079: resetting a QC/ADMIN target no longer resets anything here — it
+ * only records a request a DIFFERENT admin must approve. `pending: true`
+ * tells the caller to show "reset requested, awaiting a second admin's
+ * approval" instead of assuming the admin-chosen `password` above took
+ * effect.
+ */
+export async function resetPasswordAction(
+  userId: number,
+  password: string,
+): Promise<ActionResult & { pending?: boolean }> {
   try {
     // tempPassword deliberately dropped here: this action wraps the
     // ADMIN-CHOSEN-password path from the existing /admin table UI, which
     // already has the plaintext in `password`. Task 4.2 wires the
     // generate-if-omitted path (and the credential-slip hand-off) through a
     // new action of its own.
-    await resetUserPassword(await requireActor(), { userId, password });
+    const result = await resetUserPassword(await requireActor(), { userId, password });
     revalidatePath("/admin");
-    return { ok: true };
+    return { ok: true, pending: "pending" in result ? result.pending : false };
   } catch (e) {
     return toActionError(e);
   }
@@ -65,10 +76,37 @@ export async function createEmployeeAction(input: CreateEmployeeInput): Promise<
  * for the same credential-hand-off screen `createEmployeeAction` uses.
  * Distinct from `resetPasswordAction` above, which still serves the
  * admin-chooses-the-password path.
+ *
+ * AUD-079: for a QC/ADMIN target, `resetUserPassword` no longer returns a
+ * password at all — it returns `{ pending: true, requestId }`. This action
+ * passes that straight through so the UI can show "awaiting a second
+ * admin's approval" instead of a credential slip with nothing on it.
  */
-export async function generateResetPasswordAction(userId: number): Promise<ActionResult & { tempPassword?: string }> {
+export async function generateResetPasswordAction(
+  userId: number,
+): Promise<ActionResult & { tempPassword?: string; pending?: boolean; requestId?: number }> {
   try {
-    const { tempPassword } = await resetUserPassword(await requireActor(), { userId });
+    const result = await resetUserPassword(await requireActor(), { userId });
+    revalidatePath("/admin");
+    if ("pending" in result && result.pending) {
+      return { ok: true, pending: true, requestId: result.requestId };
+    }
+    return { ok: true, tempPassword: result.tempPassword };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * AUD-079: completes a pending password reset request. Must be called by a
+ * DIFFERENT admin than the one who requested it — enforced in
+ * `approvePasswordReset` itself (MAKER_CHECKER_VIOLATION otherwise).
+ */
+export async function approvePasswordResetAction(
+  requestId: number,
+): Promise<ActionResult & { tempPassword?: string }> {
+  try {
+    const { tempPassword } = await approvePasswordReset(await requireActor(), { requestId });
     revalidatePath("/admin");
     return { ok: true, tempPassword };
   } catch (e) {
