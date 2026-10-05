@@ -6194,3 +6194,15 @@ Went to create a placeholder second ADMIN in production via the real `/admin` UI
 **Two other findings from the same production employee list** (8 users total):
 - **None of the 12 `<dept>@despl.local` demo accounts from the 6 Sep session exist in production** — that provisioning ran against the local dev DB. Production has only `ba`, `fabrication`, `procurement`, `production`, `qc`, `aide`, `admin`, plus an inactive `qa.test.employee`. Matters for the team demo and Gate 4 cutover.
 - **`ba@despl.local` holds Client + QC/QA + Supervisor + Production Head + Management across all 13 departments** — unusually broad; the Client role alongside staff roles may collide with AUD-025's `clientId !== null` guard. Raised with Swayam, not changed.
+
+## Session — migration window (5 queued) started, blocked on DB connectivity, 5 Oct 2026
+
+Swayam asked to apply the 5 queued migrations (`20260909200000`–`220000` AUD-078, `20260910100000` AUD-006, `20260910110000` AUD-079) and re-run AUD-078's backfill preflight against production. **Nothing was applied; production is unchanged.**
+
+- **Pending set confirmed from production itself**: `/api/health` returns 503 `{"status":"error","migrations":"pending",...}` naming exactly those 5 — the intended pending-migrations signal, not an outage (`/login` 200, app serving normally).
+- **Read all 3 AUD-078 migrations.** Backfill claims NULL-tenant library rows via `audit_log` (`qcp.template.createLibrary`) first, then falls back to `organizations.code='DESPL'`; children inherit from parent template; a `DO $$` preflight `RAISE`s if any NULL remains before `SET NOT NULL`.
+- **Wrote a read-only preflight** (scratchpad `aud078_preflight.sql`, not committed): lists organizations, NULL-tenant counts per table (library vs job-owned), each NULL-tenant library template with which pass will claim it (`audit_log` / `DESPL fallback` / `UNCLAIMED`), and `job_owned_nulls` (must be 0). Syntax-checked against local `despl_test`.
+- **Agent could not reach production**: the harness classifier blocked both reading `DATABASE_PUBLIC_URL` via `railway variables` and running the preflight via `railway run`. Not worked around. Handed Swayam the command to run himself with `!`.
+- **Swayam's run timed out**: `shinkansen.proxy.rlwy.net:51870` → `Operation timed out`. `nc` confirms port 443 on the same host connects, 51870 does not — the same host:port worked on 9 Sep. Either the Postgres service's TCP proxy was disabled/re-ported, or the current network blocks non-standard outbound ports.
+
+**Next**: (1) check Railway → Postgres → Settings → Networking → TCP Proxy, or retry from another network (`nc -vz -G 5 shinkansen.proxy.rlwy.net 51870` must say `succeeded`); (2) run the AUD-078 preflight (Swayam runs it via `!`), confirm no `UNCLAIMED` rows and `job_owned_nulls = 0`; (3) dump → restore to `despl_rehearse` → `migrate deploy` → verify, per `MERGE-RUNBOOK.md` §5; (4) stop at the §5.7 abort point for Swayam's go before applying to production; (5) post-apply: `_prisma_migrations` 61 applied / 0 failed, `migrate diff --exit-code` 0, `/api/health` 200.
