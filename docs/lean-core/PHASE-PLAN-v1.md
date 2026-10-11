@@ -2,6 +2,7 @@
 
 **Project:** DESPL Production Tracker (this repo) · **Written:** 11 Oct 2026 · **Owner:** Swayam
 **Status:** active. This file sets the **phase order, gates, decisions and team inputs**. Session specs stay in `docs/lean-core/BUILD-PROMPT-lean-core-v1.md` (L0–L4, J1–J8, §8 design errata); this file adds **Phase M (master data)**, which that file does not have.
+**Also read §9** — decisions, sign-offs, team questions and production-readiness work carried over from the 6–7 Oct sessions (Review & Rebuild Strategy, Questions for the DESPL team, UI review). §9 corrects some defaults in §5–§6.
 **Precedence:** `CLAUDE.md` binds → this file decides order → the build prompt specifies each L/J session. If this file and the build prompt disagree on order, this file wins; on what a session builds, the build prompt wins.
 
 ---
@@ -148,7 +149,7 @@ D1–D13 are already in `CLAUDE.md` → "Lean Core decisions". D14–D27 are new
 | D2 | Which handoffs become SOFT; is assembly order job-specific | P0 | SJ | 17 Oct | All HARD |
 | D3 | QC scope (`requiresQc`) | P0 | SJ + QC head | 17 Oct | QC verifies every step |
 | D4 | Backdating window | P0 | SJ | 17 Oct | 72 h |
-| D5 | Pilot job, departments, JOB-grain processes | P0 | SJ + MD | 17 Oct | Planning/PPC, Fabrication, QC; processes 1–11, 33 |
+| D5 | Pilot job, departments, JOB-grain processes | P0 | SJ + MD | 17 Oct | Planning/PPC, Fabrication Prep, Fabrication/Welding, QC; processes 1–11, 33 (§9.1) |
 | D13 | Report in 36 processes or 25 work-order stages | P0 | SJ + MD/CEO | 17 Oct | Board shows 25 stages |
 | D7 | Department representatives, welder list | P0 | SJ | 24 Oct | Placeholder accounts |
 | D14 | Controlling document for routes (review action Q-01) | P1 | SJ | 24 Oct | Team workbook once approved |
@@ -171,6 +172,7 @@ D1–D13 are already in `CLAUDE.md` → "Lean Core decisions". D14–D27 are new
 | D8 | On-prem server spec, administrator, cutover month | P7 | MD + IT | 5 Dec | Stay on Railway |
 | D24 | Photo evidence points; GPS required | P7 | QC head | 12 Dec | Hold points and hydro test only |
 | D27 | Backup retention, remote access, system administrator | P7 | IT + MD | 12 Dec | Nightly, 14 days, LAN only |
+| D28 | Git integration model (§9.6): PRs into `main` behind flags, or a long-lived `redesign` branch | P0 | Swayam | 17 Oct | PRs into `main` behind flags; tag `pre-redesign` first |
 
 ---
 
@@ -196,7 +198,7 @@ D1–D13 are already in `CLAUDE.md` → "Lean Core decisions". D14–D27 are new
 | I5 | Full parts list for every PV and HE type | M2, J8 | Engineering | 21 Nov | Partial — 60 families |
 | I19 | Hindi/Gujarati reviewer | L2.12 | SJ | 21 Nov | Missing |
 | I10 | HE types and frequency, approved 42-stage plan, past HE BOM + GA, grommet details | J8 | Engineering + PPC | 25 Nov | Partial |
-| I16 | Excel trackers of in-flight jobs | D22, L2.10 | PPC | 28 Nov | Partial — DE0463/DE0467 in seed |
+| I16 | Excel trackers of every live job (E1 — needed week 1 to design the import) | D22, L2.10 | PPC | 17 Oct | Partial — DE0463/DE0467 in seed |
 | I18 | On-prem server spec, OS, IT contact, LAN host/IP, backup target, remote access | L4.1, cutover | IT | 5 Dec | Missing |
 
 ---

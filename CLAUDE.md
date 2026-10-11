@@ -4,7 +4,7 @@
 
 **Current work is sequenced by `docs/lean-core/BUILD-PROMPT-lean-core-v1.md`** (Phase 0 → L1 → J1–J8 → L2 screens → pilot → L4). It supersedes the phase order in `docs/archive/mos-execution/PROMPTS-v4.md` and Phases 2–10 of `audit/20_REMEDIATION_ROADMAP.md`. Read it in full before any session. Where it conflicts with older text in this file, it wins until this file is updated; the dated "Revised 7 Oct 2026" notes below mark the changes.
 
-- **Phase order and inputs (added 11 Oct 2026):** `docs/lean-core/PHASE-PLAN-v1.md` sets phases P0–P7, their gates, decisions D14–D27, the information still owed by the DESPL team, and adds **Phase M (master data, sessions M1–M3)**, which the build prompt does not have. Read it together with the build prompt; it wins on order, the build prompt wins on what each L/J session builds. M sessions use branch `lean/M<n>-<slug>`. Team inputs of 11 Oct live in `docs/lean-core/inputs/2026-10-11-master-list/` (all Draft, see the plan's §7 before trusting any value).
+- **Phase order and inputs (added 11 Oct 2026):** `docs/lean-core/PHASE-PLAN-v1.md` (incl. §9: carried-over decisions, team questions A1–H6, sign-offs, production-readiness work) sets phases P0–P7, their gates, decisions D14–D27, the information still owed by the DESPL team, and adds **Phase M (master data, sessions M1–M3)**, which the build prompt does not have. Read it together with the build prompt; it wins on order, the build prompt wins on what each L/J session builds. M sessions use branch `lean/M<n>-<slug>`. Team inputs of 11 Oct live in `docs/lean-core/inputs/2026-10-11-master-list/` (all Draft, see the plan's §7 before trusting any value).
 - **Goal:** pilot with Planning/PPC, Fabrication and QC on one live job; ≥ 90 % of events entered the same day for 5 straight working days.
 - **Session template:** one session item per branch `lean/L<x.y>-<slug>` (or `lean/J<n>-<slug>`). Plan first — files, migration, tests — and wait for Swayam's go. Then implement, run `pnpm typecheck && pnpm lint && pnpm test && pnpm test:db`, open a PR, add at most 15 lines to `progress.md`.
 - **Design reference:** `design/lean-core/*.dc.html` (Claude Design, 7 Oct 2026). Read the build prompt's **§8 (design review)** before building any screen: it maps frames to sessions and lists 21 errata where the frames are wrong. Recreate the frames in this codebase's components and data layer; never copy their sample data.
@@ -43,6 +43,7 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | D25 | Weight calculation in v1 | After go-live | Open |
 | D26 | Department rollout order after the pilot | Order in PHASE-PLAN P6 | Open |
 | D27 | Backup retention, remote access, system administrator | Nightly, 14 days, LAN only | Open |
+| D28 | Git integration: PRs into `main` behind flags, or a long-lived `redesign` branch | PRs into `main` behind flags; tag `pre-redesign` first | Open |
 
 **Do not start L1.2 until D2, D3 and D4 are recorded.**
 
