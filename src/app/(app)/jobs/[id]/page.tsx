@@ -10,6 +10,7 @@ import { loadQcpGrid } from "@/lib/services/qcp-grid.read";
 import { loadClientPreview } from "@/lib/services/client-snapshot.read";
 import { loadPackingPanel } from "@/lib/services/packing.read";
 import { loadDispatchPanel } from "@/lib/services/dispatch.read";
+import { FEATURES } from "@/lib/shared/flags";
 import { JobDetailClient } from "./_client";
 
 const TABS = ["overview", "gantt", "bom", "assembly", "qcp", "packing", "dispatch", "activity", "client"] as const;
@@ -36,8 +37,9 @@ export default async function JobDetail({
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
 
-  const canReviewClientUpdates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
-  const canEditJobDates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  // Lean Core freeze: false hides the Client View tab and the date editor.
+  const canReviewClientUpdates = FEATURES.clientPortal && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
+  const canEditJobDates = FEATURES.cpmReplanUi && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
   // cosmetic, the server is authoritative either way.
   const canManagePacking = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
@@ -54,7 +56,8 @@ export default async function JobDetail({
 
   const sp = await searchParams;
   const tabParam = first(sp.tab);
-  const tab: Tab = (TABS as readonly string[]).includes(tabParam ?? "") ? (tabParam as Tab) : "overview";
+  const tabs: readonly string[] = FEATURES.clientPortal ? TABS : TABS.filter((t) => t !== "client");
+  const tab: Tab = tabs.includes(tabParam ?? "") ? (tabParam as Tab) : "overview";
   const unitParam = toInt(sp.unit);
   const equipmentParam = toInt(sp.equipment);
   const openUnit = toInt(sp.openUnit);

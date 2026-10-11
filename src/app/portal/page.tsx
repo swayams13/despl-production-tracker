@@ -1,4 +1,5 @@
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
+import { FEATURES } from "@/lib/shared/flags";
 import { getActor } from "@/lib/authz";
 import { logout } from "@/app/actions/auth";
 import { loadClientPortalView } from "@/lib/services/client-snapshot.read";
@@ -11,6 +12,7 @@ import { ThemeRoot } from "@/components/industrial/theme-root";
  * docs/superpowers/specs/2026-08-19-client-portal-daily-updates-design.md.
  */
 export default async function PortalPage() {
+  if (!FEATURES.clientPortal) notFound();
   const actor = await getActor();
   if (!actor) redirect("/login");
   if (actor.mustChangePassword) redirect("/account/password");
