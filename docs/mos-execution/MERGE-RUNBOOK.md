@@ -90,6 +90,8 @@ important fact in this document.
 
 ## 2. Root cause — `railway.json` is not honored
 
+> **Update 11 Oct 2026 (L0.2):** option A was adopted. Pre-Deploy Command `pnpm prisma migrate deploy` and Healthcheck Path `/api/health` are set in the Railway dashboard (not in `railway.json`, which is still not honored). The text below is the 2 Sep analysis, kept for history; §6.4's "unattended" hazard is now armed. Rehearse every migration PR (§5) before merging it.
+
 `preDeployCommand: None` on **every deployment ever recorded**, including August's.
 And `builder: RAILPACK` where `railway.json` specifies `"builder": "NIXPACKS"`.
 

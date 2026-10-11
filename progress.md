@@ -80,3 +80,12 @@ DESPL team returned the Standard Parts Master (PV + HE) with the DE0423 GA and S
 **Not done:** the follow-up row-count/grant query against production (`prod-verify.sql`: counts 3/10/1116/8, 99 policies, `audit_log` UPDATE/DELETE denied) not yet pasted back; §5.6 browser pass and §5.8 restart skipped (code already live); `despl_rehearse` not yet dropped.
 **State:** production 71/71. Rule "no migration merges to `main`" **still stands until L0.2** (pre-deploy step not yet in Railway). AUD-079 approve-reset button in `/admin` can now merge once L0.2 lands.
 **Next:** L0.2 — Swayam sets Railway Pre-Deploy Command `pnpm prisma migrate deploy` + Healthcheck Path `/api/health`; agent then updates the `CLAUDE.md` stack section → L0.3 staging → L1.1. D2–D5, D13, D28 still open (due 17 Oct).
+
+## Session — L0.2 pre-deploy migrations enabled, 11 Oct 2026 (docs on `lean/L0.2-predeploy-docs`)
+
+**Done (Swayam, Railway dashboard):** Pre-Deploy Command `pnpm prisma migrate deploy` set on service `despl-production-tracker` (project `bubbly-forgiveness`, env `production`). Deploy log shows it running: "71 migrations found … No pending migrations to apply"; `/api/health` 200 afterwards. Accept criterion met.
+**Agent:** `CLAUDE.md` stack section rewritten (migrations now apply on deploy; dashboard, not `railway.json`, is authoritative); `MERGE-RUNBOOK.md` §2 got an update note. No code changed.
+**Rule change:** "no migration merges to `main`" is lifted. Every migration PR still gets a rehearsal on a restored copy first; a failed pre-deploy leaves the old container serving silently, so read the deploy log.
+**Open:** Healthcheck Path `/api/health` not yet confirmed in the dashboard; `main` has no branch protection; `cron-alerts` (last run failed ~44 min before check) and `cron-digest` (failed ~16 h) show failed runs — cause unknown, logs not read; second staged Railway change ("2 changes") not identified.
+**Agent could not drive the Railway UI:** the auto-mode classifier blocked production reads/writes and edits to its own permission settings; Swayam did the clicks. A local `.claude/settings.local.json` allow-rule was added by Swayam (gitignored).
+**Next:** L0.3 staging → L1.1. D2–D5, D13, D28 still open (due 17 Oct).
