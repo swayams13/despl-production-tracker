@@ -123,6 +123,8 @@ export const ERROR_CODES = {
   EXCLUSION_REASON_REQUIRED: "EXCLUSION_REASON_REQUIRED",
   /** checkFeasibility (AUD-035): requiredMinDays exceeds requiredMaxDays — the envelope data fed in is internally inconsistent (distinct from SCHEDULE_DATA_MISSING's "no envelope at all"). */
   SCHEDULE_ENVELOPE_INVALID: "SCHEDULE_ENVELOPE_INVALID",
+  /** A Server Action belonging to a feature switched off in src/lib/shared/flags.ts (Lean Core §4 freeze list). */
+  FEATURE_FROZEN: "FEATURE_FROZEN",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -210,6 +212,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "Excluding a process from the job's scope requires a reason, which is recorded.",
   SCHEDULE_ENVELOPE_INVALID:
     "This job's envelope data is inconsistent (minimum duration exceeds maximum) and cannot be scheduled. Contact an administrator.",
+  FEATURE_FROZEN:
+    "This feature is switched off while the pilot runs. Ask the Production Head if you need it; only the system administrator can switch it back on.",
 };
 
 /**

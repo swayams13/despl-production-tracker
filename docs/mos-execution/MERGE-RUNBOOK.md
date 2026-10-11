@@ -590,7 +590,7 @@ append-only REVOKEs.
    this is what proves them fixed.
 5. Console clean.
 
-Record page by page in `LEDGER.md`. This is Gate 0's exit evidence.
+Record page by page in `progress.md` (the session entry). This is Gate 0's exit evidence.
 
 ---
 

@@ -16,7 +16,9 @@ import {
 } from "@/lib/services/admin.service";
 import { loadTemplateProcesses } from "@/lib/services/job-intake.read";
 import { generateSchedule } from "@/lib/services/schedule.service";
-import { isAppError } from "@/lib/shared/errors";
+import { withTenant } from "@/lib/db";
+import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
+import { FEATURES } from "@/lib/shared/flags";
 import { toActionError, type ActionResult } from "./_action";
 import type {
   CreateJobInput,
@@ -36,7 +38,20 @@ export type CreateJobActionResult = ActionResult & {
 
 export async function createJobAction(input: CreateJobInput): Promise<CreateJobActionResult> {
   try {
-    const job = await createJob(await requireActor(), input);
+    const actor = await requireActor();
+    if (!FEATURES.multiFamilyIntake) {
+      // Lean Core freeze: only PRESSURE_VESSEL jobs may be created. An unknown
+      // or malformed familyId falls through so createJob reports it as before.
+      const family = Number.isInteger(input.familyId)
+        ? await withTenant(actor.tenantId, (tx) =>
+            tx.productFamily.findFirst({ where: { id: input.familyId, tenantId: actor.tenantId }, select: { code: true } }),
+          )
+        : null;
+      if (family && family.code !== "PRESSURE_VESSEL") {
+        throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "multiFamilyIntake", familyCode: family.code });
+      }
+    }
+    const job = await createJob(actor, input);
     revalidatePath("/jobs");
     return { ok: true, job };
   } catch (e) {
@@ -104,6 +119,8 @@ export type UpdateJobDatesActionResult = ActionResult & {
  */
 export async function updateJobDatesAction(input: UpdateJobDatesInput): Promise<UpdateJobDatesActionResult> {
   try {
+    // Lean Core freeze: changing dates re-runs the scheduler (a replan).
+    if (!FEATURES.cpmReplanUi) throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "cpmReplanUi" });
     const actor = await requireActor();
     const job = await updateJobDates(actor, input);
     revalidatePath(`/jobs/${input.jobId}`);

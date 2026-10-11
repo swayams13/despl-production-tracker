@@ -30,7 +30,7 @@ import { createUser } from "../src/lib/services/admin.service";
 import { ROLES, type Actor } from "../src/lib/authz";
 
 if (!process.env.DEPT_ACCOUNT_PASSWORD) {
-  throw new Error("create-department-accounts: set DEPT_ACCOUNT_PASSWORD — no hardcoded default (D3, LEDGER.md).");
+  throw new Error("create-department-accounts: set DEPT_ACCOUNT_PASSWORD — no hardcoded default (D3, docs/archive/mos-execution/LEDGER.md).");
 }
 const PASSWORD: string = process.env.DEPT_ACCOUNT_PASSWORD;
 

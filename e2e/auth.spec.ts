@@ -83,7 +83,8 @@ test("D13: username alone (no email match) signs in, same as email", async ({ pa
 test("client user lands in the portal and cannot reach the internal app", async ({ page }) => {
   await signIn(page, "client@example.local");
   await expect(page).toHaveURL("/portal");
-  await expect(page.getByRole("heading", { name: "Your orders" })).toBeVisible();
+  // Lean Core freeze (FEATURES.clientPortal = false): /portal is notFound().
+  await expect(page.getByRole("heading", { name: /could not be found/i })).toBeVisible();
 
   // the internal home must bounce a client user straight back out
   await page.goto("/");
@@ -150,9 +151,10 @@ test("client user navigating to /portal itself renders normally (no redirect loo
   // still-in-flight redirect and can hit /portal before the session cookie
   // is actually set, bouncing to /login instead.
   await expect(page).toHaveURL("/portal");
-  await page.goto("/portal");
+  const res = await page.goto("/portal");
   await expect(page).toHaveURL("/portal");
-  await expect(page.getByRole("heading", { name: "Your orders" })).toBeVisible();
+  // Lean Core freeze (FEATURES.clientPortal = false): a 404, not a loop.
+  expect(res?.status()).toBe(404);
 });
 
 test("internal staff user is unaffected: /board and /profile render normally", async ({

@@ -11,7 +11,9 @@ export default defineConfig({
     // of the file. (jsdom 30 also pulls undici 8, which needs Node 22+, so
     // loading it globally breaks the suite on the pinned Node 20 LTS.)
     environment: 'node',
-    exclude: ['node_modules', 'e2e', '.next', '.worktrees', 'worktrees'],
+    // .claude/**: agent worktrees (.claude/worktrees/agent-*) hold full repo
+    // copies; without this an unscoped `pnpm test` runs every one of them.
+    exclude: ['node_modules', 'e2e', '.next', '.worktrees', 'worktrees', '.claude/**'],
     // DB-gated (RUN_DB_TESTS=1) files share one seeded fixture set — DESPL-320
     // and DE0463 in particular — across files. Running files in parallel lets
     // one file's start/verify/hold-point work on that shared job race a
