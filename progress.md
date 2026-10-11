@@ -58,12 +58,13 @@ DESPL team returned the Standard Parts Master (PV + HE) with the DE0423 GA and S
 
 **Next:** L0.1 (Swayam, hotspot) → L0.2 → L0.3 → L0.4 (commit `CLAUDE.md`, `docs/lean-core/`, `design/lean-core/`, flags) → L1.1 → M1 → M2. Decision meeting with SJ for D1–D5, D13–D16.
 
-## Session — L0.4 repo and docs reset, 11 Oct 2026 (branch `lean/L0.4-repo-reset`, not pushed)
+## Session — L0.4 repo and docs reset, 11 Oct 2026 (PR #68, branch `lean/L0.4-repo-reset`; test fix PR #69)
 
-**Shipped (local commits):** Lean Core drafts landed (`CLAUDE.md`, `docs/lean-core/` with the workbook xlsx, PDFs git-ignored; `design/lean-core/`). `src/lib/shared/flags.ts` (all five off) + `FEATURE_FROZEN`: snapshot publish/verify/reject and `updateJobDatesAction` (date change + reschedule) refuse; job page hides Client View and the date editor; `/jobs/new` offers only Pressure Vessel and `createJobAction` refuses other families server-side; initial schedule at job creation untouched. Tests: `src/app/frozen-features.test.ts`.
-**Client logins land on a 404** at `/portal` while the portal is frozen (`e2e/auth.spec.ts` expects it; e2e not run this session).
+**Shipped:** Lean Core drafts landed (`CLAUDE.md`, `docs/lean-core/` with the workbook xlsx, PDFs git-ignored; `design/lean-core/`). `src/lib/shared/flags.ts` (all five off) + `FEATURE_FROZEN`: snapshot publish/verify/reject and `updateJobDatesAction` (date change + reschedule) refuse; job page hides Client View and the date editor; `/jobs/new` offers only Pressure Vessel and `createJobAction` refuses other families server-side; initial schedule at job creation untouched. Tests: `src/app/frozen-features.test.ts`.
+**Client logins land on a 404** at `/portal` while the portal is frozen (`e2e/auth.spec.ts` expects it). CI's e2e job caught a strict-mode locator in that assertion (heading and route announcer both matched); fixed in `c333e39`, e2e green in CI.
 **Docs:** `audit/` now tracked as-is. 59 superseded docs moved by `git mv` to `docs/archive/` (mos-blueprint, PROMPTS-v4, LEDGER, PHASE-PROMPTS, AUDIT-*, PLAN-/SPEC-, PRD/TRD, …); kept DESIGN_SPEC and the two DESPL-320 seed-source docs. Pointers rewritten in kept docs, `CLAUDE.md` and one script message; code comments still name the old paths. This file now holds only October entries; everything older (incl. the undated reference sections) is in `docs/archive/progress-aug-sep-2026.md`.
 **Tooling:** vitest/eslint ignore `.claude/**`, so unscoped `pnpm test`/`pnpm lint` skip agent worktrees (none deleted).
 **despl_test rebuilt** (local only: drop, create, 71/71 migrations, `db:seed`, DESPL-320 components/BOM/assembly seeds, schedules for DESPL-320/DE0463/DE0467). `pnpm test:db` went from 29 failures (same on `main`; cause: failed `aud006_check_constraints` migration on stale data) to 1181/1181 passing.
-**Not done:** `.claude/worktrees/agent-*` and merged branches untouched (needs Swayam's OK). `docs/USER-GUIDE-WHY-WAS-I-REFUSED.md` lacks the newest codes.
-**Next:** L0.1 → L0.2 → L0.3 (Swayam), then L1.1.
+**Test fix (PR #69):** the DESPL-320 hold-point test in `process.service.test.ts` flipped seeded process-10 operations to COMPLETE and never restored them, so `test:db` failed on every second run; it now restores them in a `finally`. Three isolated and two full `test:db` runs on one DB, 1181/1181. No other un-restored mutation found.
+**Not done:** `.claude/worktrees/agent-*` and merged branches untouched (needs Swayam's OK). `docs/USER-GUIDE-WHY-WAS-I-REFUSED.md` lacks the newest codes (`FEATURE_FROZEN`).
+**Next:** Swayam merges #68/#69, then L0.1 (re-dump and re-rehearse first; the 5 Oct rehearsal is stale) → L0.2 → L0.3. L1.1 after L0.2; D2–D4 gate L1.2.
