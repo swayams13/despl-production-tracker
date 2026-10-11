@@ -84,7 +84,7 @@ test("client user lands in the portal and cannot reach the internal app", async 
   await signIn(page, "client@example.local");
   await expect(page).toHaveURL("/portal");
   // Lean Core freeze (FEATURES.clientPortal = false): /portal is notFound().
-  await expect(page.getByText("This page could not be found")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /could not be found/i })).toBeVisible();
 
   // the internal home must bounce a client user straight back out
   await page.goto("/");
