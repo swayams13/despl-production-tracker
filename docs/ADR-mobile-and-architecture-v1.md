@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-16 · **Status:** proposed for approval · **Decides:** how the supervisor mobile app connects to the tracker, how it gets onto shop-floor tablets, and whether to keep the single full-stack app or split into separate frontend/backend.
 
-**Read with:** BUILD-SPEC-v2.md (decision #5 — single Next.js app), CLAUDE.md invariants, SPEC-personal-dashboards-v1.md (`/my-day` is mobile-first by design).
+**Read with:** BUILD-SPEC-v2.md (decision #5 — single Next.js app), CLAUDE.md invariants, `docs/archive/SPEC-personal-dashboards-v1.md` (`/my-day` is mobile-first by design).
 
 ---
 

@@ -4,9 +4,9 @@
 manufacturing-operations-and-traceability core with product-family configuration, not a
 pressure-vessel application, and what "future-proof for a new family" concretely means.
 
-**Read with:** `docs/PHASE-PROMPTS.md` §0 (the standing generality rule this ADR is the reasoned
-basis for), `docs/AUDIT-addendum-fabrication-and-assembly.md` §0b and §2, `docs/CLAUDE.md`'s
-generality-related conventions, `docs/AUDIT-master-engineering-review-v1.md` (preserved as-is —
+**Read with:** `docs/archive/PHASE-PROMPTS.md` §0 (the standing generality rule this ADR is the reasoned
+basis for), `docs/archive/AUDIT-addendum-fabrication-and-assembly.md` §0b and §2, `docs/CLAUDE.md`'s
+generality-related conventions, `docs/archive/AUDIT-master-engineering-review-v1.md` (preserved as-is —
 this ADR does not revise its findings).
 
 ---
@@ -78,7 +78,7 @@ DESPL-320 data — job numbers, serials, customer names, component tags, operati
 codes, family codes as literals — belongs in `seed/`, `scripts/`, and test fixtures. **No such
 literal may appear in `src/`.**
 
-`docs/PHASE-PROMPTS.md` §0 already states this rule and credits Phase 0 with removing the one
+`docs/archive/PHASE-PROMPTS.md` §0 already states this rule and credits Phase 0 with removing the one
 violation found at the time, `workspace/page.tsx:8-13`. **That credit does not hold as of this
 review** — see "DESPL-320 assumption found in `src/`" below; the violation is present again (or
 was never fully removed) in the current tree and this ADR flags it as an open item, not a closed
@@ -98,7 +98,7 @@ RBAC, BOM, materials, work orders, production, QC, audit, documents, or dispatch
 
 The answer must be **none**. An engineer authors a `ProcessTemplate` version, a `RouteTemplate` set
 and a `QcpTemplate` as data, and the job runs on the existing mechanism. Apply this test at every
-phase gate, per `docs/PHASE-PROMPTS.md` §0 rule 5 — if a phase's design makes the answer anything
+phase gate, per `docs/archive/PHASE-PROMPTS.md` §0 rule 5 — if a phase's design makes the answer anything
 other than "none", the design is wrong, and that should be said before implementing it, not after.
 
 ### Accepted exception: `specs.ts`'s per-family field map (B11)
@@ -107,7 +107,7 @@ other than "none", the design is wrong, and that should be said before implement
 family's design-spec fields (e.g. a heat exchanger's TEMA type, shell/tube-side design pressure,
 tube count) means editing this file. By the standing acceptance test above, that is a code change,
 not a template/route/QCP data-authoring step — and every prior audit of this codebase (see
-`docs/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`) has flagged it alongside the real
+`docs/archive/DESPL_CODEBASE_ALIGNMENT_AND_DEVELOPMENT_ROADMAP.md`) has flagged it alongside the real
 violations (`admin.read.ts`'s hardcoded family, `stage-names.ts`'s hardcoded stage table,
 `welding.service.ts`'s hardcoded department code — all since fixed, B4/B5/B7–B9) as if it belonged
 in the same bucket.
@@ -141,10 +141,10 @@ eliminate in a future audit without re-litigating this decision first.
   library row from scratch (PRD FR-M3). Until it exists, onboarding a new family's QCP means
   hand-authoring JSON and running it through a script — which is the real barrier to "we won a heat
   exchanger, what changes?", not the data model. This is tracked as A8 in
-  `docs/PHASE-PROMPTS.md` §3 and should not be allowed to slip silently past Phase 4.
+  `docs/archive/PHASE-PROMPTS.md` §3 and should not be allowed to slip silently past Phase 4.
 - **RLS is thin; the parent-join convention is the real boundary for most tables.** Tenant RLS
   policies exist on 3 migrations covering a handful of tables; 35 of 56 tables have no RLS of their
-  own (per `docs/PHASE-PROMPTS.md` §0's own count) and rely on being anchored through a
+  own (per `docs/archive/PHASE-PROMPTS.md` §0's own count) and rely on being anchored through a
   tenant-scoped parent (`_shared.ts:264-286`'s pattern). This is a correctness discipline to keep
   enforcing, not a mechanism this ADR can claim is complete — see "facts checked" below.
 
@@ -172,13 +172,13 @@ exists and is exercised by `PRESSURE_VESSEL` and partially by `PIPE_SPOOL`.
 | 2 | `ProcessTemplate → ProcessTemplateVersion → TemplateProcess` is per family and versioned, job pins a version at intake | **Yes.** `schema.prisma:544-624`; `Job.templateVersionId` (`schema.prisma:658`). |
 | 3 | `RouteTemplate` is `@@unique([tenantId, componentTypeId, familyId])` with nullable `familyId` | **Yes.** `schema.prisma:940-958`, exactly that unique constraint, `familyId Int?`. |
 | 4 | `QcpTemplate` supports library rows (`jobId: null`) and `createJob` accepts `qcpTemplateSourceId` | **Yes**, mechanism-wise. `QcpTemplate.jobId Int?` (`schema.prisma:1234`); `qcpTemplateSourceId` flows through `src/lib/shared/schemas.ts:491` → `src/lib/services/job-intake.service.ts:237-238` → `cloneQcpTemplate` (`job-intake.service.ts:414`), matched by process code. **But the authoring UI does not exist** (see Consequences) — the mechanism is real, the on-ramp for a new family's QCP is not. |
-| 5 | Tenant RLS plus job scoping already give project independence for most tables | **Partially.** Tenant RLS is real for the tables it covers (3 migrations, 4 `CREATE POLICY` statements), but per `docs/PHASE-PROMPTS.md` §0's own accounting, 35 of 56 tables carry no RLS and depend entirely on the parent-join convention being followed correctly at every read/write site. Project independence holds today because that convention has been followed, not because RLS enforces it everywhere. Treat this as a discipline to keep verifying (0.3's negative cross-tenant suite in Phase 0), not a closed mechanism. |
+| 5 | Tenant RLS plus job scoping already give project independence for most tables | **Partially.** Tenant RLS is real for the tables it covers (3 migrations, 4 `CREATE POLICY` statements), but per `docs/archive/PHASE-PROMPTS.md` §0's own accounting, 35 of 56 tables carry no RLS and depend entirely on the parent-join convention being followed correctly at every read/write site. Project independence holds today because that convention has been followed, not because RLS enforces it everywhere. Treat this as a discipline to keep verifying (0.3's negative cross-tenant suite in Phase 0), not a closed mechanism. |
 
 ---
 
 ## DESPL-320 assumption found in `src/`
 
-One, contradicting `docs/PHASE-PROMPTS.md` §0's claim that Phase 0 removed it:
+One, contradicting `docs/archive/PHASE-PROMPTS.md` §0's claim that Phase 0 removed it:
 
 - **`src/app/(app)/workspace/page.tsx:8-13`** — `pilotJobId()` falls back to
   `tx.job.findFirst({ where: { jobNumber: "DESPL-320" } })` whenever no `?job=` query param is
@@ -198,7 +198,7 @@ documentation-only session — see Stop condition.
 
 - `CLAUDE.md` — added a pointer to this ADR alongside the existing invariants (see diff).
 - No other document was found stating or implying the application is pressure-vessel-only or
-  DESPL-320-only. `docs/PRD.md`'s background section describes DESPL's *business* (ASME pressure
+  DESPL-320-only. `docs/archive/PRD.md`'s background section describes DESPL's *business* (ASME pressure
   equipment) as of 03 Aug 2026 — that is historical company context, already banner-superseded by
   `docs/BUILD-SPEC-v2.md`, and is correct to leave as written; it does not claim the software is
   restricted to that family. No mass replacement of "DESPL-320" was performed — every remaining

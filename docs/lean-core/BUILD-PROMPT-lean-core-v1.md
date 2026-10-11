@@ -2,7 +2,7 @@
 
 > **11 Oct 2026:** phase order, gates, decisions D14–D27 and Phase M (master data) now live in `docs/lean-core/PHASE-PLAN-v1.md`. This file still specifies every L and J session; read both.
 
-**Project:** DESPL Production Tracker (this repo) · **Written:** 6 Oct 2026 · **Supersedes:** the phase *order* in `docs/mos-execution/PROMPTS-v4.md` and Phases 2–10 of `audit/20_REMEDIATION_ROADMAP.md` wherever they conflict with this file. Everything else in `CLAUDE.md` still binds unless §2 below revises it.
+**Project:** DESPL Production Tracker (this repo) · **Written:** 6 Oct 2026 · **Supersedes:** the phase *order* in `docs/archive/mos-execution/PROMPTS-v4.md` and Phases 2–10 of `audit/20_REMEDIATION_ROADMAP.md` wherever they conflict with this file. Everything else in `CLAUDE.md` still binds unless §2 below revises it.
 
 ---
 
@@ -10,7 +10,7 @@
 
 Paste this into Claude Code at the repo root to start:
 
-> Read `CLAUDE.md` and `docs/lean-core/BUILD-PROMPT-lean-core-v1.md` in full. We are executing **Lean Core v1**, which supersedes the PROMPTS-v4 sequence. Do session **L0.4** first (amend `CLAUDE.md`). Before writing any code in any session, show me: the files you will touch, any migration, and the tests you will add — then wait for my go.
+> Read `CLAUDE.md` and `docs/lean-core/BUILD-PROMPT-lean-core-v1.md` in full. We are executing **Lean Core v1**, which supersedes the PROMPTS-v4 sequence (archived: `docs/archive/mos-execution/PROMPTS-v4.md`). Do session **L0.4** first (amend `CLAUDE.md`). Before writing any code in any session, show me: the files you will touch, any migration, and the tests you will add — then wait for my go.
 
 For every later session, use this template:
 
