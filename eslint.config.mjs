@@ -30,6 +30,8 @@ const eslintConfig = [
       "design/**",
       ".worktrees/**",
       "worktrees/**",
+      // agent worktrees (.claude/worktrees/agent-*) — full repo copies
+      ".claude/**",
     ],
   },
 ];
