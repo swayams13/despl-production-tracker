@@ -458,6 +458,8 @@ deploy.
 
 ### 6.5 No staging environment
 
+> **Update 12 Oct 2026 (L0.3):** a Railway `staging` environment now exists (own Postgres 18, branch `staging`) — see `docs/lean-core/L0.3-STAGING-RUNBOOK.md`. Push a migration PR's branch to `staging` and read its deploy log before merging to `main`. The text below describes the position before L0.3 and is kept for the failure classes it lists.
+
 One Railway `production` environment. §5's rehearsal copy is a local database, not
 a deployed environment: it never exercises Railway's build, its env vars,
 `assertDbRole()` in `src/instrumentation.ts`, or the internal
