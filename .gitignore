@@ -1,5 +1,7 @@
 # project docs
 QCP - DE0463.pdf
+# team drawings (large, client-controlled) — keep local, never commit
+docs/lean-core/inputs/**/*.pdf
 
 # dependencies
 /node_modules

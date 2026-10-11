@@ -6228,3 +6228,9 @@ cd "<repo>" && railway run --service Postgres -- sh -c 'echo "TARGET: $(echo "$D
 confirm TARGET is `shinkansen.proxy.rlwy.net:51870`, then verify `/api/health` → 200. Rollback = the 5 Oct dump.
 
 **Next session — development.** Candidates (Swayam's pick): AUD-024 (stop merges shipping code ahead of schema — highest leverage), AUD-079 approve-reset button in `/admin` (do not merge before the window), provisioning the 12 `<dept>@despl.local` accounts in production, AUD-072 pessimistic-lock follow-up, remaining audit P0s AUD-008…023. Housekeeping still open: stray `.claude/worktrees/agent-*` dirs break unscoped `pnpm test`/`lint`; local `despl_rehearse` (now at 71) can be dropped once production is applied.
+
+## Session — Phase Plan v1 added, 11 Oct 2026 (docs only, no code)
+
+DESPL team returned the Standard Parts Master (PV + HE) with the DE0423 GA and SP40 MED drawings. Added `docs/lean-core/PHASE-PLAN-v1.md`: phases P0–P7 with gates (go-live on DESPL's server 16 Jan 2027, ≈30 Jan if the pilot is DE0423), new **Phase M** (M1 master-data schema, M2 workbook importer, M3 master-data screens), decisions D14–D27, 20 team inputs (I1–I20), definition of done. Inputs copied to `docs/lean-core/inputs/2026-10-11-master-list/` (PDFs git-ignored). `CLAUDE.md` decisions table extended with D14–D27 and points at the plan; build prompt header and §7 doc rule updated. Workbook is all Draft; known defects in plan §7 (pilot-part stage fill-down 19/20/21, proposed times, stale A-01/A-02).
+
+**Next:** L0.1 (Swayam, hotspot) → L0.2 → L0.3 → L0.4 (commit `CLAUDE.md`, `docs/lean-core/`, `design/lean-core/`, flags) → L1.1 → M1 → M2. Decision meeting with SJ for D1–D5, D13–D16.

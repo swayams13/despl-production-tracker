@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin=""><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+Devanagari:wght@400;500;600&family=Noto+Sans+Gujarati:wght@400;500;600&display=swap" rel="stylesheet"><style>body{margin:0}</style></helmet>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="g-done" viewBox="0 0 14 14"><circle cx="7" cy="7" r="7" fill="currentColor"></circle><path d="M4 7.3l2 2 4-4.3" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></symbol>
+<symbol id="g-progress" viewBox="0 0 14 14"><circle cx="7" cy="7" r="7" fill="currentColor"></circle><path d="M5.6 4.2v5.6L10 7z" fill="#fff"></path></symbol>
+<symbol id="g-overdue" viewBox="0 0 14 14"><circle cx="7" cy="7" r="7" fill="currentColor"></circle><path d="M7 3.5v4.3" stroke="#fff" stroke-width="1.9" stroke-linecap="round"></path><circle cx="7" cy="10.3" r="1.05" fill="#fff"></circle></symbol>
+<symbol id="g-not" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.9" fill="none" stroke="currentColor" stroke-width="1.8"></circle></symbol>
+<symbol id="g-oos" viewBox="0 0 14 14"><path d="M3.5 12.6V1.8M3.5 2.3h7.2L8.9 5l1.8 2.7H3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></symbol>
+<symbol id="g-clock" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.9" fill="none" stroke="currentColor" stroke-width="1.6"></circle><path d="M7 4v3.2l2 1.3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></symbol>
+<symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"></path></symbol>
+<symbol id="i-scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16M4 12h16"></path></symbol>
+<symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5.5" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="12" cy="18.5" r="1.7"></circle></symbol>
+<symbol id="i-chev-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9.5l6 6 6-6"></path></symbol>
+<symbol id="i-units" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8.5 8.5h11.5V20H8.5zM4 15.5V4h11.5"></path></symbol>
+<symbol id="i-wifi-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l18 18M8.6 16.1a5 5 0 0 1 5.9-.7M5.2 12.8a9.6 9.6 0 0 1 4.1-2.2M14.7 10.6a9.6 9.6 0 0 1 4.1 2.2M2 9.4a14 14 0 0 1 4.4-2.8M10.7 5.6A14 14 0 0 1 22 9.4M12 19.5h.01"></path></symbol>
+<symbol id="i-sys" viewBox="0 0 40 12"><path d="M1 11h2V8H1zM5 11h2V6H5zM9 11h2V4H9zM13 11h2V1h-2z" fill="currentColor"></path><rect x="21.5" y="1.5" width="15" height="9" rx="2" fill="none" stroke="currentColor"></rect><rect x="23" y="3" width="10" height="6" rx="1" fill="currentColor"></rect><path d="M38.2 4.5v3" stroke="currentColor" stroke-width="1.5"></path></symbol>
+</defs></svg>
+<div style="width:360px;height:800px;position:relative;overflow:hidden;background:#F6F7F9;color:#0E1116;font-family:Inter,'Noto Sans Devanagari','Noto Sans Gujarati',system-ui,sans-serif;display:flex;flex-direction:column;-webkit-font-smoothing:antialiased">
+<div style="height:24px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#FFFFFF;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:500"><span>{{ u.time }}</span><svg width="40" height="12"><use href="#i-sys"></use></svg></div>
+<div style="height:56px;flex:none;display:flex;align-items:center;padding:0 4px;background:#FFFFFF">
+<button aria-label="Back" style="width:48px;height:48px;border:0;background:none;color:#0E1116;display:grid;place-items:center;padding:0"><svg width="24" height="24"><use href="#i-back"></use></svg></button>
+<div style="flex:1"></div>
+<button aria-label="Scan" style="width:48px;height:48px;border:0;background:none;color:#0E1116;display:grid;place-items:center;padding:0"><svg width="24" height="24"><use href="#i-scan"></use></svg></button>
+<button aria-label="More" style="width:48px;height:48px;border:0;background:none;color:#0E1116;display:grid;place-items:center;padding:0"><svg width="24" height="24"><use href="#i-more"></use></svg></button>
+</div>
+<sc-if value="{{ u.offline }}" hint-placeholder-val="{{ false }}"><div style="flex:none;display:flex;gap:10px;align-items:flex-start;padding:10px 16px;background:#0E1116;color:#FFFFFF;font-size:13px;line-height:18px"><svg width="18" height="18" style="flex:none;margin-top:0"><use href="#i-wifi-off"></use></svg><span><span style="font-weight:600">Offline — 2 updates waiting to send.</span> They'll go when Wi-Fi is back.</span></div></sc-if>
+<div style="flex:none;background:#FFFFFF;padding:2px 16px 12px;border-bottom:1px solid #D5D9DF">
+<div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:600;line-height:30px;letter-spacing:-0.01em">{{ u.serial }}</div>
+<div style="font-size:13px;line-height:18px;color:#4A5260">{{ u.sub }}</div>
+<div style="display:flex;gap:2px;height:32px;margin-top:4px">
+<sc-for list="{{ spine }}" as="sg" hint-placeholder-count="25"><div style="flex:1;position:relative">
+<sc-if value="{{ sg.mk }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;top:1px;left:50%;margin-left:-5px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-top:6px solid #0E1116"></div></sc-if>
+<div style="position:absolute;left:0;right:0;top:10px;height:14px;border-radius:2px;background:{{ sg.bg }}"></div>
+<sc-if value="{{ sg.oos }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:0;right:0;top:27px;height:3px;border-radius:1px;background:#AE4B00"></div></sc-if>
+</div></sc-for>
+</div>
+<div style="margin-top:2px;font-size:14px;line-height:20px;display:flex;flex-wrap:wrap;column-gap:5px"><span style="font-weight:600">{{ u.stage }}</span><span style="color:#4A5260">· {{ u.dueA }} <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#0E1116;font-weight:500">{{ u.date }}</span> {{ u.dueB }}</span></div>
+</div>
+<div style="flex:none;display:flex;align-items:center;gap:8px;padding:10px 16px 6px">
+<span style="font-size:12px;font-weight:600;color:#4A5260">{{ t.nextFor }}</span>
+<button style="height:44px;display:inline-flex;align-items:center;gap:2px;padding:0 6px 0 12px;border-radius:999px;border:1px solid #858B94;background:#FFFFFF;font-family:inherit;font-size:13px;font-weight:600;color:#0E1116">{{ u.dept }}<svg width="18" height="18"><use href="#i-chev-d"></use></svg></button>
+</div>
+<div style="flex:1;min-height:0;overflow:hidden">
+<sc-for list="{{ groups }}" as="g" hint-placeholder-count="3"><div>
+<div style="display:flex;justify-content:space-between;align-items:baseline;padding:8px 16px 6px"><span style="font-size:12px;font-weight:600;color:#4A5260">{{ g.name }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#4A5260">{{ g.count }}</span></div>
+<div style="background:#FFFFFF;border-top:1px solid #D5D9DF;border-bottom:1px solid #D5D9DF">
+<sc-for list="{{ g.steps }}" as="s" hint-placeholder-count="2"><div style="border-top:{{ s.bt }}">
+<sc-if value="{{ s.isAct }}" hint-placeholder-val="{{ false }}"><div style="min-height:64px;box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:8px 12px 8px 16px">
+<svg width="18" height="18" style="flex:none;align-self:flex-start;margin-top:1px;color:{{ s.c }}"><use href="{{ s.g }}"></use></svg>
+<div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:600;line-height:20px">{{ s.t }}</div><div style="font-size:12px;line-height:16px;color:#4A5260;margin-top:2px"><span style="font-weight:600;color:{{ s.lc }}">{{ s.sl }}</span>{{ s.metaSep }}</div>
+<sc-if value="{{ s.oos }}" hint-placeholder-val="{{ false }}"><div style="margin-top:4px;display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0 8px 0 5px;border-radius:999px;box-shadow:inset 0 0 0 1px #AE4B00;color:#AE4B00;font-size:12px;font-weight:600;line-height:16px"><svg width="12" height="12" style="flex:none"><use href="#g-oos"></use></svg>{{ s.oosLabel }}</div></sc-if></div>
+<button style="flex:none;height:48px;padding:0 14px;border-radius:6px;border:0;background:#0E1116;color:#FFFFFF;font-family:inherit;font-size:14px;font-weight:600;max-width:132px;line-height:17px">{{ s.btn }}</button>
+</div></sc-if>
+<sc-if value="{{ s.isTwo }}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:12px;padding:10px 12px 8px 16px">
+<svg width="18" height="18" style="flex:none;margin-top:1px;color:{{ s.c }}"><use href="{{ s.g }}"></use></svg>
+<div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:600;line-height:20px">{{ s.t }}</div>
+<div style="display:flex;align-items:center;gap:8px;margin-top:6px"><span style="flex:1;min-width:0;font-size:12px;font-weight:600;line-height:16px;color:{{ s.lc }}">{{ s.sl }}</span>
+<button style="flex:none;height:48px;padding:0 14px;border-radius:6px;border:1px solid #858B94;background:#FFFFFF;color:#0E1116;font-family:inherit;font-size:14px;font-weight:600">{{ t.start }}</button>
+<button style="flex:none;height:48px;padding:0 14px;border-radius:6px;border:0;background:#0E1116;color:#FFFFFF;font-family:inherit;font-size:14px;font-weight:600;max-width:132px;line-height:17px">{{ t.markDone }}</button></div></div>
+</div></sc-if>
+<sc-if value="{{ s.isHint }}" hint-placeholder-val="{{ false }}"><div style="min-height:52px;box-sizing:border-box;display:flex;gap:12px;padding:8px 16px">
+<svg width="18" height="18" style="flex:none;margin-top:1px;color:{{ s.c }}"><use href="{{ s.g }}"></use></svg>
+<div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:600;line-height:20px">{{ s.t }}</div><div style="font-size:12px;line-height:16px;color:#4A5260;margin-top:2px"><span style="font-weight:600;color:{{ s.lc }}">{{ s.sl }}</span>{{ s.metaSep }}</div></div>
+</div></sc-if>
+<sc-if value="{{ s.isDone }}" hint-placeholder-val="{{ false }}"><div style="min-height:52px;box-sizing:border-box;display:flex;gap:12px;align-items:center;padding:8px 12px 8px 16px">
+<svg width="18" height="18" style="flex:none;align-self:flex-start;margin-top:1px;color:{{ s.c }}"><use href="{{ s.g }}"></use></svg>
+<div style="flex:1;min-width:0"><div style="font-size:14px;font-weight:500;line-height:20px;color:#4A5260">{{ s.t }}</div><div style="font-size:12px;line-height:16px;color:#4A5260;margin-top:2px"><span style="font-weight:600;color:{{ s.lc }}">{{ s.sl }}</span>{{ s.metaSep }}</div></div>
+<svg width="20" height="20" style="flex:none;color:#4A5260"><use href="#i-chev-d"></use></svg>
+</div></sc-if>
+</div></sc-for>
+</div>
+</div></sc-for>
+</div>
+<div style="flex:none;display:flex;gap:8px;padding:8px 16px 12px;background:#FFFFFF;border-top:1px solid #D5D9DF">
+<button style="flex:1;min-width:0;min-height:52px;padding:4px 10px;border-radius:6px;border:1px solid #858B94;background:#FFFFFF;color:#0E1116;font-family:inherit;font-size:13px;font-weight:600;line-height:16px;display:flex;align-items:center;justify-content:center;gap:8px;text-align:left"><svg width="20" height="20" style="flex:none"><use href="#i-units"></use></svg><span>{{ t.also }}</span></button>
+<button style="flex:1;min-width:0;min-height:52px;padding:4px 10px;border-radius:6px;border:1px solid #858B94;background:#FFFFFF;color:#0E1116;font-family:inherit;font-size:13px;font-weight:600;line-height:16px;display:flex;align-items:center;justify-content:center;gap:8px;text-align:left"><svg width="20" height="20" style="flex:none"><use href="#i-scan"></use></svg><span>{{ t.scanNext }}</span></button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:360,&quot;height&quot;:800},&quot;unit&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;SR05&quot;,&quot;SR06&quot;,&quot;SR06b&quot;,&quot;SR01&quot;,&quot;SR05off&quot;],&quot;default&quot;:&quot;SR05&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;lang&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;en&quot;,&quot;hi&quot;,&quot;gu&quot;],&quot;default&quot;:&quot;en&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const lang = this.props.lang || 'en';
+    const key = this.props.unit || 'SR05';
+    const S = {
+      en: { nextFor: 'Next for', markDone: 'Mark done', start: 'Start', also: 'Also mark for other units', scanNext: 'Scan next unit', P: 'In progress', N: 'Not started', A: 'Accepted', oos: 'Out of sequence',
+        dept: 'Fabrication/Welding', sub: 'DESPL-320 · HP Air Receiver · unit 5 of 9', stage: 'Shell fabrication', dueA: 'due', date: 'Fri 12 Feb', dueB: '',
+        shell: 'Shell', n1: 'Nozzle N1', insp: 'Inspection', cnt: '4 of 7 done',
+        s1: 'Weld circ seam CS-2', m1: 'Started 10:40 · Imran Shaikh', s2: 'Top head to shell set-up (CS-1)', s3: 'Weld circ seam CS-1', m3: 'After CS-1 set-up',
+        s4: 'Fit-up', o4: 'Welder free', s5: 'RT of long seam LS-1', m5: 'Neha Desai, Tue 9 Feb', s6: 'RT of circ seam CS-2', m6: 'After the weld is done' },
+      hi: { nextFor: 'अगला काम', markDone: 'पूरा दर्ज करें', start: 'शुरू करें', also: 'दूसरी यूनिट पर भी दर्ज करें', scanNext: 'अगली यूनिट स्कैन करें', P: 'चालू है', N: 'शुरू नहीं हुआ', A: 'स्वीकृत', oos: 'क्रम से बाहर',
+        dept: 'फ़ैब्रिकेशन/वेल्डिंग', sub: 'DESPL-320 · HP Air Receiver · 9 में से यूनिट 5', stage: 'शेल फ़ैब्रिकेशन', dueA: '', date: 'शुक्र 12 फ़र॰', dueB: 'तक',
+        shell: 'शेल', n1: 'नोज़ल N1', insp: 'निरीक्षण', cnt: '7 में से 4 पूरे',
+        s1: 'सर्क सीम CS-2 की वेल्डिंग', m1: '10:40 पर शुरू · इमरान शेख', s2: 'टॉप हेड से शेल सेट-अप (CS-1)', s3: 'सर्क सीम CS-1 की वेल्डिंग', m3: 'CS-1 सेट-अप के बाद',
+        s4: 'फ़िट-अप', o4: 'वेल्डर खाली था', s5: 'लॉन्ग सीम LS-1 का RT', m5: 'नेहा देसाई, मंगल 9 फ़र॰', s6: 'सर्क सीम CS-2 का RT', m6: 'वेल्ड पूरा होने के बाद' },
+      gu: { nextFor: 'આગળનું કામ', markDone: 'પૂર્ણ નોંધો', start: 'શરૂ કરો', also: 'બીજા યુનિટ માટે પણ નોંધો', scanNext: 'આગળનું યુનિટ સ્કેન કરો', P: 'ચાલુ છે', N: 'શરૂ થયું નથી', A: 'સ્વીકૃત', oos: 'ક્રમ બહાર',
+        dept: 'ફેબ્રિકેશન/વેલ્ડિંગ', sub: 'DESPL-320 · HP Air Receiver · 9 માંથી યુનિટ 5', stage: 'શેલ ફેબ્રિકેશન', dueA: '', date: 'શુક્ર 12 ફેબ્રુ.', dueB: 'સુધી',
+        shell: 'શેલ', n1: 'નોઝલ N1', insp: 'નિરીક્ષણ', cnt: '7 માંથી 4 પૂર્ણ',
+        s1: 'સર્ક સીમ CS-2 નું વેલ્ડિંગ', m1: '10:40 વાગ્યે શરૂ · ઇમરાન શેખ', s2: 'ટોપ હેડથી શેલ સેટ-અપ (CS-1)', s3: 'સર્ક સીમ CS-1 નું વેલ્ડિંગ', m3: 'CS-1 સેટ-અપ પછી',
+        s4: 'ફિટ-અપ', o4: 'વેલ્ડર ખાલી હતો', s5: 'લોંગ સીમ LS-1 નું RT', m5: 'નેહા દેસાઈ, મંગળ 9 ફેબ્રુ.', s6: 'સર્ક સીમ CS-2 નું RT', m6: 'વેલ્ડ પૂરું થયા પછી' }
+    };
+    const t = S[lang] || S.en;
+    const L = key === 'SR05' ? t : S.en;
+    const sr05 = (x, pend) => ({
+      serial: '320SR05', sub: x.sub, code: 'DDDDDDDDDPNP', mk: 10, oos: 12, stage: x.stage, dueA: x.dueA, date: x.date, dueB: x.dueB, dept: x.dept, time: '11:05', offline: !!pend,
+      groups: [
+        { name: x.shell, count: pend ? '5 of 7 done' : x.cnt, steps: [
+          pend ? { k: 'done', s: 'W', t: x.s1, sl: 'Done 11:02', meta: 'waiting to send' } : { k: 'act', s: 'P', t: x.s1, meta: x.m1 },
+          { k: 'two', s: 'N', t: x.s2 },
+          { k: 'hint', s: 'N', t: x.s3, meta: x.m3 }] },
+        { name: x.n1, steps: [pend ? { k: 'done', s: 'W', t: x.s4, sl: 'Done 11:04', meta: 'waiting to send' } : { k: 'act', s: 'P', t: x.s4, oos: x.o4 }] },
+        { name: x.insp, steps: [{ k: 'done', s: 'A', t: x.s5, meta: x.m5 }, { k: 'hint', s: 'N', t: x.s6, meta: x.m6 }] }
+      ]
+    });
+    const base6 = { serial: '320SR06', sub: 'DESPL-320 · HP Air Receiver · unit 6 of 9', code: 'DDDDDDDDDO', mk: 10, stage: 'Shell fabrication', dueA: 'due', date: 'Fri 12 Feb', dueB: '', dept: 'Fabrication/Welding', time: '11:05' };
+    const U = {
+      SR05: sr05(L, false),
+      SR05off: sr05(S.en, true),
+      SR06: Object.assign({}, base6, { groups: [
+        { name: 'Shell', count: '0 of 7 done', steps: [
+          { k: 'act', s: 'O', t: 'Shell weld edge preparation', sl: 'Overdue 2 days', meta: 'due Tue 9 Feb' },
+          { k: 'hint', s: 'N', t: 'Long seam LS-1 set-up', meta: 'After edge preparation' },
+          { k: 'hint', s: 'N', t: 'Weld long seam LS-1', meta: 'After LS-1 set-up' },
+          { k: 'hint', s: 'N', t: 'Bottom head to shell set-up (CS-2)', meta: 'After the RT of LS-1' }] },
+        { name: 'Inspection', steps: [
+          { k: 'hint', s: 'N', t: 'Visual of LS-1', meta: 'After the weld is done' },
+          { k: 'hint', s: 'N', t: 'RT of long seam LS-1', meta: 'After the visual' }] }] }),
+      SR06b: Object.assign({}, base6, { time: '11:09', groups: [
+        { name: 'Shell', count: '1 of 7 done', steps: [
+          { k: 'act', s: 'O', t: 'Long seam LS-1 set-up', sl: 'Overdue 2 days', meta: 'due Tue 9 Feb' },
+          { k: 'hint', s: 'N', t: 'Weld long seam LS-1', meta: 'After LS-1 set-up' },
+          { k: 'hint', s: 'N', t: 'Bottom head to shell set-up (CS-2)', meta: 'After the RT of LS-1' }] },
+        { name: 'Inspection', steps: [
+          { k: 'hint', s: 'N', t: 'Visual of LS-1', meta: 'After the weld is done' },
+          { k: 'hint', s: 'N', t: 'RT of long seam LS-1', meta: 'After the visual' }] }] }),
+      SR01: { serial: '320SR01', sub: 'DESPL-320 · HP Air Receiver · unit 1 of 9', code: 'DDDDDDDDDDDP', mk: 12, stage: 'Nozzle fabrication', dueA: 'due', date: 'Mon 15 Feb', dueB: '', dept: 'Surface Treatment & Painting', time: '11:05', groups: [
+        { name: 'Surface preparation', steps: [{ k: 'act', s: 'N', t: 'Surface preparation', meta: 'planned Tue 9 Mar', btn: 'start' }] },
+        { name: 'Painting', steps: [{ k: 'hint', s: 'N', t: 'Painting', meta: 'After surface preparation' }] }] }
+    };
+    const u = U[key] || U.SR05;
+    const C = { P: '#0B5CD5', N: '#6E7781', O: '#C8202B', A: '#167834', W: '#4A5260' };
+    const LC = { P: '#0B5CD5', N: '#4A5260', O: '#C8202B', A: '#167834', W: '#4A5260' };
+    const G = { P: '#g-progress', N: '#g-not', O: '#g-overdue', A: '#g-done', W: '#g-clock' };
+    const SB = { D: '#167834', P: '#0B5CD5', O: '#C8202B', H: '#8A5D00', Q: '#7A3FD1', N: '#C4C9D0' };
+    const spine = u.code.padEnd(25, 'N').split('').map((c, i) => ({ bg: SB[c], mk: i + 1 === u.mk, oos: i + 1 === u.oos }));
+    const groups = u.groups.map(g => ({ name: g.name, count: g.count || '', steps: g.steps.map((s, i) => ({
+      t: s.t, isAct: s.k === 'act', isTwo: s.k === 'two', isHint: s.k === 'hint', isDone: s.k === 'done',
+      c: C[s.s], lc: LC[s.s], g: G[s.s], sl: s.sl || L[s.s] || '', metaSep: s.meta ? ' · ' + s.meta : '',
+      oos: !!s.oos, oosLabel: s.oos ? L.oos + ' · ' + s.oos : '', btn: s.btn === 'start' ? L.start : L.markDone,
+      bt: i ? '1px solid #D5D9DF' : '0'
+    })) }));
+    return { u, t: L, spine, groups };
+  }
+}
+</script>
+</body>
+</html>
