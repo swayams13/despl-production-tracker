@@ -750,17 +750,27 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
       where: { familyId: job.familyId, leadTimeProcessSeq: 10 },
       select: { operationRefId: true },
     });
-    await owner.componentOperation.updateMany({
-      where: { component: { unitId: unit.id }, operationId: { in: seq10OperationRefIds.map((r) => r.operationRefId) } },
-      data: { status: "COMPLETE" },
-    });
+    const seq10OpsWhere = {
+      component: { unitId: unit.id },
+      operationId: { in: seq10OperationRefIds.map((r) => r.operationRefId) },
+    };
+    // Restore these seeded rows afterwards (even on failure): left COMPLETE,
+    // the blocked-submit assertion above fails on every later run.
+    const seq10OpsBefore = await owner.componentOperation.findMany({ where: seq10OpsWhere, select: { id: true, status: true } });
+    await owner.componentOperation.updateMany({ where: seq10OpsWhere, data: { status: "COMPLETE" } });
 
-    await submitProcess(maker, { processPlanId: planId(seq10Id) });
+    try {
+      await submitProcess(maker, { processPlanId: planId(seq10Id) });
 
-    // ...but its OWN checkpoint (a different QcpItem than seq 1's) has no
-    // QcpExecution recorded for this unit — verify must refuse.
-    const err = await verifyProcess(checker, { processPlanId: planId(seq10Id) }).catch((e) => e);
-    expect(isAppError(err) && err.code).toBe(ERROR_CODES.HOLD_POINT_OPEN);
+      // ...but its OWN checkpoint (a different QcpItem than seq 1's) has no
+      // QcpExecution recorded for this unit — verify must refuse.
+      const err = await verifyProcess(checker, { processPlanId: planId(seq10Id) }).catch((e) => e);
+      expect(isAppError(err) && err.code).toBe(ERROR_CODES.HOLD_POINT_OPEN);
+    } finally {
+      for (const { id, status } of seq10OpsBefore) {
+        await owner.componentOperation.update({ where: { id }, data: { status } });
+      }
+    }
   });
 });
 
