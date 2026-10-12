@@ -26,8 +26,9 @@ import { loadVariants, writeRouteVariant, type RouteCtx } from "./master-data.ro
  * Lean Core M3 — master-data mutations (part families, routes, grades).
  *
  *   edit / mark reviewed : ADMIN, PRODUCTION_HEAD, ENGINEERING
- *   approve              : PRODUCTION_HEAD only; the approver is never the
- *                          recorded preparer (maker–checker)
+ *   approve              : PRODUCTION_HEAD only. The last editor is the
+ *                          "preparer"; the single Production Head may approve
+ *                          his own edits, flagged as self-approved (13 Oct)
  *   an APPROVED record is not edited in place: `revise` (with a reason) puts it
  *   back to DRAFT while its last PUBLISHED route stays in use.
  *
@@ -113,6 +114,8 @@ export async function setPartFamilyReviewed(actor: Actor, input: PartFamilyIdInp
 export interface ApproveResult {
   published: Array<{ variant: string; version: number }>;
   warnings: Finding[];
+  /** The approver is also the last person to edit the part. */
+  selfApproved: boolean;
 }
 
 /** Approve: publishes every DRAFT route variant and stamps the approver. Production Head only. */
@@ -126,9 +129,10 @@ export async function approvePartFamily(actor: Actor, input: PartFamilyIdInput):
     if (part.status === "APPROVED") {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "This part is already approved." });
     }
-    if (part.preparedById != null && part.preparedById === actor.userId) {
-      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { reason: "The person who prepared a part cannot approve it." });
-    }
+    // DESPL has one Production Head, so he may approve what he edited himself;
+    // that is flagged (audit + detail screen), never silent. Review by someone
+    // else is still available and is what makes a second pair of eyes visible.
+    const selfApproved = part.preparedById != null && part.preparedById === actor.userId;
 
     const { ctx, ref, heStages } = await routeContext(tx, actor.tenantId);
     const variants = await loadVariants(tx, actor.tenantId, part.componentTypeId, ctx);
@@ -165,11 +169,11 @@ export async function approvePartFamily(actor: Actor, input: PartFamilyIdInput):
       entityType: "PartFamily",
       entityId: part.id,
       before: { status: part.status },
-      after: { status: "APPROVED", code: part.componentType.code, published },
+      after: { status: "APPROVED", code: part.componentType.code, published, selfApproved, reviewed: part.status === "REVIEWED" },
       eventType: "PartFamilyApproved",
-      eventPayload: { partFamilyId: part.id, code: part.componentType.code, published },
+      eventPayload: { partFamilyId: part.id, code: part.componentType.code, published, selfApproved },
     });
-    return { published, warnings: readiness.warnings };
+    return { published, warnings: readiness.warnings, selfApproved };
   });
 }
 

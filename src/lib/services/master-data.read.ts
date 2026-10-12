@@ -144,6 +144,10 @@ export interface PartFamilyDetail {
   approvedAt: string | null;
   approvedBy: string | null;
   preparedBy: string | null;
+  /** APPROVED by the same person who last edited it (flagged, not forbidden). */
+  selfApproved: boolean;
+  /** The actor, if they approve now, would be approving their own edits. */
+  willSelfApprove: boolean;
   variants: Array<Omit<VariantRow, "steps"> & { steps: Array<Omit<NormalStep, "row">> }>;
   readiness: Readiness;
   /** What this actor may do with this part right now. */
@@ -190,7 +194,6 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
     let approveRefusal: string | null = null;
     if (status === "APPROVED") approveRefusal = "Already approved.";
     else if (!isHead) approveRefusal = "Only the Production Head approves master data.";
-    else if (p.preparedById != null && p.preparedById === actor.userId) approveRefusal = "You prepared this part, so someone else must approve it.";
     else if (readiness.blockers.length > 0) approveRefusal = `${readiness.blockers.length} thing${readiness.blockers.length === 1 ? "" : "s"} to fix first.`;
 
     const dimensionKeys = Array.isArray(p.dimensionKeys) ? (p.dimensionKeys as unknown[]).filter((x): x is string => typeof x === "string") : [];
@@ -212,6 +215,8 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
       approvedAt: p.approvedAt?.toISOString() ?? null,
       approvedBy: p.approvedBy?.name ?? null,
       preparedBy: p.preparedBy?.name ?? null,
+      selfApproved: status === "APPROVED" && p.approvedById != null && p.approvedById === p.preparedById,
+      willSelfApprove: status !== "APPROVED" && isHead && p.preparedById != null && p.preparedById === actor.userId,
       variants: variants.map((v) => ({ ...v, steps: v.steps.map(({ row: _row, ...s }) => s) })),
       readiness,
       can: {

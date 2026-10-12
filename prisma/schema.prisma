@@ -1783,10 +1783,11 @@ model RouteStepFamilySeq {
 
 /// Lean Core M1. Attributes of a part family (SHL-01 Shell Course…), 1:1 with
 /// a ComponentTypeRef of kind PART_FAMILY. Part code = ComponentTypeRef.code.
-/// Approval is maker-checker at the DB level (CHECKs in the migration): an
-/// approver is never the recorded preparer, and APPROVED needs both an
-/// approver and a date. Imported rows may have no preparer user (the workbook's
-/// "Filled by" is a company), so that part of the rule is also a service rule.
+/// APPROVED needs both an approver and a date (CHECK). "Preparer" is the last
+/// person to edit the part; imported rows have none (the workbook's "Filled by"
+/// is a company). DESPL has one Production Head, so he may approve his own
+/// edits; that is derived (approved_by_id = prepared_by_id) and flagged in the
+/// audit trail and the detail screen, not forbidden (M3, 13 Oct).
 model PartFamily {
   id              Int              @id @default(autoincrement())
   tenantId        Int              @map("tenant_id")

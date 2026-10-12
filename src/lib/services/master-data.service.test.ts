@@ -144,19 +144,44 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       });
     });
 
-    it("whoever last edited a part cannot approve it, however it was edited (steps or attributes)", async () => {
+    it("the single Production Head may approve what he edited himself, and it is flagged as self-approved", async () => {
       const t = await tenant("self-approve");
       const part = await draftPart(t);
       await editPartFamily(t.ph, { partFamilyId: part.id, patch: { assemblyGroup: "Shell" } });
-      await expect(approvePartFamily(t.ph, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.MAKER_CHECKER_VIOLATION });
 
-      await saveRouteDraft(t.ph2, {
-        partFamilyId: part.id, variant: "A",
-        steps: [{ seq: 10, operationCode: "RECEIPT", department: "Stores", pvStage: 10, acceptanceStandard: "Rev B" }, { seq: 20, operationCode: "MTC_VERIFICATION", department: "Quality Control / QA", pvStage: 11 }],
-      });
-      // ph2 is now the preparer; ph (who only edited an attribute earlier) may approve.
-      await expect(approvePartFamily(t.ph2, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.MAKER_CHECKER_VIOLATION });
-      await approvePartFamily(t.ph, { partFamilyId: part.id });
+      const detail = await loadPartFamily(t.ph, part.id);
+      expect(detail).toMatchObject({ willSelfApprove: true, selfApproved: false });
+      expect(detail?.approveRefusal).toBeNull();
+
+      const r = await approvePartFamily(t.ph, { partFamilyId: part.id });
+      expect(r.selfApproved).toBe(true);
+      const row = await owner.partFamily.findUniqueOrThrow({ where: { id: part.id } });
+      expect(row).toMatchObject({ status: "APPROVED", approvedById: t.ph.userId, preparedById: t.ph.userId });
+
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ selfApproved: true, willSelfApprove: false });
+      const entry = await owner.auditLog.findFirstOrThrow({ where: { tenantId: t.tenantId, action: "masterData.partFamily.approve" } });
+      expect(entry.after).toMatchObject({ selfApproved: true });
+    });
+
+    it("an approval of someone else's edit is not flagged", async () => {
+      const t = await tenant("peer-approve");
+      const part = await draftPart(t);
+      await editPartFamily(t.eng, { partFamilyId: part.id, patch: { typicalMoc: "SA240" } });
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ willSelfApprove: false });
+      const r = await approvePartFamily(t.ph, { partFamilyId: part.id });
+      expect(r.selfApproved).toBe(false);
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ selfApproved: false, approvedBy: expect.any(String) });
+    });
+
+    it("self-approval does not weaken who may approve, nor what blocks it", async () => {
+      const t = await tenant("self-blocked");
+      const part = await draftPart(t, { routeSource: "Assumed – to be confirmed" });
+      await editPartFamily(t.ph, { partFamilyId: part.id, patch: { isSpare: true } });
+      await expect(approvePartFamily(t.ph, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.APPROVAL_BLOCKED });
+      await editPartFamily(t.eng, { partFamilyId: part.id, patch: { routeSource: "Current shop practice" } });
+      await expect(approvePartFamily(t.admin, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+      await expect(approvePartFamily(t.eng, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
+      expect((await approvePartFamily(t.ph, { partFamilyId: part.id })).selfApproved).toBe(false);
     });
 
     it("the person who last edited a part cannot mark it reviewed; someone else can", async () => {
@@ -166,15 +191,6 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       await expect(setPartFamilyReviewed(t.eng, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.MAKER_CHECKER_VIOLATION });
       await setPartFamilyReviewed(t.admin, { partFamilyId: part.id });
       expect((await owner.partFamily.findUniqueOrThrow({ where: { id: part.id } })).status).toBe("REVIEWED");
-    });
-
-    it("the person who prepared a part cannot approve it", async () => {
-      const t = await tenant("maker");
-      const part = await draftPart(t);
-      await owner.partFamily.update({ where: { id: part.id }, data: { preparedById: t.ph.userId } });
-      await expect(approvePartFamily(t.ph, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.MAKER_CHECKER_VIOLATION });
-      const r = await approvePartFamily(t.ph2, { partFamilyId: part.id });
-      expect(r.published).toEqual([{ variant: "A", version: 1 }]);
     });
 
     it("publishes every DRAFT variant, stamps the approver from the DB clock, and audits", async () => {
