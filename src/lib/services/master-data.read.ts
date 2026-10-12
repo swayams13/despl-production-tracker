@@ -165,7 +165,7 @@ export interface PartFamilyDetail {
   >;
   readiness: Readiness;
   /** What this actor may do with this part right now. */
-  can: { edit: boolean; review: boolean; approve: boolean; revise: boolean };
+  can: { edit: boolean; review: boolean; approve: boolean; revise: boolean; approveRole: boolean };
   /** Why approve is unavailable to this actor, in words, when it is. */
   approveRefusal: string | null;
   reference: {
@@ -200,15 +200,38 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
         select: { code: true, name: true, active: true, defaultDepartment: { select: { name: true } } },
       }),
     ]);
-    const reviewAudit = await tx.auditLog.findFirst({
-      where: { tenantId: actor.tenantId, entityType: "PartFamily", entityId: String(p.id), action: "masterData.partFamily.review" },
-      orderBy: { at: "desc" },
-      select: { actorId: true, at: true },
-    });
-    const reviewer = reviewAudit?.actorId != null
+    const variantsRows = await loadVariantsFor(tx, actor.tenantId, [p.componentTypeId], families);
+    const variants = variantsRows.get(p.componentTypeId) ?? [];
+
+    // Who reviewed it: the latest review that no later change to the part or its
+    // routes has overtaken (there is no column; the audit trail is the record).
+    const versionIds = variants.flatMap((v) => v.history.map((h) => String(h.id)));
+    const [reviewAudit, lastChange] = await Promise.all([
+      tx.auditLog.findFirst({
+        where: { tenantId: actor.tenantId, entityType: "PartFamily", entityId: String(p.id), action: "masterData.partFamily.review" },
+        orderBy: { at: "desc" },
+        select: { actorId: true, at: true },
+      }),
+      tx.auditLog.findFirst({
+        where: {
+          tenantId: actor.tenantId,
+          OR: [
+            { entityType: "PartFamily", entityId: String(p.id), action: { in: ["masterData.partFamily.edit", "masterData.partFamily.revise"] } },
+            {
+              entityType: "RouteTemplateVersion",
+              entityId: { in: versionIds },
+              action: { in: ["masterData.route.created", "masterData.route.replaced", "masterData.route.versioned"] },
+            },
+          ],
+        },
+        orderBy: { at: "desc" },
+        select: { at: true },
+      }),
+    ]);
+    const reviewCurrent = reviewAudit != null && (lastChange == null || reviewAudit.at >= lastChange.at);
+    const reviewer = reviewCurrent && reviewAudit.actorId != null
       ? await tx.user.findFirst({ where: { id: reviewAudit.actorId, tenantId: actor.tenantId }, select: { name: true } })
       : null;
-    const variants = (await loadVariantsFor(tx, actor.tenantId, [p.componentTypeId], families)).get(p.componentTypeId) ?? [];
     const readiness = evaluateReadiness(
       { code: p.componentType.code, scope: p.equipmentScope as Scope, routeSource: p.routeSource, makeBuy: p.makeBuy },
       variants,
@@ -244,8 +267,8 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
       preparedBy: p.preparedBy?.name ?? null,
       selfApproved: status === "APPROVED" && p.approvedById != null && p.approvedById === p.preparedById,
       willSelfApprove: status !== "APPROVED" && isHead && p.preparedById != null && p.preparedById === actor.userId,
-      reviewedBy: p.status === "REVIEWED" ? (reviewer?.name ?? null) : null,
-      reviewedAt: p.status === "REVIEWED" ? (reviewAudit?.at.toISOString() ?? null) : null,
+      reviewedBy: reviewer?.name ?? null,
+      reviewedAt: reviewer ? (reviewAudit?.at.toISOString() ?? null) : null,
       variants: variants.map(({ publishedSteps, ...v }) => ({
         ...v,
         steps: v.steps.map(({ row: _row, ...s }) => s),
@@ -257,6 +280,8 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
         review: editor && status === "DRAFT" && !(p.preparedById != null && p.preparedById === actor.userId),
         approve: approveRefusal === null,
         revise: editor && status === "APPROVED",
+        // The actor holds the approving role (the screen shows Approve, enabled or with the reason).
+        approveRole: isHead,
       },
       approveRefusal,
       reference: {

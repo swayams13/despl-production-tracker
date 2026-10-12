@@ -1482,6 +1482,9 @@ async function seedDemo(
       await mkUser("md@despl.local", "MD", ["MANAGEMENT"]);
       await mkUser("ceo@despl.local", "CEO", ["MANAGEMENT"]);
       await mkUser("sj@despl.local", "SJ — Production Head", ["PRODUCTION_HEAD"]);
+      // Lean Core M3: the two roles that touch master data besides SJ and Admin.
+      const engUser = await mkUser("eng@despl.local", "Engineering", ["ENGINEERING"], ["ENGINEERING"]);
+      await mkUser("planner@despl.local", "Planner / PPC", ["PLANNER"], ["PLANNING"]);
       await mkUser("qc@despl.local", "QC Inspector", ["QC"], ["QC"]);
       // namespaced so a department code can never collide with a role account
       // (QC is both a department and a role)
@@ -1507,6 +1510,58 @@ async function seedDemo(
         leadTime.departments.map((d) => d.code),
       );
       stats.users = await tx.user.count({ where: { tenantId } });
+
+      // ── 12b. Master data demo (Lean Core M3) ─────────────────────────
+      // One DRAFT part family prepared by Engineering, so /admin/master-data has
+      // something to review and approve in a fresh demo. Not DESPL-approved data:
+      // route source is "Current shop practice" only so it is approvable by SJ.
+      const shlType = await tx.componentTypeRef.create({
+        data: { tenantId, code: "SHL-01", name: "Shell Course", kind: "PART_FAMILY" },
+      });
+      const plateType = await tx.componentTypeRef.findFirst({ where: { tenantId, code: "PLATE" }, select: { id: true } });
+      await tx.partFamily.create({
+        data: {
+          tenantId,
+          componentTypeId: shlType.id,
+          equipmentScope: "PV",
+          assemblyGroup: "Shell",
+          makeBuy: "MADE_IN_HOUSE",
+          rawFormId: plateType?.id ?? null,
+          typicalMoc: "SA516 Gr.70",
+          weightBasis: "Rolled shell (ID, T, L)",
+          dimensionKeys: ["ID", "thickness", "developed length"],
+          routeSource: "Current shop practice",
+          status: "DRAFT",
+          preparedById: engUser.id,
+        },
+      });
+      const shlRoute = await tx.routeTemplate.create({
+        data: { tenantId, componentTypeId: shlType.id, familyId: null, name: "Shell Course", variant: "A" },
+      });
+      const shlVersion = await tx.routeTemplateVersion.create({
+        data: { routeId: shlRoute.id, version: 1, status: "DRAFT" },
+      });
+      const pvFamily = await tx.productFamily.findFirstOrThrow({ where: { tenantId, code: "PRESSURE_VESSEL" }, select: { id: true } });
+      const shlSteps: Array<[number, string, string, number, string]> = [
+        [10, "CUTTING", "FABRICATION_PREP", 12, "Plate cut to developed size"],
+        [20, "ROLLING", "FABRICATION_PREP", 13, "Plate rolled to shell diameter"],
+        [30, "FIT_UP", "FABRICATION", 15, "Long seam set up"],
+      ];
+      for (const [seq, op, dept, stage, what] of shlSteps) {
+        const step = await tx.routeStep.create({
+          data: {
+            routeVersionId: shlVersion.id,
+            seq,
+            operationId: operationIdByCode.get(op)!,
+            printed: what,
+            departmentId: deptIdByCode.get(dept)!,
+            stdTimeStatus: "PROPOSED",
+          },
+        });
+        await tx.routeStepFamilySeq.create({
+          data: { tenantId, routeStepId: step.id, familyId: pvFamily.id, leadTimeProcessSeq: stage },
+        });
+      }
 
       // ── 13. Welders (FR-W1) ─────────────────────────────────────────
       // No welder list has been provided by DESPL yet (CLAUDE.md "Pending

@@ -441,10 +441,10 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       const t = await tenant("detail");
       const blocked = await draftPart(t, { routeSource: "Assumed – to be confirmed" });
       const asHead = await loadPartFamily(t.ph, blocked.id);
-      expect(asHead?.can).toEqual({ edit: true, review: true, approve: false, revise: false });
+      expect(asHead?.can).toEqual({ edit: true, review: true, approve: false, revise: false, approveRole: true });
       expect(asHead?.approveRefusal).toMatch(/1 thing to fix/);
       expect((await loadPartFamily(t.eng, blocked.id))?.approveRefusal).toBe("Only the Production Head approves master data.");
-      expect((await loadPartFamily(t.planner, blocked.id))?.can).toEqual({ edit: false, review: false, approve: false, revise: false });
+      expect((await loadPartFamily(t.planner, blocked.id))?.can).toEqual({ edit: false, review: false, approve: false, revise: false, approveRole: false });
       expect(asHead?.reference.pvStages.map((s) => s.no)).toEqual([10, 11, 12]);
       expect(asHead?.variants[0].steps).toHaveLength(2);
       expect(await loadPartFamily(t.ph, 999999999)).toBeNull();
@@ -480,6 +480,23 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       expect(v).toMatchObject({ status: "DRAFT", version: 2, liveVersion: 1 });
       expect(v.changes).toEqual([{ seq: 10, kind: "changed", fields: ["time", "acceptance", "record", "description"] }, { seq: 20, kind: "removed" }]);
       expect(v.history.map((h) => [h.version, h.status])).toEqual([[2, "DRAFT"], [1, "PUBLISHED"]]);
+    });
+
+    it("detail: the reviewer stays visible after approval, until a later change overtakes the review", async () => {
+      const t = await tenant("reviewer-kept");
+      const part = await draftPart(t);
+      await setPartFamilyReviewed(t.eng, { partFamilyId: part.id });
+      await approvePartFamily(t.ph, { partFamilyId: part.id });
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ status: "APPROVED", reviewedBy: "eng" });
+
+      // A revision is a new cycle: the old review no longer vouches for it.
+      await revisePartFamily(t.eng, { partFamilyId: part.id, reason: "Time study" });
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ status: "DRAFT", reviewedBy: null });
+
+      await editPartFamily(t.admin, { partFamilyId: part.id, patch: { typicalMoc: "SA240" } });
+      await setPartFamilyReviewed(t.eng, { partFamilyId: part.id });
+      await editPartFamily(t.admin, { partFamilyId: part.id, patch: { typicalMoc: "SA240 304L" } });
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ status: "DRAFT", reviewedBy: null });
     });
 
     it("detail: operations carry their defaults, and an inactive operation a step still uses is listed (marked)", async () => {
