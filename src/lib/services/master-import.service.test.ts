@@ -11,7 +11,7 @@ const actor = (over: Partial<Actor> = {}): Actor => ({
 
 describe("dryRunMasterImport — pure refusals (before any DB read)", () => {
   it("refuses a role that may not see master-data planning", async () => {
-    for (const roles of [[ROLES.SUPERVISOR], [ROLES.QC]]) {
+    for (const roles of [[ROLES.SUPERVISOR], [ROLES.QC], [ROLES.PLANNER]]) {
       await expect(dryRunMasterImport(actor({ roles }), Buffer.from(""))).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     }
   });
@@ -178,6 +178,17 @@ describe.skipIf(!RUN_DB)("dryRunWithDb (DB)", async () => {
     await owner.partFamily.create({ data: { tenantId: b.tenantId, componentTypeId: type.id } });
     const report = await dryRunWithDb(owner, a.tenantId, workbook(), { allowDraft: false });
     expect(report.plan.partFamilies).toEqual({ create: 1, update: 0, unchanged: 0, skipped: 0 });
+  });
+
+  it("Engineering may run the read-only check (they fix the workbook), and the report carries the file hash", async () => {
+    const t = await tenant("eng");
+    const eng = { ...actor({ userId: t.user.id, tenantId: t.tenantId }), roles: [ROLES.ENGINEERING] };
+    const bytes = workbook();
+    const report = await dryRun(eng, bytes, { allowDraft: false });
+    expect(report.plan.partFamilies.create).toBe(1);
+    const { createHash } = await import("node:crypto");
+    expect(report.fileSha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(report.planFingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("the actor entry point runs under RLS for a Production Head and returns the same plan", async () => {

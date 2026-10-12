@@ -34,6 +34,8 @@ export interface WorkbookOver {
   routeSource?: string;
   time2?: string;
   density?: string;
+  /** Material specification text (default "SA 516"); for case-variant tests. */
+  materialSpec?: string;
   /** Extra HE stages (stage no, name, department, predecessors). */
   heStages?: string[][];
   /** Replace the single part's code. */
@@ -57,7 +59,7 @@ export function standardWorkbook(over: WorkbookOver = {}): Buffer {
     },
     "Material Master": {
       header: ["Example?", "Material Specification", "Grade / UNS", "Product Form", "Density (g/cm³)", "Remarks"],
-      rows: [["REFERENCE", "SA 516", "Gr.70", "Plate", over.density ?? "7.85", ""]],
+      rows: [["REFERENCE", over.materialSpec ?? "SA 516", "Gr.70", "Plate", over.density ?? "7.85", ""]],
     },
     "HE Stages": {
       header: ["Example?", "HE Type", "Stage No.", "Stage Name", "Main Activities", "Department", "Duration Min (days)", "Duration Max (days)", "Predecessor Stage No(s).", "Link Type", "Lag / Overlap (days)", "Optional?", "When is it optional?", "Remarks"],

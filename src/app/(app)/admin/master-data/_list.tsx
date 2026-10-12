@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -34,7 +34,7 @@ function ToFix({ row }: { row: PartFamilyListRow }) {
   );
 }
 
-export function MasterDataList({ list, filters }: { list: PartFamilyList; filters: PartFamilyFilters }) {
+export function MasterDataList({ list, filters, sections }: { list: PartFamilyList; filters: PartFamilyFilters; sections?: ReactNode }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [reviewing, startReview] = useTransition();
@@ -85,13 +85,14 @@ export function MasterDataList({ list, filters }: { list: PartFamilyList; filter
     });
 
   const totals = list.totals;
+  // A filter strip, not navigation: pressed-state buttons, so it cannot be mistaken
+  // for the Parts / Materials / Import section tabs above it.
   const tab = (label: string, count: number, active: boolean, next: PartFamilyFilters) => (
     <button
       type="button"
-      className={`tab${active ? " on" : ""}`}
+      className={active ? "btn btn-outline-accent" : "btn"}
       aria-pressed={active}
       onClick={() => go(next)}
-      style={{ background: "none", border: 0 }}
     >
       {label} <span className="mono">{count}</span>
     </button>
@@ -112,7 +113,9 @@ export function MasterDataList({ list, filters }: { list: PartFamilyList; filter
         }
       />
 
-      <div className="tabs" style={{ marginBottom: 12 }}>
+      {sections}
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         {tab("All", totals.all, !filters.status && !filters.hasBlockers, base)}
         {tab("Draft", totals.draft, filters.status === "DRAFT", { ...base, status: "DRAFT" })}
         {tab("Reviewed", totals.reviewed, filters.status === "REVIEWED", { ...base, status: "REVIEWED" })}

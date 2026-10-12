@@ -9,8 +9,11 @@ import { deriveDimensionKeys, type PartDecision, type VariantDecision } from "./
 import {
   buildReport,
   dbPartFamilySignature,
+  finalizeReport,
   partFamilySignature,
+  planFingerprint,
   prepareImport,
+  sha256Hex,
   type DryRunReport,
   type Outcome,
   type Tally,
@@ -51,11 +54,22 @@ function toStatus(p: PartDecision): MasterDataStatus {
   return p.status as MasterDataStatus;
 }
 
+export interface ApplyOptions {
+  allowDraft: boolean;
+  /**
+   * What the user was shown at the preview. Given, apply writes only if the file
+   * and the plan are still exactly those: no write happens for a plan nobody saw.
+   */
+  expected?: { fileSha256: string; planFingerprint: string };
+  /** For the audit row only. */
+  fileName?: string;
+}
+
 export async function applyWithDb(
   tx: Tx,
   actor: Actor,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft: boolean },
+  opts: ApplyOptions,
 ): Promise<ApplyResult> {
   const tenantId = actor.tenantId;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`master-import:${tenantId}`}))`;
@@ -71,7 +85,16 @@ export async function applyWithDb(
   if (ev.parts.some((p) => p.load && p.status === "APPROVED") && !hasRole(actor, ROLES.PRODUCTION_HEAD)) {
     throw new AppError(ERROR_CODES.FORBIDDEN, { reason: "only the Production Head approves master data" });
   }
-  const report = await buildReport(tx, tenantId, wb, ev, opts.allowDraft);
+  const core = await buildReport(tx, tenantId, wb, ev, opts.allowDraft);
+  const report = finalizeReport(core, bytes);
+  if (opts.expected) {
+    if (sha256Hex(bytes) !== opts.expected.fileSha256) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, { kind: "FILE_CHANGED", reason: "This file changed after you checked it. Check it again." });
+    }
+    if (planFingerprint(core) !== opts.expected.planFingerprint) {
+      throw new AppError(ERROR_CODES.STALE_WRITE, { kind: "PLAN_CHANGED", reason: "Master data changed since your check. Nothing was saved." });
+    }
+  }
 
   const [operations, departments, types, families, clock] = await Promise.all([
     tx.operationRef.findMany({ where: { tenantId }, select: { id: true, code: true } }),
@@ -191,8 +214,16 @@ export async function applyWithDb(
       written.materialGrades.skipped++;
       continue;
     }
-    const where = { tenantId_spec_grade_productForm: { tenantId, spec: m.spec, grade: m.grade, productForm: m.productForm } };
-    const have = await tx.materialGrade.findUnique({ where });
+    // The dry-run matches ignoring case; so must the write, or a case-only
+    // difference previews as "unchanged" and then creates a duplicate row.
+    const have = await tx.materialGrade.findFirst({
+      where: {
+        tenantId,
+        spec: { equals: m.spec, mode: "insensitive" },
+        grade: { equals: m.grade, mode: "insensitive" },
+        productForm: { equals: m.productForm, mode: "insensitive" },
+      },
+    });
     const density = m.densityGcc;
     if (!have) {
       const row = await tx.materialGrade.create({
@@ -287,6 +318,8 @@ export async function applyWithDb(
   if (changed > 0) {
     await audit("masterImport.apply", "MasterImport", `${tenantId}:${now.toISOString()}`, undefined, {
       allowDraft: opts.allowDraft,
+      fileSha256: report.fileSha256,
+      fileName: opts.fileName ?? null,
       partFamilies: written.partFamilies,
       routes: written.routes,
       stageMappingRows: written.stageMappingRows,
@@ -302,11 +335,13 @@ export async function applyWithDb(
 export async function applyMasterImport(
   actor: Actor,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft?: boolean } = {},
+  opts: Partial<ApplyOptions> = {},
 ): Promise<ApplyResult> {
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
-  return withTenant(actor.tenantId, (tx) => applyWithDb(tx, actor, bytes, { allowDraft: opts.allowDraft ?? false }), {
-    timeoutMs: 120_000,
-  });
+  return withTenant(
+    actor.tenantId,
+    (tx) => applyWithDb(tx, actor, bytes, { allowDraft: opts.allowDraft ?? false, expected: opts.expected, fileName: opts.fileName }),
+    { timeoutMs: 120_000 },
+  );
 }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { withTenant, type Tx } from "@/lib/db";
 import { assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { parseMasterWorkbook, type ParsedWorkbook } from "./master-import.parse";
@@ -32,6 +33,10 @@ export interface Tally {
 export type Outcome = "create" | "update" | "unchanged" | "skipped";
 
 export interface DryRunReport {
+  /** SHA-256 (hex) of the uploaded file: apply refuses a different one. */
+  fileSha256: string;
+  /** SHA-256 (hex) of the plan the user was shown; apply refuses if it no longer matches. */
+  planFingerprint: string;
   allowDraft: boolean;
   sheets: string[];
   counts: {
@@ -60,6 +65,28 @@ export interface DryRunReport {
   }>;
   issues: ImportIssue[];
   issueSummary: Array<{ code: string; severity: string; count: number }>;
+}
+
+/** The report before the file hash and fingerprint are attached. */
+export type ReportCore = Omit<DryRunReport, "fileSha256" | "planFingerprint">;
+
+export function sha256Hex(bytes: Buffer | Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * What the user was shown, reduced to a stable string: the options, the plan
+ * tallies, each part's outcome and the issue counts. Apply recomputes it inside
+ * its lock and refuses to write if master data moved on since the preview.
+ */
+export function planFingerprint(r: ReportCore): string {
+  return createHash("sha256")
+    .update(JSON.stringify({ allowDraft: r.allowDraft, plan: r.plan, parts: r.parts, issueSummary: r.issueSummary }))
+    .digest("hex");
+}
+
+export function finalizeReport(core: ReportCore, bytes: Buffer | Uint8Array): DryRunReport {
+  return { ...core, fileSha256: sha256Hex(bytes), planFingerprint: planFingerprint(core) };
 }
 
 const FAMILY_PV = "PRESSURE_VESSEL";
@@ -390,7 +417,7 @@ export async function dryRunWithDb(
   opts: { allowDraft: boolean },
 ): Promise<DryRunReport> {
   const { wb, ev } = await prepareImport(db, tenantId, bytes, opts);
-  return buildReport(db, tenantId, wb, ev, opts.allowDraft);
+  return finalizeReport(await buildReport(db, tenantId, wb, ev, opts.allowDraft), bytes);
 }
 
 export async function buildReport(
@@ -399,7 +426,7 @@ export async function buildReport(
   wb: ParsedWorkbook,
   ev: Evaluation,
   allowDraft: boolean,
-): Promise<DryRunReport> {
+): Promise<ReportCore> {
   const t = await tally(db, tenantId, ev);
 
   const summary = new Map<string, { code: string; severity: string; count: number }>();
@@ -441,13 +468,21 @@ export async function buildReport(
   };
 }
 
-/** App entry point: Production Head or Admin only, tenant-scoped. Writes nothing. */
+/**
+ * App entry point: tenant-scoped and read-only. Engineering may run it (they fix
+ * the workbook); applying stays with the Production Head and Admin.
+ * The 30 s transaction budget covers parsing the workbook, which happens inside it.
+ */
 export async function dryRunMasterImport(
   actor: Actor,
   bytes: Buffer | Uint8Array,
   opts: { allowDraft?: boolean } = {},
 ): Promise<DryRunReport> {
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
-  return withTenant(actor.tenantId, (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false }));
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.ENGINEERING);
+  return withTenant(
+    actor.tenantId,
+    (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false }),
+    { timeoutMs: 30_000 },
+  );
 }

@@ -181,13 +181,27 @@ describe("toActionError — refusal detail and malformed input (M3-B)", () => {
     expect(r).toMatchObject({ ok: false, code: "APPROVAL_BLOCKED", detail: { blockers: [{ code: "MISSING_DEPARTMENT", seq: 10 }] } });
   });
 
-  it("never forwards detail for FORBIDDEN or UNAUTHENTICATED (it names roles)", async () => {
+  it("never forwards the roles in a FORBIDDEN / UNAUTHENTICATED detail", async () => {
     const { AppError, ERROR_CODES } = await import("@/lib/shared/errors");
     const { toActionError } = await import("./_action");
     for (const code of [ERROR_CODES.FORBIDDEN, ERROR_CODES.UNAUTHENTICATED]) {
       const r = toActionError(new AppError(code, { required: ["PRODUCTION_HEAD"], held: ["PLANNER"] }));
       expect(r).not.toHaveProperty("detail");
     }
+  });
+
+  it("forwards only the plain-English reason of a FORBIDDEN, so the person learns why", async () => {
+    const { AppError, ERROR_CODES } = await import("@/lib/shared/errors");
+    const { toActionError } = await import("./_action");
+    const r = toActionError(new AppError(ERROR_CODES.FORBIDDEN, { reason: "only the Production Head approves master data", required: ["PRODUCTION_HEAD"], held: ["ADMIN"] }));
+    expect(r).toMatchObject({ ok: false, code: "FORBIDDEN", detail: { reason: "only the Production Head approves master data" } });
+    expect(JSON.stringify(r)).not.toContain("PRODUCTION_HEAD");
+  });
+
+  it("maps a Prisma transaction timeout (P2028) to TRANSACTION_TIMEOUT instead of a 500", async () => {
+    const { toActionError } = await import("./_action");
+    const err = Object.assign(new Error("Transaction already closed"), { code: "P2028" });
+    expect(toActionError(err)).toMatchObject({ ok: false, code: "TRANSACTION_TIMEOUT" });
   });
 
   it("turns a zod parse failure into VALIDATION_FAILED with the issues, not a 500", async () => {

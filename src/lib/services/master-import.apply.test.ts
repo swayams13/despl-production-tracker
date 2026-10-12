@@ -115,6 +115,75 @@ describe.skipIf(!RUN_DB)("applyMasterImport (DB)", async () => {
     });
   });
 
+  describe("what the user was shown (file hash and plan fingerprint)", () => {
+    const shown = async (t: Awaited<ReturnType<typeof tenant>>, over: Parameters<typeof standardWorkbook>[0] = {}) => {
+      const { dryRunWithDb } = await import("./master-import.service");
+      return dryRunWithDb(owner, t.tenantId, standardWorkbook(over), { allowDraft: false });
+    };
+
+    it("refuses a different file than the one that was checked, and writes nothing", async () => {
+      const t = await tenant("hash");
+      const checked = await shown(t);
+      const before = await state(t.tenantId);
+      await expect(
+        applyMasterImport(t.ph, standardWorkbook({ time2: "0.9" }), {
+          expected: { fileSha256: checked.fileSha256, planFingerprint: checked.planFingerprint },
+        }),
+      ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED, detail: { kind: "FILE_CHANGED" } });
+      expect(await state(t.tenantId)).toEqual(before);
+    });
+
+    it("refuses when master data moved on since the check (the creates are no longer creates)", async () => {
+      const t = await tenant("plan");
+      const checked = await shown(t);
+      const expected = { fileSha256: checked.fileSha256, planFingerprint: checked.planFingerprint };
+      await applyMasterImport(t.ph, standardWorkbook()); // someone else imports the same file first
+      const before = await state(t.tenantId);
+      await expect(applyMasterImport(t.ph, standardWorkbook(), { expected })).rejects.toMatchObject({
+        code: ERROR_CODES.STALE_WRITE,
+        detail: { kind: "PLAN_CHANGED" },
+      });
+      expect(await state(t.tenantId)).toEqual(before);
+    });
+
+    it("applies the plan that was shown, and records the file hash in the audit row", async () => {
+      const t = await tenant("shown");
+      const checked = await shown(t);
+      const r = await applyMasterImport(t.ph, standardWorkbook(), {
+        expected: { fileSha256: checked.fileSha256, planFingerprint: checked.planFingerprint },
+        fileName: "Standard_Parts_Master.xlsx",
+      });
+      expect(r.written.partFamilies.create).toBe(1);
+      expect(r.report.fileSha256).toBe(checked.fileSha256);
+      const row = await owner.auditLog.findFirstOrThrow({ where: { tenantId: t.tenantId, action: "masterImport.apply" } });
+      expect(row.after).toMatchObject({ fileSha256: checked.fileSha256, fileName: "Standard_Parts_Master.xlsx" });
+    });
+
+    it("the fingerprint is stable for the same data and changes when the plan changes", async () => {
+      const t = await tenant("fp");
+      const a = await shown(t);
+      const b = await shown(t);
+      expect(b.planFingerprint).toBe(a.planFingerprint);
+      expect(await shown(t, { time2: "0.9" }).then((r) => r.planFingerprint)).toBe(a.planFingerprint); // same outcomes (creates)
+      expect((await shown(t, { status: "Draft" })).planFingerprint).not.toBe(a.planFingerprint);
+      await applyMasterImport(t.ph, standardWorkbook());
+      expect((await shown(t)).planFingerprint).not.toBe(a.planFingerprint);
+    });
+  });
+
+  describe("material grades match ignoring case", () => {
+    it("a case-only difference is 'unchanged' in the plan and creates no duplicate when applied", async () => {
+      const t = await tenant("case");
+      await applyMasterImport(t.ph, standardWorkbook());
+      const { dryRunWithDb } = await import("./master-import.service");
+      const preview = await dryRunWithDb(owner, t.tenantId, standardWorkbook({ materialSpec: "sa 516" }), { allowDraft: false });
+      expect(preview.plan.materialGrades).toMatchObject({ unchanged: 1, create: 0 });
+      const r = await applyMasterImport(t.ph, standardWorkbook({ materialSpec: "sa 516" }));
+      expect(r.written.materialGrades).toMatchObject({ unchanged: 1, create: 0 });
+      expect(await owner.materialGrade.count({ where: { tenantId: t.tenantId } })).toBe(1);
+    });
+  });
+
   describe("lifecycle", () => {
     it("creates part family, PUBLISHED route, stage mappings and material; the plan equals what was written", async () => {
       const t = await tenant("create");

@@ -37,6 +37,9 @@ import { loadVariants, routeSignature, writeRouteVariant, type RouteCtx } from "
  */
 export const MASTER_DATA_EDIT_ROLES = [ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.ENGINEERING] as const;
 export const MASTER_DATA_READ_ROLES = [ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.ENGINEERING, ROLES.PLANNER] as const;
+/** May open the import screen and run the read-only check; loading is Production Head and Admin only. */
+export const IMPORT_VIEW_ROLES = [ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.ENGINEERING] as const;
+export const IMPORT_APPLY_ROLES = [ROLES.ADMIN, ROLES.PRODUCTION_HEAD] as const;
 
 /** Findings that make a DRAFT unsavable (they would not even be valid rows). Completeness gaps are saved and block approval. */
 const STRUCTURAL: ReadonlySet<string> = new Set<IssueCode>(["UNKNOWN_OPERATION", "UNKNOWN_DEPARTMENT", "UNKNOWN_STAGE_NUMBER"]);
@@ -360,12 +363,20 @@ export async function upsertMaterialGrade(actor: Actor, input: UpsertMaterialGra
   const v = upsertMaterialGradeSchema.parse(input);
   guardEdit(actor);
   return withTenant(actor.tenantId, async (tx) => {
+    // Same key rule as the importer: spec, grade and form compared ignoring case,
+    // on create AND on edit (an edit must not collide with another grade).
+    const dup = await tx.materialGrade.findFirst({
+      where: {
+        tenantId: actor.tenantId,
+        spec: { equals: v.spec, mode: "insensitive" },
+        grade: { equals: v.grade, mode: "insensitive" },
+        productForm: { equals: v.productForm, mode: "insensitive" },
+        ...(v.id != null ? { id: { not: v.id } } : {}),
+      },
+      select: { id: true },
+    });
+    if (dup) throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "this specification, grade and form already exists" });
     if (v.id == null) {
-      const dup = await tx.materialGrade.findFirst({
-        where: { tenantId: actor.tenantId, spec: v.spec, grade: v.grade, productForm: v.productForm },
-        select: { id: true },
-      });
-      if (dup) throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "this specification, grade and form already exists" });
       const row = await tx.materialGrade.create({
         data: { tenantId: actor.tenantId, spec: v.spec, grade: v.grade, productForm: v.productForm, densityGcc: v.densityGcc, remarks: v.remarks },
       });
