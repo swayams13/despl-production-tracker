@@ -103,9 +103,9 @@ describe("toActionError — P2002 mapping", () => {
     expect(() => toActionError(new Error("boom"))).toThrow("boom");
   });
 
-  it("still maps AppError unchanged", () => {
+  it("still maps AppError to its code and message (M3-B: the refusal's detail now rides along)", () => {
     const result = toActionError(new AppError(ERROR_CODES.GATING_BLOCKED, { processPlanId: 1 }));
-    expect(result).toEqual({ ok: false, code: ERROR_CODES.GATING_BLOCKED, message: expect.any(String) });
+    expect(result).toEqual({ ok: false, code: ERROR_CODES.GATING_BLOCKED, message: expect.any(String), detail: { processPlanId: 1 } });
   });
 });
 
@@ -170,5 +170,32 @@ describe("toActionError — structured logging", () => {
     const result = toActionError(new AppError(ERROR_CODES.FORBIDDEN));
     expect(result).toEqual({ ok: false, code: ERROR_CODES.FORBIDDEN, message: expect.any(String) });
     await flush();
+  });
+});
+
+describe("toActionError — refusal detail and malformed input (M3-B)", () => {
+  it("forwards a refusal's detail so the screen can say which blockers", async () => {
+    const { AppError, ERROR_CODES } = await import("@/lib/shared/errors");
+    const { toActionError } = await import("./_action");
+    const r = toActionError(new AppError(ERROR_CODES.APPROVAL_BLOCKED, { blockers: [{ code: "MISSING_DEPARTMENT", seq: 10 }] }));
+    expect(r).toMatchObject({ ok: false, code: "APPROVAL_BLOCKED", detail: { blockers: [{ code: "MISSING_DEPARTMENT", seq: 10 }] } });
+  });
+
+  it("never forwards detail for FORBIDDEN or UNAUTHENTICATED (it names roles)", async () => {
+    const { AppError, ERROR_CODES } = await import("@/lib/shared/errors");
+    const { toActionError } = await import("./_action");
+    for (const code of [ERROR_CODES.FORBIDDEN, ERROR_CODES.UNAUTHENTICATED]) {
+      const r = toActionError(new AppError(code, { required: ["PRODUCTION_HEAD"], held: ["PLANNER"] }));
+      expect(r).not.toHaveProperty("detail");
+    }
+  });
+
+  it("turns a zod parse failure into VALIDATION_FAILED with the issues, not a 500", async () => {
+    const { z } = await import("zod");
+    const { toActionError } = await import("./_action");
+    const parsed = z.object({ reason: z.string().min(5, "A reason is required") }).safeParse({ reason: "" });
+    if (parsed.success) throw new Error("expected a failure");
+    const r = toActionError(parsed.error);
+    expect(r).toMatchObject({ ok: false, code: "VALIDATION_FAILED", detail: { issues: [{ path: "reason", message: "A reason is required" }] } });
   });
 });

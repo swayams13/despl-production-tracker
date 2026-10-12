@@ -1,8 +1,15 @@
+import { ZodError } from "zod";
 import { headers } from "next/headers";
 import { readSession } from "@/lib/auth/session";
 import { isAppError, ERROR_CODES, ERROR_MESSAGES, type ErrorCode } from "@/lib/shared/errors";
 
-export type ActionResult = { ok: true } | { ok: false; code: ErrorCode; message: string };
+/**
+ * `detail` is the refusal's UI-safe context (which blockers, which step). It is
+ * never sent for FORBIDDEN / UNAUTHENTICATED, whose detail names roles.
+ */
+export type ActionResult =
+  | { ok: true }
+  | { ok: false; code: ErrorCode; message: string; detail?: Record<string, unknown> };
 
 /**
  * Every duplicate guard in this codebase is check-then-insert (`findFirst`,
@@ -111,16 +118,27 @@ function log(level: "info" | "error", tag: string, payload: Record<string, unkno
   })();
 }
 
-function result(code: ErrorCode): ActionResult {
-  return { ok: false, code, message: ERROR_MESSAGES[code] ?? "This action could not be completed." };
+function result(code: ErrorCode, detail?: Record<string, unknown>): ActionResult {
+  const base = { ok: false as const, code, message: ERROR_MESSAGES[code] ?? "This action could not be completed." };
+  return detail ? { ...base, detail } : base;
 }
+
+const NO_DETAIL: ReadonlySet<ErrorCode> = new Set([ERROR_CODES.FORBIDDEN, ERROR_CODES.UNAUTHENTICATED]);
 
 /** Map an AppError to a UI-safe result; rethrow anything unexpected (→ 500). */
 export function toActionError(e: unknown): ActionResult {
   if (isAppError(e)) {
     // Refusals are expected product behavior (invariant #12) — info, not error.
     log("info", "[action] refused", { code: e.code, detail: e.detail });
-    return result(e.code);
+    return result(e.code, NO_DETAIL.has(e.code) ? undefined : e.detail);
+  }
+
+  // A schema.parse() that failed inside a service: the caller sent something
+  // malformed. That is a refusal with reasons, not a 500.
+  if (e instanceof ZodError) {
+    const issues = e.issues.map((i) => ({ path: i.path.join("."), message: i.message }));
+    log("info", "[action] refused", { code: ERROR_CODES.VALIDATION_FAILED, issues });
+    return result(ERROR_CODES.VALIDATION_FAILED, { issues });
   }
 
   const dup = asUniqueViolation(e);

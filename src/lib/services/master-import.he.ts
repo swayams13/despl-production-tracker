@@ -131,7 +131,7 @@ export async function planHe(db: Tx, tenantId: number, ev: Evaluation): Promise<
  * HEAT_EXCHANGER version, any status) with their department names — the
  * reference for validating a step's HE stage outside an import.
  */
-export async function loadHeStageMap(db: Tx, tenantId: number): Promise<Map<number, { department: string }>> {
+export async function loadHeStageMap(db: Tx, tenantId: number): Promise<Map<number, { department: string; name: string }>> {
   const template = await db.processTemplate.findFirst({
     where: { tenantId, family: { code: HE_FAMILY } },
     orderBy: { id: "asc" },
@@ -139,13 +139,13 @@ export async function loadHeStageMap(db: Tx, tenantId: number): Promise<Map<numb
       versions: {
         orderBy: { version: "desc" },
         take: 1,
-        select: { processes: { select: { code: true, defaultDepartment: { select: { name: true } } } } },
+        select: { processes: { select: { code: true, name: true, defaultDepartment: { select: { name: true } } } } },
       },
     },
   });
-  const out = new Map<number, { department: string }>();
+  const out = new Map<number, { department: string; name: string }>();
   for (const p of template?.versions[0]?.processes ?? []) {
-    if (/^\d+$/.test(p.code)) out.set(Number(p.code), { department: p.defaultDepartment.name });
+    if (/^\d+$/.test(p.code)) out.set(Number(p.code), { department: p.defaultDepartment.name, name: p.name });
   }
   return out;
 }
