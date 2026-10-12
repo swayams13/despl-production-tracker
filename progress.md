@@ -124,3 +124,8 @@ DESPL team returned the Standard Parts Master (PV + HE) with the DE0423 GA and S
 **Verified:** all 73 migrations replay clean on a scratch DB, `migrate diff` "No difference detected"; typecheck and lint exit 0; `pnpm test:db` 104 files / 1238 tests green (incl. new `m1-master-data-schema.test.ts`, RLS coverage generic over `tenant_id` so the new tables are covered). Enum values taken from the 11 Oct workbook (make/buy 4, time basis 8 of 10 seen, unit Hours only).
 **Not done:** staging push and production-dump rehearsal (MERGE-RUNBOOK §5) — needed before merge; PR B; M1 does not touch `materialiseComponents` or `loadMappedOps` yet. `dimension_keys` is JSON per spec but the workbook holds free text ("ID 3000; thickness 10…") — M2 must decide how to derive keys. Rows with no preparer user (workbook "Filled by" is a company) pass the DB maker–checker CHECK, so M3 must also enforce it in the service.
 **Next:** PR #73 (L1.1) merges first, then retarget this PR to `main`; PR B.
+
+## Session — M1 PR A on staging, 12 Oct 2026 (evening)
+
+**Staging:** pushed `0123d4b` (L1.1 + M1 PR A) to `staging`, fast-forward from `fd8fcb1`. Deployment `2d470922` SUCCESS; pre-deploy log "73 migrations found … applying `20261013100000_m1_master_data_schema` … successfully applied"; `/api/health` 200 on the new container. The earlier L1.1 deploy `bd2a352f` (`fd8fcb1`, 12 Oct 09:51) was also SUCCESS, so its migration applied cleanly too.
+**Still unchecked on staging (needs DB access):** the four L1.1 checks (roles, `public_id`, grants) and that the M1 tables, CHECKs and RLS exist. **Production-dump rehearsal (MERGE-RUNBOOK §5, expect 73 applied) not run.**
