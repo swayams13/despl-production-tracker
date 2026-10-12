@@ -28,3 +28,47 @@ export const ROUTES_HEADER = [
   "Department", "Counts toward\nPV Stage No.", "Counts toward\nHE Stage No.", "Std. Time", "Time Unit", "Time Basis",
   "Conditional?", "When does it apply?", "Acceptance Standard", "Record / Document", "Remarks",
 ];
+
+export interface WorkbookOver {
+  status?: string;
+  routeSource?: string;
+  time2?: string;
+  density?: string;
+  /** Extra HE stages (stage no, name, department, predecessors). */
+  heStages?: string[][];
+  /** Replace the single part's code. */
+  code?: string;
+}
+
+/** One PV part (two route steps), one material, optional HE stages. */
+export function standardWorkbook(over: WorkbookOver = {}): Buffer {
+  const code = over.code ?? "SHL-01";
+  return makeWorkbook({
+    "Parts Master": {
+      header: PARTS_HEADER,
+      rows: [["PILOT", code, "Shell Course", "PV", "Shell", "Made in-house", "Plate", "SA516", "ID, T, L", "Rolled shell (ID, T, L)", "A", "No", over.routeSource ?? "Current shop practice", "", "", over.status ?? "Approved by Production Head", ""]],
+    },
+    "Part Routes": {
+      header: ROUTES_HEADER,
+      rows: [
+        ["PILOT", code, "Shell Course", "A", "10", "Receipt", "Plate received", "Stores", "10", "", "0.5", "Hours", "Per piece", "No", "", "GRN accepted", "GRN", ""],
+        ["PILOT", code, "Shell Course", "A", "20", "MTC Verification / Material Identification", "MTC reviewed", "Quality Control / QA", "11", "", over.time2 ?? "0.75", "Hours", "Per material lot", "No", "", "", "", ""],
+      ],
+    },
+    "Material Master": {
+      header: ["Example?", "Material Specification", "Grade / UNS", "Product Form", "Density (g/cm³)", "Remarks"],
+      rows: [["REFERENCE", "SA 516", "Gr.70", "Plate", over.density ?? "7.85", ""]],
+    },
+    "HE Stages": {
+      header: ["Example?", "HE Type", "Stage No.", "Stage Name", "Main Activities", "Department", "Duration Min (days)", "Duration Max (days)", "Predecessor Stage No(s).", "Link Type", "Lag / Overlap (days)", "Optional?", "When is it optional?", "Remarks"],
+      rows: (over.heStages ?? []).map((s) => ["PROPOSED", "Fixed", s[0], s[1], "", s[2], "1", "2", s[3] ?? "—", "Finish-to-Start", "0", "No", "", ""]),
+    },
+    "PV Stages (ref)": {
+      header: ["Stage No.", "Stage Name", "Main Activities", "Department"],
+      rows: [["10", "Receipt", "", "Stores"], ["11", "Identification", "", "Quality Control / QA"]],
+    },
+    "Assembly Sequence": { header: ["Example?", "Equipment Type", "Activity"], rows: [] },
+    "New Operations": { header: ["Example?", "Proposed Operation"], rows: [] },
+    "Review Actions": { header: ["ID", "Issue or Decision Required"], rows: [] },
+  });
+}

@@ -140,6 +140,7 @@ describe.skipIf(!RUN_DB)("dryRunWithDb (DB)", async () => {
       const s = await owner.routeStep.create({
         data: {
           routeVersionId: version.id, seq, operationId, departmentId, stdTime: time, stdTimeUnit: "HOURS", stdTimeBasis: basis,
+          printed: seq === 10 ? "Plate received" : "MTC reviewed",
           acceptanceStandard: acceptance || null, recordDocument: seq === 10 ? "GRN" : null,
         },
       });

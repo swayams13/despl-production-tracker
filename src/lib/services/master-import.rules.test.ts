@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { HeStageRow, MaterialRow, ParsedWorkbook, PartRow, StepRow } from "./master-import.parse";
-import { evaluateMaster, stepSignature, type IssueCode, type ReferenceData } from "./master-import.rules";
+import { deriveDimensionKeys, evaluateMaster, stepSignature, type IssueCode, type ReferenceData } from "./master-import.rules";
 
 const REF: ReferenceData = {
   operationCodes: new Set(["RECEIPT", "CUTTING", "ROLLING", "FIT_UP", "WELDING", "NDT", "INSPECTION"]),
   operationDefaultStage: new Map([["RECEIPT", 10], ["CUTTING", 12], ["ROLLING", 13], ["FIT_UP", 15], ["WELDING", 16], ["NDT", 17], ["INSPECTION", 25]]),
   departmentNames: new Set(["Stores", "Fabrication Prep", "Fabrication / Welding", "Quality Control / QA", "Heat Treatment"]),
+  componentTypeCodes: new Set(["PLATE", "PIPE", "FORGING", "TUBE"]),
   pvStages: new Map([
     [10, { name: "Receipt", department: "Stores" }],
     [12, { name: "Cutting", department: "Fabrication Prep" }],
@@ -107,6 +108,12 @@ describe("part-level rules (violations first)", () => {
     }
   });
 
+  it("a mapped raw form that the tenant does not have is a warning, and the part loads without one", () => {
+    const r = evaluateMaster(wb({ parts: [part({ rawForm: "Plate" })] }), { ...REF, componentTypeCodes: new Set() }, { allowDraft: false });
+    expect(has(r, "UNKNOWN_RAW_FORM", "WARNING")).toBe(true);
+    expect(r.parts[0]).toMatchObject({ load: true, rawFormCode: null });
+  });
+
   it("an unmapped make/buy is a warning, stored empty", () => {
     const r = run({ parts: [part({ makeBuy: "Outsourced job work" })] });
     expect(has(r, "INVALID_VALUE", "WARNING")).toBe(true);
@@ -130,6 +137,7 @@ describe("route-step rules (violations first)", () => {
     ["time with unknown basis", { timeBasis: "Per furlong" }, "UNKNOWN_TIME_BASIS"],
     ["time with unknown unit", { timeUnit: "Fortnights" }, "INVALID_VALUE"],
     ["negative/non-numeric time", { stdTime: "-1" }, "INVALID_VALUE"],
+    ["time beyond the column's range", { stdTime: "100000" }, "INVALID_VALUE"],
   ];
   it.each(blocking)("%s blocks the variant, not the part", (_n, over, code) => {
     const r = run({ steps: [step(over)] });
@@ -216,9 +224,9 @@ describe("variants and routeless parts", () => {
 
 describe("material master", () => {
   it("rejects a duplicate key (case-insensitive) and a non-positive density", () => {
-    const r = run({ materials: [material(), material({ row: 6, spec: "sa 516" }), material({ row: 7, grade: "Gr.60", density: "0" })] });
+    const r = run({ materials: [material(), material({ row: 6, spec: "sa 516" }), material({ row: 7, grade: "Gr.60", density: "0" }), material({ row: 8, grade: "Gr.50", density: "1000" })] });
     expect(has(r, "DUPLICATE_MATERIAL", "ERROR")).toBe(true);
-    expect(r.materials.map((m) => m.load)).toEqual([true, false]);
+    expect(r.materials.map((m) => m.load)).toEqual([true, false, false]);
     expect(has(r, "INVALID_VALUE", "ERROR")).toBe(true);
   });
   it("a blank grade is fine; a blank density is a warning and still loads", () => {
@@ -278,14 +286,32 @@ describe("report-only sheets", () => {
 });
 
 describe("stepSignature", () => {
-  const base = { seq: 10, operationCode: "CUTTING", department: "Fabrication Prep", stdTime: 0.3, stdTimeUnit: "HOURS", stdTimeBasis: "PER_METRE_CUT", conditionText: "", acceptanceStandard: "", recordDocument: "", pvStage: 12, heStage: 13 };
+  const base = { seq: 10, operationCode: "CUTTING", whatIsDone: "Plate cut to size", department: "Fabrication Prep", stdTime: 0.3, stdTimeUnit: "HOURS", stdTimeBasis: "PER_METRE_CUT", conditional: false, conditionText: "", acceptanceStandard: "", recordDocument: "", pvStage: 12, heStage: 13 };
   it("is equal for equal steps and changes with time, stage or department", () => {
     expect(stepSignature(base)).toBe(stepSignature({ ...base }));
-    for (const change of [{ stdTime: 0.4 }, { pvStage: 13 }, { heStage: null }, { department: "Stores" }]) {
+    for (const change of [{ stdTime: 0.4 }, { pvStage: 13 }, { heStage: null }, { department: "Stores" }, { conditional: true }, { whatIsDone: "Cut" }]) {
       expect(stepSignature({ ...base, ...change })).not.toBe(stepSignature(base));
     }
   });
   it("treats a Decimal-like string time and a number time alike", () => {
     expect(stepSignature({ ...base, stdTime: Number("0.30") })).toBe(stepSignature(base));
+  });
+});
+
+describe("deriveDimensionKeys — keys, never the sample values", () => {
+  const cases: Array<[string, string, string[]]> = [
+    ["a plain comma list", "OD, thickness, hole count, pitch", ["OD", "thickness", "hole count", "pitch"]],
+    ["keys carrying sample values", "ID 3000; thickness 10; developed length 9456", ["ID", "thickness", "developed length"]],
+    ["keeps per-job wording", "ID 3000; course width/length per job", ["ID", "course width/length per job"]],
+    ["units after the number", "OD 21.3; wall 2.77mm; length 6000 mm", ["OD", "wall", "length"]],
+    ["a spec with digits is not a key", "raw thickness 12; 2:1 semi-ellipsoidal; ICR 2700", ["raw thickness", "ICR"]],
+    ["a trailing 'min' belongs to the value", "formed thickness 10 min; blank dia 3772", ["formed thickness", "blank dia"]],
+    ["example clauses are dropped, keys before them kept", "OD, quantity; SP40: OD 21.3 × 0.4, 3000 overall (Effects 1–8)", ["OD", "quantity"]],
+    ["multiplied sizes are stripped", "vessel OD; PTFE sheet 10 × 450 × 3030", ["vessel OD", "PTFE sheet"]],
+    ["de-duplicates case-insensitively and ignores blanks", "ID 10;; id 20; ", ["ID"]],
+    ["empty text gives no keys", "", []],
+  ];
+  it.each(cases)("%s", (_n, text, expected) => {
+    expect(deriveDimensionKeys(text)).toEqual(expected);
   });
 });

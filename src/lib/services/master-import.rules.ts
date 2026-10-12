@@ -46,6 +46,10 @@ export const ISSUE_CODES = [
   "ASSEMBLY_UNKNOWN_PART",
   "NEW_OPERATION_PENDING",
   "REVIEW_ACTION_OPEN",
+  // State of the tenant's existing master data (set by the service, not the pure rules).
+  "PART_CODE_CONFLICT",
+  "STATUS_DOWNGRADE",
+  "MATERIAL_LOCKED",
 ] as const;
 export type IssueCode = (typeof ISSUE_CODES)[number];
 
@@ -66,6 +70,8 @@ export interface ReferenceData {
   operationDefaultStage: ReadonlyMap<string, number>;
   /** Tenant Department names. */
   departmentNames: ReadonlySet<string>;
+  /** Tenant ComponentTypeRef codes (a mapped raw form must exist here). */
+  componentTypeCodes: ReadonlySet<string>;
   /** The 36 PV stages (tracker's own template, or the workbook's reference sheet). */
   pvStages: ReadonlyMap<number, { name: string; department: string | null }>;
 }
@@ -164,19 +170,44 @@ const TIME_UNIT = aliases.timeUnit as Record<string, string>;
 const TIME_BASIS = aliases.timeBasis as Record<string, string>;
 const LINK_TYPE = aliases.linkType as Record<string, string>;
 
+/**
+ * The workbook's "Dimensions to enter per job" is free text: mostly a comma
+ * list of keys ("OD, thickness, hole count"), sometimes keys carrying sample
+ * values ("ID 3000; thickness 10") or example clauses ("SP40: OD 21.3 × 0.4").
+ * The keys are what a planner enters per job; sample numbers are never stored.
+ * Trailing numbers and units are stripped; an item that still contains a digit
+ * (a spec such as "2:1 semi-ellipsoidal", an example clause) is not a key.
+ * Best effort for a DRAFT the Production Head reviews, not a parser of record.
+ */
+const VALUE_TOKEN = /^(mm|cm|m|kg|in|min|max|thk|x|×|to|and|%|deg|°)$/i;
+
+export function deriveDimensionKeys(text: string): string[] {
+  const keys: string[] = [];
+  for (const item of text.split(/[;,\n]+/)) {
+    const tokens = item.trim().split(/\s+/).filter(Boolean);
+    while (tokens.length > 1 && (/^[\d.]/.test(tokens[tokens.length - 1]) || VALUE_TOKEN.test(tokens[tokens.length - 1]))) tokens.pop();
+    const key = tokens.join(" ").replace(/[,.:]+$/, "").trim();
+    if (!key || /\d/.test(key)) continue;
+    if (!keys.some((k) => k.toLowerCase() === key.toLowerCase())) keys.push(key);
+  }
+  return keys;
+}
+
 const intOrNull = (s: string): number | null => (/^\d+$/.test(s.trim()) ? Number(s) : null);
 const decimalOrNull = (s: string): number | null => (/^\d+(\.\d+)?$/.test(s.trim()) ? Number(s) : null);
 const yes = (s: string): boolean => /^y(es)?$/i.test(s.trim());
 
 /** Stable comparison key for a route step; shared by the dry-run and (PR B) apply. */
-export function stepSignature(s: Pick<NormalStep, "seq" | "operationCode" | "department" | "stdTime" | "stdTimeUnit" | "stdTimeBasis" | "conditionText" | "acceptanceStandard" | "recordDocument" | "pvStage" | "heStage">): string {
+export function stepSignature(s: Pick<NormalStep, "seq" | "operationCode" | "whatIsDone" | "department" | "stdTime" | "stdTimeUnit" | "stdTimeBasis" | "conditional" | "conditionText" | "acceptanceStandard" | "recordDocument" | "pvStage" | "heStage">): string {
   return JSON.stringify([
     s.seq,
     s.operationCode,
+    s.whatIsDone,
     s.department,
     s.stdTime == null ? null : Number(s.stdTime),
     s.stdTimeUnit,
     s.stdTimeBasis,
+    s.conditional,
     s.conditionText,
     s.acceptanceStandard,
     s.recordDocument,
@@ -285,8 +316,13 @@ export function evaluateMaster(wb: ParsedWorkbook, ref: ReferenceData, opts: Eva
     }
     let rawFormCode: string | null = null;
     if (r.rawForm) {
-      if (r.rawForm in RAW_FORMS) rawFormCode = RAW_FORMS[r.rawForm];
-      else at("UNKNOWN_RAW_FORM", "WARNING", `Raw material form "${r.rawForm}" has no tracker component type; the part loads without one.`, { rawForm: r.rawForm });
+      if (r.rawForm in RAW_FORMS) {
+        rawFormCode = RAW_FORMS[r.rawForm];
+        if (rawFormCode && !ref.componentTypeCodes.has(rawFormCode)) {
+          at("UNKNOWN_RAW_FORM", "WARNING", `Raw material form "${r.rawForm}" maps to ${rawFormCode}, which does not exist in the tracker; the part loads without one.`, { rawForm: r.rawForm, rawFormCode });
+          rawFormCode = null;
+        }
+      } else at("UNKNOWN_RAW_FORM", "WARNING", `Raw material form "${r.rawForm}" has no tracker component type; the part loads without one.`, { rawForm: r.rawForm });
     }
     let makeBuy: string | null = null;
     if (r.makeBuy) {
@@ -362,7 +398,7 @@ export function evaluateMaster(wb: ParsedWorkbook, ref: ReferenceData, opts: Eva
       at("MISSING_STD_TIME", "WARNING", `Step ${r.seq} of ${r.partCode} has no standard time.`);
     } else {
       stdTime = decimalOrNull(r.stdTime);
-      if (stdTime == null) bad("INVALID_VALUE", `Standard time "${r.stdTime}" is not a number.`, { field: "stdTime" });
+      if (stdTime == null || stdTime > 99999.999) bad("INVALID_VALUE", `Standard time "${r.stdTime}" must be a number up to 99999.999.`, { field: "stdTime" });
       unit = TIME_UNIT[r.timeUnit] ?? null;
       if (!unit) bad("INVALID_VALUE", `Time unit "${r.timeUnit}" is not Hours or Days.`, { field: "timeUnit" });
       basis = TIME_BASIS[r.timeBasis] ?? null;
@@ -452,8 +488,8 @@ export function evaluateMaster(wb: ParsedWorkbook, ref: ReferenceData, opts: Eva
     if (r.density === "") at("MISSING_DENSITY", "WARNING", `${r.spec} ${r.grade} (${r.productForm}) has no density.`);
     else {
       density = decimalOrNull(r.density);
-      if (density == null || density <= 0) {
-        at("INVALID_VALUE", "ERROR", `Density "${r.density}" must be a number above zero.`, { field: "density" });
+      if (density == null || density <= 0 || density > 999.999) {
+        at("INVALID_VALUE", "ERROR", `Density "${r.density}" must be a number above zero, up to 999.999.`, { field: "density" });
         load = false;
       }
     }
