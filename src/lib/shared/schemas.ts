@@ -359,7 +359,18 @@ export const createUserSchema = z
     name: z.string().trim().min(1, "Name is required"),
     email: z.string().trim().toLowerCase().email("Enter a valid email address"),
     roleCodes: z
-      .array(z.enum(["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVISOR", "QC", "CLIENT_VIEWER"]))
+      .array(z.enum([
+        "ADMIN",
+        "MANAGEMENT",
+        "PRODUCTION_HEAD",
+        "SUPERVISOR",
+        "QC",
+        "CLIENT_VIEWER",
+        "OPERATOR",
+        "PLANNER",
+        "STORES",
+        "ENGINEERING",
+      ]))
       .min(1, "At least one role is required"),
     departmentIds: z.array(id).default([]),
     password: z.string().min(8, "Password must be at least 8 characters"),
@@ -384,7 +395,18 @@ export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export const approvePasswordResetSchema = z.object({ requestId: id }).strict();
 export type ApprovePasswordResetInput = z.infer<typeof approvePasswordResetSchema>;
 
-const roleCodeEnum = z.enum(["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVISOR", "QC", "CLIENT_VIEWER"]);
+const roleCodeEnum = z.enum([
+        "ADMIN",
+        "MANAGEMENT",
+        "PRODUCTION_HEAD",
+        "SUPERVISOR",
+        "QC",
+        "CLIENT_VIEWER",
+        "OPERATOR",
+        "PLANNER",
+        "STORES",
+        "ENGINEERING",
+      ]);
 
 /**
  * SPEC §5.2: create an employee account. Deliberately a SEPARATE contract
@@ -519,6 +541,11 @@ export const saveDraftVersionSchema = z
             workOrderStages: z.array(z.number().int().positive()).default([]),
             optional: z.boolean().default(false),
             provisional: z.boolean().default(true),
+            // Lean Core L1.1. Omitted (the current editor never sends them) =
+            // keep what the draft already holds for this process code, or the
+            // column default for a new process.
+            grain: z.enum(["JOB", "UNIT"]).optional(),
+            requiresQc: z.boolean().optional(),
           })
           .strict()
           .refine(
@@ -553,6 +580,8 @@ export const saveDraftVersionSchema = z
             // Negative lag is legitimate concurrent work (invariant #11), so
             // this is a plain int with no positivity constraint.
             lagDays: z.number().int(),
+            /** Lean Core L1.1. Omitted = keep the existing edge's value, else HARD. */
+            enforcement: z.enum(["HARD", "SOFT"]).optional(),
           })
           .strict(),
       )

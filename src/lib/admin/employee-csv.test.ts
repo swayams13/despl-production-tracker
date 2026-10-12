@@ -16,6 +16,11 @@ describe("departmentsRequired", () => {
     { roles: ["MANAGEMENT"], required: false },
     { roles: ["ADMIN"], required: false },
     { roles: ["SUPERVISOR", "MANAGEMENT"], required: false },
+    // Lean Core L1.1: Planning / PPC is cross-department; the other new roles are not.
+    { roles: ["PLANNER"], required: false },
+    { roles: ["OPERATOR"], required: true },
+    { roles: ["STORES"], required: true },
+    { roles: ["ENGINEERING"], required: true },
   ];
   for (const c of cases) {
     it(`roles=[${c.roles.join(",")}] -> required=${c.required}`, () => {
@@ -46,6 +51,16 @@ describe("parseEmployeeCsv", () => {
     expect(rows[0].errors).toEqual([]);
     expect(rows[0].data?.roles).toEqual(["SUPERVISOR", "QC"]);
     expect(rows[0].data?.departmentIds).toEqual([1, 2]);
+  });
+
+  it("accepts the Lean Core L1.1 role codes; PLANNER needs no department", () => {
+    const csv = `${header}\nP Q,pq,,,PLANNER,\nO P,op,,,OPERATOR,Fabrication\nS T,st,,,STORES|ENGINEERING,Fabrication`;
+    const rows = parseEmployeeCsv(csv, depts);
+    expect(rows.map((r) => r.errors)).toEqual([[], [], []]);
+    expect(rows[0].data?.roles).toEqual(["PLANNER"]);
+    expect(rows[0].data?.departmentIds).toEqual([]);
+    expect(rows[1].data?.roles).toEqual(["OPERATOR"]);
+    expect(rows[2].data?.roles).toEqual(["STORES", "ENGINEERING"]);
   });
 
   it("allows omitted email/employeeCode", () => {
@@ -96,7 +111,7 @@ describe("parseEmployeeCsv", () => {
   it("requires a department for SUPERVISOR with none given", () => {
     const csv = `${header}\nA B,ab,,,SUPERVISOR,`;
     const rows = parseEmployeeCsv(csv, depts);
-    expect(rows[0].errors).toContain("Departments are required unless the role is Management or Admin.");
+    expect(rows[0].errors).toContain("Departments are required unless the role is Management, Admin or Planner.");
   });
 
   it("allows MANAGEMENT with no department", () => {

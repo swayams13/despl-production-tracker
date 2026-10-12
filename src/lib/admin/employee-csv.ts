@@ -13,17 +13,29 @@
  * commas — not assumed here.
  */
 
-const ROLE_CODES = ["ADMIN", "MANAGEMENT", "PRODUCTION_HEAD", "SUPERVISOR", "QC", "CLIENT_VIEWER"] as const;
+const ROLE_CODES = [
+  "ADMIN",
+  "MANAGEMENT",
+  "PRODUCTION_HEAD",
+  "SUPERVISOR",
+  "QC",
+  "CLIENT_VIEWER",
+  "OPERATOR",
+  "PLANNER",
+  "STORES",
+  "ENGINEERING",
+] as const;
 export type RoleCodeStr = (typeof ROLE_CODES)[number];
 
 /** SPEC §7.3: departments are required on the Add-employee dialog and in
- * bulk import UNLESS the role set includes MANAGEMENT or ADMIN (these roles
+ * bulk import UNLESS the role set includes MANAGEMENT, ADMIN or PLANNER (these roles
  * are cross-department by nature). UI-level rule only — the service layer
  * does not enforce it (admin.service.createEmployee accepts `[]` from any
  * role). Shared by the dialog form and the CSV parser below so the rule is
  * defined exactly once. */
 export function departmentsRequired(roles: string[]): boolean {
-  return !roles.includes("MANAGEMENT") && !roles.includes("ADMIN");
+  // PLANNER (Planning / PPC) is cross-department like MANAGEMENT and ADMIN.
+  return !roles.includes("MANAGEMENT") && !roles.includes("ADMIN") && !roles.includes("PLANNER");
 }
 
 export interface EmployeeCsvRowData {
@@ -89,7 +101,7 @@ export function parseEmployeeCsv(text: string, departments: { id: number; name: 
       else departmentIds.push(id);
     }
     if (departmentIds.length === 0 && departmentsRequired(roleTokens)) {
-      errors.push("Departments are required unless the role is Management or Admin.");
+      errors.push("Departments are required unless the role is Management, Admin or Planner.");
     }
 
     rows.push({

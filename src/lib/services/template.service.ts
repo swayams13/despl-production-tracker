@@ -240,6 +240,27 @@ export async function saveDraftVersion(
       edgeCount: await tx.templateEdge.count({ where: { versionId } }),
     };
 
+    // Lean Core L1.1: the delete-and-recreate below would reset grain,
+    // requiresQc and enforcement to their column defaults for a caller that
+    // does not send them. Remember the current values, keyed by process code.
+    const existingProcesses = await tx.templateProcess.findMany({
+      where: { versionId },
+      select: { id: true, code: true, grain: true, requiresQc: true },
+    });
+    const existingByCode = new Map(existingProcesses.map((p) => [p.code, p]));
+    const existingCodeById = new Map(existingProcesses.map((p) => [p.id, p.code]));
+    const existingEdges = await tx.templateEdge.findMany({
+      where: { versionId },
+      select: { processId: true, predecessorId: true, enforcement: true },
+    });
+    const existingEnforcement = new Map(
+      existingEdges.map((e) => [
+        `${existingCodeById.get(e.processId)}>${existingCodeById.get(e.predecessorId)}`,
+        e.enforcement,
+      ]),
+    );
+    const codeByKey = new Map(processes.map((p) => [p.key, p.code]));
+
     return audited(tx, actor, async () => {
       // TemplateEdge cascades on both its process FKs, so deleting the
       // processes takes the edges with them; the explicit edge delete first
@@ -266,6 +287,8 @@ export async function saveDraftVersion(
             workOrderStages: p.workOrderStages,
             optional: p.optional,
             provisional: p.provisional,
+            grain: p.grain ?? existingByCode.get(p.code)?.grain,
+            requiresQc: p.requiresQc ?? existingByCode.get(p.code)?.requiresQc,
           },
         });
         idByKey.set(p.key, row.id);
@@ -278,6 +301,8 @@ export async function saveDraftVersion(
             predecessorId: idByKey.get(e.predecessorKey)!,
             type: e.type,
             lagDays: e.lagDays,
+            enforcement:
+              e.enforcement ?? existingEnforcement.get(`${codeByKey.get(e.processKey)}>${codeByKey.get(e.predecessorKey)}`),
           },
         });
       }

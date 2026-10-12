@@ -60,12 +60,13 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("tenant RLS coverage (DB)", () => {
       ORDER BY c.relname
     `;
 
-    // 38 as of AUD-001 (9 Sep 2026): the 28 AUD-001 tables + progress_snapshots
+    // 39 as of Lean Core L1.1 (12 Oct 2026): the 28 AUD-001 tables + progress_snapshots
     // (tenant-root since before H1, correctly has tenant_isolation but no
-    // job_isolation — not a gap) + the 9 tracked AUD-080 tables above. Pinned
-    // so a future job-grain table landing with no policy AND no allowlist
-    // entry doesn't silently change this count without review.
-    expect(rows.length).toBe(38);
+    // job_isolation — not a gap) + the 9 tracked AUD-080 tables above +
+    // sequence_overrides (L1.1). Pinned so a future job-grain table landing
+    // with no policy AND no allowlist entry doesn't silently change this count
+    // without review.
+    expect(rows.length).toBe(39);
     const unprotected = rows.filter((r) => {
       if (KNOWN_UNPROTECTED_JOB_TABLES.has(r.table_name)) return false;
       if (r.table_name === "progress_snapshots") {

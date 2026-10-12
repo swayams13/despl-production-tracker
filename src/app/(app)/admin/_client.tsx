@@ -33,6 +33,10 @@ const ROLE_LABEL: Record<string, string> = {
   SUPERVISOR: "Supervisor",
   QC: "QC / QA",
   CLIENT_VIEWER: "Client",
+  OPERATOR: "Operator",
+  PLANNER: "Planner",
+  STORES: "Stores",
+  ENGINEERING: "Engineering",
 };
 
 function useRun() {
@@ -337,7 +341,7 @@ function AddEmployeeDialog({
     if (!displayName.trim() || !username.trim()) return toast.error("Name and username are required.");
     if (roles.size === 0) return toast.error("At least one role is required.");
     if (deptsRequired && departmentIds.size === 0) {
-      return toast.error("Departments are required unless the role is Management or Admin.");
+      return toast.error("Departments are required unless the role is Management, Admin or Planner.");
     }
     if (password && password.length < 10) {
       return toast.error("Password must be at least 10 characters, or leave it empty to auto-generate.");
@@ -439,7 +443,7 @@ function EditEmployeeDialog({
   const submit = () => {
     if (roles.size === 0) return toast.error("At least one role is required.");
     if (deptsRequired && departmentIds.size === 0) {
-      return toast.error("Departments are required unless the role is Management or Admin.");
+      return toast.error("Departments are required unless the role is Management, Admin or Planner.");
     }
     startTransition(async () => {
       const r = await updateUserRolesDeptsAction({ userId: row.id, roles: [...roles] as never, departmentIds: [...departmentIds] });

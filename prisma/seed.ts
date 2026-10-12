@@ -527,6 +527,12 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
         ["SUPERVISOR", "Department Supervisor"],
         ["QC", "QC Inspector"],
         ["CLIENT_VIEWER", "Client (read-only)"],
+        // Lean Core L1.1 — mirrored by migration 20261012120000 for orgs that
+        // already exist (this seed returns early for those).
+        ["OPERATOR", "Floor Operator"],
+        ["PLANNER", "Planner / PPC"],
+        ["STORES", "Stores"],
+        ["ENGINEERING", "Engineering"],
       ];
       await tx.role.createMany({
         data: roleDefs.map(([code, name]) => ({ tenantId, code, name })),

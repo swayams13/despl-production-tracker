@@ -543,12 +543,20 @@ export async function materializeAssemblyStepsFromTemplate(
 
   let stepCount = 0;
   let boundToQcp = 0;
-  const rows: { unitId: number; templateStepId: number; seq: number; qcpItemId: number | null; jobId: number }[] = [];
+  const rows: {
+    unitId: number;
+    templateStepId: number;
+    seq: number;
+    qcpItemId: number | null;
+    requiresQc: boolean;
+    jobId: number;
+  }[] = [];
   for (const unitId of unitIds) {
     for (const step of steps) {
       const qcpItemId = resolveQcpItemId(step);
       if (qcpItemId != null) boundToQcp++;
-      rows.push({ unitId, templateStepId: step.id, seq: step.seq, qcpItemId, jobId });
+      // Lean Core L1.1 (D3): copied at intake, like grain/enforcement.
+      rows.push({ unitId, templateStepId: step.id, seq: step.seq, qcpItemId, requiresQc: step.requiresQc, jobId });
       stepCount++;
     }
   }

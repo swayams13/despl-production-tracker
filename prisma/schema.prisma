@@ -57,6 +57,35 @@ enum ThemePreference {
   DARK
 }
 
+/// Lean Core L1.1. JOB-grain processes (planning, PPC, procurement ...) get one
+/// plan per job; UNIT-grain processes get one plan per unit (today's behaviour).
+enum ProcessGrain {
+  JOB
+  UNIT
+}
+
+/// Lean Core L1.1. HARD = the predecessor must be COMPLETE (today's behaviour).
+/// SOFT = the write is allowed with an override reason, logged as a
+/// SequenceOverride row. Which edges are SOFT is decision D2.
+enum EdgeEnforcement {
+  HARD
+  SOFT
+}
+
+/// Lean Core L1.1. UI language per user; dictionaries arrive in L2.12.
+enum Locale {
+  en
+  hi
+  gu
+}
+
+/// Lean Core L1.1. What a SequenceOverride row points at (no FK: three tables).
+enum SequenceOverrideTargetKind {
+  PROCESS_PLAN
+  COMPONENT_OP
+  ASSEMBLY_STEP
+}
+
 enum JobPriority {
   LOW
   NORMAL
@@ -274,6 +303,7 @@ model Organization {
   procurementEvents            ProcurementEvent[]
   materialIdentifications      MaterialIdentification[]
   itemTests                    ItemTest[]
+  sequenceOverrides            SequenceOverride[]
   // AUD-080: back-relations for the tenant_id columns added to the nine
   // job_id-carrying tables H1/AUD-001 omitted (see
   // prisma/migrations/20260909140000_aud080_tenant_id_add_column).
@@ -353,6 +383,8 @@ model User {
   /// presents them as one four-step cycle — the data model then survives a
   /// later UI that splits them back into two controls (D25).
   outdoorMode        Boolean         @default(false) @map("outdoor_mode")
+  /// Lean Core L1.1: UI language. Read by the L2.12 dictionary only.
+  locale             Locale          @default(en)
 
   tenant                       Organization                  @relation(fields: [tenantId], references: [id])
   client                       Client?                       @relation(fields: [clientId], references: [id])
@@ -392,6 +424,7 @@ model User {
   passwordResetRequestsAsTarget    PendingPasswordReset[]     @relation("PendingPasswordResetTarget")
   passwordResetRequestsRequested   PendingPasswordReset[]     @relation("PendingPasswordResetRequester")
   passwordResetRequestsApproved    PendingPasswordReset[]     @relation("PendingPasswordResetApprover")
+  sequenceOverrides                SequenceOverride[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -560,6 +593,11 @@ model OperationRef {
   /// code literal — verifyComponentOperation gates on this flag instead of a
   /// hardcoded op code.
   requiresDftGate     Boolean @default(false) @map("requires_dft_gate")
+  /// Lean Core L1.1 (decision D3). true = Done goes to SUBMITTED for QC (today).
+  /// false = Done goes straight to COMPLETE, audited. Copied onto
+  /// ComponentOperation at intake so a later edit here cannot change a
+  /// running job (invariant 9).
+  requiresQc          Boolean @default(true) @map("requires_qc")
 
   tenant            Organization            @relation(fields: [tenantId], references: [id])
   defaultDepartment Department?             @relation(fields: [defaultDepartmentId], references: [id])
@@ -825,6 +863,10 @@ model TemplateProcess {
   /// but duration is not confirmed by DESPL. Distinct from `optional`.
   provisional             Boolean              @default(false)
   evidenceKind            ProcessEvidenceKind? @map("evidence_kind")
+  /// Lean Core L1.1: JOB = one plan per job, UNIT = one per unit (today).
+  grain                   ProcessGrain         @default(UNIT)
+  /// Lean Core L1.1 (D3): see OperationRef.requiresQc.
+  requiresQc              Boolean              @default(true) @map("requires_qc")
 
   version            ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment  Department             @relation(fields: [defaultDepartmentId], references: [id])
@@ -847,6 +889,8 @@ model TemplateEdge {
   predecessorId Int             @map("predecessor_id")
   type          ProcessEdgeType
   lagDays       Int             @map("lag_days")
+  /// Lean Core L1.1 (D2): HARD (today) | SOFT.
+  enforcement   EdgeEnforcement @default(HARD)
 
   version     ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   process     TemplateProcess        @relation("TemplateEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
@@ -948,6 +992,7 @@ model Job {
   procurementEvents            ProcurementEvent[]
   materialIdentifications      MaterialIdentification[]
   itemTests                    ItemTest[]
+  sequenceOverrides            SequenceOverride[]
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
@@ -1006,6 +1051,10 @@ model Unit {
   /// any constraint check runs — 0 is never actually persisted.
   tenantId    Int      @default(0) @map("tenant_id")
   createdAt   DateTime @default(now()) @map("created_at")
+  /// Lean Core L1.1: opaque id for QR URLs (/u/<publicId>), so a serial number
+  /// is never in a URL. The DB default fills it for every insert path
+  /// (services, seed, scripts, the old container during a deploy).
+  publicId    String   @unique @default(dbgenerated("(gen_random_uuid())::text")) @map("public_id")
 
   equipment          Equipment           @relation(fields: [equipmentId], references: [id])
   package            Package?            @relation(fields: [packageId], references: [id])
@@ -1018,6 +1067,7 @@ model Unit {
   weldJoints         WeldJoint[]
   assemblySteps      AssemblyStep[]
   dispatchBatchUnits DispatchBatchUnit[]
+  sequenceOverrides  SequenceOverride[]
 
   @@unique([equipmentId, serialNo])
   @@index([equipmentId])
@@ -1084,6 +1134,10 @@ model JobProcess {
   durationOverrideDays    Int?    @map("duration_override_days")
   overrideReason          String? @map("override_reason")
   provisional             Boolean @default(false)
+  /// Lean Core L1.1: copied from TemplateProcess at intake.
+  grain                   ProcessGrain @default(UNIT)
+  /// Lean Core L1.1 (D3): copied from TemplateProcess at intake.
+  requiresQc              Boolean @default(true) @map("requires_qc")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
@@ -1113,6 +1167,8 @@ model JobProcessEdge {
   predecessorId Int             @map("predecessor_id")
   type          ProcessEdgeType
   lagDays       Int             @map("lag_days")
+  /// Lean Core L1.1 (D2): copied from TemplateEdge at intake.
+  enforcement   EdgeEnforcement @default(HARD)
   /// H1 job-level RLS backstop: denormalized from process.jobId.
   jobId         Int             @map("job_id")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
@@ -1125,6 +1181,7 @@ model JobProcessEdge {
   predecessor JobProcess   @relation("JobEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
   job         Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
   tenant      Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sequenceOverrides SequenceOverride[]
 
   @@unique([processId, predecessorId])
   @@index([predecessorId])
@@ -1212,6 +1269,10 @@ model ProcessPlan {
   actualStart       DateTime?         @map("actual_start")
   /// SERVER CLOCK ONLY (invariant #1)
   actualFinish      DateTime?         @map("actual_finish")
+  /// Lean Core L1.1: what the supervisor says happened (invariant 1 revised).
+  /// Null = same as actualStart/Finish. Written by recordWork (L1.2) only.
+  reportedStartAt   DateTime?         @map("reported_start_at")
+  reportedFinishAt  DateTime?         @map("reported_finish_at")
   status            ProcessPlanStatus @default(NOT_STARTED)
   submittedBy       Int?              @map("submitted_by")
   verifiedBy        Int?              @map("verified_by")
@@ -1402,6 +1463,42 @@ model ProcurementEvent {
   @@index([jobId])
   @@index([tenantId])
   @@map("procurement_events")
+}
+
+/// Lean Core L1.1: append-only log of every SOFT-edge override (build prompt
+/// §2 row 2). Written by recordWork (L1.2). The app role has no UPDATE/DELETE
+/// grant (migration l11), same as audit_log; the Production Head's
+/// acknowledgement is a separate table (L2.5), never an UPDATE here.
+model SequenceOverride {
+  id         Int                        @id @default(autoincrement())
+  /// H1 job-level RLS backstop.
+  jobId      Int                        @map("job_id")
+  /// AUD-001: 0 is a placeholder; the aud001 trigger overwrites it from job_id.
+  tenantId   Int                        @default(0) @map("tenant_id")
+  targetKind SequenceOverrideTargetKind @map("target_kind")
+  /// ProcessPlan, ComponentOperation or AssemblyStep id, per targetKind.
+  targetId   Int                        @map("target_id")
+  unitId     Int?                       @map("unit_id")
+  /// The SOFT edge that was overridden; null when the order that was broken is
+  /// not a process edge (e.g. assembly-step order, D2).
+  edgeId     Int?                       @map("edge_id")
+  /// Free text for now; becomes a reference table once D2 settles the list.
+  category   String
+  note       String?
+  createdBy  Int                        @map("created_by")
+  createdAt  DateTime                   @default(now()) @map("created_at")
+
+  job     Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant  Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unit    Unit?           @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  edge    JobProcessEdge? @relation(fields: [edgeId], references: [id], onDelete: Cascade)
+  creator User            @relation(fields: [createdBy], references: [id])
+
+  @@index([jobId])
+  @@index([tenantId])
+  @@index([targetKind, targetId])
+  @@index([tenantId, createdAt])
+  @@map("sequence_overrides")
 }
 
 /// Real traceability: heat number + MTC. Replaces the misused
@@ -1668,6 +1765,12 @@ model ComponentOperation {
   startedAt           DateTime?       @map("started_at")
   /// SERVER CLOCK ONLY (invariant #1)
   finishedAt          DateTime?       @map("finished_at")
+  /// Lean Core L1.1: client-reported time (invariant 1 revised); null = use
+  /// startedAt/finishedAt. Written by recordWork (L1.2) only.
+  reportedStartAt     DateTime?       @map("reported_start_at")
+  reportedFinishAt    DateTime?       @map("reported_finish_at")
+  /// Lean Core L1.1 (D3): copied at intake; false = Done goes straight to COMPLETE.
+  requiresQc          Boolean         @default(true) @map("requires_qc")
   submittedBy         Int?            @map("submitted_by")
   verifiedBy          Int?            @map("verified_by")
   /// Who actually did the work (F3) — distinct from submittedBy (who
@@ -2078,6 +2181,8 @@ model AssemblyTemplateStep {
   /// for fabrication (Phase 3, addendum §3). Null where the step has no
   /// 1:1 spine process (author it on the template, never in code).
   leadTimeProcessSeq  Int?             @map("lead_time_process_seq")
+  /// Lean Core L1.1 (D3): see OperationRef.requiresQc.
+  requiresQc          Boolean          @default(true) @map("requires_qc")
 
   version           AssemblyTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment Department              @relation(fields: [defaultDepartmentId], references: [id])
@@ -2104,6 +2209,12 @@ model AssemblyStep {
   startedAt           DateTime?       @map("started_at")
   /// SERVER CLOCK ONLY (invariant #1)
   finishedAt          DateTime?       @map("finished_at")
+  /// Lean Core L1.1: client-reported time (invariant 1 revised); null = use
+  /// startedAt/finishedAt. Written by recordWork (L1.2) only.
+  reportedStartAt     DateTime?       @map("reported_start_at")
+  reportedFinishAt    DateTime?       @map("reported_finish_at")
+  /// Lean Core L1.1 (D3): copied at intake; false = Done goes straight to COMPLETE.
+  requiresQc          Boolean         @default(true) @map("requires_qc")
   performedByWelderId Int?            @map("performed_by_welder_id")
   performedByUserId   Int?            @map("performed_by_user_id")
   submittedBy         Int?            @map("submitted_by")
