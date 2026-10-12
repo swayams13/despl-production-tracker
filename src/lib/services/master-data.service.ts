@@ -96,6 +96,9 @@ export async function setPartFamilyReviewed(actor: Actor, input: PartFamilyIdInp
     if (part.status !== "DRAFT") {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: `Only a draft can be marked reviewed; this one is ${part.status}.` });
     }
+    if (part.preparedById != null && part.preparedById === actor.userId) {
+      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { reason: "The person who last edited a part cannot mark it reviewed." });
+    }
     await tx.partFamily.update({ where: { id: part.id }, data: { status: "REVIEWED" } });
     await recordAudit(tx, actor, {
       action: "masterData.partFamily.review",
@@ -206,6 +209,8 @@ export async function editPartFamily(actor: Actor, input: EditPartFamilyInput): 
     const data: Record<string, unknown> = { ...rest };
     if (rest.assemblyGroup === "") data.assemblyGroup = null;
     if (part.status === "REVIEWED") data.status = "DRAFT"; // content changed after review
+    // The last person to change a part is its preparer, so they cannot also review or approve it.
+    data.preparedById = actor.userId;
     if (name !== undefined && name !== part.componentType.name) {
       await tx.componentTypeRef.update({ where: { id: part.componentTypeId }, data: { name } });
     }
@@ -244,6 +249,14 @@ export async function saveRouteDraft(actor: Actor, input: SaveRouteDraftInput): 
     seen.add(s.seq);
     if (s.stdTime != null && (s.stdTimeUnit == null || s.stdTimeBasis == null)) {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "a standard time needs a unit and a basis", seq: s.seq });
+    }
+    // Relaxations are data defaulting to today's behaviour and are flipped only when
+    // their decision is recorded (D3: which items get requiresQc = false is still open).
+    if (s.requiresQc === false) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, {
+        reason: "Skipping QC for a step is decision D3 and is not enabled yet",
+        seq: s.seq,
+      });
     }
   }
 
@@ -307,7 +320,10 @@ export async function saveRouteDraft(actor: Actor, input: SaveRouteDraftInput): 
       wantStatus: "DRAFT",
     });
     if (w.action !== "unchanged") {
-      if (part.status === "REVIEWED") await tx.partFamily.update({ where: { id: part.id }, data: { status: "DRAFT" } });
+      await tx.partFamily.update({
+        where: { id: part.id },
+        data: { preparedById: actor.userId, ...(part.status === "REVIEWED" ? { status: "DRAFT" as const } : {}) },
+      });
       await recordAudit(tx, actor, {
         action: `masterData.route.${w.action}`,
         entityType: "RouteTemplateVersion",

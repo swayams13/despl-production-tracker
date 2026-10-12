@@ -144,6 +144,30 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       });
     });
 
+    it("whoever last edited a part cannot approve it, however it was edited (steps or attributes)", async () => {
+      const t = await tenant("self-approve");
+      const part = await draftPart(t);
+      await editPartFamily(t.ph, { partFamilyId: part.id, patch: { assemblyGroup: "Shell" } });
+      await expect(approvePartFamily(t.ph, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.MAKER_CHECKER_VIOLATION });
+
+      await saveRouteDraft(t.ph2, {
+        partFamilyId: part.id, variant: "A",
+        steps: [{ seq: 10, operationCode: "RECEIPT", department: "Stores", pvStage: 10, acceptanceStandard: "Rev B" }, { seq: 20, operationCode: "MTC_VERIFICATION", department: "Quality Control / QA", pvStage: 11 }],
+      });
+      // ph2 is now the preparer; ph (who only edited an attribute earlier) may approve.
+      await expect(approvePartFamily(t.ph2, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.MAKER_CHECKER_VIOLATION });
+      await approvePartFamily(t.ph, { partFamilyId: part.id });
+    });
+
+    it("the person who last edited a part cannot mark it reviewed; someone else can", async () => {
+      const t = await tenant("self-review");
+      const part = await draftPart(t);
+      await editPartFamily(t.eng, { partFamilyId: part.id, patch: { typicalMoc: "SA240" } });
+      await expect(setPartFamilyReviewed(t.eng, { partFamilyId: part.id })).rejects.toMatchObject({ code: ERROR_CODES.MAKER_CHECKER_VIOLATION });
+      await setPartFamilyReviewed(t.admin, { partFamilyId: part.id });
+      expect((await owner.partFamily.findUniqueOrThrow({ where: { id: part.id } })).status).toBe("REVIEWED");
+    });
+
     it("the person who prepared a part cannot approve it", async () => {
       const t = await tenant("maker");
       const part = await draftPart(t);
@@ -227,12 +251,22 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       }
     });
 
+    it("refuses to switch QC off for a step while decision D3 is not recorded", async () => {
+      const t = await tenant("d3");
+      const part = await draftPart(t);
+      await expect(
+        saveRouteDraft(t.eng, { partFamilyId: part.id, variant: "A", steps: [{ ...base, requiresQc: false }] }),
+      ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+      const vs = await versions(t, part.componentTypeId);
+      expect(vs[0].steps.every((s) => s.requiresQc)).toBe(true);
+    });
+
     it("replaces a DRAFT in place, writes stage mappings, and reports readiness; the same save again is a no-op", async () => {
       const t = await tenant("draft-save");
       const part = await draftPart(t);
       const steps = [
         { ...base, stdTime: 0.6, stdTimeUnit: "HOURS" as const, stdTimeBasis: "PER_PIECE" as const },
-        { seq: 20, operationCode: "MTC_VERIFICATION", department: "Quality Control / QA", pvStage: 11, requiresQc: false },
+        { seq: 20, operationCode: "MTC_VERIFICATION", department: "Quality Control / QA", pvStage: 11 },
       ];
       const r = await saveRouteDraft(t.eng, { partFamilyId: part.id, variant: "A", steps });
       expect(r).toMatchObject({ variant: "A", version: 1, status: "DRAFT", action: "replaced" });
@@ -240,7 +274,7 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       const vs = await versions(t, part.componentTypeId);
       expect(vs).toHaveLength(1);
       expect(vs[0].steps[0].stdTime?.toString()).toBe("0.6");
-      expect(vs[0].steps[1].requiresQc).toBe(false);
+      expect(vs[0].steps[1].requiresQc).toBe(true);
       expect(await owner.routeStepFamilySeq.count({ where: { tenantId: t.tenantId } })).toBe(2);
 
       const again = await saveRouteDraft(t.eng, { partFamilyId: part.id, variant: "A", steps });

@@ -216,7 +216,7 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
       readiness,
       can: {
         edit: editor && status !== "APPROVED",
-        review: editor && status === "DRAFT",
+        review: editor && status === "DRAFT" && !(p.preparedById != null && p.preparedById === actor.userId),
         approve: approveRefusal === null,
         revise: editor && status === "APPROVED",
       },
