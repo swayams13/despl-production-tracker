@@ -68,6 +68,9 @@ const STATUS: Record<ErrorCode, number> = {
   SCHEDULE_ENVELOPE_INVALID: 409,
   // Same answer the frozen pages give (notFound()).
   FEATURE_FROZEN: 404,
+  REVISE_REQUIRED: 409,
+  APPROVAL_BLOCKED: 409,
+  USE_MASTER_DATA: 409,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

@@ -1148,3 +1148,89 @@ export const addQcpItemToLibraryTemplateSchema = z
   })
   .strict();
 export type AddQcpItemToLibraryTemplateInput = z.infer<typeof addQcpItemToLibraryTemplateSchema>;
+
+// ── Master data (Lean Core M3) ─────────────────────────────────────────
+
+export const partFamilyIdSchema = z.object({ partFamilyId: id }).strict();
+export type PartFamilyIdInput = z.infer<typeof partFamilyIdSchema>;
+
+export const revisePartFamilySchema = z
+  .object({ partFamilyId: id, reason: z.string().trim().min(5, "A reason is required (at least 5 characters)") })
+  .strict();
+export type RevisePartFamilyInput = z.infer<typeof revisePartFamilySchema>;
+
+const masterStepSchema = z
+  .object({
+    seq: z.number().int().positive(),
+    operationCode: z.string().trim().min(1, "An operation is required"),
+    /** Department NAME; blank is allowed in a draft and blocks approval. */
+    department: z.string().trim().default(""),
+    pvStage: z.number().int().positive().nullable().default(null),
+    heStage: z.number().int().positive().nullable().default(null),
+    stdTime: z.number().min(0).max(99999.999).nullable().default(null),
+    stdTimeUnit: z.enum(["HOURS", "DAYS"]).nullable().default(null),
+    stdTimeBasis: z
+      .enum(["PER_PIECE", "PER_JOB", "PER_MATERIAL_LOT", "PER_METRE_CUT", "PER_METRE_EDGE", "PER_METRE_WELD", "PER_JOINT", "PER_HOLE", "PER_TUBE", "PER_KG"])
+      .nullable()
+      .default(null),
+    conditional: z.boolean().default(false),
+    conditionText: z.string().trim().default(""),
+    acceptanceStandard: z.string().trim().default(""),
+    recordDocument: z.string().trim().default(""),
+    whatIsDone: z.string().trim().default(""),
+    requiresQc: z.boolean().default(true),
+  })
+  .strict();
+export type MasterStepInput = z.input<typeof masterStepSchema>;
+
+export const saveRouteDraftSchema = z
+  .object({
+    partFamilyId: id,
+    variant: z.string().regex(/^[A-Z]$/, "A variant is a single capital letter"),
+    steps: z.array(masterStepSchema).min(1, "A route needs at least one step"),
+  })
+  .strict();
+export type SaveRouteDraftInput = z.input<typeof saveRouteDraftSchema>;
+
+export const editPartFamilySchema = z
+  .object({
+    partFamilyId: id,
+    patch: z
+      .object({
+        name: z.string().trim().min(1).optional(),
+        equipmentScope: z.enum(["PV", "HE", "BOTH"]).optional(),
+        assemblyGroup: z.string().trim().nullable().optional(),
+        makeBuy: z.enum(["MADE_IN_HOUSE", "BOUGHT_MACHINED", "BOUGHT_OUT", "BOUGHT_FABRICATED"]).nullable().optional(),
+        typicalMoc: z.string().trim().nullable().optional(),
+        weightBasis: z.string().trim().nullable().optional(),
+        dimensionKeys: z.array(z.string().trim().min(1)).max(40).optional(),
+        isSpare: z.boolean().optional(),
+        routeSource: z.string().trim().nullable().optional(),
+        remarks: z.string().trim().nullable().optional(),
+      })
+      .strict()
+      .refine((p) => Object.keys(p).length > 0, "Nothing to change"),
+  })
+  .strict();
+export type EditPartFamilyInput = z.input<typeof editPartFamilySchema>;
+
+export const upsertMaterialGradeSchema = z
+  .object({
+    id: id.optional(),
+    spec: z.string().trim().min(1),
+    grade: z.string().trim().default(""),
+    productForm: z.string().trim().min(1),
+    densityGcc: z.number().gt(0).max(999.999).nullable().default(null),
+    remarks: z.string().trim().nullable().default(null),
+  })
+  .strict();
+export type UpsertMaterialGradeInput = z.input<typeof upsertMaterialGradeSchema>;
+
+export const setMaterialStatusSchema = z
+  .object({
+    materialGradeId: id,
+    to: z.enum(["DRAFT", "REVIEWED", "APPROVED"]),
+    reason: z.string().trim().optional(),
+  })
+  .strict();
+export type SetMaterialStatusInput = z.input<typeof setMaterialStatusSchema>;

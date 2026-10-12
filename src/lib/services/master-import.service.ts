@@ -66,7 +66,7 @@ const FAMILY_PV = "PRESSURE_VESSEL";
 const FAMILY_HE = "HEAT_EXCHANGER";
 
 /** Tracker-side reference data for the rules. PV stages fall back to the workbook's reference sheet. */
-export async function loadReferenceData(db: Tx, tenantId: number, wb: ParsedWorkbook): Promise<ReferenceData> {
+export async function loadReferenceData(db: Tx, tenantId: number, wb?: ParsedWorkbook): Promise<ReferenceData> {
   const [operations, departments, types, pv] = await Promise.all([
     db.operationRef.findMany({ where: { tenantId }, select: { code: true } }),
     db.department.findMany({ where: { tenantId }, select: { name: true } }),
@@ -99,7 +99,7 @@ export async function loadReferenceData(db: Tx, tenantId: number, wb: ParsedWork
       }
     }
   }
-  if (pvStages.size === 0) {
+  if (pvStages.size === 0 && wb) {
     for (const s of wb.pvStagesRef) {
       if (/^\d+$/.test(s.stageNo)) pvStages.set(Number(s.stageNo), { name: s.name, department: s.department || null });
     }
@@ -202,6 +202,7 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
                   seq: true,
                   printed: true,
                   optional: true,
+                  requiresQc: true,
                   stdTime: true,
                   stdTimeUnit: true,
                   stdTimeBasis: true,
@@ -249,6 +250,7 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
         conditionText: blank(s.conditionText),
         acceptanceStandard: blank(s.acceptanceStandard),
         recordDocument: blank(s.recordDocument),
+        requiresQc: s.requiresQc,
         pvStage: stage.pv,
         heStage: stage.he,
       });

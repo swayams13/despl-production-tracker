@@ -286,10 +286,10 @@ describe("report-only sheets", () => {
 });
 
 describe("stepSignature", () => {
-  const base = { seq: 10, operationCode: "CUTTING", whatIsDone: "Plate cut to size", department: "Fabrication Prep", stdTime: 0.3, stdTimeUnit: "HOURS", stdTimeBasis: "PER_METRE_CUT", conditional: false, conditionText: "", acceptanceStandard: "", recordDocument: "", pvStage: 12, heStage: 13 };
+  const base = { seq: 10, operationCode: "CUTTING", whatIsDone: "Plate cut to size", department: "Fabrication Prep", stdTime: 0.3, stdTimeUnit: "HOURS", stdTimeBasis: "PER_METRE_CUT", conditional: false, conditionText: "", acceptanceStandard: "", recordDocument: "", requiresQc: true, pvStage: 12, heStage: 13 };
   it("is equal for equal steps and changes with time, stage or department", () => {
     expect(stepSignature(base)).toBe(stepSignature({ ...base }));
-    for (const change of [{ stdTime: 0.4 }, { pvStage: 13 }, { heStage: null }, { department: "Stores" }, { conditional: true }, { whatIsDone: "Cut" }]) {
+    for (const change of [{ stdTime: 0.4 }, { pvStage: 13 }, { heStage: null }, { department: "Stores" }, { conditional: true }, { whatIsDone: "Cut" }, { requiresQc: false }]) {
       expect(stepSignature({ ...base, ...change })).not.toBe(stepSignature(base));
     }
   });

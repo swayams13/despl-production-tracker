@@ -276,7 +276,16 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
       const codes = [...new Set(rows.map((r) => normalizeImportRow(r).componentType).filter((c): c is string => typeof c === "string"))];
       const componentTypesByCode = new Map(
         codes.length > 0
-          ? (await tx.componentTypeRef.findMany({ where: { tenantId: actor.tenantId, code: { in: codes } } })).map((c) => [c.code, c.id])
+          ? (
+              await tx.componentTypeRef.findMany({
+                where: {
+                  tenantId: actor.tenantId,
+                  code: { in: codes },
+                  // M3: a part family is only usable on a BOM once approved.
+                  OR: [{ kind: "RAW_FORM" }, { partFamily: { status: "APPROVED" } }],
+                },
+              })
+            ).map((c) => [c.code, c.id])
           : [],
       );
       const unresolvedRows = rows

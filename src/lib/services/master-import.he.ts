@@ -125,3 +125,27 @@ export async function planHe(db: Tx, tenantId: number, ev: Evaluation): Promise<
   if (!have) return "create";
   return have.signature === heSignature(heContent(ev.heStages)) ? "unchanged" : "update";
 }
+
+/**
+ * HE stage numbers the tracker knows (numeric process codes of the latest
+ * HEAT_EXCHANGER version, any status) with their department names — the
+ * reference for validating a step's HE stage outside an import.
+ */
+export async function loadHeStageMap(db: Tx, tenantId: number): Promise<Map<number, { department: string }>> {
+  const template = await db.processTemplate.findFirst({
+    where: { tenantId, family: { code: HE_FAMILY } },
+    orderBy: { id: "asc" },
+    select: {
+      versions: {
+        orderBy: { version: "desc" },
+        take: 1,
+        select: { processes: { select: { code: true, defaultDepartment: { select: { name: true } } } } },
+      },
+    },
+  });
+  const out = new Map<number, { department: string }>();
+  for (const p of template?.versions[0]?.processes ?? []) {
+    if (/^\d+$/.test(p.code)) out.set(Number(p.code), { department: p.defaultDepartment.name });
+  }
+  return out;
+}
