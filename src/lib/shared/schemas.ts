@@ -1064,6 +1064,8 @@ export const createOrReviseRouteTemplateSchema = z
     familyId: id.nullable(),
     name: z.string().trim().min(1, "A name is required"),
     printedRoute: z.string().trim().min(1).optional(),
+    /** M1: route variant letter; omitted = "A" (today's single route per type and family). */
+    variant: z.string().regex(/^[A-Z]$/, "A variant is a single capital letter").optional(),
     steps: z.array(routeStepInputSchema).min(1, "A route needs at least one step"),
   })
   .strict();

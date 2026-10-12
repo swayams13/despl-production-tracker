@@ -5,6 +5,7 @@ import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
 import { projectComponentRoute, computeComponentDisplayStatus, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
+import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
 import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
 
 /**
@@ -238,10 +239,12 @@ interface RawComponentForSummary {
     revisions: { id: number; revisionNo: number; status: string; releasedAt: Date | null }[];
   } | null;
   routeVersion: {
+    id: number;
     steps: { seq: number; operation: { id: number; name: string } }[];
   } | null;
   operations: {
     id: number;
+    seq: number;
     status: string;
     startedAt: Date | null;
     finishedAt: Date | null;
@@ -267,12 +270,18 @@ function buildComponentSummary(
   c: RawComponentForSummary,
   checkpointsByProcessCode: Map<string, BomQcpCheckpoint[]>,
   familySeqByOperationId: Map<number, number>,
+  familySeqByStep: Map<string, number>,
 ): BomComponentSummary {
+  const routeVersionId = c.routeVersion?.id ?? null;
   const routeSteps: RouteStepDef[] = (c.routeVersion?.steps ?? []).map((s) => ({
     seq: s.seq,
     operationId: s.operation.id,
     operationName: s.operation.name,
-    leadTimeProcessSeq: familySeqByOperationId.get(s.operation.id) ?? null,
+    leadTimeProcessSeq: resolveProcessSeq(
+      { operationId: s.operation.id, seq: s.seq, routeVersionId },
+      familySeqByStep,
+      familySeqByOperationId,
+    ),
   }));
   const actualOps: ActualOp[] = c.operations.map((o) => ({
     id: o.id,
@@ -281,7 +290,11 @@ function buildComponentSummary(
     status: o.status,
     startedAt: o.startedAt?.toISOString() ?? null,
     finishedAt: o.finishedAt?.toISOString() ?? null,
-    leadTimeProcessSeq: familySeqByOperationId.get(o.operation.id) ?? null,
+    leadTimeProcessSeq: resolveProcessSeq(
+      { operationId: o.operation.id, seq: o.seq, routeVersionId },
+      familySeqByStep,
+      familySeqByOperationId,
+    ),
     performedByWelderName: o.performedByWelder?.name ?? null,
     performedByUserName: o.performedByUser?.name ?? null,
     remarks: o.remarks,
@@ -326,6 +339,14 @@ export async function loadBomTree(
       select: { operationRefId: true, leadTimeProcessSeq: true },
     });
     const familySeqByOperationId = new Map(familySeqRows.map((r) => [r.operationRefId, r.leadTimeProcessSeq]));
+    // M1 (PR B): step-level mapping wins over the operation-level default.
+    const stepSeqRows = await tx.routeStepFamilySeq.findMany({
+      where: { familyId: job.familyId },
+      select: { leadTimeProcessSeq: true, routeStep: { select: { routeVersionId: true, seq: true } } },
+    });
+    const familySeqByStep = new Map(
+      stepSeqRows.map((r) => [stepKey(r.routeStep.routeVersionId, r.routeStep.seq), r.leadTimeProcessSeq]),
+    );
 
     const equipments = await tx.equipment.findMany({
       where: { jobId },
@@ -392,6 +413,7 @@ export async function loadBomTree(
             },
             routeVersion: {
               select: {
+                id: true,
                 steps: {
                   orderBy: { seq: "asc" },
                   select: { seq: true, operation: { select: { id: true, name: true } } },
@@ -402,6 +424,7 @@ export async function loadBomTree(
               orderBy: { seq: "asc" },
               select: {
                 id: true,
+                seq: true,
                 status: true,
                 startedAt: true,
                 finishedAt: true,
@@ -445,6 +468,7 @@ export async function loadBomTree(
         },
         routeVersion: {
           select: {
+            id: true,
             steps: {
               orderBy: { seq: "asc" },
               select: { seq: true, operation: { select: { id: true, name: true } } },
@@ -455,6 +479,7 @@ export async function loadBomTree(
           orderBy: { seq: "asc" },
           select: {
             id: true,
+            seq: true,
             status: true,
             startedAt: true,
             finishedAt: true,
@@ -492,7 +517,7 @@ export async function loadBomTree(
       checkpointsByProcessCode.set(link.jobProcess.code, list);
     }
 
-    const subAssemblyComponents = bomlessComponents.map((c) => buildComponentSummary(c, checkpointsByProcessCode, familySeqByOperationId));
+    const subAssemblyComponents = bomlessComponents.map((c) => buildComponentSummary(c, checkpointsByProcessCode, familySeqByOperationId, familySeqByStep));
 
     // B6, Phase 4: required/available/shortage, computed inline (same
     // transaction, already-loaded data) rather than by calling the separate
@@ -535,7 +560,7 @@ export async function loadBomTree(
         parentBomItemId: it.parentBomItemId,
         mtc: it.materialIdentifications.map((m) => ({ id: m.id, heatNumber: m.heatNumber, mtcRef: m.mtcRef, pmiResult: m.pmiResult ?? "PENDING", componentId: m.componentId })),
         procurement: summarizeProcurement(it.procurementEvents),
-        components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode, familySeqByOperationId)),
+        components: it.components.map((c) => buildComponentSummary(c, checkpointsByProcessCode, familySeqByOperationId, familySeqByStep)),
         requiredQty: required?.toNumber() ?? null,
         availableQty: available?.toNumber() ?? null,
         shortage: shortageVal?.toNumber() ?? null,

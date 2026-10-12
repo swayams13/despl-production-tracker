@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
 import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
+import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
 import { explodeBomItem, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
 import type {
   ScheduleProcess,
@@ -585,17 +586,58 @@ export interface MappedOp {
  * Gate 3 fix: `OperationRef.leadTimeProcessSeq` used to be one tenant-wide
  * value, authored only for PRESSURE_VESSEL's numbering — a second family's
  * `JobProcess.code` could silently match through it. `OperationRefFamilySeq`
- * scopes the mapping per family; this resolves which `OperationRef` ids roll
- * up into `seq` FOR THIS family specifically. Empty when the family has
- * authored no mapping for this number — a SEAM, not an error, same
- * convention as the non-numeric-`JobProcess.code` case below.
+ * scopes the mapping per family.
+ *
+ * Lean Core M1 (PR B): a `RouteStepFamilySeq` row, keyed by the route version's
+ * step, overrides the operation-level default for that one step (the workbook
+ * maps an Inspection step to process 11, 12, 18 or 25 depending on the part).
+ * This returns every `ComponentOperation` on `unitId` that rolls up into
+ * process `seq` for `familyId`, resolving step-level first (see
+ * `shared/stage-mapping.ts`). With no `RouteStepFamilySeq` rows the result is
+ * exactly the old operation-level join. Empty when the family has authored no
+ * mapping for this number — a SEAM, not an error, same convention as the
+ * non-numeric-`JobProcess.code` case below.
  */
-async function resolveOperationRefIdsForFamilySeq(tx: Tx, familyId: number, seq: number): Promise<number[]> {
-  const rows = await tx.operationRefFamilySeq.findMany({
-    where: { familyId, leadTimeProcessSeq: seq },
-    select: { operationRefId: true },
+async function loadComponentOpsForProcessSeq(
+  tx: Tx,
+  args: { familyId: number; seq: number; unitId: number },
+): Promise<Array<{ id: number; status: OperationStatus; operationName: string }>> {
+  const [opRows, stepRows] = await Promise.all([
+    tx.operationRefFamilySeq.findMany({
+      where: { familyId: args.familyId },
+      select: { operationRefId: true, leadTimeProcessSeq: true },
+    }),
+    tx.routeStepFamilySeq.findMany({
+      where: { familyId: args.familyId },
+      select: { leadTimeProcessSeq: true, routeStep: { select: { routeVersionId: true, seq: true } } },
+    }),
+  ]);
+  if (opRows.length === 0 && stepRows.length === 0) return [];
+  const operationSeq = new Map(opRows.map((r) => [r.operationRefId, r.leadTimeProcessSeq]));
+  const stepSeq = new Map(
+    stepRows.map((r) => [stepKey(r.routeStep.routeVersionId, r.routeStep.seq), r.leadTimeProcessSeq]),
+  );
+  const ops = await tx.componentOperation.findMany({
+    where: { component: { unitId: args.unitId } },
+    select: {
+      id: true,
+      seq: true,
+      status: true,
+      operationId: true,
+      operation: { select: { name: true } },
+      component: { select: { routeVersionId: true } },
+    },
   });
-  return rows.map((r) => r.operationRefId);
+  return ops
+    .filter(
+      (o) =>
+        resolveProcessSeq(
+          { operationId: o.operationId, seq: o.seq, routeVersionId: o.component.routeVersionId },
+          stepSeq,
+          operationSeq,
+        ) === args.seq,
+    )
+    .map((o) => ({ id: o.id, status: o.status, operationName: o.operation.name }));
 }
 
 /**
@@ -625,15 +667,9 @@ export async function loadMappedOps(
   });
   if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return [];
   const seq = Number(jobProcess.code);
-  const operationRefIds = await resolveOperationRefIdsForFamilySeq(tx, jobProcess.job.familyId, seq);
 
   const [componentOps, assemblySteps] = await Promise.all([
-    operationRefIds.length === 0
-      ? []
-      : tx.componentOperation.findMany({
-          where: { component: { unitId: args.unitId }, operationId: { in: operationRefIds } },
-          select: { status: true, operation: { select: { name: true } } },
-        }),
+    loadComponentOpsForProcessSeq(tx, { familyId: jobProcess.job.familyId, seq, unitId: args.unitId }),
     tx.assemblyStep.findMany({
       where: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
       select: { status: true, templateStep: { select: { activity: true } } },
@@ -641,7 +677,7 @@ export async function loadMappedOps(
   ]);
 
   return [
-    ...componentOps.map((o) => ({ source: "fabrication" as const, label: o.operation.name, status: o.status })),
+    ...componentOps.map((o) => ({ source: "fabrication" as const, label: o.operationName, status: o.status })),
     ...assemblySteps.map((s) => ({ source: "assembly" as const, label: s.templateStep.activity, status: s.status })),
   ];
 }
@@ -703,7 +739,9 @@ export async function assertNoOpenNcr(
   });
   if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return;
   const seq = Number(jobProcess.code);
-  const operationRefIds = await resolveOperationRefIdsForFamilySeq(tx, jobProcess.job.familyId, seq);
+  const mappedOpIds = (
+    await loadComponentOpsForProcessSeq(tx, { familyId: jobProcess.job.familyId, seq, unitId: args.unitId })
+  ).map((o) => o.id);
 
   const openNcrs = await tx.ncr.findMany({
     where: {
@@ -711,10 +749,7 @@ export async function assertNoOpenNcr(
       OR: [
         {
           componentOperationRejection: {
-            componentOperation: {
-              component: { unitId: args.unitId },
-              operationId: { in: operationRefIds },
-            },
+            componentOperation: { id: { in: mappedOpIds } },
           },
         },
         {
