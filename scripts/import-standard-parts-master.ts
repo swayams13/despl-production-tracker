@@ -1,11 +1,17 @@
-// Lean Core M2 (PR A): dry-run of the Standard Parts Master import. READ-ONLY.
-// Reads the workbook and the tenant's current master data, prints what an
-// apply would create / change / refuse, and every issue with its sheet and
-// row. Writes nothing. Apply arrives in M2 PR B.
+// Lean Core M2: Standard Parts Master import.
+//
+//   (default)  DRY RUN — reads the workbook and the tenant's current master
+//              data, prints what an apply would create / change / refuse and
+//              every issue with its sheet and row. Writes nothing.
+//   --apply    APPLY — one transaction, idempotent, audited. Needs
+//              --as <email> (the actor: Production Head to approve, Admin may
+//              load drafts to staging) and --yes. Without --yes it prints the
+//              plan and stops.
 //
 // Run with:
 //   pnpm tsx scripts/import-standard-parts-master.ts [--file <xlsx>] [--allow-draft]
 //        [--org DESPL] [--json <out.json>] [--examples 5]
+//        [--apply --as <email> --yes]
 //
 // --allow-draft  load Draft / Reviewed parts as drafts (staging); without it
 //                only "Approved by Production Head" rows are loadable (production).
@@ -14,6 +20,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { dryRunWithDb } from "../src/lib/services/master-import.service";
+import { applyMasterImport } from "../src/lib/services/master-import.apply";
+import type { Actor, RoleCode } from "../src/lib/authz";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -24,10 +32,6 @@ const has = (name: string) => process.argv.includes(name);
 const DEFAULT_FILE = "docs/lean-core/inputs/2026-10-11-master-list/Standard_Parts_Master_PV_HE_SAMPLE.xlsx";
 
 async function main() {
-  if (has("--apply")) {
-    console.error("Apply is not part of this PR (M2 PR B). This script only produces the dry-run report.");
-    process.exit(2);
-  }
   const file = path.resolve(arg("--file") ?? DEFAULT_FILE);
   const orgCode = arg("--org") ?? "DESPL";
   const examples = Number(arg("--examples") ?? 5);
@@ -55,7 +59,7 @@ async function main() {
     console.log(`  Material grades ${t(report.plan.materialGrades)}`);
     console.log(
       `  HE template     ${report.plan.heStages.stages} stages, ${report.plan.heStages.loadable ? "loadable" : "NOT loadable (errors)"}, ` +
-        `${report.plan.heStages.existingTemplates} existing`,
+        `${report.plan.heStages.existingTemplates} existing → ${report.plan.heStages.outcome}`,
     );
 
     console.log("\nIssues");
@@ -74,6 +78,41 @@ async function main() {
     if (out) {
       writeFileSync(out, JSON.stringify(report, null, 2));
       console.log(`\nFull report written to ${out}`);
+    }
+
+    if (has("--apply")) {
+      const email = arg("--as");
+      if (!email) {
+        console.error("\n--apply needs --as <email>: the person whose name goes on the audit trail and the approvals.");
+        process.exit(2);
+      }
+      if (!has("--yes")) {
+        console.log("\nPlan only. Re-run with --yes to apply it.");
+        return;
+      }
+      const user = await prisma.user.findFirstOrThrow({
+        where: { tenantId: org.id, email, active: true },
+        include: { roles: { include: { role: true } }, departments: true },
+      });
+      const actor: Actor = {
+        userId: user.id,
+        tenantId: user.tenantId,
+        clientId: user.clientId,
+        name: user.name,
+        email: user.email,
+        roles: user.roles.map((r) => r.role.code as RoleCode),
+        departmentIds: user.departments.map((d) => d.departmentId),
+        mustChangePassword: user.mustChangePassword,
+        themePreference: user.themePreference,
+        outdoorMode: user.outdoorMode,
+      };
+      const result = await applyMasterImport(actor, readFileSync(file), { allowDraft });
+      console.log(`\nApplied as ${actor.email}`);
+      console.log(`  Part families   ${t(result.written.partFamilies)}`);
+      console.log(`  Routes          ${t(result.written.routes)}`);
+      console.log(`  Stage mappings  ${result.written.stageMappingRows} rows written`);
+      console.log(`  Material grades ${t(result.written.materialGrades)}`);
+      console.log(`  HE template     ${result.written.heTemplate}`);
     }
   } finally {
     await prisma.$disconnect();
