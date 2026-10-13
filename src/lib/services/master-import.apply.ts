@@ -165,6 +165,9 @@ export async function applyWithDb(
       });
     }
     const wasApproved = existing?.status === "APPROVED";
+    // As in the UI: whoever last changes a part is its preparer, so they cannot also review it later.
+    // An APPROVED row from the workbook is the Production Head's own act and leaves the preparer alone.
+    const preparer = status !== "APPROVED" && p.contentChanged ? { preparedById: actor.userId } : {};
     const data = {
       equipmentScope: p.scope!,
       assemblyGroup: p.assemblyGroup || null,
@@ -180,15 +183,19 @@ export async function applyWithDb(
       approvedAt: status === "APPROVED" ? (wasApproved ? existing!.approvedAt : now) : null,
     };
     if (!existing) {
-      const created = await tx.partFamily.create({ data: { tenantId, componentTypeId: type.id, ...data } });
+      const created = await tx.partFamily.create({ data: { tenantId, componentTypeId: type.id, ...data, ...preparer } });
       await audit("masterImport.partFamily.create", "PartFamily", created.id, undefined, { code: p.code, name: p.name, status, dimensions: p.dimensions });
       written.partFamilies.create++;
     } else if (dbPartFamilySignature(type.name, existing) !== partFamilySignature(p)) {
-      await tx.partFamily.update({ where: { id: existing.id }, data });
+      await tx.partFamily.update({ where: { id: existing.id }, data: { ...data, ...preparer } });
       await audit("masterImport.partFamily.update", "PartFamily", existing.id, { status: existing.status }, { code: p.code, name: p.name, status });
       written.partFamilies.update++;
     } else {
       written.partFamilies.unchanged++;
+      // Attributes are the same but a route changed: still an edit by the loader.
+      if (preparer.preparedById != null && existing.preparedById !== preparer.preparedById) {
+        await tx.partFamily.update({ where: { id: existing.id }, data: preparer });
+      }
     }
 
     for (const v of p.variants) {

@@ -291,16 +291,9 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
   const partsOut: DryRunReport["parts"] = [];
 
   for (const p of ev.parts) {
-    let outcome: Outcome = "skipped";
     const existing = typeByCode.get(p.code);
-    if (p.load) {
-      if (!existing?.partFamily) outcome = "create";
-      else {
-        outcome = dbPartFamilySignature(existing.name, existing.partFamily) === partFamilySignature(p) ? "unchanged" : "update";
-      }
-    }
-    partFamilies[outcome]++;
 
+    // Routes first: whether a route changed decides whether the part's review survives.
     const routesOut: DryRunReport["parts"][number]["routes"] = [];
     for (const v of p.variants) {
       let rOutcome: Outcome = "skipped";
@@ -325,6 +318,34 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
       routeTally[rOutcome]++;
       routesOut.push({ variant: v.variant, steps: v.steps.length, outcome: rOutcome });
     }
+
+    let outcome: Outcome = "skipped";
+    if (p.load) {
+      if (!existing?.partFamily) {
+        outcome = "create";
+        p.contentChanged = true;
+      } else {
+        // Attributes compared with the status held equal: a status-only move is a review, not an edit.
+        const held = "DRAFT" as const;
+        const attrsChanged =
+          dbPartFamilySignature(existing.name, { ...existing.partFamily, status: held }) !== partFamilySignature({ ...p, status: held });
+        p.contentChanged = attrsChanged || routesOut.some((r) => r.outcome === "create" || r.outcome === "update");
+        // The UI resets a review when content changes after it; an import must not carry one over.
+        if (p.contentChanged && p.status === "REVIEWED" && existing.partFamily.status !== "APPROVED") {
+          p.status = "DRAFT";
+          ev.issues.push({
+            code: "REVIEW_AFTER_CHANGE",
+            severity: "WARNING",
+            sheet: "Parts Master",
+            row: p.row,
+            partCode: p.code,
+            message: `${p.code}: this import changes the part, so any earlier review no longer applies. It loads as Draft; someone other than the loader can review it.`,
+          });
+        }
+        outcome = dbPartFamilySignature(existing.name, existing.partFamily) === partFamilySignature(p) ? "unchanged" : "update";
+      }
+    }
+    partFamilies[outcome]++;
     partsOut.push({ code: p.code, status: p.status, outcome, routes: routesOut });
   }
 

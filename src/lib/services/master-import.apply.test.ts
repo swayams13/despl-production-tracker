@@ -69,12 +69,12 @@ describe.skipIf(!RUN_DB)("applyMasterImport (DB)", async () => {
       expect(await state(t.tenantId)).toEqual(before);
     });
 
-    it("an Admin may load Draft parts for staging (allowDraft); they are DRAFT with no approver", async () => {
+    it("an Admin may load Draft parts for staging (allowDraft); they are DRAFT with no approver, prepared by the loader", async () => {
       const t = await tenant("admin-draft");
       const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
       expect(r.written.partFamilies.create).toBe(1);
       const pf = await owner.partFamily.findFirstOrThrow({ where: { tenantId: t.tenantId } });
-      expect(pf).toMatchObject({ status: "DRAFT", approvedById: null, approvedAt: null, preparedById: null });
+      expect(pf).toMatchObject({ status: "DRAFT", approvedById: null, approvedAt: null, preparedById: t.user.id });
     });
 
     it("production mode (no allowDraft) loads no Draft part", async () => {
@@ -181,6 +181,70 @@ describe.skipIf(!RUN_DB)("applyMasterImport (DB)", async () => {
       const { applied, part } = await reviewedAs(t, editor.id);
       expect(applied.report.issues.map((i) => i.code)).not.toContain("REVIEW_BY_PREPARER");
       expect(part.status).toBe("REVIEWED");
+    });
+
+    // Option 1 (13 Oct): an import that changes a part is an edit by the loader, as in the UI.
+    const editorOf = async (t: Awaited<ReturnType<typeof tenant>>) =>
+      owner.user.create({
+        data: { tenantId: t.tenantId, email: `ed-${Date.now()}-${Math.random()}@test.local`, username: `ed-${Date.now()}-${Math.random()}`, passwordHash: "x", name: "Ed" },
+      });
+
+    it("an import that changes a REVIEWED part does not carry the review over: Draft, loader is the preparer, preview says so", async () => {
+      const t = await tenant("carry");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const reviewer = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { status: "REVIEWED", preparedById: reviewer.id } });
+      const { dryRunWithDb } = await import("./master-import.service");
+      const changed = standardWorkbook({ status: "Reviewed", routeSource: "Drawing" }); // an attribute, not a route step
+      const preview = await dryRunWithDb(owner, t.tenantId, changed, { allowDraft: true, actorId: t.user.id });
+      expect(preview.issues.map((i) => i.code)).toContain("REVIEW_AFTER_CHANGE");
+      expect(preview.parts[0]).toMatchObject({ status: "DRAFT", outcome: "update" });
+
+      const applied = await applyMasterImport(t.admin, changed, { allowDraft: true });
+      expect(applied.report.issues.map((i) => i.code)).toContain("REVIEW_AFTER_CHANGE");
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "DRAFT", preparedById: t.user.id });
+    });
+
+    it("a route-only change (attributes identical) also resets the review and records the loader", async () => {
+      const t = await tenant("route-only");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const reviewer = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { status: "REVIEWED", preparedById: reviewer.id } });
+      const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed", time2: "1.5" }), { allowDraft: true });
+      expect(r.report.issues.map((i) => i.code)).toContain("REVIEW_AFTER_CHANGE");
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "DRAFT", preparedById: t.user.id });
+    });
+
+    it("a Draft whose only change is a route step is still an edit by the loader", async () => {
+      const t = await tenant("draft-route");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const editor = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { preparedById: editor.id } });
+      const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Draft", time2: "1.5" }), { allowDraft: true });
+      expect(r.written.partFamilies.unchanged).toBe(1); // attributes identical: this is the no-attribute-write path
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "DRAFT", preparedById: t.user.id });
+    });
+
+    it("a status-only move by someone other than the last editor is a review: it keeps the editor as preparer", async () => {
+      const t = await tenant("review-only");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const editor = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { preparedById: editor.id } });
+      const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed" }), { allowDraft: true });
+      expect(r.report.issues.map((i) => i.code)).not.toContain("REVIEW_AFTER_CHANGE");
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "REVIEWED", preparedById: editor.id });
+    });
+
+    it("a new part loaded as Reviewed stays Reviewed and the loader is recorded as its preparer", async () => {
+      const t = await tenant("new-reviewed");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed" }), { allowDraft: true });
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "REVIEWED", preparedById: t.user.id });
+    });
+
+    it("an APPROVED row from the workbook leaves the preparer alone", async () => {
+      const t = await tenant("approved-prep");
+      await applyMasterImport(t.ph, standardWorkbook());
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "APPROVED", approvedById: t.user.id, preparedById: null });
     });
 
     it("a part that is already REVIEWED is not pushed back to Draft by re-importing the same row", async () => {

@@ -41,6 +41,7 @@ export const ISSUE_TITLES: Record<string, string> = {
   PART_CODE_CONFLICT: "Part code is already used by another component type",
   STATUS_DOWNGRADE: "Part is already approved and the workbook says otherwise",
   REVIEW_BY_PREPARER: "You last edited this part, so it loads as Draft, not Reviewed",
+  REVIEW_AFTER_CHANGE: "This import changes a part, so it loads as Draft and needs a fresh review",
   MATERIAL_LOCKED: "Material is already reviewed or approved",
 };
 
