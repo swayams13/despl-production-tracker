@@ -171,6 +171,10 @@ const ROLE_LABEL: Record<string, string> = {
   SUPERVISOR: "Supervisor",
   QC: "QC / QA",
   CLIENT_VIEWER: "Client",
+  OPERATOR: "Operator",
+  PLANNER: "Planner",
+  STORES: "Stores",
+  ENGINEERING: "Engineering",
 };
 
 export function AppShell({

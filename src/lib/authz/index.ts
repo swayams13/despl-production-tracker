@@ -10,6 +10,14 @@ export const ROLES = {
   SUPERVISOR: "SUPERVISOR",
   QC: "QC",
   CLIENT_VIEWER: "CLIENT_VIEWER",
+  /** Lean Core L1.1: records work on a bay tablet under their own login (A9). */
+  OPERATOR: "OPERATOR",
+  /** Lean Core L1.1: Planning / PPC. */
+  PLANNER: "PLANNER",
+  /** Lean Core L1.1: Stores (BOM-line pipeline, L2). */
+  STORES: "STORES",
+  /** Lean Core L1.1: Engineering (BOM and weld-map release, J5). */
+  ENGINEERING: "ENGINEERING",
 } as const;
 
 export type RoleCode = (typeof ROLES)[keyof typeof ROLES];

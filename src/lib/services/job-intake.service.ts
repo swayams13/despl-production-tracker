@@ -208,6 +208,10 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
           workOrderStages: tp.workOrderStages,
           provisional: tp.provisional,
+          // Lean Core L1.1: copied at intake so later template edits cannot
+          // change a running job (invariant 9).
+          grain: tp.grain,
+          requiresQc: tp.requiresQc,
           included: !excluded.has(tp.code),
         })),
       });
@@ -232,6 +236,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           predecessorId: jpIdByCode.get(tpCodeById.get(e.predecessorId)!)!,
           type: e.type,
           lagDays: e.lagDays,
+          enforcement: e.enforcement,
         })),
       });
 

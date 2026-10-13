@@ -650,6 +650,18 @@ export async function materializeComponentsFromBomItems(
     if (!existing || (existing.familyId == null && t.familyId != null)) templateByTypeId.set(t.componentTypeId, t);
   }
 
+  // Lean Core L1.1 (D3): requiresQc is copied from OperationRef onto each
+  // ComponentOperation at materialisation, so a later edit to the (unversioned)
+  // OperationRef cannot change a running job (invariant 9).
+  const operationIds = [
+    ...new Set([...templateByTypeId.values()].flatMap((t) => t.versions[0]?.steps.map((st) => st.operationId) ?? [])),
+  ];
+  const operationRefs =
+    operationIds.length > 0
+      ? await tx.operationRef.findMany({ where: { id: { in: operationIds } }, select: { id: true, requiresQc: true } })
+      : [];
+  const requiresQcByOperationId = new Map(operationRefs.map((o) => [o.id, o.requiresQc]));
+
   let componentCount = 0;
   let skippedNoRoute = 0;
   const usedTags = new Set<string>();
@@ -687,6 +699,7 @@ export async function materializeComponentsFromBomItems(
             seq: step.seq,
             operationId: step.operationId,
             status: OperationStatus.NOT_STARTED,
+            requiresQc: requiresQcByOperationId.get(step.operationId) ?? true,
             jobId,
           })),
         });

@@ -117,6 +117,33 @@ describe("assertMakerChecker — the same human never submits and verifies", () 
   });
 });
 
+// Lean Core L1.1: four new roles. None of them may verify QC, none is an
+// implicit superuser, and holding one grants nothing in requireRole.
+describe.each([ROLES.OPERATOR, ROLES.PLANNER, ROLES.STORES, ROLES.ENGINEERING])("Lean Core role %s", (role) => {
+  it("is refused by assertMakerChecker (only QC verifies)", () => {
+    expect(codeOf(() => assertMakerChecker(actor({ userId: 2, roles: [role] }), 1))).toBe(ERROR_CODES.FORBIDDEN);
+  });
+
+  it("is refused by requireRole for the roles it does not hold", () => {
+    expect(codeOf(() => requireRole(actor({ roles: [role] }), ROLES.ADMIN))).toBe(ERROR_CODES.FORBIDDEN);
+    expect(codeOf(() => requireRole(actor({ roles: [role] }), ROLES.QC, ROLES.PRODUCTION_HEAD))).toBe(
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("is department-scoped (not exempt like ADMIN / PRODUCTION_HEAD) — floor writes are gated by department (A9)", () => {
+    expect(codeOf(() => requireDepartmentScope(actor({ roles: [role], departmentIds: [10] }), 10))).toBeNull();
+    expect(codeOf(() => requireDepartmentScope(actor({ roles: [role], departmentIds: [10] }), 11))).toBe(
+      ERROR_CODES.FORBIDDEN,
+    );
+  });
+
+  it("is allowed by requireRole for itself, and hasRole sees it", () => {
+    expect(codeOf(() => requireRole(actor({ roles: [role] }), role))).toBeNull();
+    expect(hasRole(actor({ roles: [role] }), role)).toBe(true);
+  });
+});
+
 describe("client scoping — the external boundary", () => {
   it("lets an internal user reach any client", () => {
     expect(codeOf(() => assertClientScope(actor({ clientId: null }), 42))).toBeNull();

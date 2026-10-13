@@ -284,6 +284,46 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     }
   });
 
+  // Lean Core L1.1: grain, requiresQc and enforcement are copied onto the job's
+  // rows at intake (invariant 9 — a later template edit cannot change a running
+  // job). Flip one template process and one template edge, restore in finally.
+  it("L1.1: copies grain, requiresQc and enforcement from the template onto JobProcess and JobProcessEdge", async () => {
+    const refs = await seedRefs();
+    const tp = await owner.templateProcess.findFirstOrThrow({ where: { versionId: refs.version.id, seq: 1 } });
+    const te = await owner.templateEdge.findFirstOrThrow({ where: { versionId: refs.version.id } });
+    const tePred = await owner.templateProcess.findUniqueOrThrow({ where: { id: te.predecessorId } });
+    const teProc = await owner.templateProcess.findUniqueOrThrow({ where: { id: te.processId } });
+    try {
+      await owner.templateProcess.update({ where: { id: tp.id }, data: { grain: "JOB", requiresQc: false } });
+      await owner.templateEdge.update({ where: { id: te.id }, data: { enforcement: "SOFT" } });
+
+      const r = await createJob(actor(), base({ jobNumber: "TEST-L11-COPY" }, refs));
+      created.push(r.jobId);
+
+      const jps = await owner.jobProcess.findMany({ where: { jobId: r.jobId } });
+      const flipped = jps.find((p) => p.code === tp.code)!;
+      expect(flipped.grain).toBe("JOB");
+      expect(flipped.requiresQc).toBe(false);
+      // Every other process keeps today's behaviour.
+      for (const p of jps.filter((p) => p.code !== tp.code)) {
+        expect(p.grain).toBe("UNIT");
+        expect(p.requiresQc).toBe(true);
+      }
+
+      const jpByCode = new Map(jps.map((p) => [p.code, p.id]));
+      const edge = await owner.jobProcessEdge.findFirstOrThrow({
+        where: { processId: jpByCode.get(teProc.code)!, predecessorId: jpByCode.get(tePred.code)! },
+      });
+      expect(edge.enforcement).toBe("SOFT");
+      const hard = await owner.jobProcessEdge.count({ where: { jobId: r.jobId, enforcement: "HARD" } });
+      const total = await owner.jobProcessEdge.count({ where: { jobId: r.jobId } });
+      expect(hard).toBe(total - 1);
+    } finally {
+      await owner.templateProcess.update({ where: { id: tp.id }, data: { grain: "UNIT", requiresQc: true } });
+      await owner.templateEdge.update({ where: { id: te.id }, data: { enforcement: "HARD" } });
+    }
+  });
+
   it("keeps excluded processes AND their edges, marked included: false", async () => {
     const refs = await seedRefs();
     // seq 28 ("Draining & Drying") — an arbitrary real process, flipped

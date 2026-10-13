@@ -52,6 +52,10 @@ export async function copyVersionContents(
         envelopeStartByMaxDays: p.envelopeStartByMaxDays,
         optional: p.optional,
         provisional: o?.provisional ?? p.provisional,
+        // Lean Core L1.1: a copy must carry these, or a duration edit would
+        // silently reset them to the column defaults.
+        grain: p.grain,
+        requiresQc: p.requiresQc,
       },
     });
     oldToNewProcessId.set(p.id, copy.id);
@@ -65,6 +69,7 @@ export async function copyVersionContents(
         predecessorId: oldToNewProcessId.get(e.predecessorId)!,
         type: e.type,
         lagDays: e.lagDays,
+        enforcement: e.enforcement,
       },
     });
   }
