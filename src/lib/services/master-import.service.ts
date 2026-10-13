@@ -402,8 +402,13 @@ async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Pr
 }
 
 /** Parse, evaluate against the tenant, then apply the tenant-state rules. Read-only. */
-export async function prepareImport(db: Tx, tenantId: number, bytes: Buffer | Uint8Array, opts: { allowDraft: boolean }) {
-  const wb = parseMasterWorkbook(bytes);
+export async function prepareImport(
+  db: Tx,
+  tenantId: number,
+  bytes: Buffer | Uint8Array,
+  opts: { allowDraft: boolean; parsed?: ParsedWorkbook },
+) {
+  const wb = opts.parsed ?? parseMasterWorkbook(bytes);
   const ref = await loadReferenceData(db, tenantId, wb);
   const ev = evaluateMaster(wb, ref, { allowDraft: opts.allowDraft });
   await applyStateConflicts(db, tenantId, ev);
@@ -414,7 +419,7 @@ export async function dryRunWithDb(
   db: Tx,
   tenantId: number,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft: boolean },
+  opts: { allowDraft: boolean; parsed?: ParsedWorkbook },
 ): Promise<DryRunReport> {
   const { wb, ev } = await prepareImport(db, tenantId, bytes, opts);
   return finalizeReport(await buildReport(db, tenantId, wb, ev, opts.allowDraft), bytes);
@@ -471,7 +476,8 @@ export async function buildReport(
 /**
  * App entry point: tenant-scoped and read-only. Engineering may run it (they fix
  * the workbook); applying stays with the Production Head and Admin.
- * The 30 s transaction budget covers parsing the workbook, which happens inside it.
+ * The workbook is parsed BEFORE the transaction opens: a hostile file must not hold a
+ * connection while it is being read.
  */
 export async function dryRunMasterImport(
   actor: Actor,
@@ -480,9 +486,10 @@ export async function dryRunMasterImport(
 ): Promise<DryRunReport> {
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.ENGINEERING);
+  const parsed = parseMasterWorkbook(bytes);
   return withTenant(
     actor.tenantId,
-    (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false }),
+    (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false, parsed }),
     { timeoutMs: 30_000 },
   );
 }

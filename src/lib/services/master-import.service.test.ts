@@ -3,6 +3,7 @@ import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES } from "@/lib/shared/errors";
 import { dryRunMasterImport } from "./master-import.service";
 import { makeWorkbook, PARTS_HEADER, ROUTES_HEADER } from "./master-import.test-util";
+import { makeSparseWorkbook } from "@/lib/shared/upload.test-util";
 
 const actor = (over: Partial<Actor> = {}): Actor => ({
   userId: 1, tenantId: 1, clientId: null, name: "PH", email: "ph@despl.test", roles: [ROLES.PRODUCTION_HEAD],
@@ -18,6 +19,12 @@ describe("dryRunMasterImport — pure refusals (before any DB read)", () => {
   it("refuses a client user before the role check", async () => {
     await expect(dryRunMasterImport(actor({ clientId: 7, roles: [ROLES.ADMIN] }), Buffer.from(""))).rejects.toMatchObject({
       code: ERROR_CODES.FORBIDDEN,
+    });
+  });
+  it("refuses a hostile workbook while parsing, before a transaction (no DB is configured here)", async () => {
+    const hostile = makeSparseWorkbook("Parts Master", "A1:XFD1048576");
+    await expect(dryRunMasterImport(actor({ roles: [ROLES.ENGINEERING] }), hostile)).rejects.toMatchObject({
+      code: ERROR_CODES.VALIDATION_FAILED,
     });
   });
 });

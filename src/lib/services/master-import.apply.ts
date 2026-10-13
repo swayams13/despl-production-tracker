@@ -5,6 +5,7 @@ import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { MasterDataStatus, PartMakeBuy } from "@/generated/prisma/client";
 import { existingHe, heContent, heSignature, HE_FAMILY, HE_TEMPLATE_NAME } from "./master-import.he";
 import { writeRouteVariant } from "./master-data.routes";
+import { parseMasterWorkbook, type ParsedWorkbook } from "./master-import.parse";
 import { deriveDimensionKeys, type PartDecision, type VariantDecision } from "./master-import.rules";
 import {
   buildReport,
@@ -63,6 +64,8 @@ export interface ApplyOptions {
   expected?: { fileSha256: string; planFingerprint: string };
   /** For the audit row only. */
   fileName?: string;
+  /** The workbook already parsed outside the transaction; parsed here when absent (scripts, tests). */
+  parsed?: ParsedWorkbook;
 }
 
 export async function applyWithDb(
@@ -339,9 +342,11 @@ export async function applyMasterImport(
 ): Promise<ApplyResult> {
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  const parsed = parseMasterWorkbook(bytes); // before the transaction: see dryRunMasterImport
   return withTenant(
     actor.tenantId,
-    (tx) => applyWithDb(tx, actor, bytes, { allowDraft: opts.allowDraft ?? false, expected: opts.expected, fileName: opts.fileName }),
+    (tx) =>
+      applyWithDb(tx, actor, bytes, { allowDraft: opts.allowDraft ?? false, expected: opts.expected, fileName: opts.fileName, parsed }),
     { timeoutMs: 120_000 },
   );
 }
