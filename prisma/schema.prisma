@@ -131,6 +131,60 @@ enum TemplateStatus {
   ARCHIVED
 }
 
+/// Lean Core M1. RAW_FORM = today's component types (PLATE, PIPE…, route
+/// anchors for DESPL-320). PART_FAMILY = a master-data part family (SHL-01…);
+/// its attributes live in `PartFamily`. Existing rows are RAW_FORM.
+enum ComponentTypeKind {
+  RAW_FORM
+  PART_FAMILY
+}
+
+/// Lean Core M1. Review lifecycle of master data (part families, material
+/// grades). Distinct from TemplateStatus, which versions a route.
+enum MasterDataStatus {
+  DRAFT
+  REVIEWED
+  APPROVED
+}
+
+/// Lean Core M1. Workbook "Equipment" column: PV | HE | "PV + HE".
+enum EquipmentScope {
+  PV
+  HE
+  BOTH
+}
+
+/// Lean Core M1. Workbook "Make / Buy" column (four values).
+enum PartMakeBuy {
+  MADE_IN_HOUSE
+  BOUGHT_MACHINED
+  BOUGHT_OUT
+  BOUGHT_FABRICATED
+}
+
+enum StdTimeUnit {
+  HOURS
+  DAYS
+}
+
+enum StdTimeBasis {
+  PER_PIECE
+  PER_JOB
+  PER_MATERIAL_LOT
+  PER_METRE_CUT
+  PER_METRE_EDGE
+  PER_METRE_WELD
+  PER_JOINT
+  PER_HOLE
+  PER_TUBE
+  PER_KG
+}
+
+enum StdTimeStatus {
+  PROPOSED
+  VALIDATED
+}
+
 /// BomRevision (Phase 4, B3): DRAFT is unused by anything in this dispatch —
 /// the backfill script only ever creates RELEASED rows (invariant #9: a new
 /// revision is a new row, never an edit). DRAFT exists for the later BOM
@@ -266,6 +320,9 @@ model Organization {
   delayCategories              DelayCategoryRef[]
   qcpCodes                     QcpCodeRef[]
   routeTemplates               RouteTemplate[]
+  partFamilies                 PartFamily[]
+  materialGrades               MaterialGrade[]
+  routeStepFamilySeqs          RouteStepFamilySeq[]
   calendars                    WorkCalendar[]
   snapshots                    ProgressSnapshot[]
   notifications                Notification[]
@@ -425,6 +482,8 @@ model User {
   passwordResetRequestsRequested   PendingPasswordReset[]     @relation("PendingPasswordResetRequester")
   passwordResetRequestsApproved    PendingPasswordReset[]     @relation("PendingPasswordResetApprover")
   sequenceOverrides                SequenceOverride[]
+  preparedPartFamilies             PartFamily[]               @relation("PartFamilyPreparedBy")
+  approvedPartFamilies             PartFamily[]               @relation("PartFamilyApprovedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -512,6 +571,7 @@ model Department {
   operations            OperationRef[]
   welders               Welder[]
   assemblyTemplateSteps AssemblyTemplateStep[]
+  routeSteps            RouteStep[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -534,16 +594,21 @@ model UserDepartment {
 // ── Reference vocabularies (see design note 4) ──────────────────────────
 
 model ComponentTypeRef {
-  id       Int     @id @default(autoincrement())
-  tenantId Int     @map("tenant_id")
+  id       Int               @id @default(autoincrement())
+  tenantId Int               @map("tenant_id")
   code     String
   name     String
-  active   Boolean @default(true)
+  active   Boolean           @default(true)
+  /// Lean Core M1. RAW_FORM (default) = today's behaviour. PART_FAMILY rows
+  /// carry their attributes in `partFamily`.
+  kind     ComponentTypeKind @default(RAW_FORM)
 
-  tenant         Organization    @relation(fields: [tenantId], references: [id])
-  routeTemplates RouteTemplate[]
-  components     Component[]
-  bomItems       BomItem[]
+  tenant            Organization    @relation(fields: [tenantId], references: [id])
+  routeTemplates    RouteTemplate[]
+  components        Component[]
+  bomItems          BomItem[]
+  partFamily        PartFamily?     @relation("PartFamilyType")
+  rawFormOfFamilies PartFamily[]    @relation("PartFamilyRawForm")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -764,6 +829,7 @@ model ProductFamily {
   assemblyTemplates AssemblyTemplate[]
   workOrderStages   WorkOrderStage[]
   operationRefSeqs  OperationRefFamilySeq[]
+  routeStepSeqs     RouteStepFamilySeq[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -1624,13 +1690,16 @@ model RouteTemplate {
   /// Null = applies to every family.
   familyId        Int?   @map("family_id")
   name            String
+  /// Lean Core M1. Route variant letter (A, B…) for one part family; the BOM
+  /// release step picks one (J5). Until then materialisation takes the lowest.
+  variant         String @default("A")
 
   tenant        Organization           @relation(fields: [tenantId], references: [id])
   componentType ComponentTypeRef       @relation(fields: [componentTypeId], references: [id])
   family        ProductFamily?         @relation(fields: [familyId], references: [id])
   versions      RouteTemplateVersion[]
 
-  @@unique([tenantId, componentTypeId, familyId])
+  @@unique([tenantId, componentTypeId, familyId, variant])
   @@index([tenantId])
   @@index([componentTypeId])
   @@index([familyId])
@@ -1655,20 +1724,121 @@ model RouteTemplateVersion {
 }
 
 model RouteStep {
-  id             Int     @id @default(autoincrement())
-  routeVersionId Int     @map("route_version_id")
-  seq            Int
-  operationId    Int     @map("operation_id")
-  printed        String?
-  optional       Boolean @default(false)
+  id                 Int           @id @default(autoincrement())
+  routeVersionId     Int           @map("route_version_id")
+  seq                Int
+  operationId        Int           @map("operation_id")
+  printed            String?
+  optional           Boolean       @default(false)
+  /// Lean Core M1 (master data). Null = the operation's default department.
+  departmentId       Int?          @map("department_id")
+  /// Standard time, stored only (D17 default): not read by scheduling.
+  stdTime            Decimal?      @map("std_time") @db.Decimal(8, 3)
+  stdTimeUnit        StdTimeUnit?  @map("std_time_unit")
+  stdTimeBasis       StdTimeBasis? @map("std_time_basis")
+  stdTimeStatus      StdTimeStatus @default(PROPOSED) @map("std_time_status")
+  /// "When does it apply?" in words, plus the machine-readable rule (same
+  /// shape as J2's includeWhen). Nothing evaluates includeWhen before J2.
+  conditionText      String?       @map("condition_text")
+  includeWhen        Json?         @map("include_when")
+  acceptanceStandard String?       @map("acceptance_standard")
+  recordDocument     String?       @map("record_document")
+  /// Effective QC on a materialised operation = this AND OperationRef.requiresQc.
+  requiresQc         Boolean       @default(true) @map("requires_qc")
 
-  routeVersion RouteTemplateVersion @relation(fields: [routeVersionId], references: [id], onDelete: Cascade)
-  operation    OperationRef         @relation(fields: [operationId], references: [id])
+  routeVersion      RouteTemplateVersion @relation(fields: [routeVersionId], references: [id], onDelete: Cascade)
+  operation         OperationRef         @relation(fields: [operationId], references: [id])
+  department        Department?          @relation(fields: [departmentId], references: [id])
+  familySeqMappings RouteStepFamilySeq[]
 
   @@unique([routeVersionId, seq])
   @@index([routeVersionId])
   @@index([operationId])
+  @@index([departmentId])
   @@map("route_steps")
+}
+
+/// Lean Core M1. Per-step stage mapping, mirroring OperationRefFamilySeq: the
+/// workbook maps an Inspection step to process 11, 12, 18 or 25 depending on
+/// the part, which one process per operation cannot express. Rollup resolves
+/// a step-level row first, then the operation-level default. No rows = today.
+model RouteStepFamilySeq {
+  id                 Int @id @default(autoincrement())
+  tenantId           Int @map("tenant_id")
+  routeStepId        Int @map("route_step_id")
+  familyId           Int @map("family_id")
+  /// Which of the family's own template processes (`JobProcess.code` as a
+  /// number) this step rolls up into.
+  leadTimeProcessSeq Int @map("lead_time_process_seq")
+
+  tenant    Organization  @relation(fields: [tenantId], references: [id])
+  routeStep RouteStep     @relation(fields: [routeStepId], references: [id], onDelete: Cascade)
+  family    ProductFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([routeStepId, familyId])
+  @@index([tenantId])
+  @@index([familyId, leadTimeProcessSeq])
+  @@map("route_step_family_seqs")
+}
+
+/// Lean Core M1. Attributes of a part family (SHL-01 Shell Course…), 1:1 with
+/// a ComponentTypeRef of kind PART_FAMILY. Part code = ComponentTypeRef.code.
+/// Approval is maker-checker at the DB level (CHECKs in the migration): an
+/// approver is never the recorded preparer, and APPROVED needs both an
+/// approver and a date. Imported rows may have no preparer user (the workbook's
+/// "Filled by" is a company), so that part of the rule is also a service rule.
+model PartFamily {
+  id              Int              @id @default(autoincrement())
+  tenantId        Int              @map("tenant_id")
+  componentTypeId Int              @unique @map("component_type_id")
+  equipmentScope  EquipmentScope   @default(BOTH) @map("equipment_scope")
+  assemblyGroup   String?          @map("assembly_group")
+  makeBuy         PartMakeBuy?     @map("make_buy")
+  /// Raw-material form (a RAW_FORM component type). Null for assemblies and
+  /// catalogue items, and for forms not yet in the vocabulary (ELB-01).
+  rawFormId       Int?             @map("raw_form_id")
+  typicalMoc      String?          @map("typical_moc")
+  /// List of dimension keys the planner enters per job. Free text in the
+  /// workbook; M2 decides how to derive keys.
+  dimensionKeys   Json?            @map("dimension_keys")
+  weightBasis     String?          @map("weight_basis")
+  isSpare         Boolean          @default(false) @map("is_spare")
+  routeSource     String?          @map("route_source")
+  status          MasterDataStatus @default(DRAFT)
+  preparedById    Int?             @map("prepared_by_id")
+  approvedById    Int?             @map("approved_by_id")
+  approvedAt      DateTime?        @map("approved_at")
+  remarks         String?
+
+  tenant        Organization      @relation(fields: [tenantId], references: [id])
+  componentType ComponentTypeRef  @relation("PartFamilyType", fields: [componentTypeId], references: [id], onDelete: Cascade)
+  rawForm       ComponentTypeRef? @relation("PartFamilyRawForm", fields: [rawFormId], references: [id])
+  preparedBy    User?             @relation("PartFamilyPreparedBy", fields: [preparedById], references: [id], onDelete: Restrict)
+  approvedBy    User?             @relation("PartFamilyApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([rawFormId])
+  @@map("part_families")
+}
+
+/// Lean Core M1. Material master (spec, grade, product form, density).
+model MaterialGrade {
+  id          Int              @id @default(autoincrement())
+  tenantId    Int              @map("tenant_id")
+  spec        String
+  /// Empty string when the spec has no grade (keeps the unique key total).
+  grade       String           @default("")
+  productForm String           @map("product_form")
+  densityGcc  Decimal?         @map("density_gcc") @db.Decimal(6, 3)
+  remarks     String?
+  status      MasterDataStatus @default(DRAFT)
+
+  tenant Organization @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, spec, grade, productForm])
+  @@index([tenantId])
+  @@map("material_grades")
 }
 
 /// A physical thing being made. THIS is what makes "one client wants 5
