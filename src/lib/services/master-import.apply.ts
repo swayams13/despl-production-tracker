@@ -14,6 +14,7 @@ import {
   partFamilySignature,
   planFingerprint,
   prepareImport,
+  reviewedByPreparer,
   sha256Hex,
   type DryRunReport,
   type Outcome,
@@ -77,7 +78,7 @@ export async function applyWithDb(
   const tenantId = actor.tenantId;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`master-import:${tenantId}`}))`;
 
-  const { wb, ev } = await prepareImport(tx, tenantId, bytes, opts);
+  const { wb, ev } = await prepareImport(tx, tenantId, bytes, { ...opts, actorId: actor.userId });
   const structural = ev.issues.filter((i) => i.code === "SHEET_MISSING" || i.code === "COLUMN_MISSING");
   if (structural.length > 0) {
     throw new AppError(ERROR_CODES.VALIDATION_FAILED, {
@@ -147,12 +148,22 @@ export async function applyWithDb(
       await tx.componentTypeRef.update({ where: { id: type.id }, data: { name: p.name } });
     }
 
+    // The same row lock every master-data.service write takes. An approve or edit
+    // that is mid-flight finishes first, and the part is then judged as it is NOW:
+    // the dry-run above read it unlocked, so its verdict may be stale.
+    await tx.$queryRaw`SELECT id FROM part_families WHERE component_type_id = ${type.id} AND tenant_id = ${tenantId} FOR UPDATE`;
     const existing = await tx.partFamily.findUnique({
       where: { componentTypeId: type.id },
       include: { rawForm: { select: { code: true } } },
     });
     const rawFormId = p.rawFormCode ? (typeByCode.get(p.rawFormCode)?.id ?? null) : null;
     const status = toStatus(p);
+    if ((existing?.status === "APPROVED" && status !== "APPROVED") || reviewedByPreparer(status, existing, actor.userId)) {
+      throw new AppError(ERROR_CODES.STALE_WRITE, {
+        kind: "PLAN_CHANGED",
+        reason: `${p.code} changed while this import was running. Nothing was saved. Check the file again.`,
+      });
+    }
     const wasApproved = existing?.status === "APPROVED";
     const data = {
       equipmentScope: p.scope!,

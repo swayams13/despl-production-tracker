@@ -137,6 +137,8 @@ describe("review, approve, revise", () => {
     render(<MaterialsView rows={[row(1), row(2, { status: "REVIEWED" })]} totals={totals} filters={{}} can={head} />);
     fireEvent.click(screen.getByRole("button", { name: "Mark reviewed" }));
     await waitFor(() => expect(setStatus).toHaveBeenCalledWith({ materialGradeId: 1, to: "REVIEWED" }));
+    // Row buttons are disabled while the first move is still in its transition; a click then is a no-op.
+    await waitFor(() => expect((screen.getAllByRole("button", { name: "Approve" })[1] as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[1]);
     await waitFor(() => expect(setStatus).toHaveBeenCalledWith({ materialGradeId: 2, to: "APPROVED" }));
   });

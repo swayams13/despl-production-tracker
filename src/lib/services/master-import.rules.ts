@@ -49,6 +49,7 @@ export const ISSUE_CODES = [
   // State of the tenant's existing master data (set by the service, not the pure rules).
   "PART_CODE_CONFLICT",
   "STATUS_DOWNGRADE",
+  "REVIEW_BY_PREPARER",
   "MATERIAL_LOCKED",
 ] as const;
 export type IssueCode = (typeof ISSUE_CODES)[number];

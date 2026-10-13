@@ -115,6 +115,83 @@ describe.skipIf(!RUN_DB)("applyMasterImport (DB)", async () => {
     });
   });
 
+  describe("a part that changed under the import (row lock, maker-checker)", () => {
+    const partOf = (tenantId: number) => owner.partFamily.findFirstOrThrow({ where: { tenantId } });
+
+    it("an import that was planned while a part was DRAFT does not overwrite it once it is APPROVED; nothing is written", async () => {
+      const t = await tenant("race");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const draft = await partOf(t.tenantId);
+      const stepsBefore = await owner.routeStep.count({ where: { routeVersion: { route: { tenantId: t.tenantId } } } });
+
+      // Another session approves the part and has not committed yet.
+      let release!: () => void;
+      let locked!: () => void;
+      const held = new Promise<void>((r) => (locked = r));
+      const gate = new Promise<void>((r) => (release = r));
+      const approver = owner.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM part_families WHERE id = ${draft.id} FOR UPDATE`;
+        await tx.partFamily.update({ where: { id: draft.id }, data: { status: "APPROVED", approvedById: t.user.id, approvedAt: new Date() } });
+        locked();
+        await gate;
+      });
+      await held;
+
+      // The importer plans against the committed DRAFT, then queues behind the row lock.
+      const importing = applyMasterImport(t.admin, standardWorkbook({ status: "Draft", time2: "0.9" }), { allowDraft: true });
+      let waiting = false;
+      for (let i = 0; i < 100 && !waiting; i++) {
+        const w = await owner.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`;
+        waiting = Number(w[0].n) > 0;
+        if (!waiting) await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(waiting).toBe(true);
+      release();
+      await approver;
+
+      await expect(importing).rejects.toMatchObject({ code: ERROR_CODES.STALE_WRITE, detail: { kind: "PLAN_CHANGED" } });
+      const after = await partOf(t.tenantId);
+      expect(after).toMatchObject({ status: "APPROVED", approvedById: t.user.id });
+      expect(await owner.routeStep.count({ where: { routeVersion: { route: { tenantId: t.tenantId } } } })).toBe(stepsBefore);
+    }, 20_000);
+
+    const reviewedAs = async (t: Awaited<ReturnType<typeof tenant>>, preparedById: number | null, status: "DRAFT" | "REVIEWED" = "DRAFT") => {
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { preparedById, status } });
+      const { dryRunWithDb } = await import("./master-import.service");
+      const preview = await dryRunWithDb(owner, t.tenantId, standardWorkbook({ status: "Reviewed" }), { allowDraft: true, actorId: t.user.id });
+      const applied = await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed" }), { allowDraft: true });
+      return { preview, applied, part: await partOf(t.tenantId) };
+    };
+
+    it("the last editor cannot mark a part reviewed through an import: it loads as Draft, and the preview says so", async () => {
+      const t = await tenant("prep");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const { preview, applied, part } = await reviewedAs(t, t.user.id);
+      expect(preview.issues.map((i) => i.code)).toContain("REVIEW_BY_PREPARER");
+      expect(applied.report.issues.map((i) => i.code)).toContain("REVIEW_BY_PREPARER");
+      expect(part.status).toBe("DRAFT");
+    });
+
+    it("a part last edited by someone else can be loaded as Reviewed (the importer acts as the second person)", async () => {
+      const t = await tenant("other");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const editor = await owner.user.create({
+        data: { tenantId: t.tenantId, email: `ed-${Date.now()}-${Math.random()}@test.local`, username: `ed-${Date.now()}-${Math.random()}`, passwordHash: "x", name: "Ed" },
+      });
+      const { applied, part } = await reviewedAs(t, editor.id);
+      expect(applied.report.issues.map((i) => i.code)).not.toContain("REVIEW_BY_PREPARER");
+      expect(part.status).toBe("REVIEWED");
+    });
+
+    it("a part that is already REVIEWED is not pushed back to Draft by re-importing the same row", async () => {
+      const t = await tenant("keep");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const { applied, part } = await reviewedAs(t, t.user.id, "REVIEWED");
+      expect(applied.report.issues.map((i) => i.code)).not.toContain("REVIEW_BY_PREPARER");
+      expect(part.status).toBe("REVIEWED");
+    });
+  });
+
   describe("what the user was shown (file hash and plan fingerprint)", () => {
     const shown = async (t: Awaited<ReturnType<typeof tenant>>, over: Parameters<typeof standardWorkbook>[0] = {}) => {
       const { dryRunWithDb } = await import("./master-import.service");

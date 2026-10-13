@@ -352,13 +352,26 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
 }
 
 /**
+ * The last editor of a part may not also mark it reviewed (M3-A); an import is
+ * not a way round that. Only a DRAFT becomes REVIEWED here: an already-reviewed
+ * part was reviewed by someone else, and an approved one is the downgrade rule's.
+ */
+export function reviewedByPreparer(
+  want: string | null,
+  have: { status: string; preparedById: number | null } | null | undefined,
+  actorId: number | undefined,
+): boolean {
+  return want === "REVIEWED" && actorId != null && have?.status === "DRAFT" && have.preparedById === actorId;
+}
+
+/**
  * Rules that depend on what the tenant already holds. A part whose code is
  * taken by a legacy component type, or that is already APPROVED and would be
  * downgraded by a Draft row, is not loaded: an import never silently demotes
  * approved master data (invariant 6). A grade that is no longer DRAFT is not
  * rewritten either.
  */
-async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Promise<void> {
+async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation, actorId?: number): Promise<void> {
   const block = (p: PartDecision, code: ImportIssue["code"], message: string) => {
     p.load = false;
     for (const v of p.variants) v.load = false;
@@ -369,7 +382,7 @@ async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Pr
   if (codes.length > 0) {
     const types = await db.componentTypeRef.findMany({
       where: { tenantId, code: { in: codes } },
-      select: { code: true, kind: true, partFamily: { select: { status: true } } },
+      select: { code: true, kind: true, partFamily: { select: { status: true, preparedById: true } } },
     });
     for (const t of types) {
       const p = byCode.get(t.code)!;
@@ -377,6 +390,16 @@ async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Pr
         block(p, "PART_CODE_CONFLICT", `Code ${t.code} is already used by a ${t.kind.toLowerCase().replace("_", " ")} component type; a part family cannot share it.`);
       } else if (t.partFamily?.status === "APPROVED" && p.status !== "APPROVED") {
         block(p, "STATUS_DOWNGRADE", `${t.code} is already approved in the tracker; the workbook says "${p.status}". Approved master data is not demoted by an import.`);
+      } else if (reviewedByPreparer(p.status, t.partFamily, actorId)) {
+        p.status = "DRAFT";
+        ev.issues.push({
+          code: "REVIEW_BY_PREPARER",
+          severity: "WARNING",
+          sheet: "Parts Master",
+          row: p.row,
+          partCode: p.code,
+          message: `${t.code}: you last edited this part, so you cannot also mark it reviewed. It loads as Draft; someone else can review it.`,
+        });
       }
     }
   }
@@ -406,12 +429,12 @@ export async function prepareImport(
   db: Tx,
   tenantId: number,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft: boolean; parsed?: ParsedWorkbook },
+  opts: { allowDraft: boolean; parsed?: ParsedWorkbook; actorId?: number },
 ) {
   const wb = opts.parsed ?? parseMasterWorkbook(bytes);
   const ref = await loadReferenceData(db, tenantId, wb);
   const ev = evaluateMaster(wb, ref, { allowDraft: opts.allowDraft });
-  await applyStateConflicts(db, tenantId, ev);
+  await applyStateConflicts(db, tenantId, ev, opts.actorId);
   return { wb, ref, ev };
 }
 
@@ -419,7 +442,7 @@ export async function dryRunWithDb(
   db: Tx,
   tenantId: number,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft: boolean; parsed?: ParsedWorkbook },
+  opts: { allowDraft: boolean; parsed?: ParsedWorkbook; actorId?: number },
 ): Promise<DryRunReport> {
   const { wb, ev } = await prepareImport(db, tenantId, bytes, opts);
   return finalizeReport(await buildReport(db, tenantId, wb, ev, opts.allowDraft), bytes);
@@ -489,7 +512,7 @@ export async function dryRunMasterImport(
   const parsed = parseMasterWorkbook(bytes);
   return withTenant(
     actor.tenantId,
-    (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false, parsed }),
+    (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false, parsed, actorId: actor.userId }),
     { timeoutMs: 30_000 },
   );
 }

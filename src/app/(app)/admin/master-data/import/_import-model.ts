@@ -40,6 +40,7 @@ export const ISSUE_TITLES: Record<string, string> = {
   REVIEW_ACTION_OPEN: "An open review question from the workbook",
   PART_CODE_CONFLICT: "Part code is already used by another component type",
   STATUS_DOWNGRADE: "Part is already approved and the workbook says otherwise",
+  REVIEW_BY_PREPARER: "You last edited this part, so it loads as Draft, not Reviewed",
   MATERIAL_LOCKED: "Material is already reviewed or approved",
 };
 
