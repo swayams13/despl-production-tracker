@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { inspectZip } from "@/lib/shared/upload";
+import { canonicalizeXlsx } from "./xlsx-canonical";
 
 /**
  * Lean Core M2 — reads the Standard Parts Master workbook into typed rows.
@@ -412,14 +412,13 @@ const REVIEW: Sheet<ReviewActionRow> = {
 };
 
 /**
- * Untrusted input: refuse an oversized zip before inflating it, read only the
- * sheets this importer uses, and cap rows so a sheet that merely DECLARES a huge
- * range cannot make `sheet_to_json` allocate it.
+ * Untrusted input: the reader only ever sees a canonical re-pack of the upload
+ * (every entry inflated under a real limit, see xlsx-canonical.ts), reads only
+ * the sheets this importer uses, and caps rows so a sheet that merely DECLARES
+ * a huge range cannot make `sheet_to_json` allocate it.
  */
 export function parseMasterWorkbook(bytes: Buffer | Uint8Array): ParsedWorkbook {
-  const tooBig = inspectZip(bytes);
-  if (tooBig) throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: tooBig });
-  const wb = XLSX.read(bytes, {
+  const wb = XLSX.read(canonicalizeXlsx(bytes), {
     type: "buffer",
     sheetRows: MAX_SHEET_ROWS,
     sheets: [PARTS, STEPS, MATERIALS, HE_STAGES, PV_REF, ASSEMBLY, NEW_OPS, REVIEW].map((s) => s.name),

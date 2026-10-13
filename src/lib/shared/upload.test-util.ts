@@ -1,10 +1,12 @@
-import { crc32 } from "node:zlib";
+import { crc32, deflateRawSync } from "node:zlib";
 
 export interface ZipEntry {
   name: string;
   data: Buffer;
   /** What the central directory CLAIMS; the stored bytes stay `data`. Lets a test lie about sizes. */
   declaredSize?: number;
+  /** Store the entry deflated (method 8), so a small file can inflate to a large one. */
+  deflate?: boolean;
 }
 
 /** Test helper: a stored (uncompressed) zip. `zip64` sets the zip64 sentinel on every entry. */
@@ -14,27 +16,30 @@ export function makeZip(entries: ZipEntry[], opts: { zip64?: boolean } = {}): Bu
   let offset = 0;
   for (const e of entries) {
     const name = Buffer.from(e.name);
+    const packed = e.deflate ? deflateRawSync(e.data) : e.data;
     const lh = Buffer.alloc(30);
     lh.writeUInt32LE(0x04034b50, 0);
     lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(e.deflate ? 8 : 0, 8);
     lh.writeUInt32LE(crc32(e.data), 14);
-    lh.writeUInt32LE(e.data.length, 18);
+    lh.writeUInt32LE(packed.length, 18);
     lh.writeUInt32LE(e.data.length, 22);
     lh.writeUInt16LE(name.length, 26);
-    local.push(lh, name, e.data);
+    local.push(lh, name, packed);
 
     const size = opts.zip64 ? 0xffffffff : (e.declaredSize ?? e.data.length);
     const ch = Buffer.alloc(46);
     ch.writeUInt32LE(0x02014b50, 0);
     ch.writeUInt16LE(20, 4);
     ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(e.deflate ? 8 : 0, 10);
     ch.writeUInt32LE(crc32(e.data), 16);
-    ch.writeUInt32LE(opts.zip64 ? 0xffffffff : e.data.length, 20);
+    ch.writeUInt32LE(opts.zip64 ? 0xffffffff : packed.length, 20);
     ch.writeUInt32LE(size, 24);
     ch.writeUInt16LE(name.length, 28);
     ch.writeUInt32LE(offset, 42);
     central.push(ch, name);
-    offset += 30 + name.length + e.data.length;
+    offset += 30 + name.length + packed.length;
   }
   const cd = Buffer.concat(central);
   const end = Buffer.alloc(22);

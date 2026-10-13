@@ -118,8 +118,9 @@ describe("parseMasterWorkbook — hostile input is refused, not parsed", () => {
     expect(wb.problems.map((p) => p.code)).toContain("SHEET_MISSING");
   });
 
-  it("refuses a zip that declares 100 MB from a tiny file before inflating anything", () => {
-    const bomb = makeZip([{ name: "xl/worksheets/sheet1.xml", data: Buffer.from("<x/>"), declaredSize: 25 * 1024 * 1024 }]);
+  it("refuses a real zip bomb whose directory lies about its size", () => {
+    const bomb = makeZip([{ name: "xl/worksheets/sheet1.xml", data: Buffer.alloc(40 * 1024 * 1024), declaredSize: 100, deflate: true }]);
+    expect(bomb.length).toBeLessThan(100_000);
     expect(refused(bomb)?.code).toBe(ERROR_CODES.VALIDATION_FAILED);
   });
 });
