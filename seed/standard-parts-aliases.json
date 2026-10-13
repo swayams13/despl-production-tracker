@@ -1,0 +1,66 @@
+{
+  "$comment": "Lean Core M2: maps the Standard Parts Master workbook's labels to tracker codes and enums. Confirm with the Production Head before an apply (decision D16: no new operations). A label that is absent here is reported by the importer, never guessed.",
+  "operations": {
+    "Receipt": "RECEIPT",
+    "MTC Verification / Material Identification": "MTC_VERIFICATION",
+    "Cutting / Blanking": "CUTTING",
+    "Edge Preparation / Beveling": "EDGE_PREP",
+    "Rolling": "ROLLING",
+    "Forming / Pressing / Dishing": "FORMING",
+    "Machining": "MACHINING",
+    "Fit-up": "FIT_UP",
+    "Welding": "WELDING",
+    "Grinding": "GRINDING",
+    "NDT": "NDT",
+    "Surface Preparation / Blasting": "SURFACE_PREP",
+    "Painting / Coating": "PAINTING",
+    "Inspection": "INSPECTION",
+    "Threading": "THREADING",
+    "Tube Expansion": "EXPANSION",
+    "Assembly Check": "ASSEMBLY_CHECK"
+  },
+  "rawForms": {
+    "Plate": "PLATE",
+    "Pipe": "PIPE",
+    "Forging": "FORGING",
+    "Tube": "TUBE",
+    "Assembly (made of other parts)": null,
+    "Standard item (catalogue)": null
+  },
+  "makeBuy": {
+    "Made in-house": "MADE_IN_HOUSE",
+    "Bought + machined in-house": "BOUGHT_MACHINED",
+    "Bought-out": "BOUGHT_OUT",
+    "Bought + fabricated in-house": "BOUGHT_FABRICATED"
+  },
+  "equipment": {
+    "PV": "PV",
+    "HE": "HE",
+    "PV + HE": "BOTH"
+  },
+  "status": {
+    "Draft": "DRAFT",
+    "Reviewed": "REVIEWED",
+    "Approved by Production Head": "APPROVED"
+  },
+  "timeUnit": {
+    "Hours": "HOURS",
+    "Days": "DAYS"
+  },
+  "timeBasis": {
+    "Per piece": "PER_PIECE",
+    "Per job": "PER_JOB",
+    "Per material lot": "PER_MATERIAL_LOT",
+    "Per metre of cut": "PER_METRE_CUT",
+    "Per metre of edge": "PER_METRE_EDGE",
+    "Per metre of weld": "PER_METRE_WELD",
+    "Per joint": "PER_JOINT",
+    "Per hole": "PER_HOLE",
+    "Per tube": "PER_TUBE",
+    "Per kg": "PER_KG"
+  },
+  "linkType": {
+    "Finish-to-Start": "FINISH_TO_START",
+    "Start-to-Start (overlap allowed)": "START_TO_START_WITH_OVERLAP"
+  }
+}
