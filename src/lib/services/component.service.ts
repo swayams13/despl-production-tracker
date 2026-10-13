@@ -1,3 +1,4 @@
+import { effectiveRequiresQc, pickRouteTemplate } from "@/lib/shared/stage-mapping";
 import { withTenant, type Tx } from "@/lib/db";
 import {
   type Actor,
@@ -643,16 +644,25 @@ export async function materializeComponentsFromBomItems(
     },
   });
   // A family-specific route template takes precedence over the generic (familyId null) one
-  // for the same componentTypeId; within a template, the highest-version PUBLISHED row wins.
-  const templateByTypeId = new Map<number, (typeof templates)[number]>();
+  // for the same componentTypeId; among variants the lowest letter with a published version wins
+  // (M1: deterministic until BOM release picks one, J5); within a template, the highest-version
+  // PUBLISHED row wins. See shared/stage-mapping.ts.
+  const templatesByTypeId = new Map<number, (typeof templates)[number][]>();
   for (const t of templates) {
-    const existing = templateByTypeId.get(t.componentTypeId);
-    if (!existing || (existing.familyId == null && t.familyId != null)) templateByTypeId.set(t.componentTypeId, t);
+    const list = templatesByTypeId.get(t.componentTypeId) ?? [];
+    list.push(t);
+    templatesByTypeId.set(t.componentTypeId, list);
+  }
+  const templateByTypeId = new Map<number, (typeof templates)[number]>();
+  for (const [typeId, list] of templatesByTypeId) {
+    const picked = pickRouteTemplate(list);
+    if (picked) templateByTypeId.set(typeId, picked);
   }
 
   // Lean Core L1.1 (D3): requiresQc is copied from OperationRef onto each
   // ComponentOperation at materialisation, so a later edit to the (unversioned)
-  // OperationRef cannot change a running job (invariant 9).
+  // OperationRef cannot change a running job (invariant 9). M1: the route step's
+  // own requiresQc is ANDed in (effectiveRequiresQc) — either level can waive QC.
   const operationIds = [
     ...new Set([...templateByTypeId.values()].flatMap((t) => t.versions[0]?.steps.map((st) => st.operationId) ?? [])),
   ];
@@ -699,7 +709,7 @@ export async function materializeComponentsFromBomItems(
             seq: step.seq,
             operationId: step.operationId,
             status: OperationStatus.NOT_STARTED,
-            requiresQc: requiresQcByOperationId.get(step.operationId) ?? true,
+            requiresQc: effectiveRequiresQc(step.requiresQc, requiresQcByOperationId.get(step.operationId) ?? true),
             jobId,
           })),
         });

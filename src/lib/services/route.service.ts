@@ -33,8 +33,9 @@ export async function createOrReviseRouteTemplate(
   actor: Actor,
   input: CreateOrReviseRouteTemplateInput,
 ): Promise<RouteTemplateVersion> {
-  const { componentTypeId, familyId, name, printedRoute, steps } =
+  const { componentTypeId, familyId, name, printedRoute, steps, variant: inputVariant } =
     createOrReviseRouteTemplateSchema.parse(input);
+  const variant = inputVariant ?? "A";
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
@@ -101,7 +102,7 @@ export async function createOrReviseRouteTemplate(
     // type does not accept null cleanly for a nullable compound-unique
     // field — a plain findFirst on the same columns always works instead.
     const existingRoute = await tx.routeTemplate.findFirst({
-      where: { tenantId: actor.tenantId, componentTypeId, familyId },
+      where: { tenantId: actor.tenantId, componentTypeId, familyId, variant },
     });
 
     return audited(tx, actor, async () => {
@@ -116,7 +117,7 @@ export async function createOrReviseRouteTemplate(
         newVersion = (max._max.version ?? 0) + 1;
       } else {
         const created = await tx.routeTemplate.create({
-          data: { tenantId: actor.tenantId, componentTypeId, familyId, name },
+          data: { tenantId: actor.tenantId, componentTypeId, familyId, name, variant },
         });
         routeId = created.id;
         newVersion = 1;
