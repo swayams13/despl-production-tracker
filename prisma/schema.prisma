@@ -267,6 +267,12 @@ enum DelayReviewStatus {
   DISPUTED
 }
 
+/// L1.2f: the D2 HARD rule a rule NCR was raised under (no rejection behind it).
+enum NcrRuleCode {
+  H5
+  H6
+}
+
 enum NcrDisposition {
   USE_AS_IS
   REPAIR
@@ -476,6 +482,8 @@ model User {
   ncrsDispositioned              Ncr[]                         @relation("NcrDispositionedBy")
   ncrsReworkOwned                Ncr[]                         @relation("NcrReworkOwner")
   ncrsClosed                     Ncr[]                         @relation("NcrClosedBy")
+  ncrsRaised                     Ncr[]                         @relation("NcrRaisedBy")
+  ncrConcessionsApproved         Ncr[]                         @relation("NcrConcessionApprovedBy")
   recordedDftReadings            DftReading[]
   dispatchBatchesApproved        DispatchBatch[]               @relation("DispatchBatchReleaseApprovedBy")
   createdPackages                Package[]
@@ -2010,6 +2018,7 @@ model ComponentOperation {
   job               Job                           @relation(fields: [jobId], references: [id], onDelete: Cascade)
   tenant            Organization                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rejections        ComponentOperationRejection[]
+  ruleNcrs          Ncr[]
   paintRecord       PaintRecord?
   dftReadings       DftReading[]
 
@@ -2469,6 +2478,7 @@ model AssemblyStep {
   job               Job                     @relation(fields: [jobId], references: [id], onDelete: Cascade)
   tenant            Organization            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   rejections        AssemblyStepRejection[]
+  ruleNcrs          Ncr[]
 
   @@unique([unitId, seq])
   @@index([unitId])
@@ -2546,8 +2556,25 @@ model Ncr {
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
   tenantId                      Int             @default(0) @map("tenant_id")
+  /// L1.2f rule NCR (H5/H6): the refused item instead of a rejection. Exactly
+  /// one of the two rejection ids and these two targets is set (CHECK
+  /// ncr_exactly_one_source); ruleCode, raisedBy and raisedAt come with a target.
+  targetAssemblyStepId          Int?            @map("target_assembly_step_id")
+  targetComponentOperationId    Int?            @map("target_component_operation_id")
+  ruleCode                      NcrRuleCode?    @map("rule_code")
+  /// "Accept per code exception": the clause relied on (required with a concession on a rule NCR).
+  codeClause                    String?         @map("code_clause")
+  /// Decision 1 (14 Oct): the Production Head who accepted it; QC head ratifies.
+  concessionApprovedById        Int?            @map("concession_approved_by_id")
+  raisedBy                      Int?            @map("raised_by")
+  /// SERVER CLOCK ONLY (invariant #1)
+  raisedAt                      DateTime?       @map("raised_at")
 
   componentOperationRejection ComponentOperationRejection? @relation(fields: [componentOperationRejectionId], references: [id], onDelete: Cascade)
+  targetAssemblyStep          AssemblyStep?                @relation(fields: [targetAssemblyStepId], references: [id], onDelete: Cascade)
+  targetComponentOperation    ComponentOperation?          @relation(fields: [targetComponentOperationId], references: [id], onDelete: Cascade)
+  raisedByUser                User?                        @relation("NcrRaisedBy", fields: [raisedBy], references: [id], onDelete: Restrict)
+  concessionApprovedBy        User?                        @relation("NcrConcessionApprovedBy", fields: [concessionApprovedById], references: [id], onDelete: Restrict)
   assemblyStepRejection       AssemblyStepRejection?       @relation(fields: [assemblyStepRejectionId], references: [id], onDelete: Cascade)
   dispositionedByUser         User?                        @relation("NcrDispositionedBy", fields: [dispositionedBy], references: [id])
   reworkOwner                 User?                        @relation("NcrReworkOwner", fields: [reworkOwnerId], references: [id])
@@ -2558,6 +2585,10 @@ model Ncr {
   @@index([status])
   @@index([jobId])
   @@index([tenantId])
+  @@index([targetAssemblyStepId])
+  @@index([targetComponentOperationId])
+  @@index([raisedBy])
+  @@index([concessionApprovedById])
   @@map("ncrs")
 }
 
