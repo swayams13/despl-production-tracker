@@ -16,14 +16,17 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("@/lib/auth/session", () => ({ readSession: async () => null }));
 vi.mock("@/lib/authz", () => ({ requireActor: vi.fn(async () => ({ userId: 9, tenantId: 1, clientId: null, roles: ["QC"] })) }));
 vi.mock("@/lib/services/work.service", () => ({ recordWork: vi.fn(), inspect: vi.fn() }));
+vi.mock("@/lib/services/ncr.service", () => ({ raiseRuleNcr: vi.fn() }));
 
 const svc = await import("@/lib/services/work.service");
-const { recordWorkAction, inspectAction } = await import("./work");
+const ncrSvc = await import("@/lib/services/ncr.service");
+const { recordWorkAction, inspectAction, raiseRuleNcrAction } = await import("./work");
 const { AppError } = await import("@/lib/shared/errors");
 const { ZodError } = await import("zod");
 
 const rw = { jobId: 1, action: "START" as const, items: [{ kind: "ASSEMBLY_STEP" as const, id: 1 }] };
 const ins = { kind: "ASSEMBLY_STEP" as const, targetId: 1, result: "ACCEPT" as const };
+const raise = { kind: "ASSEMBLY_STEP" as const, targetId: 1, rule: "H5" as const };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -35,10 +38,12 @@ describe("switch off: FEATURE_FROZEN before any service", () => {
   it.each([
     ["recordWorkAction", () => recordWorkAction(rw)],
     ["inspectAction", () => inspectAction(ins)],
+    ["raiseRuleNcrAction", () => raiseRuleNcrAction(raise)],
   ])("%s", async (_n, call) => {
     expect(await call()).toMatchObject({ ok: false, code: ERROR_CODES.FEATURE_FROZEN });
     expect(svc.recordWork).not.toHaveBeenCalled();
     expect(svc.inspect).not.toHaveBeenCalled();
+    expect(ncrSvc.raiseRuleNcr).not.toHaveBeenCalled();
   });
 });
 
@@ -59,6 +64,12 @@ describe("switch on", () => {
     vi.mocked(svc.inspect).mockResolvedValue(out);
     expect(await inspectAction(ins)).toEqual({ ok: true, result: out });
     expect(svc.inspect).toHaveBeenCalledWith(expect.objectContaining({ userId: 9 }), ins);
+  });
+
+  it("raiseRuleNcrAction calls the service as the session actor and returns the NCR id", async () => {
+    vi.mocked(ncrSvc.raiseRuleNcr).mockResolvedValue({ id: 42 } as never);
+    expect(await raiseRuleNcrAction(raise)).toEqual({ ok: true, result: { ncrId: 42 } });
+    expect(ncrSvc.raiseRuleNcr).toHaveBeenCalledWith(expect.objectContaining({ userId: 9 }), raise);
   });
 
   it("a service refusal comes back as its stable code", async () => {

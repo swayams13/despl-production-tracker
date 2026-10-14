@@ -2,9 +2,10 @@
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
 import * as svc from "@/lib/services/work.service";
+import { raiseRuleNcr } from "@/lib/services/ncr.service";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { FEATURES } from "@/lib/shared/flags";
-import type { InspectInput, RecordWorkInput } from "@/lib/shared/schemas";
+import type { InspectInput, RaiseRuleNcrInput, RecordWorkInput } from "@/lib/shared/schemas";
 import { toActionError, type ActionResult } from "./_action";
 
 /**
@@ -33,4 +34,9 @@ export async function recordWorkAction(input: RecordWorkInput): Promise<WithResu
 
 export async function inspectAction(input: InspectInput): Promise<WithResult<svc.InspectResult>> {
   return run(async () => svc.inspect(await requireActor(), input));
+}
+
+/** L1.2f: QC raises the NCR an H5/H6 refusal routes to. */
+export async function raiseRuleNcrAction(input: RaiseRuleNcrInput): Promise<WithResult<{ ncrId: number }>> {
+  return run(async () => ({ ncrId: (await raiseRuleNcr(await requireActor(), input)).id }));
 }

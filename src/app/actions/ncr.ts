@@ -21,6 +21,8 @@ export async function dispositionNcrAction(
     notes?: string;
     reworkOwnerId?: number;
     reworkDueDate?: Date;
+    /** L1.2f: required for a CONCESSION on an H5/H6 rule NCR. */
+    codeClause?: string;
   },
 ): Promise<ActionResult> {
   try {
