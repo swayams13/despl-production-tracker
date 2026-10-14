@@ -361,6 +361,7 @@ model Organization {
   materialIdentifications      MaterialIdentification[]
   itemTests                    ItemTest[]
   sequenceOverrides            SequenceOverride[]
+  workRequests                 WorkRequest[]
   // AUD-080: back-relations for the tenant_id columns added to the nine
   // job_id-carrying tables H1/AUD-001 omitted (see
   // prisma/migrations/20260909140000_aud080_tenant_id_add_column).
@@ -443,47 +444,49 @@ model User {
   /// Lean Core L1.1: UI language. Read by the L2.12 dictionary only.
   locale             Locale          @default(en)
 
-  tenant                       Organization                  @relation(fields: [tenantId], references: [id])
-  client                       Client?                       @relation(fields: [clientId], references: [id])
-  roles                        UserRole[]
-  departments                  UserDepartment[]
-  assignedPlans                ProcessPlan[]
-  performedComponentOperations ComponentOperation[]
-  performedAssemblySteps       AssemblyStep[]
-  procurementEvents            ProcurementEvent[]
-  stockTxns                    StockTxn[]
-  createdScheduleRuns          ScheduleRun[]
-  submittedProcessPlans        ProcessPlan[]                 @relation("ProcessPlanSubmittedBy")
-  verifiedProcessPlans         ProcessPlan[]                 @relation("ProcessPlanVerifiedBy")
-  submittedComponentOps        ComponentOperation[]          @relation("ComponentOperationSubmittedBy")
-  verifiedComponentOps         ComponentOperation[]          @relation("ComponentOperationVerifiedBy")
-  rejectedComponentOps         ComponentOperationRejection[]
-  loggedWeldJoints             WeldJoint[]
-  loggedWeldLogs               WeldLog[]
-  submittedAssemblySteps       AssemblyStep[]                @relation("AssemblyStepSubmittedBy")
-  verifiedAssemblySteps        AssemblyStep[]                @relation("AssemblyStepVerifiedBy")
-  rejectedAssemblySteps        AssemblyStepRejection[]
-  clearedQcpExecutions         QcpExecution[]                @relation("QcpExecutionClearedBy")
-  waiverApprovedQcpExecutions  QcpExecution[]                @relation("QcpExecutionWaiverApprovedBy")
-  filedDelayReasons            DelayReason[]                 @relation("DelayReasonFiledBy")
-  reviewedDelayReasons         DelayReason[]                 @relation("DelayReasonReviewedBy")
-  publishedSnapshots           ProgressSnapshot[]            @relation("ProgressSnapshotPublishedBy")
-  verifiedSnapshots            ProgressSnapshot[]            @relation("ProgressSnapshotVerifiedBy")
-  createdBomRevisions          BomRevision[]
-  recordedNdtResults           NdtResult[]
-  publishedTemplateVersions    ProcessTemplateVersion[]
-  ncrsDispositioned            Ncr[]                         @relation("NcrDispositionedBy")
-  ncrsReworkOwned              Ncr[]                         @relation("NcrReworkOwner")
-  ncrsClosed                   Ncr[]                         @relation("NcrClosedBy")
-  recordedDftReadings          DftReading[]
-  dispatchBatchesApproved      DispatchBatch[]               @relation("DispatchBatchReleaseApprovedBy")
-  createdPackages              Package[]
-  passwordResetRequestsAsTarget    PendingPasswordReset[]     @relation("PendingPasswordResetTarget")
-  passwordResetRequestsRequested   PendingPasswordReset[]     @relation("PendingPasswordResetRequester")
-  passwordResetRequestsApproved    PendingPasswordReset[]     @relation("PendingPasswordResetApprover")
-  sequenceOverrides                SequenceOverride[]
-  preparedPartFamilies             PartFamily[]               @relation("PartFamilyPreparedBy")
-  approvedPartFamilies             PartFamily[]               @relation("PartFamilyApprovedBy")
+  tenant                         Organization                  @relation(fields: [tenantId], references: [id])
+  client                         Client?                       @relation(fields: [clientId], references: [id])
+  roles                          UserRole[]
+  departments                    UserDepartment[]
+  assignedPlans                  ProcessPlan[]
+  performedComponentOperations   ComponentOperation[]
+  performedAssemblySteps         AssemblyStep[]
+  procurementEvents              ProcurementEvent[]
+  stockTxns                      StockTxn[]
+  createdScheduleRuns            ScheduleRun[]
+  submittedProcessPlans          ProcessPlan[]                 @relation("ProcessPlanSubmittedBy")
+  verifiedProcessPlans           ProcessPlan[]                 @relation("ProcessPlanVerifiedBy")
+  submittedComponentOps          ComponentOperation[]          @relation("ComponentOperationSubmittedBy")
+  verifiedComponentOps           ComponentOperation[]          @relation("ComponentOperationVerifiedBy")
+  rejectedComponentOps           ComponentOperationRejection[]
+  loggedWeldJoints               WeldJoint[]
+  loggedWeldLogs                 WeldLog[]
+  submittedAssemblySteps         AssemblyStep[]                @relation("AssemblyStepSubmittedBy")
+  verifiedAssemblySteps          AssemblyStep[]                @relation("AssemblyStepVerifiedBy")
+  rejectedAssemblySteps          AssemblyStepRejection[]
+  clearedQcpExecutions           QcpExecution[]                @relation("QcpExecutionClearedBy")
+  waiverApprovedQcpExecutions    QcpExecution[]                @relation("QcpExecutionWaiverApprovedBy")
+  filedDelayReasons              DelayReason[]                 @relation("DelayReasonFiledBy")
+  reviewedDelayReasons           DelayReason[]                 @relation("DelayReasonReviewedBy")
+  publishedSnapshots             ProgressSnapshot[]            @relation("ProgressSnapshotPublishedBy")
+  verifiedSnapshots              ProgressSnapshot[]            @relation("ProgressSnapshotVerifiedBy")
+  createdBomRevisions            BomRevision[]
+  recordedNdtResults             NdtResult[]
+  publishedTemplateVersions      ProcessTemplateVersion[]
+  ncrsDispositioned              Ncr[]                         @relation("NcrDispositionedBy")
+  ncrsReworkOwned                Ncr[]                         @relation("NcrReworkOwner")
+  ncrsClosed                     Ncr[]                         @relation("NcrClosedBy")
+  recordedDftReadings            DftReading[]
+  dispatchBatchesApproved        DispatchBatch[]               @relation("DispatchBatchReleaseApprovedBy")
+  createdPackages                Package[]
+  passwordResetRequestsAsTarget  PendingPasswordReset[]        @relation("PendingPasswordResetTarget")
+  passwordResetRequestsRequested PendingPasswordReset[]        @relation("PendingPasswordResetRequester")
+  passwordResetRequestsApproved  PendingPasswordReset[]        @relation("PendingPasswordResetApprover")
+  sequenceOverrides              SequenceOverride[]
+  workRequests                   WorkRequest[]
+  atRiskDrawingReleases          DrawingRevision[]             @relation("DrawingRevisionAtRiskReleasedBy")
+  preparedPartFamilies           PartFamily[]                  @relation("PartFamilyPreparedBy")
+  approvedPartFamilies           PartFamily[]                  @relation("PartFamilyApprovedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -1059,6 +1062,7 @@ model Job {
   materialIdentifications      MaterialIdentification[]
   itemTests                    ItemTest[]
   sequenceOverrides            SequenceOverride[]
+  workRequests                 WorkRequest[]
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
@@ -1179,36 +1183,36 @@ model Package {
 /// template version and then editable. `included = false` = this client skips
 /// it. `templateProcessId = null` = added for this job only.
 model JobProcess {
-  id                      Int     @id @default(autoincrement())
-  jobId                   Int     @map("job_id")
-  templateProcessId       Int?    @map("template_process_id")
+  id                      Int          @id @default(autoincrement())
+  jobId                   Int          @map("job_id")
+  templateProcessId       Int?         @map("template_process_id")
   seq                     Int
   code                    String
   name                    String
-  departmentId            Int     @map("department_id")
+  departmentId            Int          @map("department_id")
   /// Nullable + `provisional`: see TemplateProcess. A job pinned to a
   /// provisional template materialises provisional JobProcess rows too —
   /// `lib/schedule/` must refuse to plan around them, not guess.
-  durationMinDays         Int?    @map("duration_min_days")
-  durationMaxDays         Int?    @map("duration_max_days")
-  envelopeFinishByMinDays Int?    @map("envelope_finish_by_min_days")
-  envelopeFinishByMaxDays Int?    @map("envelope_finish_by_max_days")
-  envelopeStartByMinDays  Int?    @map("envelope_start_by_min_days")
-  envelopeStartByMaxDays  Int?    @map("envelope_start_by_max_days")
-  workOrderStages         Int[]   @map("work_order_stages")
-  included                Boolean @default(true)
-  durationOverrideDays    Int?    @map("duration_override_days")
-  overrideReason          String? @map("override_reason")
-  provisional             Boolean @default(false)
+  durationMinDays         Int?         @map("duration_min_days")
+  durationMaxDays         Int?         @map("duration_max_days")
+  envelopeFinishByMinDays Int?         @map("envelope_finish_by_min_days")
+  envelopeFinishByMaxDays Int?         @map("envelope_finish_by_max_days")
+  envelopeStartByMinDays  Int?         @map("envelope_start_by_min_days")
+  envelopeStartByMaxDays  Int?         @map("envelope_start_by_max_days")
+  workOrderStages         Int[]        @map("work_order_stages")
+  included                Boolean      @default(true)
+  durationOverrideDays    Int?         @map("duration_override_days")
+  overrideReason          String?      @map("override_reason")
+  provisional             Boolean      @default(false)
   /// Lean Core L1.1: copied from TemplateProcess at intake.
   grain                   ProcessGrain @default(UNIT)
   /// Lean Core L1.1 (D3): copied from TemplateProcess at intake.
-  requiresQc              Boolean @default(true) @map("requires_qc")
+  requiresQc              Boolean      @default(true) @map("requires_qc")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId                Int     @default(0) @map("tenant_id")
+  tenantId                Int          @default(0) @map("tenant_id")
 
   job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
   tenant             Organization     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1243,10 +1247,10 @@ model JobProcessEdge {
   /// any constraint check runs — 0 is never actually persisted.
   tenantId      Int             @default(0) @map("tenant_id")
 
-  process     JobProcess   @relation("JobEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
-  predecessor JobProcess   @relation("JobEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
-  job         Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  tenant      Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  process           JobProcess         @relation("JobEdgeProcess", fields: [processId], references: [id], onDelete: Cascade)
+  predecessor       JobProcess         @relation("JobEdgePredecessor", fields: [predecessorId], references: [id], onDelete: Cascade)
+  job               Job                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant            Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   sequenceOverrides SequenceOverride[]
 
   @@unique([processId, predecessorId])
@@ -1536,23 +1540,25 @@ model ProcurementEvent {
 /// grant (migration l11), same as audit_log; the Production Head's
 /// acknowledgement is a separate table (L2.5), never an UPDATE here.
 model SequenceOverride {
-  id         Int                        @id @default(autoincrement())
+  id                  Int                        @id @default(autoincrement())
   /// H1 job-level RLS backstop.
-  jobId      Int                        @map("job_id")
+  jobId               Int                        @map("job_id")
   /// AUD-001: 0 is a placeholder; the aud001 trigger overwrites it from job_id.
-  tenantId   Int                        @default(0) @map("tenant_id")
-  targetKind SequenceOverrideTargetKind @map("target_kind")
+  tenantId            Int                        @default(0) @map("tenant_id")
+  targetKind          SequenceOverrideTargetKind @map("target_kind")
   /// ProcessPlan, ComponentOperation or AssemblyStep id, per targetKind.
-  targetId   Int                        @map("target_id")
-  unitId     Int?                       @map("unit_id")
+  targetId            Int                        @map("target_id")
+  unitId              Int?                       @map("unit_id")
   /// The SOFT edge that was overridden; null when the order that was broken is
   /// not a process edge (e.g. assembly-step order, D2).
-  edgeId     Int?                       @map("edge_id")
+  edgeId              Int?                       @map("edge_id")
   /// Free text for now; becomes a reference table once D2 settles the list.
-  category   String
-  note       String?
-  createdBy  Int                        @map("created_by")
-  createdAt  DateTime                   @default(now()) @map("created_at")
+  category            String
+  note                String?
+  /// L1.2: the earlier item (same targetKind) the SOFT override skipped.
+  predecessorTargetId Int?                       @map("predecessor_target_id")
+  createdBy           Int                        @map("created_by")
+  createdAt           DateTime                   @default(now()) @map("created_at")
 
   job     Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
   tenant  Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1565,6 +1571,28 @@ model SequenceOverride {
   @@index([targetKind, targetId])
   @@index([tenantId, createdAt])
   @@map("sequence_overrides")
+}
+
+/// Lean Core L1.2: recordWork idempotency. One row per client requestId; a
+/// replay returns `response` and writes nothing. Append-only for the app role
+/// (migration l12_floor_facts), RLS like sequence_overrides.
+model WorkRequest {
+  id        Int      @id @default(autoincrement())
+  /// AUD-001: 0 is a placeholder; the aud001 trigger overwrites it from job_id.
+  tenantId  Int      @default(0) @map("tenant_id")
+  jobId     Int      @map("job_id")
+  requestId String   @map("request_id") @db.Uuid
+  actorId   Int      @map("actor_id")
+  response  Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  job    Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  actor  User         @relation(fields: [actorId], references: [id])
+
+  @@unique([tenantId, requestId])
+  @@index([jobId])
+  @@map("work_requests")
 }
 
 /// Real traceability: heat number + MTC. Replaces the misused
@@ -1789,27 +1817,29 @@ model RouteStepFamilySeq {
 /// edits; that is derived (approved_by_id = prepared_by_id) and flagged in the
 /// audit trail and the detail screen, not forbidden (M3, 13 Oct).
 model PartFamily {
-  id              Int              @id @default(autoincrement())
-  tenantId        Int              @map("tenant_id")
-  componentTypeId Int              @unique @map("component_type_id")
-  equipmentScope  EquipmentScope   @default(BOTH) @map("equipment_scope")
-  assemblyGroup   String?          @map("assembly_group")
-  makeBuy         PartMakeBuy?     @map("make_buy")
+  id                Int              @id @default(autoincrement())
+  tenantId          Int              @map("tenant_id")
+  componentTypeId   Int              @unique @map("component_type_id")
+  equipmentScope    EquipmentScope   @default(BOTH) @map("equipment_scope")
+  assemblyGroup     String?          @map("assembly_group")
+  makeBuy           PartMakeBuy?     @map("make_buy")
   /// Raw-material form (a RAW_FORM component type). Null for assemblies and
   /// catalogue items, and for forms not yet in the vocabulary (ELB-01).
-  rawFormId       Int?             @map("raw_form_id")
-  typicalMoc      String?          @map("typical_moc")
+  rawFormId         Int?             @map("raw_form_id")
+  typicalMoc        String?          @map("typical_moc")
   /// List of dimension keys the planner enters per job. Free text in the
   /// workbook; M2 decides how to derive keys.
-  dimensionKeys   Json?            @map("dimension_keys")
-  weightBasis     String?          @map("weight_basis")
-  isSpare         Boolean          @default(false) @map("is_spare")
-  routeSource     String?          @map("route_source")
-  status          MasterDataStatus @default(DRAFT)
-  preparedById    Int?             @map("prepared_by_id")
-  approvedById    Int?             @map("approved_by_id")
-  approvedAt      DateTime?        @map("approved_at")
-  remarks         String?
+  dimensionKeys     Json?            @map("dimension_keys")
+  weightBasis       String?          @map("weight_basis")
+  isSpare           Boolean          @default(false) @map("is_spare")
+  /// L1.2 (D2, H2/H3): copied onto Component at materialisation.
+  pressureRetaining Boolean          @default(false) @map("pressure_retaining")
+  routeSource       String?          @map("route_source")
+  status            MasterDataStatus @default(DRAFT)
+  preparedById      Int?             @map("prepared_by_id")
+  approvedById      Int?             @map("approved_by_id")
+  approvedAt        DateTime?        @map("approved_at")
+  remarks           String?
 
   tenant        Organization      @relation(fields: [tenantId], references: [id])
   componentType ComponentTypeRef  @relation("PartFamilyType", fields: [componentTypeId], references: [id], onDelete: Cascade)
@@ -1846,14 +1876,14 @@ model MaterialGrade {
 /// nozzles, another wants 8" representable: one BOM line spawns N tagged
 /// component instances, each with its own ordered operation route.
 model Component {
-  id                 Int    @id @default(autoincrement())
-  equipmentId        Int    @map("equipment_id")
-  unitId             Int?   @map("unit_id")
-  bomItemId          Int?   @map("bom_item_id")
+  id                 Int     @id @default(autoincrement())
+  equipmentId        Int     @map("equipment_id")
+  unitId             Int?    @map("unit_id")
+  bomItemId          Int?    @map("bom_item_id")
   /// N1, N2, M1, Shell-1, Top Head…
   tag                String
-  componentTypeId    Int    @map("component_type_id")
-  routeVersionId     Int?   @map("route_version_id")
+  componentTypeId    Int     @map("component_type_id")
+  routeVersionId     Int?    @map("route_version_id")
   /// F7b (Phase 1, pulled forward from Phase 4 — see
   /// docs/ADR-product-family-agnostic-platform-v1.md's schema-shape review,
   /// approved 26 Aug 2026). Self-referencing, nullable: schema shape only,
@@ -1862,7 +1892,7 @@ model Component {
   /// instead of collapsed into one fabrication unit — the gap F4 names.
   /// Added while Component still has zero real rows so this never needs a
   /// backfill migration later.
-  parentComponentId  Int?   @map("parent_component_id")
+  parentComponentId  Int?    @map("parent_component_id")
   /// B9, Phase 4: which `AssemblyDrawing` gates this component's CUTTING
   /// start. Nullable, MANUALLY set by whoever authors the component's
   /// route/BOM link — not auto-derived (the schema has no rule for e.g.
@@ -1870,19 +1900,22 @@ model Component {
   /// `WeldJoint.componentId` being set by whoever logs the joint. A null
   /// value is a no-op (SEAM): components with no drawing link are
   /// completely unaffected by the CUTTING gate.
-  governingDrawingId Int?   @map("governing_drawing_id")
+  governingDrawingId Int?    @map("governing_drawing_id")
   /// B9, Phase 4: which `DrawingRevision` this component was actually built
   /// to. SERVER-STAMPED (invariant #1) inside the same transaction
   /// `startComponentOperation` succeeds in for a CUTTING operation — never
   /// client-supplied.
-  builtToRevisionId  Int?   @map("built_to_revision_id")
+  builtToRevisionId  Int?    @map("built_to_revision_id")
+  /// L1.2 (D2, H2/H3): copied from PartFamily at materialisation; false = the
+  /// material-issue, heat-number and drawing HARD rules do not apply.
+  pressureRetaining  Boolean @default(false) @map("pressure_retaining")
   /// H1 job-level RLS backstop: denormalized from equipment.jobId.
-  jobId              Int    @map("job_id")
+  jobId              Int     @map("job_id")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId           Int    @default(0) @map("tenant_id")
+  tenantId           Int     @default(0) @map("tenant_id")
 
   equipment               Equipment                @relation(fields: [equipmentId], references: [id])
   unit                    Unit?                    @relation(fields: [unitId], references: [id])
@@ -2290,6 +2323,16 @@ enum AssemblyStepKind {
   INSPECTION
 }
 
+/// L1.2 (D2): what an assembly step does, for the HARD rules H1/H4–H6.
+enum AssemblyStepRole {
+  FIT_UP
+  WELD
+  NDT
+  HEAT_TREATMENT
+  FINAL_PWHT
+  HYDRO
+}
+
 model AssemblyTemplate {
   id       Int    @id @default(autoincrement())
   tenantId Int    @map("tenant_id")
@@ -2328,32 +2371,36 @@ model AssemblyTemplateVersion {
 /// lines, and this schema keeps them as separate rows/steps, matching the
 /// spec document's own row-per-checkpoint layout.
 model AssemblyTemplateStep {
-  id                  Int              @id @default(autoincrement())
-  versionId           Int              @map("version_id")
+  id                  Int               @id @default(autoincrement())
+  versionId           Int               @map("version_id")
   seq                 Int
-  groupCode           String           @map("group_code")
-  groupName           String           @map("group_name")
+  groupCode           String            @map("group_code")
+  groupName           String            @map("group_name")
   /// Printed QAP reference, e.g. "4.5" — deliberately not unique (same
   /// discipline as QcpItem.srNo: several rows share one sr no).
-  srNo                String           @map("sr_no")
+  srNo                String            @map("sr_no")
   activity            String
   kind                AssemblyStepKind
-  defaultDepartmentId Int              @map("default_department_id")
+  defaultDepartmentId Int               @map("default_department_id")
   /// Resolves to QcpItem.srNo at materialisation — match-by-code, never by
   /// id, the same discipline cloneQcpTemplate already uses so it survives
   /// QCP renumbering across template versions.
-  qcpSrNo             String?          @map("qcp_sr_no")
+  qcpSrNo             String?           @map("qcp_sr_no")
   /// Printed weld-map reference ("LS-1", "CS-2", ...), set only on the six
   /// weld groups (E/G/H/J/K/L per spec §3). Not a WeldJoint FK — the actual
   /// joint doesn't exist until the floor logs it against this step.
-  jointRef            String?          @map("joint_ref")
+  jointRef            String?           @map("joint_ref")
   /// Which of the 36 lead-time processes (`JobProcess.code`, as a number)
   /// this assembly step rolls up into — same mapping OperationRef carries
   /// for fabrication (Phase 3, addendum §3). Null where the step has no
   /// 1:1 spine process (author it on the template, never in code).
-  leadTimeProcessSeq  Int?             @map("lead_time_process_seq")
+  leadTimeProcessSeq  Int?              @map("lead_time_process_seq")
   /// Lean Core L1.1 (D3): see OperationRef.requiresQc.
-  requiresQc          Boolean          @default(true) @map("requires_qc")
+  requiresQc          Boolean           @default(true) @map("requires_qc")
+  /// L1.2 (D2): copied onto AssemblyStep at intake. Published v1 rows stay
+  /// null/false (invariant 9); a fresh database takes them from the seed JSON.
+  role                AssemblyStepRole?
+  pressurePart        Boolean           @default(false) @map("pressure_part")
 
   version           AssemblyTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment Department              @relation(fields: [defaultDepartmentId], references: [id])
@@ -2371,39 +2418,45 @@ model AssemblyTemplateStep {
 /// same way ProcessPlan/ComponentOperation are — reuses OperationStatus and
 /// F8's generic assertStateTransition (see assembly.service.ts).
 model AssemblyStep {
-  id                  Int             @id @default(autoincrement())
-  unitId              Int             @map("unit_id")
-  templateStepId      Int             @map("template_step_id")
+  id                  Int               @id @default(autoincrement())
+  unitId              Int               @map("unit_id")
+  templateStepId      Int               @map("template_step_id")
   seq                 Int
-  status              OperationStatus @default(NOT_STARTED)
+  status              OperationStatus   @default(NOT_STARTED)
   /// SERVER CLOCK ONLY (invariant #1)
-  startedAt           DateTime?       @map("started_at")
+  startedAt           DateTime?         @map("started_at")
   /// SERVER CLOCK ONLY (invariant #1)
-  finishedAt          DateTime?       @map("finished_at")
+  finishedAt          DateTime?         @map("finished_at")
   /// Lean Core L1.1: client-reported time (invariant 1 revised); null = use
   /// startedAt/finishedAt. Written by recordWork (L1.2) only.
-  reportedStartAt     DateTime?       @map("reported_start_at")
-  reportedFinishAt    DateTime?       @map("reported_finish_at")
+  reportedStartAt     DateTime?         @map("reported_start_at")
+  reportedFinishAt    DateTime?         @map("reported_finish_at")
   /// Lean Core L1.1 (D3): copied at intake; false = Done goes straight to COMPLETE.
-  requiresQc          Boolean         @default(true) @map("requires_qc")
-  performedByWelderId Int?            @map("performed_by_welder_id")
-  performedByUserId   Int?            @map("performed_by_user_id")
-  submittedBy         Int?            @map("submitted_by")
-  verifiedBy          Int?            @map("verified_by")
+  requiresQc          Boolean           @default(true) @map("requires_qc")
+  /// L1.2 (D2): job-level copies of the template step's role / jointRef /
+  /// pressurePart, set at intake (or by the L1.2c backfill). The HARD rules
+  /// read these, never the template.
+  role                AssemblyStepRole?
+  jointRef            String?           @map("joint_ref")
+  pressurePart        Boolean           @default(false) @map("pressure_part")
+  performedByWelderId Int?              @map("performed_by_welder_id")
+  performedByUserId   Int?              @map("performed_by_user_id")
+  submittedBy         Int?              @map("submitted_by")
+  verifiedBy          Int?              @map("verified_by")
   /// Bound as the joint is logged (WORK weld steps only).
-  weldJointId         Int?            @map("weld_joint_id")
+  weldJointId         Int?              @map("weld_joint_id")
   /// Bound at materialisation by qcpSrNo match (INSPECTION steps that map to
   /// a real QcpItem — links the hold/witness points assertNoOpenHoldPoint
   /// already enforces, no change needed there).
-  qcpItemId           Int?            @map("qcp_item_id")
+  qcpItemId           Int?              @map("qcp_item_id")
   remarks             String?
   /// H1 job-level RLS backstop: denormalized from unit.equipment.jobId.
-  jobId               Int             @map("job_id")
+  jobId               Int               @map("job_id")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId            Int             @default(0) @map("tenant_id")
+  tenantId            Int               @default(0) @map("tenant_id")
 
   unit              Unit                    @relation(fields: [unitId], references: [id])
   templateStep      AssemblyTemplateStep    @relation(fields: [templateStepId], references: [id])
@@ -2744,34 +2797,43 @@ model AssemblyDrawing {
 /// `createDrawingRevision`) rather than overwriting it. The current
 /// revision for a drawing is the one with the highest `revisionNo`.
 model DrawingRevision {
-  id                Int           @id @default(autoincrement())
-  assemblyDrawingId Int           @map("assembly_drawing_id")
-  revisionNo        Int           @map("revision_no")
-  status            DrawingStatus @default(DRAFT)
+  id                 Int           @id @default(autoincrement())
+  assemblyDrawingId  Int           @map("assembly_drawing_id")
+  revisionNo         Int           @map("revision_no")
+  status             DrawingStatus @default(DRAFT)
   /// Task review Important: AssemblyDrawing's old approved_date/revised_date
   /// moved here rather than being dropped — the brief's own wording ("moved
   /// onto the revision rows") plus real seed data (e.g. DE0463-001) carrying
   /// both. Set at seed/authoring time; not stamped by the CUTTING gate the
   /// way releasedAt effectively is via createDrawingRevision.
-  approvedAt        DateTime?     @map("approved_at")
-  revisedAt         DateTime?     @map("revised_at")
-  releasedAt        DateTime?     @map("released_at")
-  createdAt         DateTime      @default(now()) @map("created_at")
+  approvedAt         DateTime?     @map("approved_at")
+  revisedAt          DateTime?     @map("revised_at")
+  releasedAt         DateTime?     @map("released_at")
+  /// L1.2 (D2, H3): Production Head's release-at-risk of a not-yet-RELEASED
+  /// revision. First three are all set or all null (CHECK).
+  atRiskReleasedById Int?          @map("at_risk_released_by_id")
+  atRiskReleasedAt   DateTime?     @map("at_risk_released_at")
+  atRiskReason       String?       @map("at_risk_reason")
+  /// Optional client consent reference for an at-risk release.
+  clientConsentRef   String?       @map("client_consent_ref")
+  createdAt          DateTime      @default(now()) @map("created_at")
   /// H1 job-level RLS backstop: denormalized from assemblyDrawing.jobId.
-  jobId             Int           @map("job_id")
+  jobId              Int           @map("job_id")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId          Int           @default(0) @map("tenant_id")
+  tenantId           Int           @default(0) @map("tenant_id")
 
   assemblyDrawing   AssemblyDrawing @relation(fields: [assemblyDrawingId], references: [id], onDelete: Cascade)
   job               Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
   tenant            Organization    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   builtByComponents Component[]     @relation("ComponentBuiltToRevision")
+  atRiskReleasedBy  User?           @relation("DrawingRevisionAtRiskReleasedBy", fields: [atRiskReleasedById], references: [id], onDelete: Restrict)
 
   @@unique([assemblyDrawingId, revisionNo])
   @@index([assemblyDrawingId])
+  @@index([atRiskReleasedById])
   @@index([jobId])
   @@index([tenantId])
   @@map("drawing_revisions")
