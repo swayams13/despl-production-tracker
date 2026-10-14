@@ -299,3 +299,9 @@ DESPL team returned the Standard Parts Master (PV + HE) with the DE0423 GA and S
 **Unit lock** (`pg_advisory_xact_lock`, taken before any row lock, recordWork's order): inspect, `rejectAssemblyStep`, `rejectComponentOperation`, `recordQcpExecution`, `dispositionNcr`.
 **Tests:** 32 DB-gated + 6 pure; mutation-checked (derived guard, preceding-maker check, unit lock).
 **Choices:** `inspectSchema` gained optional `categoryId` / `testTypeId`; a reject files under the given category, else the tenant's `REWORK_QUALITY`, else `OTHER`, else refuses. PROCESS_PLAN inspect delegates to `verifyProcess`/`rejectProcess` (RepeatableRead), so no unit lock on that path (non-derived plans have no mapped items to race). Legacy start also rolls up (needed for IN_PROGRESS). Legacy `verifyProcess` still runs `assertCanComplete`.
+
+## Session — L1.2 review fixes, 14 Oct 2026
+
+**On `lean/L1.2e-inspect-derived-switch` (PR #87), no migration.** `recordWork`: floor-write allowlist (OPERATOR, SUPERVISOR, PRODUCTION_HEAD, ADMIN; PLANNER only on processes 1–11; others FORBIDDEN); a QC-free Done on a step or operation refuses its own open H point, open NCR (`findOpenItemNcrIds`) or missing DFT coats (`findDftShortfall`, extracted from verify); component-op START now runs `assertKitReady` (reverses the L1.2d "choice to confirm"), with parity tests against the legacy start incl. CUTTING with no drawing link; `lockItemRows` locks only this job's resolved ids, `job_id` in each query.
+**Not real as stated:** the foreign-tenant lock — tenant/job RLS on `process_plans` already hid the row (test passes before and after); kept as defence-in-depth.
+`workingHoursBetween` walks back from now, stops past 72 h and returns Infinity after 400 days. `inspect` on an INSPECTION step: makers = every preceding WORK step of the group (same joint where set); none or the inspector among them → `MAKER_CHECKER_VIOLATION`; ACCEPT with any not SUBMITTED/COMPLETE → new `INSPECT_PRECONDITION`.
