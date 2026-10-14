@@ -49,6 +49,8 @@ export const ISSUE_CODES = [
   // State of the tenant's existing master data (set by the service, not the pure rules).
   "PART_CODE_CONFLICT",
   "STATUS_DOWNGRADE",
+  "REVIEW_BY_PREPARER",
+  "REVIEW_AFTER_CHANGE",
   "MATERIAL_LOCKED",
 ] as const;
 export type IssueCode = (typeof ISSUE_CODES)[number];
@@ -110,6 +112,11 @@ export interface VariantDecision {
 }
 
 export interface PartDecision {
+  /**
+   * Set by the service from what the tenant already holds: this import creates the part or changes
+   * its attributes or a route. The loader is then the part's last editor (as in the UI).
+   */
+  contentChanged?: boolean;
   row: number;
   code: string;
   name: string;

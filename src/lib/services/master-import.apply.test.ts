@@ -69,12 +69,12 @@ describe.skipIf(!RUN_DB)("applyMasterImport (DB)", async () => {
       expect(await state(t.tenantId)).toEqual(before);
     });
 
-    it("an Admin may load Draft parts for staging (allowDraft); they are DRAFT with no approver", async () => {
+    it("an Admin may load Draft parts for staging (allowDraft); they are DRAFT with no approver, prepared by the loader", async () => {
       const t = await tenant("admin-draft");
       const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
       expect(r.written.partFamilies.create).toBe(1);
       const pf = await owner.partFamily.findFirstOrThrow({ where: { tenantId: t.tenantId } });
-      expect(pf).toMatchObject({ status: "DRAFT", approvedById: null, approvedAt: null, preparedById: null });
+      expect(pf).toMatchObject({ status: "DRAFT", approvedById: null, approvedAt: null, preparedById: t.user.id });
     });
 
     it("production mode (no allowDraft) loads no Draft part", async () => {
@@ -112,6 +112,216 @@ describe.skipIf(!RUN_DB)("applyMasterImport (DB)", async () => {
       const legacy = await owner.componentTypeRef.findFirstOrThrow({ where: { tenantId: t.tenantId, code: "SHL-01" } });
       expect(legacy).toMatchObject({ kind: "RAW_FORM", name: "Legacy shell" });
       expect(await owner.partFamily.count({ where: { tenantId: t.tenantId } })).toBe(0);
+    });
+  });
+
+  describe("a part that changed under the import (row lock, maker-checker)", () => {
+    const partOf = (tenantId: number) => owner.partFamily.findFirstOrThrow({ where: { tenantId } });
+
+    it("an import that was planned while a part was DRAFT does not overwrite it once it is APPROVED; nothing is written", async () => {
+      const t = await tenant("race");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const draft = await partOf(t.tenantId);
+      const stepsBefore = await owner.routeStep.count({ where: { routeVersion: { route: { tenantId: t.tenantId } } } });
+
+      // Another session approves the part and has not committed yet.
+      let release!: () => void;
+      let locked!: () => void;
+      const held = new Promise<void>((r) => (locked = r));
+      const gate = new Promise<void>((r) => (release = r));
+      const approver = owner.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM part_families WHERE id = ${draft.id} FOR UPDATE`;
+        await tx.partFamily.update({ where: { id: draft.id }, data: { status: "APPROVED", approvedById: t.user.id, approvedAt: new Date() } });
+        locked();
+        await gate;
+      });
+      await held;
+
+      // The importer plans against the committed DRAFT, then queues behind the row lock.
+      const importing = applyMasterImport(t.admin, standardWorkbook({ status: "Draft", time2: "0.9" }), { allowDraft: true });
+      let waiting = false;
+      for (let i = 0; i < 100 && !waiting; i++) {
+        const w = await owner.$queryRaw<Array<{ n: bigint }>>`SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()`;
+        waiting = Number(w[0].n) > 0;
+        if (!waiting) await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(waiting).toBe(true);
+      release();
+      await approver;
+
+      await expect(importing).rejects.toMatchObject({ code: ERROR_CODES.STALE_WRITE, detail: { kind: "PLAN_CHANGED" } });
+      const after = await partOf(t.tenantId);
+      expect(after).toMatchObject({ status: "APPROVED", approvedById: t.user.id });
+      expect(await owner.routeStep.count({ where: { routeVersion: { route: { tenantId: t.tenantId } } } })).toBe(stepsBefore);
+    }, 20_000);
+
+    const reviewedAs = async (t: Awaited<ReturnType<typeof tenant>>, preparedById: number | null, status: "DRAFT" | "REVIEWED" = "DRAFT") => {
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { preparedById, status } });
+      const { dryRunWithDb } = await import("./master-import.service");
+      const preview = await dryRunWithDb(owner, t.tenantId, standardWorkbook({ status: "Reviewed" }), { allowDraft: true, actorId: t.user.id });
+      const applied = await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed" }), { allowDraft: true });
+      return { preview, applied, part: await partOf(t.tenantId) };
+    };
+
+    it("the last editor cannot mark a part reviewed through an import: it loads as Draft, and the preview says so", async () => {
+      const t = await tenant("prep");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const { preview, applied, part } = await reviewedAs(t, t.user.id);
+      expect(preview.issues.map((i) => i.code)).toContain("REVIEW_BY_PREPARER");
+      expect(applied.report.issues.map((i) => i.code)).toContain("REVIEW_BY_PREPARER");
+      expect(part.status).toBe("DRAFT");
+    });
+
+    it("a part last edited by someone else can be loaded as Reviewed (the importer acts as the second person)", async () => {
+      const t = await tenant("other");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const editor = await owner.user.create({
+        data: { tenantId: t.tenantId, email: `ed-${Date.now()}-${Math.random()}@test.local`, username: `ed-${Date.now()}-${Math.random()}`, passwordHash: "x", name: "Ed" },
+      });
+      const { applied, part } = await reviewedAs(t, editor.id);
+      expect(applied.report.issues.map((i) => i.code)).not.toContain("REVIEW_BY_PREPARER");
+      expect(part.status).toBe("REVIEWED");
+    });
+
+    // Option 1 (13 Oct): an import that changes a part is an edit by the loader, as in the UI.
+    const editorOf = async (t: Awaited<ReturnType<typeof tenant>>) =>
+      owner.user.create({
+        data: { tenantId: t.tenantId, email: `ed-${Date.now()}-${Math.random()}@test.local`, username: `ed-${Date.now()}-${Math.random()}`, passwordHash: "x", name: "Ed" },
+      });
+
+    it("an import that changes a REVIEWED part does not carry the review over: Draft, loader is the preparer, preview says so", async () => {
+      const t = await tenant("carry");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const reviewer = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { status: "REVIEWED", preparedById: reviewer.id } });
+      const { dryRunWithDb } = await import("./master-import.service");
+      const changed = standardWorkbook({ status: "Reviewed", routeSource: "Drawing" }); // an attribute, not a route step
+      const preview = await dryRunWithDb(owner, t.tenantId, changed, { allowDraft: true, actorId: t.user.id });
+      expect(preview.issues.map((i) => i.code)).toContain("REVIEW_AFTER_CHANGE");
+      expect(preview.parts[0]).toMatchObject({ status: "DRAFT", outcome: "update" });
+
+      const applied = await applyMasterImport(t.admin, changed, { allowDraft: true });
+      expect(applied.report.issues.map((i) => i.code)).toContain("REVIEW_AFTER_CHANGE");
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "DRAFT", preparedById: t.user.id });
+    });
+
+    it("a route-only change (attributes identical) also resets the review and records the loader", async () => {
+      const t = await tenant("route-only");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const reviewer = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { status: "REVIEWED", preparedById: reviewer.id } });
+      const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed", time2: "1.5" }), { allowDraft: true });
+      expect(r.report.issues.map((i) => i.code)).toContain("REVIEW_AFTER_CHANGE");
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "DRAFT", preparedById: t.user.id });
+    });
+
+    it("a Draft whose only change is a route step is still an edit by the loader", async () => {
+      const t = await tenant("draft-route");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const editor = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { preparedById: editor.id } });
+      const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Draft", time2: "1.5" }), { allowDraft: true });
+      expect(r.written.partFamilies.unchanged).toBe(1); // attributes identical: this is the no-attribute-write path
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "DRAFT", preparedById: t.user.id });
+    });
+
+    it("a status-only move by someone other than the last editor is a review: it keeps the editor as preparer", async () => {
+      const t = await tenant("review-only");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const editor = await editorOf(t);
+      await owner.partFamily.updateMany({ where: { tenantId: t.tenantId }, data: { preparedById: editor.id } });
+      const r = await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed" }), { allowDraft: true });
+      expect(r.report.issues.map((i) => i.code)).not.toContain("REVIEW_AFTER_CHANGE");
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "REVIEWED", preparedById: editor.id });
+    });
+
+    it("a new part loaded as Reviewed stays Reviewed and the loader is recorded as its preparer", async () => {
+      const t = await tenant("new-reviewed");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Reviewed" }), { allowDraft: true });
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "REVIEWED", preparedById: t.user.id });
+    });
+
+    it("an APPROVED row from the workbook leaves the preparer alone", async () => {
+      const t = await tenant("approved-prep");
+      await applyMasterImport(t.ph, standardWorkbook());
+      expect(await partOf(t.tenantId)).toMatchObject({ status: "APPROVED", approvedById: t.user.id, preparedById: null });
+    });
+
+    it("a part that is already REVIEWED is not pushed back to Draft by re-importing the same row", async () => {
+      const t = await tenant("keep");
+      await applyMasterImport(t.admin, standardWorkbook({ status: "Draft" }), { allowDraft: true });
+      const { applied, part } = await reviewedAs(t, t.user.id, "REVIEWED");
+      expect(applied.report.issues.map((i) => i.code)).not.toContain("REVIEW_BY_PREPARER");
+      expect(part.status).toBe("REVIEWED");
+    });
+  });
+
+  describe("what the user was shown (file hash and plan fingerprint)", () => {
+    const shown = async (t: Awaited<ReturnType<typeof tenant>>, over: Parameters<typeof standardWorkbook>[0] = {}) => {
+      const { dryRunWithDb } = await import("./master-import.service");
+      return dryRunWithDb(owner, t.tenantId, standardWorkbook(over), { allowDraft: false });
+    };
+
+    it("refuses a different file than the one that was checked, and writes nothing", async () => {
+      const t = await tenant("hash");
+      const checked = await shown(t);
+      const before = await state(t.tenantId);
+      await expect(
+        applyMasterImport(t.ph, standardWorkbook({ time2: "0.9" }), {
+          expected: { fileSha256: checked.fileSha256, planFingerprint: checked.planFingerprint },
+        }),
+      ).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED, detail: { kind: "FILE_CHANGED" } });
+      expect(await state(t.tenantId)).toEqual(before);
+    });
+
+    it("refuses when master data moved on since the check (the creates are no longer creates)", async () => {
+      const t = await tenant("plan");
+      const checked = await shown(t);
+      const expected = { fileSha256: checked.fileSha256, planFingerprint: checked.planFingerprint };
+      await applyMasterImport(t.ph, standardWorkbook()); // someone else imports the same file first
+      const before = await state(t.tenantId);
+      await expect(applyMasterImport(t.ph, standardWorkbook(), { expected })).rejects.toMatchObject({
+        code: ERROR_CODES.STALE_WRITE,
+        detail: { kind: "PLAN_CHANGED" },
+      });
+      expect(await state(t.tenantId)).toEqual(before);
+    });
+
+    it("applies the plan that was shown, and records the file hash in the audit row", async () => {
+      const t = await tenant("shown");
+      const checked = await shown(t);
+      const r = await applyMasterImport(t.ph, standardWorkbook(), {
+        expected: { fileSha256: checked.fileSha256, planFingerprint: checked.planFingerprint },
+        fileName: "Standard_Parts_Master.xlsx",
+      });
+      expect(r.written.partFamilies.create).toBe(1);
+      expect(r.report.fileSha256).toBe(checked.fileSha256);
+      const row = await owner.auditLog.findFirstOrThrow({ where: { tenantId: t.tenantId, action: "masterImport.apply" } });
+      expect(row.after).toMatchObject({ fileSha256: checked.fileSha256, fileName: "Standard_Parts_Master.xlsx" });
+    });
+
+    it("the fingerprint is stable for the same data and changes when the plan changes", async () => {
+      const t = await tenant("fp");
+      const a = await shown(t);
+      const b = await shown(t);
+      expect(b.planFingerprint).toBe(a.planFingerprint);
+      expect(await shown(t, { time2: "0.9" }).then((r) => r.planFingerprint)).toBe(a.planFingerprint); // same outcomes (creates)
+      expect((await shown(t, { status: "Draft" })).planFingerprint).not.toBe(a.planFingerprint);
+      await applyMasterImport(t.ph, standardWorkbook());
+      expect((await shown(t)).planFingerprint).not.toBe(a.planFingerprint);
+    });
+  });
+
+  describe("material grades match ignoring case", () => {
+    it("a case-only difference is 'unchanged' in the plan and creates no duplicate when applied", async () => {
+      const t = await tenant("case");
+      await applyMasterImport(t.ph, standardWorkbook());
+      const { dryRunWithDb } = await import("./master-import.service");
+      const preview = await dryRunWithDb(owner, t.tenantId, standardWorkbook({ materialSpec: "sa 516" }), { allowDraft: false });
+      expect(preview.plan.materialGrades).toMatchObject({ unchanged: 1, create: 0 });
+      const r = await applyMasterImport(t.ph, standardWorkbook({ materialSpec: "sa 516" }));
+      expect(r.written.materialGrades).toMatchObject({ unchanged: 1, create: 0 });
+      expect(await owner.materialGrade.count({ where: { tenantId: t.tenantId } })).toBe(1);
     });
   });
 

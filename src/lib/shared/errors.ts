@@ -131,6 +131,8 @@ export const ERROR_CODES = {
   APPROVAL_BLOCKED: "APPROVAL_BLOCKED",
   /** Master data (M3): a master-data part family was changed through a legacy editor that bypasses approval. */
   USE_MASTER_DATA: "USE_MASTER_DATA",
+  /** A database transaction ran out of time; nothing it did was saved. */
+  TRANSACTION_TIMEOUT: "TRANSACTION_TIMEOUT",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -226,6 +228,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This cannot be approved yet. Fix what is listed and try again.",
   USE_MASTER_DATA:
     "This is a master-data part family. Change it under Master data, where edits go through review and approval.",
+  TRANSACTION_TIMEOUT: "That took too long, so nothing was saved. Try again; if it keeps happening, split the file.",
 };
 
 /**

@@ -3,6 +3,7 @@ import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES } from "@/lib/shared/errors";
 import { dryRunMasterImport } from "./master-import.service";
 import { makeWorkbook, PARTS_HEADER, ROUTES_HEADER } from "./master-import.test-util";
+import { makeSparseWorkbook } from "@/lib/shared/upload.test-util";
 
 const actor = (over: Partial<Actor> = {}): Actor => ({
   userId: 1, tenantId: 1, clientId: null, name: "PH", email: "ph@despl.test", roles: [ROLES.PRODUCTION_HEAD],
@@ -11,13 +12,19 @@ const actor = (over: Partial<Actor> = {}): Actor => ({
 
 describe("dryRunMasterImport — pure refusals (before any DB read)", () => {
   it("refuses a role that may not see master-data planning", async () => {
-    for (const roles of [[ROLES.SUPERVISOR], [ROLES.QC]]) {
+    for (const roles of [[ROLES.SUPERVISOR], [ROLES.QC], [ROLES.PLANNER]]) {
       await expect(dryRunMasterImport(actor({ roles }), Buffer.from(""))).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
     }
   });
   it("refuses a client user before the role check", async () => {
     await expect(dryRunMasterImport(actor({ clientId: 7, roles: [ROLES.ADMIN] }), Buffer.from(""))).rejects.toMatchObject({
       code: ERROR_CODES.FORBIDDEN,
+    });
+  });
+  it("refuses a hostile workbook while parsing, before a transaction (no DB is configured here)", async () => {
+    const hostile = makeSparseWorkbook("Parts Master", "A1:XFD1048576");
+    await expect(dryRunMasterImport(actor({ roles: [ROLES.ENGINEERING] }), hostile)).rejects.toMatchObject({
+      code: ERROR_CODES.VALIDATION_FAILED,
     });
   });
 });
@@ -178,6 +185,17 @@ describe.skipIf(!RUN_DB)("dryRunWithDb (DB)", async () => {
     await owner.partFamily.create({ data: { tenantId: b.tenantId, componentTypeId: type.id } });
     const report = await dryRunWithDb(owner, a.tenantId, workbook(), { allowDraft: false });
     expect(report.plan.partFamilies).toEqual({ create: 1, update: 0, unchanged: 0, skipped: 0 });
+  });
+
+  it("Engineering may run the read-only check (they fix the workbook), and the report carries the file hash", async () => {
+    const t = await tenant("eng");
+    const eng = { ...actor({ userId: t.user.id, tenantId: t.tenantId }), roles: [ROLES.ENGINEERING] };
+    const bytes = workbook();
+    const report = await dryRun(eng, bytes, { allowDraft: false });
+    expect(report.plan.partFamilies.create).toBe(1);
+    const { createHash } = await import("node:crypto");
+    expect(report.fileSha256).toBe(createHash("sha256").update(bytes).digest("hex"));
+    expect(report.planFingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("the actor entry point runs under RLS for a Production Head and returns the same plan", async () => {

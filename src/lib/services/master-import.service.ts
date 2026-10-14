@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { withTenant, type Tx } from "@/lib/db";
 import { assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { parseMasterWorkbook, type ParsedWorkbook } from "./master-import.parse";
@@ -32,6 +33,10 @@ export interface Tally {
 export type Outcome = "create" | "update" | "unchanged" | "skipped";
 
 export interface DryRunReport {
+  /** SHA-256 (hex) of the uploaded file: apply refuses a different one. */
+  fileSha256: string;
+  /** SHA-256 (hex) of the plan the user was shown; apply refuses if it no longer matches. */
+  planFingerprint: string;
   allowDraft: boolean;
   sheets: string[];
   counts: {
@@ -60,6 +65,28 @@ export interface DryRunReport {
   }>;
   issues: ImportIssue[];
   issueSummary: Array<{ code: string; severity: string; count: number }>;
+}
+
+/** The report before the file hash and fingerprint are attached. */
+export type ReportCore = Omit<DryRunReport, "fileSha256" | "planFingerprint">;
+
+export function sha256Hex(bytes: Buffer | Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * What the user was shown, reduced to a stable string: the options, the plan
+ * tallies, each part's outcome and the issue counts. Apply recomputes it inside
+ * its lock and refuses to write if master data moved on since the preview.
+ */
+export function planFingerprint(r: ReportCore): string {
+  return createHash("sha256")
+    .update(JSON.stringify({ allowDraft: r.allowDraft, plan: r.plan, parts: r.parts, issueSummary: r.issueSummary }))
+    .digest("hex");
+}
+
+export function finalizeReport(core: ReportCore, bytes: Buffer | Uint8Array): DryRunReport {
+  return { ...core, fileSha256: sha256Hex(bytes), planFingerprint: planFingerprint(core) };
 }
 
 const FAMILY_PV = "PRESSURE_VESSEL";
@@ -264,16 +291,9 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
   const partsOut: DryRunReport["parts"] = [];
 
   for (const p of ev.parts) {
-    let outcome: Outcome = "skipped";
     const existing = typeByCode.get(p.code);
-    if (p.load) {
-      if (!existing?.partFamily) outcome = "create";
-      else {
-        outcome = dbPartFamilySignature(existing.name, existing.partFamily) === partFamilySignature(p) ? "unchanged" : "update";
-      }
-    }
-    partFamilies[outcome]++;
 
+    // Routes first: whether a route changed decides whether the part's review survives.
     const routesOut: DryRunReport["parts"][number]["routes"] = [];
     for (const v of p.variants) {
       let rOutcome: Outcome = "skipped";
@@ -298,6 +318,34 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
       routeTally[rOutcome]++;
       routesOut.push({ variant: v.variant, steps: v.steps.length, outcome: rOutcome });
     }
+
+    let outcome: Outcome = "skipped";
+    if (p.load) {
+      if (!existing?.partFamily) {
+        outcome = "create";
+        p.contentChanged = true;
+      } else {
+        // Attributes compared with the status held equal: a status-only move is a review, not an edit.
+        const held = "DRAFT" as const;
+        const attrsChanged =
+          dbPartFamilySignature(existing.name, { ...existing.partFamily, status: held }) !== partFamilySignature({ ...p, status: held });
+        p.contentChanged = attrsChanged || routesOut.some((r) => r.outcome === "create" || r.outcome === "update");
+        // The UI resets a review when content changes after it; an import must not carry one over.
+        if (p.contentChanged && p.status === "REVIEWED" && existing.partFamily.status !== "APPROVED") {
+          p.status = "DRAFT";
+          ev.issues.push({
+            code: "REVIEW_AFTER_CHANGE",
+            severity: "WARNING",
+            sheet: "Parts Master",
+            row: p.row,
+            partCode: p.code,
+            message: `${p.code}: this import changes the part, so any earlier review no longer applies. It loads as Draft; someone other than the loader can review it.`,
+          });
+        }
+        outcome = dbPartFamilySignature(existing.name, existing.partFamily) === partFamilySignature(p) ? "unchanged" : "update";
+      }
+    }
+    partFamilies[outcome]++;
     partsOut.push({ code: p.code, status: p.status, outcome, routes: routesOut });
   }
 
@@ -325,13 +373,26 @@ async function tally(db: Tx, tenantId: number, ev: Evaluation) {
 }
 
 /**
+ * The last editor of a part may not also mark it reviewed (M3-A); an import is
+ * not a way round that. Only a DRAFT becomes REVIEWED here: an already-reviewed
+ * part was reviewed by someone else, and an approved one is the downgrade rule's.
+ */
+export function reviewedByPreparer(
+  want: string | null,
+  have: { status: string; preparedById: number | null } | null | undefined,
+  actorId: number | undefined,
+): boolean {
+  return want === "REVIEWED" && actorId != null && have?.status === "DRAFT" && have.preparedById === actorId;
+}
+
+/**
  * Rules that depend on what the tenant already holds. A part whose code is
  * taken by a legacy component type, or that is already APPROVED and would be
  * downgraded by a Draft row, is not loaded: an import never silently demotes
  * approved master data (invariant 6). A grade that is no longer DRAFT is not
  * rewritten either.
  */
-async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Promise<void> {
+async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation, actorId?: number): Promise<void> {
   const block = (p: PartDecision, code: ImportIssue["code"], message: string) => {
     p.load = false;
     for (const v of p.variants) v.load = false;
@@ -342,7 +403,7 @@ async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Pr
   if (codes.length > 0) {
     const types = await db.componentTypeRef.findMany({
       where: { tenantId, code: { in: codes } },
-      select: { code: true, kind: true, partFamily: { select: { status: true } } },
+      select: { code: true, kind: true, partFamily: { select: { status: true, preparedById: true } } },
     });
     for (const t of types) {
       const p = byCode.get(t.code)!;
@@ -350,6 +411,16 @@ async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Pr
         block(p, "PART_CODE_CONFLICT", `Code ${t.code} is already used by a ${t.kind.toLowerCase().replace("_", " ")} component type; a part family cannot share it.`);
       } else if (t.partFamily?.status === "APPROVED" && p.status !== "APPROVED") {
         block(p, "STATUS_DOWNGRADE", `${t.code} is already approved in the tracker; the workbook says "${p.status}". Approved master data is not demoted by an import.`);
+      } else if (reviewedByPreparer(p.status, t.partFamily, actorId)) {
+        p.status = "DRAFT";
+        ev.issues.push({
+          code: "REVIEW_BY_PREPARER",
+          severity: "WARNING",
+          sheet: "Parts Master",
+          row: p.row,
+          partCode: p.code,
+          message: `${t.code}: you last edited this part, so you cannot also mark it reviewed. It loads as Draft; someone else can review it.`,
+        });
       }
     }
   }
@@ -375,11 +446,16 @@ async function applyStateConflicts(db: Tx, tenantId: number, ev: Evaluation): Pr
 }
 
 /** Parse, evaluate against the tenant, then apply the tenant-state rules. Read-only. */
-export async function prepareImport(db: Tx, tenantId: number, bytes: Buffer | Uint8Array, opts: { allowDraft: boolean }) {
-  const wb = parseMasterWorkbook(bytes);
+export async function prepareImport(
+  db: Tx,
+  tenantId: number,
+  bytes: Buffer | Uint8Array,
+  opts: { allowDraft: boolean; parsed?: ParsedWorkbook; actorId?: number },
+) {
+  const wb = opts.parsed ?? parseMasterWorkbook(bytes);
   const ref = await loadReferenceData(db, tenantId, wb);
   const ev = evaluateMaster(wb, ref, { allowDraft: opts.allowDraft });
-  await applyStateConflicts(db, tenantId, ev);
+  await applyStateConflicts(db, tenantId, ev, opts.actorId);
   return { wb, ref, ev };
 }
 
@@ -387,10 +463,10 @@ export async function dryRunWithDb(
   db: Tx,
   tenantId: number,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft: boolean },
+  opts: { allowDraft: boolean; parsed?: ParsedWorkbook; actorId?: number },
 ): Promise<DryRunReport> {
   const { wb, ev } = await prepareImport(db, tenantId, bytes, opts);
-  return buildReport(db, tenantId, wb, ev, opts.allowDraft);
+  return finalizeReport(await buildReport(db, tenantId, wb, ev, opts.allowDraft), bytes);
 }
 
 export async function buildReport(
@@ -399,7 +475,7 @@ export async function buildReport(
   wb: ParsedWorkbook,
   ev: Evaluation,
   allowDraft: boolean,
-): Promise<DryRunReport> {
+): Promise<ReportCore> {
   const t = await tally(db, tenantId, ev);
 
   const summary = new Map<string, { code: string; severity: string; count: number }>();
@@ -441,13 +517,23 @@ export async function buildReport(
   };
 }
 
-/** App entry point: Production Head or Admin only, tenant-scoped. Writes nothing. */
+/**
+ * App entry point: tenant-scoped and read-only. Engineering may run it (they fix
+ * the workbook); applying stays with the Production Head and Admin.
+ * The workbook is parsed BEFORE the transaction opens: a hostile file must not hold a
+ * connection while it is being read.
+ */
 export async function dryRunMasterImport(
   actor: Actor,
   bytes: Buffer | Uint8Array,
   opts: { allowDraft?: boolean } = {},
 ): Promise<DryRunReport> {
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
-  return withTenant(actor.tenantId, (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false }));
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.ENGINEERING);
+  const parsed = parseMasterWorkbook(bytes);
+  return withTenant(
+    actor.tenantId,
+    (tx) => dryRunWithDb(tx, actor.tenantId, bytes, { allowDraft: opts.allowDraft ?? false, parsed, actorId: actor.userId }),
+    { timeoutMs: 30_000 },
+  );
 }

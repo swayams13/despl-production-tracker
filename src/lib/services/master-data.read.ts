@@ -310,7 +310,9 @@ export interface MaterialGradeRow {
   status: MasterStatus;
 }
 
-export async function loadMaterialGrades(actor: Actor): Promise<{ rows: MaterialGradeRow[]; canEdit: boolean; canApprove: boolean }> {
+export async function loadMaterialGrades(
+  actor: Actor,
+): Promise<{ rows: MaterialGradeRow[]; canEdit: boolean; canApprove: boolean; canRevise: boolean }> {
   guardRead(actor);
   return withTenant(actor.tenantId, async (tx) => {
     const grades = await tx.materialGrade.findMany({
@@ -329,6 +331,8 @@ export async function loadMaterialGrades(actor: Actor): Promise<{ rows: Material
       })),
       canEdit: hasRole(actor, ...MASTER_DATA_EDIT_ROLES),
       canApprove: hasRole(actor, ROLES.PRODUCTION_HEAD),
+      // Reopening an approved or reviewed grade: Admin and Production Head only (setMaterialStatus).
+      canRevise: hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD),
     };
   });
 }

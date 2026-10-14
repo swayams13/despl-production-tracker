@@ -1,4 +1,6 @@
 import * as XLSX from "xlsx";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { canonicalizeXlsx } from "./xlsx-canonical";
 
 /**
  * Lean Core M2 — reads the Standard Parts Master workbook into typed rows.
@@ -152,11 +154,25 @@ interface Sheet<T> {
   build: (r: Record<string, string>, row: number) => T;
 }
 
+/** The real workbook's biggest sheet is 336 rows by 20 columns; these are ceilings, not targets. */
+export const MAX_SHEET_ROWS = 5000;
+export const MAX_SHEET_COLS = 100;
+
 function readSheet<T>(wb: XLSX.WorkBook, def: Sheet<T>, out: ParsedWorkbook): T[] {
   const ws = wb.Sheets[def.name];
   if (!ws) {
     out.problems.push({ sheet: def.name, row: null, code: "SHEET_MISSING", message: `Sheet "${def.name}" is missing.` });
     return [];
+  }
+  // With `sheetRows` set, "!fullref" holds the dimension the file declared before truncation.
+  const dim = ws["!fullref"] ?? ws["!ref"];
+  if (dim) {
+    const r = XLSX.utils.decode_range(dim);
+    if (r.e.r - r.s.r + 1 > MAX_SHEET_ROWS || r.e.c - r.s.c + 1 > MAX_SHEET_COLS) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, {
+        reason: `Sheet "${def.name}" is larger than the importer reads (${MAX_SHEET_ROWS} rows by ${MAX_SHEET_COLS} columns). Remove empty rows and columns and try again.`,
+      });
+    }
   }
   const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", blankrows: true });
   const firstRow = ws["!ref"] ? XLSX.utils.decode_range(ws["!ref"]).s.r : 0;
@@ -395,8 +411,18 @@ const REVIEW: Sheet<ReviewActionRow> = {
   build: (r, row) => ({ row, id: r.id, category: r.category, issue: r.issue, owner: r.owner, status: r.status }),
 };
 
+/**
+ * Untrusted input: the reader only ever sees a canonical re-pack of the upload
+ * (every entry inflated under a real limit, see xlsx-canonical.ts), reads only
+ * the sheets this importer uses, and caps rows so a sheet that merely DECLARES
+ * a huge range cannot make `sheet_to_json` allocate it.
+ */
 export function parseMasterWorkbook(bytes: Buffer | Uint8Array): ParsedWorkbook {
-  const wb = XLSX.read(bytes, { type: "buffer" });
+  const wb = XLSX.read(canonicalizeXlsx(bytes), {
+    type: "buffer",
+    sheetRows: MAX_SHEET_ROWS,
+    sheets: [PARTS, STEPS, MATERIALS, HE_STAGES, PV_REF, ASSEMBLY, NEW_OPS, REVIEW].map((s) => s.name),
+  });
   const out: ParsedWorkbook = {
     sheets: wb.SheetNames,
     parts: [],

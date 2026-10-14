@@ -71,6 +71,7 @@ const STATUS: Record<ErrorCode, number> = {
   REVISE_REQUIRED: 409,
   APPROVAL_BLOCKED: 409,
   USE_MASTER_DATA: 409,
+  TRANSACTION_TIMEOUT: 503,
 };
 
 /** Next 15 route-handler context; params is a Promise. */

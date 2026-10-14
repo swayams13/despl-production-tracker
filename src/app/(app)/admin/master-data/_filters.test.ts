@@ -32,3 +32,33 @@ describe("parsePartFamilyFilters — the URL is untrusted", () => {
     expect(toQueryString({})).toBe("");
   });
 });
+
+import { filterMaterials, materialQueryString, parseMaterialFilters } from "./_filters";
+
+describe("material filters", () => {
+  const rows = [
+    { spec: "SA 516", grade: "Gr.70", productForm: "Plate", status: "DRAFT", densityGcc: 7.85 },
+    { spec: "SA 106", grade: "Gr.B", productForm: "Pipe", status: "APPROVED", densityGcc: null },
+    { spec: "IS 2062", grade: "E250", productForm: "Plate", status: "REVIEWED", densityGcc: 7.85 },
+  ];
+
+  it("ignores junk in the URL", () => {
+    expect(parseMaterialFilters({ status: "weird", nodensity: "yes", q: "  " })).toEqual({});
+    expect(parseMaterialFilters({ status: "DRAFT", nodensity: "1", q: "516" })).toEqual({ status: "DRAFT", noDensity: true, q: "516" });
+  });
+
+  it("filters by status, missing density and a text search over spec, grade and form", () => {
+    expect(filterMaterials(rows, { status: "APPROVED" }).map((r) => r.spec)).toEqual(["SA 106"]);
+    expect(filterMaterials(rows, { noDensity: true }).map((r) => r.spec)).toEqual(["SA 106"]);
+    expect(filterMaterials(rows, { q: "plate" }).map((r) => r.spec)).toEqual(["SA 516", "IS 2062"]);
+    expect(filterMaterials(rows, { q: "gr.b" }).map((r) => r.spec)).toEqual(["SA 106"]);
+    expect(filterMaterials(rows, { status: "DRAFT", q: "plate" }).map((r) => r.spec)).toEqual(["SA 516"]);
+    expect(filterMaterials(rows, {})).toHaveLength(3);
+  });
+
+  it("round-trips through the query string", () => {
+    const f = { status: "REVIEWED" as const, noDensity: true, q: "plate" };
+    expect(parseMaterialFilters(Object.fromEntries(new URLSearchParams(materialQueryString(f))))).toEqual(f);
+    expect(materialQueryString({})).toBe("");
+  });
+});

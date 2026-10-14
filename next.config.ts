@@ -23,6 +23,10 @@ const CSP = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Lean Core M3-C: the Standard Parts Master workbook is uploaded through a
+  // Server Action. The sample is 183 KB; the default 1 MB leaves no room for a
+  // full catalogue. The action itself refuses anything above 4 MB.
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   async headers() {
     return [
       {

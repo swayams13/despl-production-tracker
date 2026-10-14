@@ -31,3 +31,44 @@ export function toQueryString(f: PartFamilyFilters): string {
   const s = p.toString();
   return s ? `?${s}` : "";
 }
+
+// ── Material grades ──────────────────────────────────────────────────────
+
+export interface MaterialFilters {
+  status?: "DRAFT" | "REVIEWED" | "APPROVED";
+  /** Grades with no density yet (they cannot be approved). */
+  noDensity?: boolean;
+  q?: string;
+}
+
+export function parseMaterialFilters(raw: Record<string, string | string[] | undefined>): MaterialFilters {
+  const q = z.string().trim().min(1).max(60).safeParse(one(raw.q));
+  const status = z.enum(["DRAFT", "REVIEWED", "APPROVED"]).safeParse(one(raw.status));
+  return {
+    ...(q.success ? { q: q.data } : {}),
+    ...(status.success ? { status: status.data } : {}),
+    ...(one(raw.nodensity) === "1" ? { noDensity: true } : {}),
+  };
+}
+
+export function materialQueryString(f: MaterialFilters): string {
+  const p = new URLSearchParams();
+  if (f.q) p.set("q", f.q);
+  if (f.status) p.set("status", f.status);
+  if (f.noDensity) p.set("nodensity", "1");
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+export function filterMaterials<T extends { spec: string; grade: string; productForm: string; status: string; densityGcc: number | null }>(
+  rows: readonly T[],
+  f: MaterialFilters,
+): T[] {
+  const q = f.q?.toLowerCase();
+  return rows.filter(
+    (r) =>
+      (!f.status || r.status === f.status) &&
+      (!f.noDensity || r.densityGcc == null) &&
+      (!q || [r.spec, r.grade, r.productForm].some((x) => x.toLowerCase().includes(q))),
+  );
+}

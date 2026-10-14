@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { parseMasterWorkbook } from "./master-import.parse";
+import { MAX_SHEET_COLS, MAX_SHEET_ROWS, parseMasterWorkbook } from "./master-import.parse";
+import { makeSparseWorkbook, makeZip } from "@/lib/shared/upload.test-util";
+import { ERROR_CODES } from "@/lib/shared/errors";
 import { makeWorkbook, PARTS_HEADER, ROUTES_HEADER } from "./master-import.test-util";
 
 const part = (code: string, over: Partial<Record<number, string>> = {}) => {
@@ -75,5 +77,50 @@ describe("parseMasterWorkbook — the 11 Oct workbook (explicit M2 fixture)", ()
     // 57 assembly rows after the 9 grey EXAMPLE rows are dropped.
     expect(wb.assembly).toHaveLength(57);
     expect(wb.skippedExamples["Assembly Sequence"]).toBe(9);
+  });
+});
+
+describe("parseMasterWorkbook — hostile input is refused, not parsed", () => {
+  const refused = (b: Buffer) => {
+    try {
+      parseMasterWorkbook(b);
+    } catch (e) {
+      return e as { code: string; detail?: { reason?: string } };
+    }
+    return null;
+  };
+
+  it("refuses a few-KB workbook that declares a 16384 x 1048576 sheet, and does it fast", () => {
+    const bytes = makeSparseWorkbook("Parts Master", "A1:XFD1048576");
+    expect(bytes.length).toBeLessThan(5_000);
+    const t = Date.now();
+    const err = refused(bytes);
+    expect(Date.now() - t).toBeLessThan(2_000);
+    expect(err?.code).toBe(ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  it.each([
+    ["one row too many", `A1:Q${MAX_SHEET_ROWS + 1}`],
+    ["one column too many", `A1:${"DX"}10`], // DX = column 128 > 100
+  ])("refuses a sheet with %s", (_n, dim) => {
+    expect(refused(makeSparseWorkbook("Parts Master", dim))?.code).toBe(ERROR_CODES.VALIDATION_FAILED);
+  });
+
+  it("accepts a sheet exactly at the row and column ceilings", () => {
+    const last = `${"CV"}${MAX_SHEET_ROWS}`; // CV = column 100
+    expect(MAX_SHEET_COLS).toBe(100);
+    expect(refused(makeSparseWorkbook("Parts Master", `A1:${last}`))).toBeNull();
+  });
+
+  it("does not read, so does not refuse, a sheet the importer never uses", () => {
+    const wb = parseMasterWorkbook(makeSparseWorkbook("Pilot Review", "A1:XFD1048576"));
+    expect(wb.sheets).toEqual(["Pilot Review"]);
+    expect(wb.problems.map((p) => p.code)).toContain("SHEET_MISSING");
+  });
+
+  it("refuses a real zip bomb whose directory lies about its size", () => {
+    const bomb = makeZip([{ name: "xl/worksheets/sheet1.xml", data: Buffer.alloc(40 * 1024 * 1024), declaredSize: 100, deflate: true }]);
+    expect(bomb.length).toBeLessThan(100_000);
+    expect(refused(bomb)?.code).toBe(ERROR_CODES.VALIDATION_FAILED);
   });
 });

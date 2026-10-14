@@ -411,6 +411,17 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       expect((await owner.materialGrade.findUniqueOrThrow({ where: { id } })).densityGcc?.toString()).toBe("7.9");
     });
 
+    it("a duplicate is a duplicate whatever the case, on create and on edit", async () => {
+      const t = await tenant("mat-dup");
+      await upsertMaterialGrade(t.eng, { spec: "SA 516", grade: "Gr.70", productForm: "Plate", densityGcc: 7.85 });
+      await expect(upsertMaterialGrade(t.eng, { spec: "sa 516", grade: "GR.70", productForm: "plate" })).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+
+      const other = await upsertMaterialGrade(t.eng, { spec: "SA 106", grade: "Gr.B", productForm: "Pipe" });
+      await expect(upsertMaterialGrade(t.eng, { id: other.id, spec: "SA 516", grade: "gr.70", productForm: "Plate" })).rejects.toMatchObject({ code: ERROR_CODES.VALIDATION_FAILED });
+      // editing a grade to itself is not a collision
+      await upsertMaterialGrade(t.eng, { id: other.id, spec: "SA 106", grade: "Gr.B", productForm: "Pipe", densityGcc: 7.85 });
+    });
+
     it("a grade with no density cannot be approved", async () => {
       const t = await tenant("no-density");
       const { id } = await upsertMaterialGrade(t.eng, { spec: "SA 106", grade: "Gr.B", productForm: "Pipe" });
@@ -513,9 +524,10 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       await upsertMaterialGrade(t.eng, { spec: "SA 516", grade: "Gr.70", productForm: "Plate", densityGcc: 7.85 });
       const asHead = await loadMaterialGrades(t.ph);
       expect(asHead.rows).toHaveLength(1);
-      expect(asHead).toMatchObject({ canEdit: true, canApprove: true });
-      expect(await loadMaterialGrades(t.eng)).toMatchObject({ canEdit: true, canApprove: false });
-      expect(await loadMaterialGrades(t.planner)).toMatchObject({ canEdit: false, canApprove: false });
+      expect(asHead).toMatchObject({ canEdit: true, canApprove: true, canRevise: true });
+      expect(await loadMaterialGrades(t.eng)).toMatchObject({ canEdit: true, canApprove: false, canRevise: false });
+      expect(await loadMaterialGrades(t.admin)).toMatchObject({ canEdit: true, canApprove: false, canRevise: true });
+      expect(await loadMaterialGrades(t.planner)).toMatchObject({ canEdit: false, canApprove: false, canRevise: false });
     });
   });
 

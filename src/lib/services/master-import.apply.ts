@@ -5,12 +5,17 @@ import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { MasterDataStatus, PartMakeBuy } from "@/generated/prisma/client";
 import { existingHe, heContent, heSignature, HE_FAMILY, HE_TEMPLATE_NAME } from "./master-import.he";
 import { writeRouteVariant } from "./master-data.routes";
+import { parseMasterWorkbook, type ParsedWorkbook } from "./master-import.parse";
 import { deriveDimensionKeys, type PartDecision, type VariantDecision } from "./master-import.rules";
 import {
   buildReport,
   dbPartFamilySignature,
+  finalizeReport,
   partFamilySignature,
+  planFingerprint,
   prepareImport,
+  reviewedByPreparer,
+  sha256Hex,
   type DryRunReport,
   type Outcome,
   type Tally,
@@ -51,16 +56,29 @@ function toStatus(p: PartDecision): MasterDataStatus {
   return p.status as MasterDataStatus;
 }
 
+export interface ApplyOptions {
+  allowDraft: boolean;
+  /**
+   * What the user was shown at the preview. Given, apply writes only if the file
+   * and the plan are still exactly those: no write happens for a plan nobody saw.
+   */
+  expected?: { fileSha256: string; planFingerprint: string };
+  /** For the audit row only. */
+  fileName?: string;
+  /** The workbook already parsed outside the transaction; parsed here when absent (scripts, tests). */
+  parsed?: ParsedWorkbook;
+}
+
 export async function applyWithDb(
   tx: Tx,
   actor: Actor,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft: boolean },
+  opts: ApplyOptions,
 ): Promise<ApplyResult> {
   const tenantId = actor.tenantId;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`master-import:${tenantId}`}))`;
 
-  const { wb, ev } = await prepareImport(tx, tenantId, bytes, opts);
+  const { wb, ev } = await prepareImport(tx, tenantId, bytes, { ...opts, actorId: actor.userId });
   const structural = ev.issues.filter((i) => i.code === "SHEET_MISSING" || i.code === "COLUMN_MISSING");
   if (structural.length > 0) {
     throw new AppError(ERROR_CODES.VALIDATION_FAILED, {
@@ -71,7 +89,16 @@ export async function applyWithDb(
   if (ev.parts.some((p) => p.load && p.status === "APPROVED") && !hasRole(actor, ROLES.PRODUCTION_HEAD)) {
     throw new AppError(ERROR_CODES.FORBIDDEN, { reason: "only the Production Head approves master data" });
   }
-  const report = await buildReport(tx, tenantId, wb, ev, opts.allowDraft);
+  const core = await buildReport(tx, tenantId, wb, ev, opts.allowDraft);
+  const report = finalizeReport(core, bytes);
+  if (opts.expected) {
+    if (sha256Hex(bytes) !== opts.expected.fileSha256) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, { kind: "FILE_CHANGED", reason: "This file changed after you checked it. Check it again." });
+    }
+    if (planFingerprint(core) !== opts.expected.planFingerprint) {
+      throw new AppError(ERROR_CODES.STALE_WRITE, { kind: "PLAN_CHANGED", reason: "Master data changed since your check. Nothing was saved." });
+    }
+  }
 
   const [operations, departments, types, families, clock] = await Promise.all([
     tx.operationRef.findMany({ where: { tenantId }, select: { id: true, code: true } }),
@@ -121,13 +148,26 @@ export async function applyWithDb(
       await tx.componentTypeRef.update({ where: { id: type.id }, data: { name: p.name } });
     }
 
+    // The same row lock every master-data.service write takes. An approve or edit
+    // that is mid-flight finishes first, and the part is then judged as it is NOW:
+    // the dry-run above read it unlocked, so its verdict may be stale.
+    await tx.$queryRaw`SELECT id FROM part_families WHERE component_type_id = ${type.id} AND tenant_id = ${tenantId} FOR UPDATE`;
     const existing = await tx.partFamily.findUnique({
       where: { componentTypeId: type.id },
       include: { rawForm: { select: { code: true } } },
     });
     const rawFormId = p.rawFormCode ? (typeByCode.get(p.rawFormCode)?.id ?? null) : null;
     const status = toStatus(p);
+    if ((existing?.status === "APPROVED" && status !== "APPROVED") || reviewedByPreparer(status, existing, actor.userId)) {
+      throw new AppError(ERROR_CODES.STALE_WRITE, {
+        kind: "PLAN_CHANGED",
+        reason: `${p.code} changed while this import was running. Nothing was saved. Check the file again.`,
+      });
+    }
     const wasApproved = existing?.status === "APPROVED";
+    // As in the UI: whoever last changes a part is its preparer, so they cannot also review it later.
+    // An APPROVED row from the workbook is the Production Head's own act and leaves the preparer alone.
+    const preparer = status !== "APPROVED" && p.contentChanged ? { preparedById: actor.userId } : {};
     const data = {
       equipmentScope: p.scope!,
       assemblyGroup: p.assemblyGroup || null,
@@ -143,15 +183,19 @@ export async function applyWithDb(
       approvedAt: status === "APPROVED" ? (wasApproved ? existing!.approvedAt : now) : null,
     };
     if (!existing) {
-      const created = await tx.partFamily.create({ data: { tenantId, componentTypeId: type.id, ...data } });
+      const created = await tx.partFamily.create({ data: { tenantId, componentTypeId: type.id, ...data, ...preparer } });
       await audit("masterImport.partFamily.create", "PartFamily", created.id, undefined, { code: p.code, name: p.name, status, dimensions: p.dimensions });
       written.partFamilies.create++;
     } else if (dbPartFamilySignature(type.name, existing) !== partFamilySignature(p)) {
-      await tx.partFamily.update({ where: { id: existing.id }, data });
+      await tx.partFamily.update({ where: { id: existing.id }, data: { ...data, ...preparer } });
       await audit("masterImport.partFamily.update", "PartFamily", existing.id, { status: existing.status }, { code: p.code, name: p.name, status });
       written.partFamilies.update++;
     } else {
       written.partFamilies.unchanged++;
+      // Attributes are the same but a route changed: still an edit by the loader.
+      if (preparer.preparedById != null && existing.preparedById !== preparer.preparedById) {
+        await tx.partFamily.update({ where: { id: existing.id }, data: preparer });
+      }
     }
 
     for (const v of p.variants) {
@@ -191,8 +235,16 @@ export async function applyWithDb(
       written.materialGrades.skipped++;
       continue;
     }
-    const where = { tenantId_spec_grade_productForm: { tenantId, spec: m.spec, grade: m.grade, productForm: m.productForm } };
-    const have = await tx.materialGrade.findUnique({ where });
+    // The dry-run matches ignoring case; so must the write, or a case-only
+    // difference previews as "unchanged" and then creates a duplicate row.
+    const have = await tx.materialGrade.findFirst({
+      where: {
+        tenantId,
+        spec: { equals: m.spec, mode: "insensitive" },
+        grade: { equals: m.grade, mode: "insensitive" },
+        productForm: { equals: m.productForm, mode: "insensitive" },
+      },
+    });
     const density = m.densityGcc;
     if (!have) {
       const row = await tx.materialGrade.create({
@@ -287,6 +339,8 @@ export async function applyWithDb(
   if (changed > 0) {
     await audit("masterImport.apply", "MasterImport", `${tenantId}:${now.toISOString()}`, undefined, {
       allowDraft: opts.allowDraft,
+      fileSha256: report.fileSha256,
+      fileName: opts.fileName ?? null,
       partFamilies: written.partFamilies,
       routes: written.routes,
       stageMappingRows: written.stageMappingRows,
@@ -302,11 +356,15 @@ export async function applyWithDb(
 export async function applyMasterImport(
   actor: Actor,
   bytes: Buffer | Uint8Array,
-  opts: { allowDraft?: boolean } = {},
+  opts: Partial<ApplyOptions> = {},
 ): Promise<ApplyResult> {
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
-  return withTenant(actor.tenantId, (tx) => applyWithDb(tx, actor, bytes, { allowDraft: opts.allowDraft ?? false }), {
-    timeoutMs: 120_000,
-  });
+  const parsed = parseMasterWorkbook(bytes); // before the transaction: see dryRunMasterImport
+  return withTenant(
+    actor.tenantId,
+    (tx) =>
+      applyWithDb(tx, actor, bytes, { allowDraft: opts.allowDraft ?? false, expected: opts.expected, fileName: opts.fileName, parsed }),
+    { timeoutMs: 120_000 },
+  );
 }

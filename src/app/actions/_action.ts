@@ -4,8 +4,9 @@ import { readSession } from "@/lib/auth/session";
 import { isAppError, ERROR_CODES, ERROR_MESSAGES, type ErrorCode } from "@/lib/shared/errors";
 
 /**
- * `detail` is the refusal's UI-safe context (which blockers, which step). It is
- * never sent for FORBIDDEN / UNAUTHENTICATED, whose detail names roles.
+ * `detail` is the refusal's UI-safe context (which blockers, which step). For
+ * FORBIDDEN / UNAUTHENTICATED, whose detail names roles, only a plain-English
+ * `reason` is forwarded.
  */
 export type ActionResult =
   | { ok: true }
@@ -130,7 +131,19 @@ export function toActionError(e: unknown): ActionResult {
   if (isAppError(e)) {
     // Refusals are expected product behavior (invariant #12) — info, not error.
     log("info", "[action] refused", { code: e.code, detail: e.detail });
-    return result(e.code, NO_DETAIL.has(e.code) ? undefined : e.detail);
+    if (NO_DETAIL.has(e.code)) {
+      // Their detail names roles. A plain-English `reason` is safe and is what tells
+      // the person why ("only the Production Head approves master data").
+      const reason = typeof e.detail?.reason === "string" ? e.detail.reason : undefined;
+      return result(e.code, reason ? { reason } : undefined);
+    }
+    return result(e.code, e.detail);
+  }
+
+  // Prisma's interactive-transaction timeout: everything in it was rolled back.
+  if (typeof e === "object" && e !== null && (e as { code?: unknown }).code === "P2028") {
+    log("error", "[action] transaction timeout", { error: e instanceof Error ? e.message : String(e) });
+    return result(ERROR_CODES.TRANSACTION_TIMEOUT);
   }
 
   // A schema.parse() that failed inside a service: the caller sent something
