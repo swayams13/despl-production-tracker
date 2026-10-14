@@ -17,9 +17,9 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | ID | Decision | Default until decided | Status |
 |---|---|---|---|
 | D1 | Working days or calendar days | `CALENDAR_DAYS_6DAY_WEEK` (Sun off) | Provisional (Swayam, 4 Sep) — SJ to confirm |
-| D2 | Which edges become SOFT (see build prompt §8.2 item 4: nozzle work precedes CS-1) | All HARD | Open |
-| D3 | Which items get `requiresQc = false` | All `true` | Open |
-| D4 | Backdating window | 72 hours | Open |
+| D2 | Which edges become SOFT (see build prompt §8.2 item 4: nozzle work precedes CS-1) | All HARD until built | **Decided, provisional** (Swayam for the Production Head, 14 Oct) — SJ to ratify; QC head to ratify H5/H6. See D2 section below |
+| D3 | Which items get `requiresQc = false` | All `true` | **Decided** (Swayam, 14 Oct) — derived by rule, see note D3 below |
+| D4 | Backdating window | 72 hours | **Decided** (Swayam, 14 Oct) — 72 h, three refinements, see note D4 below |
 | D5 | Pilot job + departments; JOB-grain process list | Planning/PPC, Fabrication, QC; processes 1–11 and 33 | Open |
 | D6 | Devices and floor Wi-Fi | Design for both | Open |
 | D7 | Department representatives; welder list | Placeholder accounts | Open |
@@ -27,7 +27,7 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | D9 | Ten milestone names | See build prompt §8.4 | Open |
 | D10 | Late-reason categories | The 8 in frame 01D | Open |
 | D11 | Single QC inspector recorded the work | Production Head may accept, logged as override | Open |
-| D12 | Do DESPL-own H points block floor progress or only QC sign-off? | Block | Open |
+| D12 | Do DESPL-own H points block floor progress or only QC sign-off? | Block | **Decided, provisional** (14 Oct) — blocks the linked step on the same joint/part and its stage; QC head to ratify. See D12 section below |
 | D13 | Canonical 25 stage names (C27) | Seed `workOrderStageNames` | Open |
 | D14 | Controlling document for routes (Q-01) | Team workbook once approved | Open |
 | D15 | Who approves master data; Excel only for bulk import | Production Head approves in the tracker | Open |
@@ -45,7 +45,36 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | D27 | Backup retention, remote access, system administrator | Nightly, 14 days, LAN only | Open |
 | D28 | Git integration: PRs into `main` behind flags, or a long-lived `redesign` branch | PRs into `main` behind flags; tag `pre-redesign` first | Open |
 
-**Do not start L1.2 until D2, D3 and D4 are recorded.**
+**L1.2 may start on D2–D4 as recorded (14 Oct 2026).** D2 and D12 are provisional: ratification by SJ (all) and the QC head (H5, H6, D12) can change rule text, so keep the HARD rules in one registry in shared config and ship them behind the existing switch.
+
+**Decision notes (14 Oct 2026, Swayam):**
+
+- **D3 — DECIDED.** `requiresQc` is derived by rule, not a hand list; the QC head reviews the derived list once. `true` when the step is linked to a QCP point of any party (H, W, R, RW, R&A); or is fit-up/welding on a pressure-retaining joint (shell long and circ seams, head-to-shell, nozzle-to-shell, nozzle-to-flange, skirt-to-head); or is heat-number transfer at cutting of a pressure part; or is a test/treatment record (PWHT/PFHT, hydro, final dimensional, painting DFT, name-plate stamping). Everything else is `false` (handling, non-pressure cutting and marking, rolling and edge prep, non-pressure attachments, office processes 1–11). QC's own Inspection operations are the checker of the preceding work step, recorded against the QCP point, and need no second QC verify; the same-inspector case is D11. **Record D12 (does an H point block the part or the whole unit; proposal: the part) together with this.**
+- **D4 — DECIDED.** `BACKDATE_WINDOW_HOURS` stays 72. Refinements: (1) lower bound is the job's BOM / floor release date, not the order date (replaces the order-date bound in invariant 1), and Done ≥ Start for the same item; (2) the window is counted in working hours from the D1 calendar — if that is too much for v1, keep 72 calendar hours and accept admin corrections around shutdowns; (3) the pilot's same-day metric (≥ 90 %) uses `recordedAt − reportedAt`, so a generous window does not hide late logging, while on-time KPIs keep `COALESCE(reportedAt, recordedAt)`. Beyond the window: the admin correction flow, no in-app confirm. Separate operator (24 h) and supervisor (72 h) windows: not in the pilot unless SJ asks. D1 is still provisional, so refinement (2) rests on it.
+
+### D2 — Sequence gating (provisional, 14 Oct 2026)
+
+Decided by Swayam acting for the Production Head. Ratify: SJ (all), QC head (H5, H6, D12).
+
+- Process edges (36-process DAG) are schedule-only: planned dates and lateness; they never refuse a floor action.
+- **HARD rules** (one registry in shared config, no override):
+  - **H1** same `jointRef`: fit-up → weld → NDT (every joint with a `jointRef`).
+  - **H2** pressure-part cutting needs material issued and heat number picked.
+  - **H3** pressure-part cutting needs the drawing released for fabrication, or released at risk by `PRODUCTION_HEAD` (reason required; client consent reference optional, required where the client's QCP holds on drawing approval; recorded against the drawing revision). Non-pressure parts have no drawing gate.
+  - **H4** hydro needs final PWHT complete (units with PWHT).
+  - **H5** no welding on a pressure part after the unit's final PWHT → refuse and route to NCR. Only the final PWHT triggers it (PFHT of formed heads does not); local PWHT locks the whole unit. "Welding on a pressure part" = any weld whose fusion is on a pressure-retaining part, including cleats, lugs and clips; welding non-pressure parts to each other is allowed.
+  - **H6** hydro needs every weld and NDT step on the unit's pressure joints complete; after hydro, welding on a pressure part is refused and routed to NCR.
+  - Plus the always-HARD rules of invariant 2 (open blocking H point blocks stage completion; 29/30 need 27; dispatch refuses open NCR, open hold point or incomplete production).
+  - NCR resolution of H5/H6: "repair + repeat PWHT/hydro" reopens that step for the unit, or "accept per code exception" with QC head approval and the clause recorded.
+- **SOFT** (allowed early with a reason; writes a `SequenceOverride` row and flags the item): starting a step while an earlier step in the unit's assembly sequence is open and no HARD rule links them (nozzles vs head closure, attachments and skirt vs circ seams, clearance work, internal-access work after closure); department overlaps (rolling before all plates are cut, edge prep with cutting, Machine Shop 12–14 ahead of shell fabrication); planning and procurement order, processes 1–11 (job grain). Internal-access-after-closure is reviewed after the pilot as a HARD candidate.
+- **Override:** Supervisor and above; operators see "Ask your supervisor to start this early". Reason chips: Material/part ready early · Crew or machine free, upstream not ready · Crane/access/space available now · Client or delivery priority · Other (needs text). A batch start across units takes one reason.
+- **Acknowledge:** `PRODUCTION_HEAD` only; never blocks work; unacknowledged after 2 working days → digest. The same step pair overridden on at least half of a job's units (minimum 3) → master-data review list for that assembly sequence.
+- **Jobs with no assembly sequence** (in-flight imports, legacy jobs): HARD rules only, no SOFT gating, no process-edge fallback.
+- **New data:** `pressureRetaining` on the part family / component; `jointRef` on weld and NDT steps (already on `AssemblyTemplateStep`); a unit-level "final PWHT" marker on the heat-treatment step.
+
+### D12 — H-point blocking scope (provisional, 14 Oct 2026; QC head to ratify)
+
+An open blocking H point blocks the next HARD-linked step on the same joint or part, and blocks completion of its stage. It does not block unrelated work on the unit. The QC head marks which H points are true holds, per QCP (A4).
 
 ### Frozen (Lean Core §4) — keep the code, hide it, no new work
 
