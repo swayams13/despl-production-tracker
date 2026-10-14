@@ -177,6 +177,52 @@ describe.skipIf(!RUN_DB)("L1.2e inspect, derived switch, unit lock (DB)", async 
       expect(await code(inspectStep(qc, j.step(2)))).toBeNull();
     });
 
+    // Review fix (14 Oct): an INSPECTION step needs its work done, and a maker who is not the inspector.
+    describe("INSPECTION step: work precondition and every maker", () => {
+      const W = (seq: number, extra: object = {}) => ({ seq, processSeq: 20, requiresQc: false, ...extra });
+      const I = (seq: number, extra: object = {}) => ({ seq, kind: "INSPECTION" as const, processSeq: 20, hold: true, ...extra });
+      const setStep = (id: number, status: "IN_PROGRESS" | "COMPLETE", by: Actor | null) =>
+        owner.assemblyStep.update({ where: { id }, data: { status, submittedBy: by?.userId ?? null, startedAt: new Date() } });
+
+      it.each<[string, JobSpec["steps"], (j: WorkJob) => Promise<unknown>]>([
+        ["the preceding work step not started", [W(1), I(2)], async () => {}],
+        ["the preceding work step in progress", [W(1), I(2)], (j) => setStep(j.step(1), "IN_PROGRESS", null)],
+        ["one of two preceding work steps not done", [W(1), W(2), I(3)], (j) => setStep(j.step(2), "COMPLETE", sup)],
+        ["the work step on the inspection's joint not done", [W(1, { jointRef: "J1" }), W(2, { jointRef: "J2" }), I(3, { jointRef: "J1" })], (j) => setStep(j.step(2), "COMPLETE", sup)],
+      ])("ACCEPT with %s is refused INSPECT_PRECONDITION; no QCP execution, nothing changes", async (_l, steps, prep) => {
+        const j = await o.job({ processes: [{ code: "20" }], steps });
+        await prep(j);
+        const target = j.step(steps!.length);
+        expect(await code(inspectStep(qc, target))).toBe(ERROR_CODES.INSPECT_PRECONDITION);
+        expect((await stepRow(target)).status).toBe("NOT_STARTED");
+        expect(await owner.qcpExecution.count({ where: { jobId: j.job.id } })).toBe(0);
+      });
+
+      it("a work step on another joint does not hold the inspection back (H1 scope)", async () => {
+        const j = await o.job({ processes: [{ code: "20" }], steps: [W(1, { jointRef: "J2" }), W(2, { jointRef: "J1" }), I(3, { jointRef: "J1" })] });
+        await setStep(j.step(2), "COMPLETE", sup);
+        expect(await code(inspectStep(qc, j.step(3)))).toBeNull();
+      });
+
+      it("no preceding work step at all: MAKER_CHECKER_VIOLATION on ACCEPT and REJECT", async () => {
+        const j = await o.job({ processes: [{ code: "20" }], steps: [I(1)] });
+        for (const result of ["ACCEPT", "REJECT"] as const) {
+          expect(await code(inspectStep(qc, j.step(1), result))).toBe(ERROR_CODES.MAKER_CHECKER_VIOLATION);
+        }
+        expect(await owner.qcpExecution.count({ where: { jobId: j.job.id } })).toBe(0);
+      });
+
+      it("the QC user who recorded an earlier (not the nearest) work step of the group is refused", async () => {
+        const j = await o.job({ processes: [{ code: "20" }], steps: [W(1), W(2), I(3)] });
+        await setStep(j.step(1), "COMPLETE", supQc);
+        await setStep(j.step(2), "COMPLETE", sup);
+        for (const result of ["ACCEPT", "REJECT"] as const) {
+          expect(await code(inspectStep(supQc, j.step(3), result))).toBe(ERROR_CODES.MAKER_CHECKER_VIOLATION);
+        }
+        expect(await code(inspectStep(qc, j.step(3)))).toBeNull();
+      });
+    });
+
     it("a Production Head holding QC who recorded the preceding work is refused too (no D11 exception yet)", async () => {
       const headQc = await o.user("headqc", ["PRODUCTION_HEAD", "QC"], [o.fab.id]);
       const j = await inspectionJob(headQc);

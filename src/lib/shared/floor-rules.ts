@@ -106,7 +106,9 @@ const steps = (f: UnitFacts) => f.items.filter((i): i is StepItem => i.kind === 
 const ops = (f: UnitFacts) => f.items.filter((i): i is OpItem => i.kind === "COMPONENT_OP");
 const ref = (i: FloorItem) => ({ kind: i.kind, id: i.id });
 
-const joints = (s: StepItem) => (s.jointRef ?? "").split(",").map((j) => j.trim()).filter(Boolean);
+/** The joints a jointRef names: one, or several separated by commas. */
+export const jointRefs = (ref: string | null) => (ref ?? "").split(",").map((j) => j.trim()).filter(Boolean);
+const joints = (s: StepItem) => jointRefs(s.jointRef);
 const shareJoint = (a: StepItem, b: StepItem) => joints(a).some((j) => joints(b).includes(j));
 
 const H1_RANK: Partial<Record<AssemblyRole, number>> = { FIT_UP: 0, WELD: 1, NDT: 2 };
