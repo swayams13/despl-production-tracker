@@ -287,6 +287,21 @@ export const createDrawingRevisionSchema = z
   .strict();
 export type CreateDrawingRevisionInput = z.infer<typeof createDrawingRevisionSchema>;
 
+/**
+ * L1.2c (D2, H3): the Production Head releases the CURRENT, not-yet-RELEASED
+ * revision at risk so pressure-part cutting can start. The reason is
+ * mandatory; client consent is an optional reference (mail, MoM no.).
+ */
+export const releaseDrawingAtRiskSchema = z
+  .object({
+    jobId: id,
+    drawingRevisionId: id,
+    reason: z.string().trim().min(1).max(1000),
+    clientConsentRef: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+export type ReleaseDrawingAtRiskInput = z.infer<typeof releaseDrawingAtRiskSchema>;
+
 /** S18: manually set (or clear) a Component's governing drawing — nothing auto-derives this link. */
 export const linkGoverningDrawingSchema = z
   .object({

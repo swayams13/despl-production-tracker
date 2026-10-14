@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
 import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
+import { drawingStateOf } from "@/lib/shared/floor-rules";
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
 import { explodeBomItem, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
 import type {
@@ -1130,7 +1131,7 @@ export async function assertDrawingReleased(
     select: {
       drawingNo: true,
       jobId: true,
-      revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true, status: true } },
+      revisions: { orderBy: { revisionNo: "desc" }, take: 1, select: { id: true, status: true, atRiskReleasedAt: true } },
     },
   });
   await tx.$executeRaw`SELECT set_config('app.job_id', ${priorJobGuc?.v ?? ""}, true)`;
@@ -1152,8 +1153,11 @@ export async function assertDrawingReleased(
     });
   }
 
+  // L1.2c (H3): a Production Head's at-risk release of the CURRENT revision
+  // passes the gate; a newer revision has no such release, so it voids it.
   const current = drawing.revisions[0];
-  if (!current || current.status !== "RELEASED") {
+  const state = drawingStateOf(current, true);
+  if (!current || (state !== "RELEASED" && state !== "AT_RISK")) {
     throw new AppError(ERROR_CODES.DRAWING_NOT_RELEASED, {
       componentId,
       assemblyDrawingId: component.governingDrawingId,

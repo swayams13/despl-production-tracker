@@ -8,6 +8,7 @@ import {
   checkReportedAt,
   checkStart,
   deriveRequiresQc,
+  drawingStateOf,
   evaluateHard,
   evaluateSoft,
   h3DataGaps,
@@ -230,6 +231,28 @@ describe("deriveRequiresQc (D3) — one row per category", () => {
   ];
   it.each(cases)("%s", (_name, input, expected) => {
     expect(deriveRequiresQc(input).requiresQc).toBe(expected);
+  });
+});
+
+describe("drawingStateOf: H3 state from the current revision (L1.2c)", () => {
+  const at = new Date("2026-10-14T05:00:00Z");
+  it.each<[string, Parameters<typeof drawingStateOf>[0], boolean, string]>([
+    ["no governing drawing link", null, false, "NO_LINK"],
+    ["linked, no revision issued", null, true, "NOT_RELEASED"],
+    ["current DRAFT, not at risk", { status: "DRAFT", atRiskReleasedAt: null }, true, "NOT_RELEASED"],
+    ["current SUBMITTED, not at risk", { status: "SUBMITTED", atRiskReleasedAt: null }, true, "NOT_RELEASED"],
+    ["current DRAFT released at risk", { status: "DRAFT", atRiskReleasedAt: at }, true, "AT_RISK"],
+    ["current APPROVED released at risk", { status: "APPROVED", atRiskReleasedAt: at }, true, "AT_RISK"],
+    ["current RELEASED", { status: "RELEASED", atRiskReleasedAt: null }, true, "RELEASED"],
+    ["RELEASED wins over a stale at-risk release", { status: "RELEASED", atRiskReleasedAt: at }, true, "RELEASED"],
+  ])("%s -> %s", (_name, current, linked, expected) => {
+    expect(drawingStateOf(current, linked)).toBe(expected);
+  });
+
+  it("an AT_RISK drawing passes H3 for pressure-part cutting; NOT_RELEASED still refuses", () => {
+    const cut = (drawing: OpItem["drawing"]) => op(1, { drawing });
+    expect(evaluateHard(cut("AT_RISK"), facts([cut("AT_RISK")]))).toBeNull();
+    expect(evaluateHard(cut("NOT_RELEASED"), facts([cut("NOT_RELEASED")]))?.code).toBe("DRAWING_NOT_RELEASED");
   });
 });
 

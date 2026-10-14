@@ -1,8 +1,13 @@
-import { withTenant } from "@/lib/db";
+import { withJob, withTenant } from "@/lib/db";
 import { audited } from "@/lib/audit";
 import { assertClientScope, assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { createDrawingRevisionSchema, type CreateDrawingRevisionInput } from "@/lib/shared/schemas";
+import {
+  createDrawingRevisionSchema,
+  releaseDrawingAtRiskSchema,
+  type CreateDrawingRevisionInput,
+  type ReleaseDrawingAtRiskInput,
+} from "@/lib/shared/schemas";
 import type { DrawingRevision } from "@/generated/prisma/client";
 
 /**
@@ -47,7 +52,7 @@ export async function createDrawingRevision(
     const highest = await tx.drawingRevision.findFirst({
       where: { assemblyDrawingId },
       orderBy: { revisionNo: "desc" },
-      select: { revisionNo: true },
+      select: { id: true, revisionNo: true, status: true, atRiskReleasedAt: true },
     });
     if (highest && revisionNo <= highest.revisionNo) {
       throw new AppError(ERROR_CODES.DRAWING_REVISION_NOT_INCREASING, {
@@ -61,6 +66,9 @@ export async function createDrawingRevision(
       where: { assemblyDrawingId, status: "RELEASED" },
       select: { id: true },
     });
+
+    // L1.2c: an at-risk release belongs to one revision; this newer one voids it.
+    const voidedAtRisk = highest?.atRiskReleasedAt && highest.status !== "RELEASED" ? highest.id : undefined;
 
     return audited(tx, actor, async () => {
       if (priorReleased) {
@@ -81,10 +89,81 @@ export async function createDrawingRevision(
           action: "drawing.createRevision",
           entityType: "DrawingRevision",
           entityId: revision.id,
-          before: priorReleased ? { supersededRevisionId: priorReleased.id } : undefined,
+          before: priorReleased || voidedAtRisk ? { supersededRevisionId: priorReleased?.id, voidedAtRiskReleaseOfRevisionId: voidedAtRisk } : undefined,
           after: { assemblyDrawingId, revisionNo, status, releasedAt: revision.releasedAt },
           eventType: "DrawingRevisionCreated",
           eventPayload: { assemblyDrawingId, revisionNo, status },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * L1.2c (D2, H3): release the drawing's CURRENT, not-yet-RELEASED revision at
+ * risk so pressure-part cutting may start before the revision is formally
+ * released. PRODUCTION_HEAD only (not ADMIN), with a mandatory reason and an
+ * optional client-consent reference, recorded on the revision row and audited.
+ * It is voided by a newer revision: the at-risk fields live on one revision
+ * row, and `assertDrawingReleased` reads only the highest revisionNo.
+ */
+export async function releaseDrawingAtRisk(actor: Actor, input: ReleaseDrawingAtRiskInput): Promise<DrawingRevision> {
+  const { jobId, drawingRevisionId, reason, clientConsentRef } = releaseDrawingAtRiskSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.PRODUCTION_HEAD);
+
+  return withJob(actor.tenantId, jobId, async (tx) => {
+    const revision = await tx.drawingRevision.findFirst({
+      where: { id: drawingRevisionId, jobId, tenantId: actor.tenantId },
+      select: { id: true, assemblyDrawingId: true, revisionNo: true, status: true, atRiskReleasedAt: true },
+    });
+    if (!revision) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "DrawingRevision", drawingRevisionId });
+
+    const highest = await tx.drawingRevision.findFirst({
+      where: { assemblyDrawingId: revision.assemblyDrawingId },
+      orderBy: { revisionNo: "desc" },
+      select: { revisionNo: true },
+    });
+    const refuse = (why: string) =>
+      new AppError(
+        ERROR_CODES.INVALID_STATE_TRANSITION,
+        { drawingRevisionId, currentStatus: revision.status, reason: why },
+        `This revision cannot be released at risk: ${why}.`,
+      );
+    if (revision.status === "RELEASED") throw refuse("it is already released");
+    if (highest && revision.revisionNo < highest.revisionNo) throw refuse("a newer revision exists");
+    if (revision.atRiskReleasedAt) throw refuse("it was already released at risk");
+
+    return audited(tx, actor, async () => {
+      // Guarded write: the at-risk fields are set once, never overwritten.
+      const claimed = await tx.drawingRevision.updateMany({
+        where: { id: revision.id, atRiskReleasedAt: null },
+        data: {
+          atRiskReleasedById: actor.userId,
+          atRiskReleasedAt: new Date(),
+          atRiskReason: reason,
+          clientConsentRef: clientConsentRef ?? null,
+        },
+      });
+      if (claimed.count !== 1) throw refuse("it was already released at risk");
+      const updated = await tx.drawingRevision.findUniqueOrThrow({ where: { id: revision.id } });
+      return {
+        result: updated,
+        audit: {
+          action: "drawing.releaseAtRisk",
+          entityType: "DrawingRevision",
+          entityId: revision.id,
+          before: { status: revision.status, atRiskReleasedAt: null },
+          after: {
+            assemblyDrawingId: revision.assemblyDrawingId,
+            revisionNo: revision.revisionNo,
+            atRiskReleasedById: actor.userId,
+            atRiskReleasedAt: updated.atRiskReleasedAt,
+            reason,
+            clientConsentRef: clientConsentRef ?? null,
+          },
+          eventType: "DrawingReleasedAtRisk",
+          eventPayload: { assemblyDrawingId: revision.assemblyDrawingId, revisionNo: revision.revisionNo },
         },
       };
     });
