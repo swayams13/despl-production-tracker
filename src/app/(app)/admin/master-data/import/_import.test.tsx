@@ -19,6 +19,17 @@ vi.mock("@/app/actions/master-import", () => ({
 
 import { MasterImport } from "./_import";
 
+// jsdom 26 (the newest that loads on the pinned Node 20) has no Blob.arrayBuffer or Blob.text; browsers do.
+const readBlob = (b: Blob, how: "readAsArrayBuffer" | "readAsText") =>
+  new Promise<never>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as never);
+    r.onerror = () => rej(r.error);
+    r[how](b);
+  });
+if (!Blob.prototype.arrayBuffer) Blob.prototype.arrayBuffer = function (this: Blob) { return readBlob(this, "readAsArrayBuffer"); };
+if (!Blob.prototype.text) Blob.prototype.text = function (this: Blob) { return readBlob(this, "readAsText"); };
+
 const tally = (create = 0, update = 0, unchanged = 0, skipped = 0) => ({ create, update, unchanged, skipped });
 const issue = (code: string, severity: string, row = 5, message = `${code} at ${row}`) =>
   ({ code, severity, sheet: "Part Routes", row, partCode: "SHL-01", message }) as DryRunReport["issues"][number];
