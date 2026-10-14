@@ -533,7 +533,22 @@ export async function assertNoOpenHoldPoint(
   tx: Tx,
   args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
-  if (args.unitId == null) return;
+  const open = await findOpenHoldPointItemIds(tx, args);
+  if (open.length > 0) {
+    throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      openQcpItemIds: open,
+    });
+  }
+}
+
+/** Non-throwing form of `assertNoOpenHoldPoint` (L1.2 rollup): the open blocking QcpItem ids. */
+export async function findOpenHoldPointItemIds(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
+): Promise<number[]> {
+  if (args.unitId == null) return [];
   // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
   await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
@@ -544,11 +559,18 @@ export async function assertNoOpenHoldPoint(
     },
     select: { id: true },
   });
-  if (blockingItems.length === 0) return;
+  return openQcpItemIdsForUnit(tx, args.unitId, blockingItems.map((i) => i.id));
+}
 
-  const itemIds = blockingItems.map((i) => i.id);
+/**
+ * Of `itemIds` (already known to carry a blocking code), those whose latest
+ * execution for the unit has not cleared them. Shared by the process-grain
+ * gate above and the L1.2 floor facts (an open H point on a step's QcpItem).
+ */
+export async function openQcpItemIdsForUnit(tx: Tx, unitId: number, itemIds: number[]): Promise<number[]> {
+  if (itemIds.length === 0) return [];
   const execs = await tx.qcpExecution.findMany({
-    where: { unitId: args.unitId, qcpItemId: { in: itemIds } },
+    where: { unitId, qcpItemId: { in: itemIds } },
     orderBy: { attemptNo: "desc" },
     select: { qcpItemId: true, result: true, waiverApprovedBy: true },
   });
@@ -559,28 +581,54 @@ export async function assertNoOpenHoldPoint(
 
   // AUD-003: NA is a pending waiver, not a clearance — it only clears once
   // approveQcpWaiver (qcp.service.ts) has stamped waiverApprovedBy.
-  const open = itemIds.filter((itemId) => {
+  return itemIds.filter((itemId) => {
     const e = latestByItem.get(itemId);
     if (!e) return true; // no execution at all — blocks
     if (e.result === "ACCEPTED") return false;
     if (e.result === "NA") return e.waiverApprovedBy == null; // NA clears only once approved
     return true; // PENDING / REJECTED block
   });
-  if (open.length > 0) {
-    throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, {
-      jobProcessId: args.jobProcessId,
-      unitId: args.unitId,
-      openQcpItemIds: open,
-    });
-  }
 }
 
 // ── Component/assembly rollup (Phase 3, addendum §3) ────────────────────
 
 export interface MappedOp {
   source: "fabrication" | "assembly";
+  /** ComponentOperation.id or AssemblyStep.id, per source. */
+  id: number;
   label: string;
   status: OperationStatus;
+  /** Server clock (invariant 1) and the L1.2 client-reported times, for rollupProcessPlan. */
+  startedAt: Date | null;
+  finishedAt: Date | null;
+  reportedStartAt: Date | null;
+  reportedFinishAt: Date | null;
+}
+
+/**
+ * `(op) => leadTimeProcessSeq` for one family: step-level `RouteStepFamilySeq`
+ * first, then the operation-level `OperationRefFamilySeq` (see
+ * `shared/stage-mapping.ts`). Null = no mapping (SEAM).
+ */
+export async function loadOpSeqResolver(
+  tx: Tx,
+  familyId: number,
+): Promise<(op: { operationId: number; seq: number; routeVersionId: number | null }) => number | null> {
+  const [opRows, stepRows] = await Promise.all([
+    tx.operationRefFamilySeq.findMany({
+      where: { familyId },
+      select: { operationRefId: true, leadTimeProcessSeq: true },
+    }),
+    tx.routeStepFamilySeq.findMany({
+      where: { familyId },
+      select: { leadTimeProcessSeq: true, routeStep: { select: { routeVersionId: true, seq: true } } },
+    }),
+  ]);
+  const operationSeq = new Map(opRows.map((r) => [r.operationRefId, r.leadTimeProcessSeq]));
+  const stepSeq = new Map(
+    stepRows.map((r) => [stepKey(r.routeStep.routeVersionId, r.routeStep.seq), r.leadTimeProcessSeq]),
+  );
+  return (op) => resolveProcessSeq(op, stepSeq, operationSeq);
 }
 
 /**
@@ -602,22 +650,8 @@ export interface MappedOp {
 async function loadComponentOpsForProcessSeq(
   tx: Tx,
   args: { familyId: number; seq: number; unitId: number },
-): Promise<Array<{ id: number; status: OperationStatus; operationName: string }>> {
-  const [opRows, stepRows] = await Promise.all([
-    tx.operationRefFamilySeq.findMany({
-      where: { familyId: args.familyId },
-      select: { operationRefId: true, leadTimeProcessSeq: true },
-    }),
-    tx.routeStepFamilySeq.findMany({
-      where: { familyId: args.familyId },
-      select: { leadTimeProcessSeq: true, routeStep: { select: { routeVersionId: true, seq: true } } },
-    }),
-  ]);
-  if (opRows.length === 0 && stepRows.length === 0) return [];
-  const operationSeq = new Map(opRows.map((r) => [r.operationRefId, r.leadTimeProcessSeq]));
-  const stepSeq = new Map(
-    stepRows.map((r) => [stepKey(r.routeStep.routeVersionId, r.routeStep.seq), r.leadTimeProcessSeq]),
-  );
+) {
+  const resolve = await loadOpSeqResolver(tx, args.familyId);
   const ops = await tx.componentOperation.findMany({
     where: { component: { unitId: args.unitId } },
     select: {
@@ -625,20 +659,25 @@ async function loadComponentOpsForProcessSeq(
       seq: true,
       status: true,
       operationId: true,
+      startedAt: true,
+      finishedAt: true,
+      reportedStartAt: true,
+      reportedFinishAt: true,
       operation: { select: { name: true } },
       component: { select: { routeVersionId: true } },
     },
   });
   return ops
-    .filter(
-      (o) =>
-        resolveProcessSeq(
-          { operationId: o.operationId, seq: o.seq, routeVersionId: o.component.routeVersionId },
-          stepSeq,
-          operationSeq,
-        ) === args.seq,
-    )
-    .map((o) => ({ id: o.id, status: o.status, operationName: o.operation.name }));
+    .filter((o) => resolve({ operationId: o.operationId, seq: o.seq, routeVersionId: o.component.routeVersionId }) === args.seq)
+    .map((o) => ({
+      id: o.id,
+      status: o.status,
+      operationName: o.operation.name,
+      startedAt: o.startedAt,
+      finishedAt: o.finishedAt,
+      reportedStartAt: o.reportedStartAt,
+      reportedFinishAt: o.reportedFinishAt,
+    }));
 }
 
 /**
@@ -673,13 +712,21 @@ export async function loadMappedOps(
     loadComponentOpsForProcessSeq(tx, { familyId: jobProcess.job.familyId, seq, unitId: args.unitId }),
     tx.assemblyStep.findMany({
       where: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
-      select: { status: true, templateStep: { select: { activity: true } } },
+      select: {
+        id: true,
+        status: true,
+        startedAt: true,
+        finishedAt: true,
+        reportedStartAt: true,
+        reportedFinishAt: true,
+        templateStep: { select: { activity: true } },
+      },
     }),
   ]);
 
   return [
-    ...componentOps.map((o) => ({ source: "fabrication" as const, label: o.operationName, status: o.status })),
-    ...assemblySteps.map((s) => ({ source: "assembly" as const, label: s.templateStep.activity, status: s.status })),
+    ...componentOps.map(({ operationName, ...o }) => ({ source: "fabrication" as const, label: operationName, ...o })),
+    ...assemblySteps.map(({ templateStep, ...s }) => ({ source: "assembly" as const, label: templateStep.activity, ...s })),
   ];
 }
 
@@ -730,7 +777,22 @@ export async function assertNoOpenNcr(
   tx: Tx,
   args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
-  if (args.unitId == null) return;
+  const blockingOperations = await findOpenNcrOperations(tx, args);
+  if (blockingOperations.length > 0) {
+    throw new AppError(ERROR_CODES.NCR_OPEN, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      blockingOperations,
+    });
+  }
+}
+
+/** Non-throwing form of `assertNoOpenNcr` (L1.2 rollup): the blocking operations' labels. */
+export async function findOpenNcrOperations(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null; jobId: number },
+): Promise<string[]> {
+  if (args.unitId == null) return [];
   // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
   await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
@@ -738,7 +800,7 @@ export async function assertNoOpenNcr(
     where: { id: args.jobProcessId },
     select: { code: true, job: { select: { familyId: true } } },
   });
-  if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return;
+  if (!jobProcess || !/^\d+$/.test(jobProcess.code)) return [];
   const seq = Number(jobProcess.code);
   const mappedOpIds = (
     await loadComponentOpsForProcessSeq(tx, { familyId: jobProcess.job.familyId, seq, unitId: args.unitId })
@@ -770,19 +832,12 @@ export async function assertNoOpenNcr(
     },
   });
 
-  if (openNcrs.length > 0) {
-    const blockingOperations = openNcrs.map(
-      (n) =>
-        n.componentOperationRejection?.componentOperation.operation.name ??
-        n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
-        "unknown operation",
-    );
-    throw new AppError(ERROR_CODES.NCR_OPEN, {
-      jobProcessId: args.jobProcessId,
-      unitId: args.unitId,
-      blockingOperations,
-    });
-  }
+  return openNcrs.map(
+    (n) =>
+      n.componentOperationRejection?.componentOperation.operation.name ??
+      n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
+      "unknown operation",
+  );
 }
 
 /**
@@ -936,14 +991,29 @@ export async function assertEvidenceSatisfied(
   tx: Tx,
   args: { jobProcessId: number; unitId: number | null },
 ): Promise<void> {
-  if (args.unitId == null) return;
+  const missing = await findMissingEvidence(tx, args);
+  if (missing) {
+    throw new AppError(ERROR_CODES.EVIDENCE_NOT_SATISFIED, {
+      jobProcessId: args.jobProcessId,
+      unitId: args.unitId,
+      evidenceKind: missing,
+    });
+  }
+}
+
+/** Non-throwing form of `assertEvidenceSatisfied` (L1.2 rollup): the missing evidence kind, or null. */
+export async function findMissingEvidence(
+  tx: Tx,
+  args: { jobProcessId: number; unitId: number | null },
+): Promise<string | null> {
+  if (args.unitId == null) return null;
 
   const jobProcess = await tx.jobProcess.findUnique({
     where: { id: args.jobProcessId },
     select: { templateProcess: { select: { evidenceKind: true } } },
   });
   const evidenceKind = jobProcess?.templateProcess?.evidenceKind;
-  if (evidenceKind == null) return;
+  if (evidenceKind == null) return null;
 
   let satisfied: boolean;
   switch (evidenceKind) {
@@ -969,13 +1039,7 @@ export async function assertEvidenceSatisfied(
       satisfied = false;
   }
 
-  if (!satisfied) {
-    throw new AppError(ERROR_CODES.EVIDENCE_NOT_SATISFIED, {
-      jobProcessId: args.jobProcessId,
-      unitId: args.unitId,
-      evidenceKind,
-    });
-  }
+  return satisfied ? null : evidenceKind;
 }
 
 /**
@@ -1233,4 +1297,115 @@ export async function loadPredecessorStates(
     predecessorId,
     status: statusByProc.get(predecessorId) ?? "NOT_STARTED",
   }));
+}
+
+// ── Lean Core L1.2: floor locks and the derived process plan ─────────────
+
+/** Two-key advisory-lock namespaces (a different keyspace from stock.service's one-key lock). */
+export const FLOOR_LOCK_JOB = 1201;
+export const FLOOR_LOCK_UNIT = 1202;
+
+/**
+ * L1.2: serialise every floor write on a unit (the job, for unit-less items).
+ * Always the job key first, then units ascending, so two overlapping batches
+ * can never take them in opposite orders and deadlock. Transaction-scoped:
+ * released on commit or rollback.
+ */
+export async function lockFloorUnits(tx: Tx, jobId: number, unitIds: Iterable<number | null>): Promise<void> {
+  const ids = [...new Set(unitIds)];
+  if (ids.includes(null)) await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FLOOR_LOCK_JOB}::int, ${jobId}::int)`;
+  for (const id of ids.filter((u): u is number => u != null).sort((a, b) => a - b)) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${FLOOR_LOCK_UNIT}::int, ${id}::int)`;
+  }
+}
+
+export interface RollupChange {
+  processPlanId: number;
+  from: ProcessPlan["status"];
+  to: ProcessPlan["status"];
+}
+
+const minDate = (ds: (Date | null)[]) => ds.reduce<Date | null>((m, d) => (d && (!m || d < m) ? d : m), null);
+const maxDate = (ds: (Date | null)[]) => ds.reduce<Date | null>((m, d) => (d && (!m || d > m) ? d : m), null);
+const sameTime = (a: Date | null, b: Date | null) => (a?.getTime() ?? null) === (b?.getTime() ?? null);
+
+/**
+ * Invariant 12 as revised (L1.2): a unit's process plan with mapped steps or
+ * operations takes its status from them, in the caller's transaction (which
+ * already holds the unit's floor lock). NOT_STARTED while none has started;
+ * IN_PROGRESS once any has; COMPLETE when every mapped item is COMPLETE and
+ * no blocking H point, open NCR or missing evidence remains (the same
+ * predicates verifyProcess refuses on). It moves back from COMPLETE when a
+ * mapped item is reopened. actualStart/actualFinish are the server min/max;
+ * reported* the min/max of COALESCE(reported, actual).
+ *
+ * Returns null and writes nothing when the plan is not derived (JOB grain,
+ * no mapped items), does not exist (an excluded process has no plan), is
+ * ON_HOLD, or nothing changed. One `process.rollup` audit row per change.
+ */
+export async function rollupProcessPlan(
+  tx: Tx,
+  actor: Actor,
+  jobProcessId: number,
+  unitId: number | null,
+): Promise<RollupChange | null> {
+  if (unitId == null) return null;
+  const found = await tx.processPlan.findFirst({
+    where: { jobProcessId, unitId, scheduleRun: { isCurrent: true } },
+    select: { id: true },
+  });
+  if (!found) return null;
+  await tx.$queryRaw`SELECT id FROM process_plans WHERE id = ${found.id} FOR UPDATE`;
+  const plan = await tx.processPlan.findUniqueOrThrow({ where: { id: found.id } });
+  if (plan.status === "ON_HOLD") return null;
+
+  const items = await loadMappedOps(tx, { jobProcessId, unitId, jobId: plan.jobId });
+  if (items.length === 0) return null;
+
+  const started = items.filter((i) => i.status !== "NOT_STARTED");
+  let to: ProcessPlan["status"] = started.length === 0 ? "NOT_STARTED" : "IN_PROGRESS";
+  if (items.every((i) => i.status === "COMPLETE")) {
+    const args = { jobProcessId, unitId, jobId: plan.jobId };
+    const blocked =
+      (await findOpenHoldPointItemIds(tx, args)).length > 0 ||
+      (await findOpenNcrOperations(tx, args)).length > 0 ||
+      (await findMissingEvidence(tx, args)) != null;
+    if (!blocked) to = "COMPLETE";
+  }
+
+  const complete = to === "COMPLETE";
+  const next = {
+    status: to,
+    actualStart: minDate(started.map((i) => i.startedAt)),
+    actualFinish: complete ? (maxDate(items.map((i) => i.finishedAt)) ?? new Date()) : null,
+    reportedStartAt: minDate(started.map((i) => i.reportedStartAt ?? i.startedAt)),
+    reportedFinishAt: complete ? maxDate(items.map((i) => i.reportedFinishAt ?? i.finishedAt)) : null,
+  };
+  if (
+    next.status === plan.status &&
+    sameTime(next.actualStart, plan.actualStart) &&
+    sameTime(next.actualFinish, plan.actualFinish) &&
+    sameTime(next.reportedStartAt, plan.reportedStartAt) &&
+    sameTime(next.reportedFinishAt, plan.reportedFinishAt)
+  ) {
+    return null;
+  }
+
+  await tx.processPlan.update({ where: { id: plan.id }, data: next });
+  await recordAudit(tx, actor, {
+    action: "process.rollup",
+    entityType: "ProcessPlan",
+    entityId: plan.id,
+    before: {
+      status: plan.status,
+      actualStart: plan.actualStart,
+      actualFinish: plan.actualFinish,
+      reportedStartAt: plan.reportedStartAt,
+      reportedFinishAt: plan.reportedFinishAt,
+    },
+    after: { ...next, items: items.map((i) => ({ source: i.source, id: i.id, status: i.status })) },
+    eventType: "ProcessRolledUp",
+    eventPayload: { processPlanId: plan.id, from: plan.status, to },
+  });
+  return { processPlanId: plan.id, from: plan.status, to };
 }
