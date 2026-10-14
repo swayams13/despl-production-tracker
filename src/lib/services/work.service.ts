@@ -1,3 +1,4 @@
+import { Prisma } from "@/generated/prisma/client";
 import { withJob, type Tx } from "@/lib/db";
 import { type Actor, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
@@ -7,6 +8,9 @@ import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import { recordWorkSchema, type RecordWorkInput } from "@/lib/shared/schemas";
 import type { WorkCalendarInput } from "@/lib/schedule";
 import {
+  assertEvidenceSatisfied,
+  assertNoOpenHoldPoint,
+  assertNoOpenNcr,
   loadPlanNotifyContext,
   lockFloorUnits,
   resolveCalendarsForJobs,
@@ -205,9 +209,15 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
       // Same JSON shape on the first answer and on a replay.
       const response = JSON.parse(JSON.stringify(result)) as RecordWorkResult;
       if (requestId) {
-        await tx.workRequest.create({
-          data: { jobId: job.id, requestId, actorId: actor.userId, response: response as never },
-        });
+        // job_isolation RLS hides another job's row from the lookup above; the unique index still sees it.
+        await tx.workRequest
+          .create({ data: { jobId: job.id, requestId, actorId: actor.userId, response: response as never } })
+          .catch((e: unknown) => {
+            if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
+              throw new AppError(ERROR_CODES.VALIDATION_FAILED, { requestId }, "This request id was already used for another request.");
+            }
+            throw e;
+          });
       }
       return response;
     },
@@ -332,8 +342,16 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     throw new AppError(ERROR_CODES.VALIDATION_FAILED, { assemblyStepId: item.id, jointRef: row.templateJointRef }, JOINT_REQUIRED);
   }
 
-  // ── Writes ──
   const to = action === "START" ? "IN_PROGRESS" : row.requiresQc ? "SUBMITTED" : "COMPLETE";
+  // Invariant 4: a plan written straight to COMPLETE (no QC verify) passes what verifyProcess refuses on.
+  if (item.kind === "PROCESS_PLAN" && to === "COMPLETE") {
+    const args = { jobProcessId: row.jobProcessId!, unitId: row.unitId, jobId: ctx.job.id };
+    await assertNoOpenHoldPoint(tx, args);
+    await assertNoOpenNcr(tx, args);
+    await assertEvidenceSatisfied(tx, args);
+  }
+
+  // ── Writes ──
   const times = {
     ...(starting ? { reportedStartAt: reportedAt ?? undefined } : {}),
     ...(action === "DONE" ? { reportedFinishAt: reportedAt ?? undefined, submittedBy: actor.userId } : {}),
@@ -344,6 +362,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     remarks: detail?.remarks,
   };
   let written: Record<string, unknown>;
+  let builtToRevisionId: number | undefined;
   if (item.kind === "PROCESS_PLAN") {
     written = await tx.processPlan.update({
       where: { id: item.id },
@@ -387,7 +406,8 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     }
     // B9 / H3: server-stamped revision the part was cut to.
     if (starting && item.kind === "COMPONENT_OP" && item.opCode === "CUTTING" && row.currentRevisionId != null) {
-      await tx.component.update({ where: { id: row.componentId! }, data: { builtToRevisionId: row.currentRevisionId } });
+      builtToRevisionId = row.currentRevisionId;
+      await tx.component.update({ where: { id: row.componentId! }, data: { builtToRevisionId } });
     }
   }
 
@@ -419,7 +439,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     entityType: ENTITY[item.kind],
     entityId: item.id,
     before: { status: from },
-    after: { ...written, recordedAt: now, reportedAt, late, sequenceOverride, requestId: ctx.requestId ?? null },
+    after: { ...written, builtToRevisionId, recordedAt: now, reportedAt, late, sequenceOverride, requestId: ctx.requestId ?? null },
     eventType: action === "START" ? "WorkStarted" : "WorkDone",
     eventPayload: { kind: item.kind, id: item.id, from, to, unitId: row.unitId },
   });

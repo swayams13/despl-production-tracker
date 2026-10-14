@@ -321,6 +321,11 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       await rec(sup, j, "START", [[OP, j.op("SHELL", "CUTTING")]]);
       const c = await owner.component.findUniqueOrThrow({ where: { id: j.components.get("SHELL:0")! } });
       expect(c.builtToRevisionId).toBe(j.revisions.get("SHELL:0"));
+      // Invariant 5: the component stamp is in the audit row, as the legacy start records it.
+      const audit = await owner.auditLog.findFirstOrThrow({
+        where: { tenantId: o.tenantId, action: "work.start", entityId: String(j.op("SHELL", "CUTTING")) },
+      });
+      expect(audit.after).toMatchObject({ builtToRevisionId: j.revisions.get("SHELL:0") });
     });
   });
 
@@ -486,6 +491,22 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       });
       expect(notes.map((n) => n.entityId).sort()).toEqual(j.units.map((u) => u.id).sort());
       expect(notes[0].title).toMatch(/^2 items awaiting your verification/);
+    });
+
+    it("false on an unmapped unit plan: an open blocking H point on it refuses HOLD_POINT_OPEN (invariant 4); nothing written", async () => {
+      const j = await o.job({ processes: [{ code: "22", requiresQc: false }] });
+      const qcpTemplate = await owner.qcpTemplate.create({ data: { jobId: j.job.id, jobLabel: "x", vessel: "x" } });
+      const party = await owner.inspectionParty.create({ data: { qcpTemplateId: qcpTemplate.id, code: "DESPL", jobId: j.job.id } });
+      const item = await owner.qcpItem.create({ data: { qcpTemplateId: qcpTemplate.id, sequence: 1, srNo: "9", kind: "CHECKPOINT", activity: "H", jobId: j.job.id } });
+      await owner.qcpItemPartyCode.create({ data: { qcpItemId: item.id, inspectionPartyId: party.id, qcpCodeId: o.holdCode.id, jobId: j.job.id } });
+      await owner.qcpItemProcess.create({ data: { qcpItemId: item.id, jobProcessId: j.processes.get("22")!, jobId: j.job.id } });
+
+      const r = await rec(sup, j, "DONE", [[P, j.plan("22", 0)]]);
+      expect(refusal(r, j.plan("22", 0))?.code).toBe(ERROR_CODES.HOLD_POINT_OPEN);
+      expect((await planRow(j.plan("22", 0))).status).toBe("NOT_STARTED");
+
+      await owner.qcpExecution.create({ data: { qcpItemId: item.id, unitId: j.units[0].id, result: "ACCEPTED", jobId: j.job.id } });
+      expect((await rec(sup, j, "DONE", [[P, j.plan("22", 0)]])).applied).toMatchObject([{ to: "COMPLETE" }]);
     });
 
     it("false: Done goes straight to COMPLETE, audited, no QC notification", async () => {
@@ -688,6 +709,15 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       const requestId = crypto.randomUUID();
       await rec(sup, j, "START", [[S, j.step(1)]], { requestId });
       await expectThrownCode(rec(sup2, j, "START", [[S, j.step(1)]], { requestId }), ERROR_CODES.VALIDATION_FAILED);
+    });
+
+    it("a requestId reused on another job (hidden by job RLS) is refused VALIDATION_FAILED, and that batch is rolled back", async () => {
+      const j = await o.job({ steps: [{ seq: 1 }] });
+      const k = await o.job({ steps: [{ seq: 1 }] });
+      const requestId = crypto.randomUUID();
+      await rec(sup, j, "START", [[S, j.step(1)]], { requestId });
+      await expectThrownCode(rec(sup, k, "START", [[S, k.step(1)]], { requestId }), ERROR_CODES.VALIDATION_FAILED);
+      expect((await stepRow(k.step(1))).status).toBe("NOT_STARTED");
     });
   });
 });
