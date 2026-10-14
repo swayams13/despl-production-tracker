@@ -131,6 +131,7 @@ export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): 
       if (!codeClause) {
         throw new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "codeClause" }, "Record the code clause this acceptance relies on.");
       }
+      await assertConcessionNotByMaker(tx, actor, ncr);
     } else {
       requireRole(actor, ROLES.QC);
     }
@@ -183,6 +184,49 @@ export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): 
       };
     });
   });
+}
+
+/**
+ * Invariant 3 on a concession: whoever accepts a rule violation per a code
+ * clause did not raise its NCR and did not do the work it names. "Did the work"
+ * is anyone with a recorded write on the target item (the audit trail of its
+ * start / done / submit) or named on it (submittedBy, performedByUserId). Admins
+ * are not exempt; a Production Head who started the weld cannot concede it.
+ */
+async function assertConcessionNotByMaker(tx: Tx, actor: Actor, ncr: Ncr): Promise<void> {
+  const makers = new Set<number>();
+  if (ncr.raisedBy != null) makers.add(ncr.raisedBy);
+  const target =
+    ncr.targetAssemblyStepId != null
+      ? { entityType: "AssemblyStep", id: ncr.targetAssemblyStepId }
+      : ncr.targetComponentOperationId != null
+        ? { entityType: "ComponentOperation", id: ncr.targetComponentOperationId }
+        : null;
+  if (target) {
+    const item =
+      target.entityType === "AssemblyStep"
+        ? await tx.assemblyStep.findFirst({
+            where: { id: target.id, jobId: ncr.jobId },
+            select: { submittedBy: true, performedByUserId: true },
+          })
+        : await tx.componentOperation.findFirst({
+            where: { id: target.id, jobId: ncr.jobId },
+            select: { submittedBy: true, performedByUserId: true },
+          });
+    for (const u of [item?.submittedBy, item?.performedByUserId]) if (u != null) makers.add(u);
+    const trail = await tx.auditLog.findMany({
+      where: { tenantId: actor.tenantId, entityType: target.entityType, entityId: String(target.id) },
+      select: { actorId: true },
+    });
+    for (const a of trail) if (a.actorId != null) makers.add(a.actorId);
+  }
+  if (makers.has(actor.userId)) {
+    throw new AppError(
+      ERROR_CODES.MAKER_CHECKER_VIOLATION,
+      { ncrId: ncr.id, reason: "raised the NCR or did the work it names" },
+      "You raised this NCR or did the work it names, so you cannot accept it per a code clause. Another Production Head must.",
+    );
+  }
 }
 
 /**

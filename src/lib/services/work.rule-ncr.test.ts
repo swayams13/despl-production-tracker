@@ -27,6 +27,7 @@ describe.skipIf(!RUN_DB)("L1.2f H5/H6 rule NCRs (DB)", async () => {
   let b: WorkOrg;
   let sup: Actor;
   let head: Actor;
+  let head2: Actor;
   let qc: Actor;
   let qc2: Actor;
   let bQc: Actor;
@@ -36,6 +37,7 @@ describe.skipIf(!RUN_DB)("L1.2f H5/H6 rule NCRs (DB)", async () => {
     b = await makeWorkOrg(owner, "G");
     sup = await o.user("sup", ["SUPERVISOR"], [o.fab.id]);
     head = await o.user("head", ["PRODUCTION_HEAD"]);
+    head2 = await o.user("head2", ["PRODUCTION_HEAD"]);
     qc = await o.user("qc", ["QC"]);
     qc2 = await o.user("qc2", ["QC"]);
     bQc = await b.user("bqc", ["QC"]);
@@ -341,6 +343,57 @@ describe.skipIf(!RUN_DB)("L1.2f H5/H6 rule NCRs (DB)", async () => {
     const r = await work(sup, j, "START", [[OP, cleatOp(j, "H5")], [S, j.step(3)]]);
     expect(r.applied.map((a) => a.id)).toEqual([cleatOp(j, "H5")]);
     expect(r.refused.map((x) => x.code)).toEqual([ERROR_CODES.WELD_AFTER_PWHT]);
+  });
+
+  // ── CONCESSION maker-checker (invariant 3; found by review 14 Oct) ──────
+  describe("a concession is never approved by the person who did the work or raised the NCR", () => {
+    /** Step 3 is started by `maker` before the final PWHT, then H5 refuses its Done: QC raises the NCR. */
+    async function startedBefore(maker: Actor, detail?: { performedByUserId?: number }, raiser: Actor = qc) {
+      const j = await o.job(RULES.H5.spec());
+      await work(sup, j, "DONE", [[S, j.step(1)]]);
+      await accept(qc, j.step(1));
+      const r = await recordWork(maker, {
+        jobId: j.job.id,
+        action: "START",
+        items: [{ kind: S, id: j.step(3), ...(detail ? { detail } : {}) }],
+      });
+      expect(r.applied, JSON.stringify(r.refused)).toHaveLength(1);
+      await RULES.H5.doTrigger(j);
+      const ncr = await raise(raiser, j, "H5");
+      return { j, ncr };
+    }
+    const concede = (actor: Actor, ncrId: number) =>
+      dispositionNcr(actor, { ncrId, disposition: "CONCESSION", codeClause: "UG-99" });
+
+    it.each<[string, () => Promise<{ ncrId: number; actor: Actor }>]>([
+      [
+        "the Production Head who started the weld",
+        async () => ({ ncrId: (await startedBefore(head)).ncr.id, actor: head }),
+      ],
+      [
+        "the Production Head named as the person who performed it",
+        async () => ({ ncrId: (await startedBefore(sup, { performedByUserId: head.userId })).ncr.id, actor: head }),
+      ],
+      [
+        "a Production Head who is also the QC user that raised the NCR",
+        async () => {
+          // Created here, not in beforeAll: another QC user would change the ratification notification counts above.
+          const headQc = await o.user("headqc", ["PRODUCTION_HEAD", "QC"]);
+          return { ncrId: (await startedBefore(sup, undefined, headQc)).ncr.id, actor: headQc };
+        },
+      ],
+    ])("%s is refused; the NCR stays OPEN with no approver", async (_l, setup) => {
+      const { ncrId, actor } = await setup();
+      expect(await code(concede(actor, ncrId))).toBe(ERROR_CODES.MAKER_CHECKER_VIOLATION);
+      expect(await ncrRow(ncrId)).toMatchObject({ status: "OPEN", disposition: null, concessionApprovedById: null, codeClause: null });
+    });
+
+    it("a different Production Head may accept it, and the refused one still may not afterwards", async () => {
+      const { ncr } = await startedBefore(head);
+      expect(await code(concede(head, ncr.id))).toBe(ERROR_CODES.MAKER_CHECKER_VIOLATION);
+      expect(await code(concede(head2, ncr.id))).toBeNull();
+      expect(await ncrRow(ncr.id)).toMatchObject({ status: "DISPOSITIONED", concessionApprovedById: head2.userId });
+    });
   });
 
   it("an H5 concession does not exempt the same item from H6", async () => {
