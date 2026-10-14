@@ -820,23 +820,41 @@ export async function findOpenNcrOperations(
             assemblyStep: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
           },
         },
+        // L1.2f: H5/H6 rule NCRs name the refused item directly.
+        { targetComponentOperationId: { in: mappedOpIds } },
+        { targetAssemblyStep: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } } },
       ],
     },
-    select: {
-      componentOperationRejection: {
-        select: { componentOperation: { select: { operation: { select: { name: true } } } } },
-      },
-      assemblyStepRejection: {
-        select: { assemblyStep: { select: { templateStep: { select: { activity: true } } } } },
-      },
-    },
+    select: NCR_SOURCE_LABEL_SELECT,
   });
 
-  return openNcrs.map(
-    (n) =>
-      n.componentOperationRejection?.componentOperation.operation.name ??
-      n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
-      "unknown operation",
+  return openNcrs.map(ncrSourceLabel);
+}
+
+const NCR_SOURCE_LABEL_SELECT = {
+  componentOperationRejection: {
+    select: { componentOperation: { select: { operation: { select: { name: true } } } } },
+  },
+  assemblyStepRejection: {
+    select: { assemblyStep: { select: { templateStep: { select: { activity: true } } } } },
+  },
+  targetComponentOperation: { select: { operation: { select: { name: true } } } },
+  targetAssemblyStep: { select: { templateStep: { select: { activity: true } } } },
+} as const;
+
+/** The operation/step an NCR is about, whichever of its four sources is set. */
+function ncrSourceLabel(n: {
+  componentOperationRejection: { componentOperation: { operation: { name: string } } } | null;
+  assemblyStepRejection: { assemblyStep: { templateStep: { activity: string } } } | null;
+  targetComponentOperation: { operation: { name: string } } | null;
+  targetAssemblyStep: { templateStep: { activity: string } } | null;
+}): string {
+  return (
+    n.componentOperationRejection?.componentOperation.operation.name ??
+    n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
+    n.targetComponentOperation?.operation.name ??
+    n.targetAssemblyStep?.templateStep.activity ??
+    "unknown operation"
   );
 }
 
@@ -890,25 +908,15 @@ export async function assertUnitHasNoOpenNcr(tx: Tx, unitId: number, jobId: numb
       OR: [
         { componentOperationRejection: { componentOperation: { component: { unitId } } } },
         { assemblyStepRejection: { assemblyStep: { unitId } } },
+        { targetComponentOperation: { component: { unitId } } },
+        { targetAssemblyStep: { unitId } },
       ],
     },
-    select: {
-      componentOperationRejection: {
-        select: { componentOperation: { select: { operation: { select: { name: true } } } } },
-      },
-      assemblyStepRejection: {
-        select: { assemblyStep: { select: { templateStep: { select: { activity: true } } } } },
-      },
-    },
+    select: NCR_SOURCE_LABEL_SELECT,
   });
 
   if (openNcrs.length > 0) {
-    const blockingOperations = openNcrs.map(
-      (n) =>
-        n.componentOperationRejection?.componentOperation.operation.name ??
-        n.assemblyStepRejection?.assemblyStep.templateStep.activity ??
-        "unknown operation",
-    );
+    const blockingOperations = openNcrs.map(ncrSourceLabel);
     throw new AppError(ERROR_CODES.NCR_OPEN, { unitId, blockingOperations });
   }
 }

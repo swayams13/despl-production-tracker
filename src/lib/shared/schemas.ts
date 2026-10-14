@@ -201,6 +201,8 @@ export const dispositionNcrSchema = z
     notes: z.string().trim().max(2000).optional(),
     reworkOwnerId: id.optional(),
     reworkDueDate: z.coerce.date().optional(),
+    /** L1.2f: the code clause a CONCESSION on an H5/H6 rule NCR relies on (required there). */
+    codeClause: z.string().trim().min(1).max(500).optional(),
   })
   .strict();
 export type DispositionNcrInput = z.infer<typeof dispositionNcrSchema>;
@@ -1329,3 +1331,13 @@ export const inspectSchema = z
   .strict()
   .refine((i) => i.result !== "REJECT" || !!i.reason, { message: "Give a reason to reject", path: ["reason"] });
 export type InspectInput = z.input<typeof inspectSchema>;
+
+/** L1.2f: QC raises an NCR for an item D2's H5/H6 refuses (welding after final PWHT / after hydro). */
+export const raiseRuleNcrSchema = z
+  .object({
+    kind: z.enum(["ASSEMBLY_STEP", "COMPONENT_OP"]),
+    targetId: id,
+    rule: z.enum(["H5", "H6"]),
+  })
+  .strict();
+export type RaiseRuleNcrInput = z.infer<typeof raiseRuleNcrSchema>;

@@ -29,6 +29,7 @@ import { rejectProcess, verifyProcess } from "./process.service";
 import { loadFloorFacts, rowKey, type FloorFacts, type WorkRow } from "./work.facts";
 import { assertPerformedByValid } from "./welding.service";
 import { notify, userIdsWithRole } from "./notifications.service";
+import { closeRuleNcrsOnRedo } from "./ncr.service";
 
 /**
  * Lean Core L1.2: the one floor write path. Start or Done on a batch of
@@ -309,6 +310,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
   if (starting) {
     const check = checkStart(item, facts.facts, { roles: actor.roles, hasOverride: !!ctx.override });
     if (!check.ok) {
+      await withRuleNcr(ctx, item, check.meta);
       const operator = check.code === ERROR_CODES.SEQUENCE_OVERRIDE_REQUIRED && check.meta.canOverride === false;
       throw new AppError(check.code, check.meta, operator ? SEQUENCE_OVERRIDE_OPERATOR_MESSAGE : undefined);
     }
@@ -318,7 +320,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
   } else {
     // Review fix: Done of a started item re-runs H5/H6 (rework finished after the final PWHT / hydro).
     const hard = evaluateHard(item, facts.facts, "DONE");
-    if (hard) throw new AppError(hard.code, hard.meta);
+    if (hard) throw new AppError(hard.code, await withRuleNcr(ctx, item, hard.meta));
   }
 
   // Invariant 7 as revised: a late Done carries its reason in the same action.
@@ -484,11 +486,31 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
   });
 
   if (fileLateOn) await fileLateReason(ctx, fileLateOn);
+  if (item.kind === "ASSEMBLY_STEP" && to === "COMPLETE") {
+    await closeRuleNcrsOnRedo(tx, actor, { unitId: row.unitId!, jobId: ctx.job.id, role: item.role });
+  }
 
   // Later items in this batch see this one's new state.
   item.status = to;
   if (starting) row.startedAt = reportedAt ?? now;
   return { kind: item.kind, id: item.id, from, to, overridden: overridden.length > 0, late };
+}
+
+/** L1.2f: an H5/H6 refusal routes to an NCR; point at the one already raised for this item (null if none yet). */
+async function withRuleNcr(ctx: BatchContext, item: FloorItem, meta: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (meta.routeTo !== "NCR" || item.kind === "PROCESS_PLAN") return meta;
+  const ncr = await ctx.tx.ncr.findFirst({
+    where: {
+      jobId: ctx.job.id,
+      ruleCode: meta.rule as "H5" | "H6",
+      status: { not: "CLOSED" },
+      ...(item.kind === "ASSEMBLY_STEP" ? { targetAssemblyStepId: item.id } : { targetComponentOperationId: item.id }),
+    },
+    orderBy: { id: "desc" },
+    select: { id: true },
+  });
+  meta.ncrId = ncr?.id ?? null;
+  return meta;
 }
 
 /** One DelayReason per late plan, notified to the Production Head as fileDelayReason does. */

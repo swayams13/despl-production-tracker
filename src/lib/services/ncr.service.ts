@@ -1,11 +1,19 @@
-import { withTenant, type Tx } from "@/lib/db";
+import { withJob, withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz";
-import { audited } from "@/lib/audit";
+import { audited, recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { HARD_RULES } from "@/lib/shared/floor-rules";
 import { assertStateTransition } from "./state-machine";
-import { lockFloorUnits } from "./_shared";
-import { dispositionNcrSchema, type DispositionNcrInput } from "@/lib/shared/schemas";
-import type { Ncr, NcrStatus, NcrDisposition } from "@/generated/prisma/client";
+import { lockFloorUnits, rollupForAssemblyStep, rollupForComponentOperation } from "./_shared";
+import { loadFloorFacts, rowKey } from "./work.facts";
+import { notify, userIdsWithRole } from "./notifications.service";
+import {
+  dispositionNcrSchema,
+  raiseRuleNcrSchema,
+  type DispositionNcrInput,
+  type RaiseRuleNcrInput,
+} from "@/lib/shared/schemas";
+import type { AssemblyStepRole, Ncr, NcrStatus, NcrDisposition, NcrRuleCode } from "@/generated/prisma/client";
 
 /**
  * N1/N2/N4 (Phase 5) — the disposition/rework workflow layered on top of
@@ -35,28 +43,29 @@ export function assertNcrTransition(action: NcrAction, from: NcrStatus): NcrStat
 
 const REWORK_DISPOSITIONS: NcrDisposition[] = ["REWORK", "REPAIR"];
 
+/** L1.2f: the step a rule NCR's repair repeats, and back. */
+const RULE_ROLE: Record<NcrRuleCode, AssemblyStepRole> = { H5: "FINAL_PWHT", H6: "HYDRO" };
+const ROLE_RULE: Partial<Record<AssemblyStepRole, NcrRuleCode>> = { FINAL_PWHT: "H5", HYDRO: "H6" };
+
 /**
- * Locks the row and re-reads tenant-scoped. `Ncr` carries no tenantId of its
- * own (audit C3 precedent — same reason qcp.service.ts anchors through
- * unit.equipment.job): reachable only via its rejection → operation/step →
- * component/unit → equipment → job → tenantId chain.
+ * Tenant scope for any Ncr. `Ncr` is reached through its source (audit C3
+ * precedent — same reason qcp.service.ts anchors through unit.equipment.job):
+ * a rejection → operation/step chain, or (L1.2f) a rule NCR's target item.
  */
-async function lockNcrForUpdate(tx: Tx, ncrId: number, tenantId: number): Promise<Ncr> {
-  const where = {
-    id: ncrId,
+export function ncrTenantScope(tenantId: number) {
+  return {
     OR: [
-      {
-        componentOperationRejection: {
-          componentOperation: { component: { equipment: { job: { tenantId } } } },
-        },
-      },
-      {
-        assemblyStepRejection: {
-          assemblyStep: { unit: { equipment: { job: { tenantId } } } },
-        },
-      },
+      { componentOperationRejection: { componentOperation: { component: { equipment: { job: { tenantId } } } } } },
+      { assemblyStepRejection: { assemblyStep: { unit: { equipment: { job: { tenantId } } } } } },
+      { targetComponentOperation: { component: { equipment: { job: { tenantId } } } } },
+      { targetAssemblyStep: { unit: { equipment: { job: { tenantId } } } } },
     ],
   };
+}
+
+/** Locks the row and re-reads tenant-scoped; also returns the unit its source item belongs to. */
+export async function lockNcrForUpdate(tx: Tx, ncrId: number, tenantId: number): Promise<{ ncr: Ncr; unitId: number | null }> {
+  const where = { id: ncrId, ...ncrTenantScope(tenantId) };
   // L1.2e: the unit's floor lock goes BEFORE the row lock, as in recordWork, so a
   // disposition and a concurrent Start/Done batch on the same unit serialise.
   const pre = await tx.ncr.findFirst({
@@ -65,15 +74,17 @@ async function lockNcrForUpdate(tx: Tx, ncrId: number, tenantId: number): Promis
       jobId: true,
       assemblyStepRejection: { select: { assemblyStep: { select: { unitId: true } } } },
       componentOperationRejection: { select: { componentOperation: { select: { component: { select: { unitId: true } } } } } },
+      targetAssemblyStep: { select: { unitId: true } },
+      targetComponentOperation: { select: { component: { select: { unitId: true } } } },
     },
   });
-  if (pre) {
-    const unitId =
-      pre.assemblyStepRejection?.assemblyStep.unitId ??
-      pre.componentOperationRejection?.componentOperation.component.unitId ??
-      null;
-    await lockFloorUnits(tx, pre.jobId, [unitId]);
-  }
+  const unitId =
+    pre?.assemblyStepRejection?.assemblyStep.unitId ??
+    pre?.componentOperationRejection?.componentOperation.component.unitId ??
+    pre?.targetAssemblyStep?.unitId ??
+    pre?.targetComponentOperation?.component.unitId ??
+    null;
+  if (pre) await lockFloorUnits(tx, pre.jobId, [unitId]);
   await tx.$queryRaw`SELECT id FROM ncrs WHERE id = ${ncrId} FOR UPDATE`;
 
   const ncr = await tx.ncr.findFirst({ where });
@@ -82,7 +93,7 @@ async function lockNcrForUpdate(tx: Tx, ncrId: number, tenantId: number): Promis
   // transaction to the Ncr's own (denormalized) jobId, same pattern as
   // lockProcessPlanForUpdate/lockAssemblyStepForUpdate.
   await tx.$executeRaw`SELECT set_config('app.job_id', ${String(ncr.jobId)}, true)`;
-  return ncr;
+  return { ncr, unitId };
 }
 
 /**
@@ -97,12 +108,32 @@ async function lockNcrForUpdate(tx: Tx, ncrId: number, tenantId: number): Promis
  * since both check `reworkStartedAt == null` before writing.
  */
 export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): Promise<Ncr> {
-  const { ncrId, disposition, notes, reworkOwnerId, reworkDueDate } = dispositionNcrSchema.parse(input);
+  const { ncrId, disposition, notes, reworkOwnerId, reworkDueDate, codeClause } = dispositionNcrSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.QC);
+  requireRole(actor, ROLES.QC, ROLES.PRODUCTION_HEAD);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const ncr = await lockNcrForUpdate(tx, ncrId, actor.tenantId);
+    const { ncr, unitId } = await lockNcrForUpdate(tx, ncrId, actor.tenantId);
+    // L1.2f (D2 H5/H6, decision 1 of 14 Oct): a rule NCR is repaired (QC; the
+    // PWHT / hydro step is repeated) or accepted per a code clause (Production
+    // Head, clause mandatory, flagged for QC head ratification). Every other
+    // NCR is QC's, as before.
+    const concession = ncr.ruleCode != null && disposition === "CONCESSION";
+    if (ncr.ruleCode != null && disposition !== "REPAIR" && !concession) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { ncrId, disposition },
+        "An H5/H6 NCR is resolved by repair (repeat PWHT or hydro) or by acceptance per a code clause.",
+      );
+    }
+    if (concession) {
+      requireRole(actor, ROLES.PRODUCTION_HEAD);
+      if (!codeClause) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "codeClause" }, "Record the code clause this acceptance relies on.");
+      }
+    } else {
+      requireRole(actor, ROLES.QC);
+    }
     const isRework = REWORK_DISPOSITIONS.includes(disposition);
     const to = assertNcrTransition(isRework ? "dispositionRework" : "dispositionFinal", ncr.status);
 
@@ -119,8 +150,12 @@ export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): 
           reworkOwnerId: reworkOwnerId ?? undefined,
           reworkDueDate: reworkDueDate ?? undefined,
           reworkStartedAt: isRework && ncr.reworkStartedAt == null ? now : undefined,
+          codeClause: codeClause ?? undefined,
+          concessionApprovedById: concession ? actor.userId : undefined,
         },
       });
+      const reopened = ncr.ruleCode != null && isRework ? await reopenForRepair(tx, actor, ncr, unitId) : [];
+      if (concession) await flagConcessionForRatification(tx, actor, updated);
       return {
         result: updated,
         audit: {
@@ -128,13 +163,211 @@ export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): 
           entityType: "Ncr",
           entityId: ncr.id,
           before: { status: ncr.status, disposition: ncr.disposition },
-          after: { status: updated.status, disposition: updated.disposition, reworkOwnerId: updated.reworkOwnerId },
+          after: {
+            status: updated.status,
+            disposition: updated.disposition,
+            reworkOwnerId: updated.reworkOwnerId,
+            ...(ncr.ruleCode != null
+              ? {
+                  ruleCode: ncr.ruleCode,
+                  codeClause: updated.codeClause,
+                  concessionApprovedById: updated.concessionApprovedById,
+                  ratification: concession ? "QC_HEAD_PENDING" : null,
+                  reopenedAssemblyStepIds: reopened,
+                }
+              : {}),
+          },
           eventType: "ncr.dispositioned",
           eventPayload: { ncrId: ncr.id, disposition, status: updated.status },
         },
       };
     });
   });
+}
+
+/**
+ * L1.2f REPAIR of a rule NCR: "repair + repeat PWHT/hydro" reopens the unit's
+ * FINAL_PWHT (H5) or HYDRO (H6) steps to NOT_STARTED, so H5/H6 stop refusing
+ * the weld, and rolls their plans back. The original times stay in the audit
+ * row (invariant 6). The NCR closes when the repeated step is complete again
+ * (closeRuleNcrsOnRedo).
+ */
+async function reopenForRepair(tx: Tx, actor: Actor, ncr: Ncr, unitId: number | null): Promise<number[]> {
+  if (unitId == null) return [];
+  const steps = await tx.assemblyStep.findMany({
+    where: { unitId, jobId: ncr.jobId, role: RULE_ROLE[ncr.ruleCode!], status: { not: "NOT_STARTED" } },
+    orderBy: { id: "asc" },
+  });
+  for (const s of steps) {
+    const cleared = {
+      status: "NOT_STARTED" as const,
+      startedAt: null,
+      finishedAt: null,
+      reportedStartAt: null,
+      reportedFinishAt: null,
+      submittedBy: null,
+      verifiedBy: null,
+    };
+    await tx.assemblyStep.update({ where: { id: s.id }, data: cleared });
+    await recordAudit(tx, actor, {
+      action: "assemblyStep.reopen",
+      entityType: "AssemblyStep",
+      entityId: s.id,
+      before: {
+        status: s.status,
+        startedAt: s.startedAt,
+        finishedAt: s.finishedAt,
+        reportedStartAt: s.reportedStartAt,
+        reportedFinishAt: s.reportedFinishAt,
+        submittedBy: s.submittedBy,
+        verifiedBy: s.verifiedBy,
+      },
+      after: { ...cleared, ncrId: ncr.id, ruleCode: ncr.ruleCode },
+      eventType: "AssemblyStepReopened",
+      eventPayload: { assemblyStepId: s.id, unitId, ncrId: ncr.id },
+    });
+    await rollupForAssemblyStep(tx, actor, s.id);
+  }
+  return steps.map((s) => s.id);
+}
+
+/** Decision 1: no QC head role yet, so every QC user is told a concession awaits the QC head's ratification. */
+async function flagConcessionForRatification(tx: Tx, actor: Actor, ncr: Ncr): Promise<void> {
+  const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
+  if (qcIds.length === 0) return;
+  await notify(
+    tx,
+    actor.tenantId,
+    qcIds.map((recipientId) => ({
+      recipientId,
+      type: "NCR_CONCESSION",
+      entityType: "Ncr",
+      entityId: ncr.id,
+      title: `${ncr.ruleCode} NCR accepted per code clause: QC head to ratify`,
+      body: `${ncr.codeClause} · accepted by ${actor.name}`,
+      payload: { jobId: ncr.jobId, ncrId: ncr.id },
+    })),
+  );
+}
+
+/**
+ * L1.2f: QC raises an NCR for an item H5 or H6 refuses right now (welding on a
+ * pressure part after the unit's final PWHT / hydro has started). Refused when
+ * the rule does not refuse the item, or an NCR under the same rule is already
+ * OPEN for it. Takes the unit's floor lock; the Production Head (concession
+ * authority) is notified.
+ */
+export async function raiseRuleNcr(actor: Actor, input: RaiseRuleNcrInput): Promise<Ncr> {
+  const { kind, targetId, rule } = raiseRuleNcrSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.QC);
+  const field = kind === "ASSEMBLY_STEP" ? "targetAssemblyStepId" : "targetComponentOperationId";
+
+  const target = await withTenant(actor.tenantId, async (tx) =>
+    kind === "ASSEMBLY_STEP"
+      ? tx.assemblyStep.findFirst({
+          where: { id: targetId, unit: { equipment: { job: { tenantId: actor.tenantId } } } },
+          select: { jobId: true, unitId: true },
+        })
+      : tx.componentOperation
+          .findFirst({
+            where: { id: targetId, component: { equipment: { job: { tenantId: actor.tenantId } } } },
+            select: { jobId: true, component: { select: { unitId: true } } },
+          })
+          .then((o) => (o ? { jobId: o.jobId, unitId: o.component.unitId } : null)),
+  );
+  if (!target) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: kind === "ASSEMBLY_STEP" ? "AssemblyStep" : "ComponentOperation", id: targetId });
+
+  return withJob(
+    actor.tenantId,
+    target.jobId,
+    async (tx) => {
+      await lockFloorUnits(tx, target.jobId, [target.unitId]);
+      const job = await tx.job.findFirstOrThrow({ where: { id: target.jobId, tenantId: actor.tenantId }, select: { id: true, familyId: true, jobNumber: true } });
+      const { facts, rows } = await loadFloorFacts(tx, job, target.unitId);
+      const row = rows.get(rowKey(kind, targetId));
+      const refusal = row ? HARD_RULES.find((r) => r.id === rule)!.check(row.item, facts) : null;
+      if (refusal?.meta.routeTo !== "NCR") {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { rule, kind, targetId },
+          `${rule} does not refuse this item now, so there is nothing to raise an NCR for.`,
+        );
+      }
+      const open = await tx.ncr.findFirst({ where: { [field]: targetId, ruleCode: rule, status: "OPEN" }, select: { id: true } });
+      if (open) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { ncrId: open.id }, "An NCR under this rule is already open for this item.");
+      }
+
+      return audited(tx, actor, async () => {
+        const ncr = await tx.ncr.create({
+          data: { jobId: job.id, [field]: targetId, ruleCode: rule, raisedBy: actor.userId, raisedAt: new Date() },
+        });
+        const heads = await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD);
+        if (heads.length > 0) {
+          await notify(
+            tx,
+            actor.tenantId,
+            heads.map((recipientId) => ({
+              recipientId,
+              type: "NCR_OPENED",
+              entityType: "Ncr",
+              entityId: ncr.id,
+              title: `${rule} NCR opened: ${rule === "H5" ? "welding after final PWHT" : "welding after hydro"}`,
+              body: `raised by ${actor.name} · ${job.jobNumber}`,
+              payload: { jobId: job.id, unitId: target.unitId, ncrId: ncr.id },
+            })),
+          );
+        }
+        return {
+          result: ncr,
+          audit: {
+            action: "ncr.raiseRule",
+            entityType: "Ncr",
+            entityId: ncr.id,
+            after: { ruleCode: rule, kind, targetId, unitId: target.unitId, status: ncr.status, refusal: refusal.code },
+            eventType: "ncr.raised",
+            eventPayload: { ncrId: ncr.id, ruleCode: rule, kind, targetId },
+          },
+        };
+      });
+    },
+    { timeoutMs: 30_000 },
+  );
+}
+
+/**
+ * L1.2f: once every FINAL_PWHT (H5) or HYDRO (H6) step of the unit is COMPLETE
+ * again, close the unit's rule NCRs under repair for that rule and roll up
+ * their targets' plans (the open NCR held them back). Called in the caller's
+ * transaction right after a step is written COMPLETE (verify, inspect,
+ * recordWork's QC-free Done). No-op for any other role.
+ */
+export async function closeRuleNcrsOnRedo(
+  tx: Tx,
+  actor: Actor,
+  step: { unitId: number; jobId: number; role: AssemblyStepRole | null },
+): Promise<void> {
+  const rule = step.role ? ROLE_RULE[step.role] : undefined;
+  if (!rule) return;
+  const pending = await tx.assemblyStep.count({
+    where: { unitId: step.unitId, jobId: step.jobId, role: step.role!, status: { not: "COMPLETE" } },
+  });
+  if (pending > 0) return;
+  const ncrs = await tx.ncr.findMany({
+    where: {
+      jobId: step.jobId,
+      ruleCode: rule,
+      status: "REWORK_IN_PROGRESS",
+      OR: [{ targetAssemblyStep: { unitId: step.unitId } }, { targetComponentOperation: { component: { unitId: step.unitId } } }],
+    },
+    orderBy: { id: "asc" },
+  });
+  for (const n of ncrs) {
+    await closeNcr(tx, actor, { ncrId: n.id, jobId: n.jobId });
+    if (n.targetAssemblyStepId != null) await rollupForAssemblyStep(tx, actor, n.targetAssemblyStepId);
+    else await rollupForComponentOperation(tx, actor, n.targetComponentOperationId!);
+  }
 }
 
 /**

@@ -6,7 +6,7 @@ import { deriveRequiresQc, jointRefs } from "@/lib/shared/floor-rules";
 import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
-import { closeNcr } from "./ncr.service";
+import { closeNcr, closeRuleNcrsOnRedo } from "./ncr.service";
 import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
 import { assertFloorHard } from "./work.facts";
 import { notify, userIdsWithRole } from "./notifications.service";
@@ -305,6 +305,8 @@ async function completeStepLocked(tx: Tx, actor: Actor, step: LockedStep, to: Op
     for (const ncr of openNcrs) {
       await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
     }
+    // L1.2f: a repeated final PWHT / hydro closes the unit's H5/H6 NCRs under repair.
+    await closeRuleNcrsOnRedo(tx, actor, updated);
     // A4: an INSPECTION step verifying IS the QCP checkpoint result — record
     // it so assertNoOpenHoldPoint and the QCP/hold-point view see the same
     // truth the assembly view just showed, instead of the linked QcpItem

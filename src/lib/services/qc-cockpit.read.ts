@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { pctOf } from "@/lib/shared/metrics";
+import { ncrTenantScope } from "./ncr.service";
 
 /**
  * `/qc` — cross-job QC cockpit (§4.8): the QC user's home surface. Everything
@@ -260,13 +261,9 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
     // ── N4: rework load — Ncr carries no tenantId of its own (same reason
     //    qcp.service.ts anchors through unit.equipment.job), so both counts
     //    are reached via the rejection → operation/step → component/unit →
-    //    equipment → job → tenantId chain, never RLS alone (audit C3).
-    const tenantNcrScope = {
-      OR: [
-        { componentOperationRejection: { componentOperation: { component: { equipment: { job: { tenantId: actor.tenantId } } } } } },
-        { assemblyStepRejection: { assemblyStep: { unit: { equipment: { job: { tenantId: actor.tenantId } } } } } },
-      ],
-    };
+    //    equipment → job → tenantId chain (or, L1.2f, a rule NCR's target),
+    //    never RLS alone (audit C3).
+    const tenantNcrScope = ncrTenantScope(actor.tenantId);
     const openCount = await tx.ncr.count({ where: { status: { not: "CLOSED" }, ...tenantNcrScope } });
     const closedReworkNcrs = await tx.ncr.findMany({
       where: {
@@ -323,11 +320,43 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
             },
           },
         },
+        // L1.2f: H5/H6 rule NCRs carry no rejection — the refused item, who raised it and when.
+        ruleCode: true,
+        raisedAt: true,
+        raisedByUser: { select: { name: true } },
+        targetComponentOperation: {
+          select: {
+            component: { select: { tag: true, unitId: true, unit: { select: { serialNo: true } }, equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } } } },
+            operation: { select: { name: true } },
+          },
+        },
+        targetAssemblyStep: {
+          select: {
+            templateStep: { select: { activity: true } },
+            unit: { select: { id: true, serialNo: true, equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } } } },
+          },
+        },
       },
     });
+    const RULE_LABEL = { H5: "H5 · welding after final PWHT", H6: "H6 · welding after hydro" } as const;
     const openNcrs: OpenNcrRow[] = openNcrRows.map((n) => {
       const cor = n.componentOperationRejection;
       const asr = n.assemblyStepRejection;
+      if (n.ruleCode) {
+        const top = n.targetComponentOperation;
+        const tstep = n.targetAssemblyStep;
+        const where = top
+          ? { jobId: top.component.equipment.jobId, jobNumber: top.component.equipment.job.jobNumber, unitId: top.component.unitId, serialNo: top.component.unit?.serialNo ?? null, entityLabel: `${top.component.tag} · ${top.operation.name}` }
+          : { jobId: tstep!.unit.equipment.jobId, jobNumber: tstep!.unit.equipment.job.jobNumber, unitId: tstep!.unit.id, serialNo: tstep!.unit.serialNo, entityLabel: tstep!.templateStep.activity };
+        return {
+          ncrId: n.id,
+          ...where,
+          categoryName: RULE_LABEL[n.ruleCode],
+          rejectionDetail: null,
+          rejectedByName: n.raisedByUser?.name ?? "—",
+          rejectedAt: n.raisedAt!.toISOString(),
+        };
+      }
       if (cor) {
         const c = cor.componentOperation.component;
         return {
