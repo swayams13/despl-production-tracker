@@ -202,6 +202,19 @@ describe("reportedAt window (D4)", () => {
     expect(checkReportedAt(input)).toBe(reason);
   });
 
+  // Review fix (14 Oct): reportedAt is client input; the walk is bounded.
+  it("a year-0001 reportedAt with no release or order date is TOO_OLD, fast", () => {
+    const t0 = performance.now();
+    expect(checkReportedAt({ ...base, reportedAt: at("0001-01-01T00:00:00Z") })).toBe("TOO_OLD");
+    // 100 ms does not discriminate: the unbounded walk took ~70 ms here. Bounded, it is microseconds.
+    expect(performance.now() - t0).toBeLessThan(20);
+  });
+
+  it("a calendar with no working day still refuses a reportedAt years back (iteration cap)", () => {
+    const never = { weekOffDays: [0, 1, 2, 3, 4, 5, 6, 7] };
+    expect(checkReportedAt({ ...base, reportedAt: at("2024-10-17T04:30:00Z"), calendar: never })).toBe("TOO_OLD");
+  });
+
   it("counts Sunday by the IST day, not the UTC day", () => {
     // Sat 23:00 IST → Sun 01:00 IST: only the Saturday hour counts.
     expect(workingHoursBetween(at("2026-10-17T17:30:00Z"), at("2026-10-17T19:30:00Z"))).toBe(1);

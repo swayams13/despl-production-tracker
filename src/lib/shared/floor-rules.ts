@@ -319,15 +319,27 @@ const DAY_MS = 24 * HOUR_MS;
  * Hours in [from, to) that fall on a working day of `calendar`, every IST day
  * counting all 24 h. calendar.ts works on UTC-midnight date markers, so each
  * IST day is converted to that marker before asking isWorkingDay.
+ *
+ * Bounded (`from` can be client input): walks back from `to` and stops once
+ * more than `stopAfterHours` are counted, or after MAX_WALK_DAYS days, which
+ * returns Infinity (further back than any window this is asked about).
  */
-export function workingHoursBetween(from: Date, to: Date, calendar: WorkCalendarInput = DEFAULT_CALENDAR): number {
+const MAX_WALK_DAYS = 400;
+export function workingHoursBetween(
+  from: Date,
+  to: Date,
+  calendar: WorkCalendarInput = DEFAULT_CALENDAR,
+  stopAfterHours = Infinity,
+): number {
   let ms = 0;
-  let cursor = from.getTime();
-  while (cursor < to.getTime()) {
-    const day = istCalendarDayMarker(new Date(cursor));
-    const end = Math.min(day.getTime() + DAY_MS - IST_OFFSET_MS, to.getTime());
-    if (isWorkingDay(day, calendar)) ms += end - cursor;
-    cursor = end;
+  let cursor = to.getTime();
+  for (let days = 0; cursor > from.getTime(); days++) {
+    if (days === MAX_WALK_DAYS) return Infinity;
+    if (ms > stopAfterHours * HOUR_MS) break;
+    const day = istCalendarDayMarker(new Date(cursor - 1));
+    const start = Math.max(day.getTime() - IST_OFFSET_MS, from.getTime());
+    if (isWorkingDay(day, calendar)) ms += cursor - start;
+    cursor = start;
   }
   return ms / HOUR_MS;
 }
@@ -354,7 +366,7 @@ export function checkReportedAt(input: {
   const floor = input.releaseDate ?? input.orderDate;
   if (floor && istCalendarDayMarker(reportedAt) < istCalendarDayMarker(floor)) return "BEFORE_RELEASE";
   if (input.action === "DONE" && input.startedAt && reportedAt < input.startedAt) return "DONE_BEFORE_START";
-  if (workingHoursBetween(reportedAt, now, input.calendar) > BACKDATE_WINDOW_HOURS) return "TOO_OLD";
+  if (workingHoursBetween(reportedAt, now, input.calendar, BACKDATE_WINDOW_HOURS) > BACKDATE_WINDOW_HOURS) return "TOO_OLD";
   return null;
 }
 
