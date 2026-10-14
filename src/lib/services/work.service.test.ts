@@ -93,6 +93,45 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect((await stepRow(theirs.step(1))).status).toBe("NOT_STARTED");
     });
 
+    // Review fix (14 Oct): tenant/job RLS on process_plans already hid the row; lockItemRows now scopes by job too.
+    it("another tenant's process plan id is refused NOT_FOUND and its row is never locked", async () => {
+      const mine = await b.job({ steps: [{ seq: 1 }] });
+      const theirs = await o.job({ processes: [{ code: "22" }] });
+      const foreign = theirs.plan("22", 0);
+      const requestId = crypto.randomUUID();
+      let pending!: Promise<Result>;
+      let lockError: string | null = "not checked";
+      // An uncommitted work request with the same id: recordWork's final insert waits on it
+      // while holding every row lock it took, so a second connection can probe them.
+      await owner
+        .$transaction(
+          async (t) => {
+            await t.workRequest.create({ data: { jobId: mine.job.id, requestId, actorId: bSup.userId, response: {} } });
+            pending = rec(bSup, mine, "START", [[S, mine.step(1)], [P, foreign]], { requestId });
+            pending.catch(() => {});
+            for (let i = 0; i < 100; i++) {
+              const [w] = await owner.$queryRaw<{ n: bigint }[]>`
+                SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%work_requests%'`;
+              if (w.n > 0n) break;
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            lockError = await owner.$queryRaw`SELECT id FROM process_plans WHERE id = ${foreign} FOR UPDATE NOWAIT`.then(
+              () => null,
+              (e: unknown) => String(e),
+            );
+            throw new Error("rollback");
+          },
+          { timeout: 20_000 },
+        )
+        .catch((e: Error) => {
+          if (e.message !== "rollback") throw e;
+        });
+      expect(lockError).toBeNull();
+      const r = await pending;
+      expect(refusal(r, foreign)?.code).toBe(ERROR_CODES.NOT_FOUND);
+      expect(r.applied.map((a) => a.id)).toEqual([mine.step(1)]);
+    });
+
     it("a client user is refused FORBIDDEN before anything runs", async () => {
       const j = await o.job({ steps: [{ seq: 1 }] });
       await expectThrownCode(rec({ ...head, clientId: 1 }, j, "START", [[S, j.step(1)]]), ERROR_CODES.FORBIDDEN);

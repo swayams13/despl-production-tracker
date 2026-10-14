@@ -98,15 +98,21 @@ async function resolveUnits(tx: Tx, jobId: number, items: Item[]): Promise<Map<s
   ]);
 }
 
-/** FOR UPDATE on every item row, sorted by (kind, id): serialises with the legacy start/submit/verify paths. */
-async function lockItemRows(tx: Tx, items: Item[]): Promise<void> {
-  const ids = (k: WorkKind) => items.filter((i) => i.kind === k).map((i) => i.id).sort((a, b) => a - b);
+/**
+ * FOR UPDATE on every item row, sorted by (kind, id): serialises with the
+ * legacy start/submit/verify paths. Only ids resolveUnits found in this job,
+ * and job_id in each query: RLS already hides other jobs' rows, this does not
+ * rely on it.
+ */
+async function lockItemRows(tx: Tx, jobId: number, items: Item[], resolved: Map<string, number | null>): Promise<void> {
+  const ids = (k: WorkKind) =>
+    items.filter((i) => i.kind === k && resolved.has(rowKey(k, i.id))).map((i) => i.id).sort((a, b) => a - b);
   const steps = ids("ASSEMBLY_STEP");
   const ops = ids("COMPONENT_OP");
   const plans = ids("PROCESS_PLAN");
-  if (steps.length) await tx.$queryRaw`SELECT id FROM assembly_steps WHERE id = ANY(${steps}::int[]) ORDER BY id FOR UPDATE`;
-  if (ops.length) await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ANY(${ops}::int[]) ORDER BY id FOR UPDATE`;
-  if (plans.length) await tx.$queryRaw`SELECT id FROM process_plans WHERE id = ANY(${plans}::int[]) ORDER BY id FOR UPDATE`;
+  if (steps.length) await tx.$queryRaw`SELECT id FROM assembly_steps WHERE id = ANY(${steps}::int[]) AND job_id = ${jobId} ORDER BY id FOR UPDATE`;
+  if (ops.length) await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ANY(${ops}::int[]) AND job_id = ${jobId} ORDER BY id FOR UPDATE`;
+  if (plans.length) await tx.$queryRaw`SELECT id FROM process_plans WHERE id = ANY(${plans}::int[]) AND job_id = ${jobId} ORDER BY id FOR UPDATE`;
 }
 
 /** The earlier item a SOFT override skipped, closest first (SequenceOverride.predecessorTargetId). */
@@ -154,7 +160,7 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
         if (!category) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "DelayCategoryRef", categoryId: lateReason.categoryId });
       }
 
-      await lockItemRows(tx, items);
+      await lockItemRows(tx, job.id, items, unitOf);
 
       const factsByUnit = new Map<number | null, FloorFacts>();
       for (const unitId of new Set(unitOf.values())) factsByUnit.set(unitId, await loadFloorFacts(tx, job, unitId));
