@@ -313,6 +313,49 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
     });
   });
 
+  describe("saveRouteDraft — stale writes and what a re-save must not lose", () => {
+    const base = { seq: 10, operationCode: "RECEIPT", department: "Stores", pvStage: 10, stdTime: 0.5, stdTimeUnit: "HOURS" as const, stdTimeBasis: "PER_PIECE" as const };
+    const two = [base, { seq: 20, operationCode: "MTC_VERIFICATION", department: "Quality Control / QA", pvStage: 11 }];
+
+    it("refuses a save made on top of a draft someone else changed since it was loaded", async () => {
+      const t = await tenant("stale");
+      const part = await draftPart(t);
+      const loaded = (await loadPartFamily(t.eng, part.id))!.variants[0].signature;
+
+      await saveRouteDraft(t.admin, { partFamilyId: part.id, variant: "A", steps: [{ ...base, acceptanceStandard: "Admin edit" }, two[1]] });
+      await expect(
+        saveRouteDraft(t.eng, { partFamilyId: part.id, variant: "A", steps: two, baseSignature: loaded }),
+      ).rejects.toMatchObject({ code: ERROR_CODES.STALE_WRITE });
+
+      const fresh = (await loadPartFamily(t.eng, part.id))!.variants[0].signature;
+      const ok = await saveRouteDraft(t.eng, { partFamilyId: part.id, variant: "A", steps: two, baseSignature: fresh });
+      expect(ok.version).toBe(1);
+    });
+
+    it("keeps a VALIDATED time and an include rule across a re-save, and demotes a time that was changed", async () => {
+      const t = await tenant("carry");
+      const part = await draftPart(t);
+      const v = (await versions(t, part.componentTypeId))[0];
+      await owner.routeStep.update({
+        where: { id: v.steps[0].id },
+        data: { stdTimeStatus: "VALIDATED", includeWhen: { all: [{ key: "pwht", op: "truthy" }] } },
+      });
+      await owner.routeStep.update({ where: { id: v.steps[1].id }, data: { stdTimeStatus: "VALIDATED" } });
+
+      // Step 10 untouched but for its acceptance text; step 20 gets a new time.
+      await saveRouteDraft(t.eng, {
+        partFamilyId: part.id, variant: "A",
+        steps: [
+          { seq: 10, operationCode: "RECEIPT", department: "Stores", pvStage: 10, stdTime: 0.5, stdTimeUnit: "HOURS", stdTimeBasis: "PER_PIECE", acceptanceStandard: "GRN" },
+          { seq: 20, operationCode: "MTC_VERIFICATION", department: "Quality Control / QA", pvStage: 11, stdTime: 9, stdTimeUnit: "HOURS", stdTimeBasis: "PER_MATERIAL_LOT" },
+        ],
+      });
+      const after = (await versions(t, part.componentTypeId))[0].steps;
+      expect(after[0]).toMatchObject({ stdTimeStatus: "VALIDATED", includeWhen: { all: [{ key: "pwht", op: "truthy" }] }, acceptanceStandard: "GRN" });
+      expect(after[1].stdTimeStatus).toBe("PROPOSED");
+    });
+  });
+
   describe("spec accept: a job created after approval uses the new version; an existing job keeps the old one", () => {
     const base = { seq: 10, operationCode: "RECEIPT", department: "Stores", pvStage: 10 };
     it("pins each component to the version that was PUBLISHED when it was materialised", async () => {
@@ -398,13 +441,71 @@ describe.skipIf(!RUN_DB)("master-data service (DB)", async () => {
       const t = await tenant("detail");
       const blocked = await draftPart(t, { routeSource: "Assumed – to be confirmed" });
       const asHead = await loadPartFamily(t.ph, blocked.id);
-      expect(asHead?.can).toEqual({ edit: true, review: true, approve: false, revise: false });
+      expect(asHead?.can).toEqual({ edit: true, review: true, approve: false, revise: false, approveRole: true });
       expect(asHead?.approveRefusal).toMatch(/1 thing to fix/);
       expect((await loadPartFamily(t.eng, blocked.id))?.approveRefusal).toBe("Only the Production Head approves master data.");
-      expect((await loadPartFamily(t.planner, blocked.id))?.can).toEqual({ edit: false, review: false, approve: false, revise: false });
+      expect((await loadPartFamily(t.planner, blocked.id))?.can).toEqual({ edit: false, review: false, approve: false, revise: false, approveRole: false });
       expect(asHead?.reference.pvStages.map((s) => s.no)).toEqual([10, 11, 12]);
       expect(asHead?.variants[0].steps).toHaveLength(2);
       expect(await loadPartFamily(t.ph, 999999999)).toBeNull();
+    });
+
+    it("list: canReview follows role, status and who made the last change", async () => {
+      const t = await tenant("canreview");
+      const part = await draftPart(t);
+      await editPartFamily(t.eng, { partFamilyId: part.id, patch: { typicalMoc: "SA240" } });
+      const rowFor = async (a: typeof t.eng) => (await loadPartFamilies(a)).rows[0].canReview;
+      expect(await rowFor(t.eng)).toBe(false); // last editor
+      expect(await rowFor(t.admin)).toBe(true);
+      expect(await rowFor(t.planner)).toBe(false); // read-only role
+    });
+
+    it("detail: names who reviewed it, and shows what a revision changes against the live version", async () => {
+      const t = await tenant("diff");
+      const part = await draftPart(t);
+      await setPartFamilyReviewed(t.eng, { partFamilyId: part.id });
+      const reviewed = await loadPartFamily(t.ph, part.id);
+      expect(reviewed).toMatchObject({ status: "REVIEWED", reviewedBy: "eng" });
+      expect(reviewed?.reviewedAt).not.toBeNull();
+      expect(reviewed?.variants[0].changes).toBeNull(); // nothing live to compare with yet
+
+      await approvePartFamily(t.ph, { partFamilyId: part.id });
+      await revisePartFamily(t.eng, { partFamilyId: part.id, reason: "Time study" });
+      await saveRouteDraft(t.eng, {
+        partFamilyId: part.id, variant: "A",
+        steps: [{ seq: 10, operationCode: "RECEIPT", department: "Stores", pvStage: 10, stdTime: 2, stdTimeUnit: "HOURS", stdTimeBasis: "PER_PIECE" }],
+      });
+      const rev = await loadPartFamily(t.ph, part.id);
+      const v = rev!.variants[0];
+      expect(v).toMatchObject({ status: "DRAFT", version: 2, liveVersion: 1 });
+      expect(v.changes).toEqual([{ seq: 10, kind: "changed", fields: ["time", "acceptance", "record", "description"] }, { seq: 20, kind: "removed" }]);
+      expect(v.history.map((h) => [h.version, h.status])).toEqual([[2, "DRAFT"], [1, "PUBLISHED"]]);
+    });
+
+    it("detail: the reviewer stays visible after approval, until a later change overtakes the review", async () => {
+      const t = await tenant("reviewer-kept");
+      const part = await draftPart(t);
+      await setPartFamilyReviewed(t.eng, { partFamilyId: part.id });
+      await approvePartFamily(t.ph, { partFamilyId: part.id });
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ status: "APPROVED", reviewedBy: "eng" });
+
+      // A revision is a new cycle: the old review no longer vouches for it.
+      await revisePartFamily(t.eng, { partFamilyId: part.id, reason: "Time study" });
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ status: "DRAFT", reviewedBy: null });
+
+      await editPartFamily(t.admin, { partFamilyId: part.id, patch: { typicalMoc: "SA240" } });
+      await setPartFamilyReviewed(t.eng, { partFamilyId: part.id });
+      await editPartFamily(t.admin, { partFamilyId: part.id, patch: { typicalMoc: "SA240 304L" } });
+      expect(await loadPartFamily(t.ph, part.id)).toMatchObject({ status: "DRAFT", reviewedBy: null });
+    });
+
+    it("detail: operations carry their defaults, and an inactive operation a step still uses is listed (marked)", async () => {
+      const t = await tenant("ops");
+      const part = await draftPart(t);
+      await owner.operationRef.updateMany({ where: { tenantId: t.tenantId, code: "RECEIPT" }, data: { active: false } });
+      const d = await loadPartFamily(t.ph, part.id);
+      expect(d?.reference.operations.find((o) => o.code === "RECEIPT")).toMatchObject({ active: false });
+      expect(d?.reference.operations.find((o) => o.code === "MTC_VERIFICATION")).toMatchObject({ active: true });
     });
 
     it("materials list reflects role capabilities", async () => {

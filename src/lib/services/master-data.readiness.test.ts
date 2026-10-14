@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NormalStep, ReferenceData } from "./master-import.rules";
-import { evaluateReadiness, type VariantState } from "./master-data.readiness";
+import { evaluateReadiness, fieldsOf, type VariantState } from "./master-data.readiness";
 
 const REF: ReferenceData = {
   operationCodes: new Set(["RECEIPT", "FIT_UP", "INSPECTION"]),
@@ -21,8 +21,9 @@ const step = (over: Partial<NormalStep> = {}): NormalStep => ({
   acceptanceStandard: "", recordDocument: "", requiresQc: true, ...over,
 });
 const variant = (over: Partial<VariantState> = {}): VariantState => ({ variant: "A", version: 1, status: "DRAFT", steps: [step()], ...over });
-const part = (over: { scope?: "PV" | "HE" | "BOTH"; routeSource?: string | null } = {}) => ({
+const part = (over: { scope?: "PV" | "HE" | "BOTH"; routeSource?: string | null; makeBuy?: string | null } = {}) => ({
   code: "SHL-01", scope: over.scope ?? "PV", routeSource: over.routeSource === undefined ? "Current shop practice" : over.routeSource,
+  makeBuy: over.makeBuy ?? "MADE_IN_HOUSE",
 });
 const run = (p: ReturnType<typeof part>, v: VariantState[]) => evaluateReadiness(p, v, REF, HE);
 const codes = (f: Array<{ code: string }>) => f.map((x) => x.code);
@@ -79,5 +80,43 @@ describe("evaluateReadiness — what blocks approval", () => {
   it("findings carry the variant and step so the screen can point at them", () => {
     const r = run(part(), [variant({ variant: "B", steps: [step({ seq: 30, department: "" })] })]);
     expect(r.blockers[0]).toMatchObject({ variant: "B", seq: 30, code: "MISSING_DEPARTMENT" });
+  });
+});
+
+describe("fieldsOf — which cell a finding points at", () => {
+  const cases: Array<[string, Record<string, unknown> | undefined, string[]]> = [
+    ["UNKNOWN_OPERATION", undefined, ["operation"]],
+    ["MISSING_DEPARTMENT", undefined, ["department"]],
+    ["UNKNOWN_DEPARTMENT", undefined, ["department"]],
+    ["MISSING_STAGE", { missing: ["PV"] }, ["pvStage"]],
+    ["MISSING_STAGE", { missing: ["HE"] }, ["heStage"]],
+    ["MISSING_STAGE", { missing: ["PV", "HE"] }, ["pvStage", "heStage"]],
+    ["UNKNOWN_STAGE_NUMBER", { family: "HE" }, ["heStage"]],
+    ["UNKNOWN_STAGE_NUMBER", { family: "PV" }, ["pvStage"]],
+    ["STAGE_DIFFERS_FROM_OPERATION_DEFAULT", undefined, ["pvStage"]],
+    ["DEPARTMENT_STAGE_MISMATCH", { family: "PV" }, ["department", "pvStage"]],
+    ["DEPARTMENT_STAGE_MISMATCH", { family: "HE" }, ["department", "heStage"]],
+    ["MISSING_STD_TIME", undefined, ["stdTime"]],
+    ["ROUTE_SOURCE", undefined, []],
+    ["NO_STEPS", undefined, []],
+  ];
+  it.each(cases)("%s %j -> %j", (code, meta, expected) => {
+    expect(fieldsOf(code, meta)).toEqual(expected);
+  });
+
+  it("evaluateReadiness attaches the fields to each finding", () => {
+    const r = run(part({ scope: "BOTH" }), [variant({ steps: [step({ department: "", heStage: null })] })]);
+    expect(r.blockers.find((b) => b.code === "MISSING_DEPARTMENT")?.fields).toEqual(["department"]);
+    expect(r.blockers.find((b) => b.code === "MISSING_STAGE")?.fields).toEqual(["heStage"]);
+    expect(r.blockers.find((b) => b.code === "ROUTE_SOURCE")).toBeUndefined();
+  });
+});
+
+describe("a part with no route", () => {
+  it("is approvable but warned, unless it is a bought-out item", () => {
+    const made = run(part({ makeBuy: "MADE_IN_HOUSE" }), []);
+    expect(made.blockers).toEqual([]);
+    expect(codes(made.warnings)).toContain("NO_ROUTE");
+    expect(codes(run(part({ makeBuy: "BOUGHT_OUT" }), []).warnings)).not.toContain("NO_ROUTE");
   });
 });

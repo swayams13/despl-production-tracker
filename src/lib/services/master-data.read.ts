@@ -5,6 +5,7 @@ import { loadReferenceData } from "./master-import.service";
 import type { NormalStep, Scope } from "./master-import.rules";
 import { evaluateReadiness, type Readiness } from "./master-data.readiness";
 import { loadVariantsFor, type VariantRow } from "./master-data.routes";
+import { diffSteps, type StepChange } from "./master-data.diff";
 import { MASTER_DATA_EDIT_ROLES, MASTER_DATA_READ_ROLES } from "./master-data.service";
 
 /**
@@ -30,6 +31,8 @@ export interface PartFamilyListRow {
   blockers: number;
   warnings: number;
   approvedAt: string | null;
+  /** This actor may mark this row reviewed (edit role, draft, and not the last editor). */
+  canReview: boolean;
 }
 
 export interface PartFamilyFilters {
@@ -75,10 +78,11 @@ export async function loadPartFamilies(actor: Actor, filters: PartFamilyFilters 
     ]);
     const variantsByType = await loadVariantsFor(tx, actor.tenantId, parts.map((p) => p.componentTypeId), families);
 
+    const editor = hasRole(actor, ...MASTER_DATA_EDIT_ROLES);
     const all: PartFamilyListRow[] = parts.map((p) => {
       const variants = variantsByType.get(p.componentTypeId) ?? [];
       const readiness = evaluateReadiness(
-        { code: p.componentType.code, scope: p.equipmentScope as Scope, routeSource: p.routeSource },
+        { code: p.componentType.code, scope: p.equipmentScope as Scope, routeSource: p.routeSource, makeBuy: p.makeBuy },
         variants,
         ref,
         heStages,
@@ -99,6 +103,7 @@ export async function loadPartFamilies(actor: Actor, filters: PartFamilyFilters 
         blockers: readiness.blockers.length,
         warnings: readiness.warnings.length,
         approvedAt: p.approvedAt?.toISOString() ?? null,
+        canReview: editor && p.status === "DRAFT" && !(p.preparedById != null && p.preparedById === actor.userId),
       };
     });
 
@@ -121,7 +126,7 @@ export async function loadPartFamilies(actor: Actor, filters: PartFamilyFilters 
         approved: all.filter((r) => r.status === "APPROVED").length,
         withBlockers: all.filter((r) => r.blockers > 0).length,
       },
-      canEdit: hasRole(actor, ...MASTER_DATA_EDIT_ROLES),
+      canEdit: editor,
     };
   });
 }
@@ -144,21 +149,30 @@ export interface PartFamilyDetail {
   approvedAt: string | null;
   approvedBy: string | null;
   preparedBy: string | null;
+  /** From the audit trail (there is no column): who last marked it reviewed, and when. */
+  reviewedBy: string | null;
+  reviewedAt: string | null;
   /** APPROVED by the same person who last edited it (flagged, not forbidden). */
   selfApproved: boolean;
   /** The actor, if they approve now, would be approving their own edits. */
   willSelfApprove: boolean;
-  variants: Array<Omit<VariantRow, "steps"> & { steps: Array<Omit<NormalStep, "row">> }>;
+  variants: Array<
+    Omit<VariantRow, "steps" | "publishedSteps"> & {
+      steps: Array<Omit<NormalStep, "row">>;
+      /** Against the live published version; null when there is nothing to compare with. */
+      changes: StepChange[] | null;
+    }
+  >;
   readiness: Readiness;
   /** What this actor may do with this part right now. */
-  can: { edit: boolean; review: boolean; approve: boolean; revise: boolean };
+  can: { edit: boolean; review: boolean; approve: boolean; revise: boolean; approveRole: boolean };
   /** Why approve is unavailable to this actor, in words, when it is. */
   approveRefusal: string | null;
   reference: {
-    operations: Array<{ code: string; name: string }>;
+    operations: Array<{ code: string; name: string; active: boolean; defaultDepartment: string | null; defaultPvStage: number | null }>;
     departments: string[];
     pvStages: Array<{ no: number; name: string; department: string | null }>;
-    heStages: Array<{ no: number; department: string }>;
+    heStages: Array<{ no: number; name: string; department: string }>;
   };
 }
 
@@ -179,11 +193,47 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
       loadReferenceData(tx, actor.tenantId),
       loadHeStageMap(tx, actor.tenantId),
       familyIds(tx, actor.tenantId),
-      tx.operationRef.findMany({ where: { tenantId: actor.tenantId, active: true }, orderBy: { name: "asc" }, select: { code: true, name: true } }),
+      // Inactive operations are kept in the list (marked) so a step that still uses one stays editable.
+      tx.operationRef.findMany({
+        where: { tenantId: actor.tenantId },
+        orderBy: { name: "asc" },
+        select: { code: true, name: true, active: true, defaultDepartment: { select: { name: true } } },
+      }),
     ]);
-    const variants = (await loadVariantsFor(tx, actor.tenantId, [p.componentTypeId], families)).get(p.componentTypeId) ?? [];
+    const variantsRows = await loadVariantsFor(tx, actor.tenantId, [p.componentTypeId], families);
+    const variants = variantsRows.get(p.componentTypeId) ?? [];
+
+    // Who reviewed it: the latest review that no later change to the part or its
+    // routes has overtaken (there is no column; the audit trail is the record).
+    const versionIds = variants.flatMap((v) => v.history.map((h) => String(h.id)));
+    const [reviewAudit, lastChange] = await Promise.all([
+      tx.auditLog.findFirst({
+        where: { tenantId: actor.tenantId, entityType: "PartFamily", entityId: String(p.id), action: "masterData.partFamily.review" },
+        orderBy: { at: "desc" },
+        select: { actorId: true, at: true },
+      }),
+      tx.auditLog.findFirst({
+        where: {
+          tenantId: actor.tenantId,
+          OR: [
+            { entityType: "PartFamily", entityId: String(p.id), action: { in: ["masterData.partFamily.edit", "masterData.partFamily.revise"] } },
+            {
+              entityType: "RouteTemplateVersion",
+              entityId: { in: versionIds },
+              action: { in: ["masterData.route.created", "masterData.route.replaced", "masterData.route.versioned"] },
+            },
+          ],
+        },
+        orderBy: { at: "desc" },
+        select: { at: true },
+      }),
+    ]);
+    const reviewCurrent = reviewAudit != null && (lastChange == null || reviewAudit.at >= lastChange.at);
+    const reviewer = reviewCurrent && reviewAudit.actorId != null
+      ? await tx.user.findFirst({ where: { id: reviewAudit.actorId, tenantId: actor.tenantId }, select: { name: true } })
+      : null;
     const readiness = evaluateReadiness(
-      { code: p.componentType.code, scope: p.equipmentScope as Scope, routeSource: p.routeSource },
+      { code: p.componentType.code, scope: p.equipmentScope as Scope, routeSource: p.routeSource, makeBuy: p.makeBuy },
       variants,
       ref,
       heStages,
@@ -217,20 +267,34 @@ export async function loadPartFamily(actor: Actor, partFamilyId: number): Promis
       preparedBy: p.preparedBy?.name ?? null,
       selfApproved: status === "APPROVED" && p.approvedById != null && p.approvedById === p.preparedById,
       willSelfApprove: status !== "APPROVED" && isHead && p.preparedById != null && p.preparedById === actor.userId,
-      variants: variants.map((v) => ({ ...v, steps: v.steps.map(({ row: _row, ...s }) => s) })),
+      reviewedBy: reviewer?.name ?? null,
+      reviewedAt: reviewer ? (reviewAudit?.at.toISOString() ?? null) : null,
+      variants: variants.map(({ publishedSteps, ...v }) => ({
+        ...v,
+        steps: v.steps.map(({ row: _row, ...s }) => s),
+        changes: publishedSteps ? diffSteps(publishedSteps, v.steps) : null,
+      })),
       readiness,
       can: {
         edit: editor && status !== "APPROVED",
         review: editor && status === "DRAFT" && !(p.preparedById != null && p.preparedById === actor.userId),
         approve: approveRefusal === null,
         revise: editor && status === "APPROVED",
+        // The actor holds the approving role (the screen shows Approve, enabled or with the reason).
+        approveRole: isHead,
       },
       approveRefusal,
       reference: {
-        operations,
+        operations: operations.map((o) => ({
+          code: o.code,
+          name: o.name,
+          active: o.active,
+          defaultDepartment: o.defaultDepartment?.name ?? null,
+          defaultPvStage: ref.operationDefaultStage.get(o.code) ?? null,
+        })),
         departments: [...ref.departmentNames].sort(),
         pvStages: [...ref.pvStages].map(([no, v]) => ({ no, ...v })).sort((a, b) => a.no - b.no),
-        heStages: [...heStages].map(([no, v]) => ({ no, ...v })).sort((a, b) => a.no - b.no),
+        heStages: [...heStages].map(([no, v]) => ({ no, department: v.department, name: v.name })).sort((a, b) => a.no - b.no),
       },
     };
   });

@@ -1,5 +1,5 @@
 import type { Tx } from "@/lib/db";
-import type { StdTimeBasis, StdTimeUnit, TemplateStatus } from "@/generated/prisma/client";
+import type { Prisma, StdTimeBasis, StdTimeUnit, TemplateStatus } from "@/generated/prisma/client";
 import { stepSignature, type NormalStep } from "./master-import.rules";
 
 /**
@@ -58,7 +58,8 @@ export async function writeRouteVariant(
             orderBy: { seq: "asc" },
             select: {
               id: true, seq: true, printed: true, optional: true, requiresQc: true, stdTime: true, stdTimeUnit: true,
-              stdTimeBasis: true, conditionText: true, acceptanceStandard: true, recordDocument: true,
+              stdTimeBasis: true, stdTimeStatus: true, includeWhen: true, conditionText: true, acceptanceStandard: true,
+              recordDocument: true,
               operation: { select: { code: true } },
               department: { select: { name: true } },
             },
@@ -68,6 +69,10 @@ export async function writeRouteVariant(
     },
   });
   const latest = route?.versions[0];
+  // A re-save must not silently demote a VALIDATED time or drop a machine-readable
+  // include rule that nothing in the editor can express yet (D17 / J2). Keyed by
+  // step number; a time that was changed is a new, PROPOSED value.
+  const carried = new Map((latest?.steps ?? []).map((s) => [s.seq, s]));
 
   let haveSig: string | null = null;
   if (latest) {
@@ -144,7 +149,8 @@ export async function writeRouteVariant(
       stdTime: s.stdTime,
       stdTimeUnit: s.stdTimeUnit as StdTimeUnit | null,
       stdTimeBasis: s.stdTimeBasis as StdTimeBasis | null,
-      stdTimeStatus: "PROPOSED" as const, // D17: nothing here validates a time
+      stdTimeStatus: keepStatus(carried.get(s.seq), s),
+      ...includeRule(carried.get(s.seq)),
       conditionText: s.conditionText || null,
       acceptanceStandard: s.acceptanceStandard || null,
       recordDocument: s.recordDocument || null,
@@ -175,6 +181,33 @@ export async function writeRouteVariant(
   };
 }
 
+type CarriedStep = {
+  stdTime: { toString(): string } | null;
+  stdTimeUnit: StdTimeUnit | null;
+  stdTimeBasis: StdTimeBasis | null;
+  stdTimeStatus: "PROPOSED" | "VALIDATED";
+  includeWhen: unknown;
+};
+
+/** D17: a time keeps its status only while the time itself is unchanged; nothing here validates one. */
+function keepStatus(prev: CarriedStep | undefined, next: NormalStep): "PROPOSED" | "VALIDATED" {
+  if (!prev) return "PROPOSED";
+  const same =
+    (prev.stdTime == null ? null : Number(prev.stdTime.toString())) === next.stdTime &&
+    prev.stdTimeUnit === next.stdTimeUnit &&
+    prev.stdTimeBasis === next.stdTimeBasis;
+  return same ? prev.stdTimeStatus : "PROPOSED";
+}
+
+function includeRule(prev: CarriedStep | undefined): { includeWhen?: Prisma.InputJsonValue } {
+  return prev?.includeWhen != null ? { includeWhen: prev.includeWhen as Prisma.InputJsonValue } : {};
+}
+
+/** One comparison key for a whole variant: the stale-write guard compares what the editor loaded with what is there now. */
+export function routeSignature(steps: readonly NormalStep[]): string {
+  return JSON.stringify(steps.map((s) => stepSignature(s)));
+}
+
 export interface VariantRow {
   variant: string;
   routeId: number;
@@ -182,9 +215,31 @@ export interface VariantRow {
   version: number;
   status: TemplateStatus;
   steps: NormalStep[];
-  /** Every version of this variant, newest first. */
-  history: Array<{ id: number; version: number; status: TemplateStatus }>;
+  /** Every version of this variant, newest first. `components` = components built on that version. */
+  history: Array<{ id: number; version: number; status: TemplateStatus; components: number }>;
+  /** `routeSignature` of `steps`; sent back on save so a concurrent edit is refused (STALE_WRITE). */
+  signature: string;
+  /** The version new work uses: the highest PUBLISHED one, if any. */
+  liveVersion: number | null;
+  /** The live version's steps when the latest is a DRAFT (what the approver compares against). */
+  publishedSteps: NormalStep[] | null;
 }
+
+type StepRowDb = {
+  id: number;
+  seq: number;
+  printed: string | null;
+  optional: boolean;
+  requiresQc: boolean;
+  stdTime: { toString(): string } | null;
+  stdTimeUnit: StdTimeUnit | null;
+  stdTimeBasis: StdTimeBasis | null;
+  conditionText: string | null;
+  acceptanceStandard: string | null;
+  recordDocument: string | null;
+  operation: { code: string };
+  department: { name: string } | null;
+};
 
 /** Latest version of each variant of each part family's generic route, with stage mappings, as NormalSteps. */
 export async function loadVariantsFor(
@@ -195,6 +250,12 @@ export async function loadVariantsFor(
 ): Promise<Map<number, VariantRow[]>> {
   const out = new Map<number, VariantRow[]>();
   if (typeIds.length === 0) return out;
+  const stepSelect = {
+    id: true, seq: true, printed: true, optional: true, requiresQc: true, stdTime: true, stdTimeUnit: true,
+    stdTimeBasis: true, conditionText: true, acceptanceStandard: true, recordDocument: true,
+    operation: { select: { code: true } },
+    department: { select: { name: true } },
+  } as const;
   const routes = await tx.routeTemplate.findMany({
     where: { tenantId, componentTypeId: { in: [...typeIds] }, familyId: null },
     orderBy: [{ componentTypeId: "asc" }, { variant: "asc" }],
@@ -208,56 +269,69 @@ export async function loadVariantsFor(
           id: true,
           version: true,
           status: true,
-          steps: {
-            orderBy: { seq: "asc" },
-            select: {
-              id: true, seq: true, printed: true, optional: true, requiresQc: true, stdTime: true, stdTimeUnit: true,
-              stdTimeBasis: true, conditionText: true, acceptanceStandard: true, recordDocument: true,
-              operation: { select: { code: true } },
-              department: { select: { name: true } },
-            },
-          },
+          _count: { select: { components: true } },
+          steps: { orderBy: { seq: "asc" }, select: stepSelect },
         },
       },
     },
   });
-  const latestStepIds = routes.flatMap((r) => r.versions[0]?.steps.map((s) => s.id) ?? []);
-  const maps = latestStepIds.length
+
+  // The steps worth showing: each variant's latest, plus (when the latest is a
+  // DRAFT) the live published version it will replace.
+  const wanted = new Map<number, { latest: boolean }>();
+  for (const r of routes) {
+    const latest = r.versions[0];
+    if (!latest) continue;
+    wanted.set(latest.id, { latest: true });
+    if (latest.status === "DRAFT") {
+      const live = r.versions.find((v) => v.status === "PUBLISHED");
+      if (live) wanted.set(live.id, { latest: false });
+    }
+  }
+  const stepIds = routes.flatMap((r) => r.versions.filter((v) => wanted.has(v.id)).flatMap((v) => v.steps.map((s) => s.id)));
+  const maps = stepIds.length
     ? await tx.routeStepFamilySeq.findMany({
-        where: { tenantId, routeStepId: { in: latestStepIds } },
+        where: { tenantId, routeStepId: { in: stepIds } },
         select: { routeStepId: true, leadTimeProcessSeq: true, familyId: true },
       })
     : [];
   const stage = new Map<string, number>();
   for (const m of maps) stage.set(`${m.routeStepId}:${m.familyId}`, m.leadTimeProcessSeq);
 
+  const toNormal = (s: StepRowDb): NormalStep => ({
+    row: 0,
+    seq: s.seq,
+    operationCode: s.operation.code,
+    whatIsDone: s.printed ?? "",
+    department: s.department?.name ?? "",
+    pvStage: families.pvFamilyId != null ? (stage.get(`${s.id}:${families.pvFamilyId}`) ?? null) : null,
+    heStage: families.heFamilyId != null ? (stage.get(`${s.id}:${families.heFamilyId}`) ?? null) : null,
+    stdTime: s.stdTime == null ? null : Number(s.stdTime.toString()),
+    stdTimeUnit: s.stdTimeUnit,
+    stdTimeBasis: s.stdTimeBasis,
+    conditional: s.optional,
+    conditionText: s.conditionText ?? "",
+    acceptanceStandard: s.acceptanceStandard ?? "",
+    recordDocument: s.recordDocument ?? "",
+    requiresQc: s.requiresQc,
+  });
+
   for (const r of routes) {
     const v = r.versions[0];
     if (!v) continue;
+    const steps = v.steps.map(toNormal);
+    const live = r.versions.find((x) => x.status === "PUBLISHED");
     const row: VariantRow = {
       variant: r.variant,
       routeId: r.id,
       versionId: v.id,
       version: v.version,
       status: v.status,
-      history: r.versions.map((x) => ({ id: x.id, version: x.version, status: x.status })),
-      steps: v.steps.map((s) => ({
-        row: 0,
-        seq: s.seq,
-        operationCode: s.operation.code,
-        whatIsDone: s.printed ?? "",
-        department: s.department?.name ?? "",
-        pvStage: families.pvFamilyId != null ? (stage.get(`${s.id}:${families.pvFamilyId}`) ?? null) : null,
-        heStage: families.heFamilyId != null ? (stage.get(`${s.id}:${families.heFamilyId}`) ?? null) : null,
-        stdTime: s.stdTime == null ? null : Number(s.stdTime.toString()),
-        stdTimeUnit: s.stdTimeUnit,
-        stdTimeBasis: s.stdTimeBasis,
-        conditional: s.optional,
-        conditionText: s.conditionText ?? "",
-        acceptanceStandard: s.acceptanceStandard ?? "",
-        recordDocument: s.recordDocument ?? "",
-        requiresQc: s.requiresQc,
-      })),
+      history: r.versions.map((x) => ({ id: x.id, version: x.version, status: x.status, components: x._count.components })),
+      steps,
+      signature: routeSignature(steps),
+      liveVersion: live?.version ?? null,
+      publishedSteps: v.status === "DRAFT" && live ? live.steps.map(toNormal) : null,
     };
     const list = out.get(r.componentTypeId) ?? [];
     list.push(row);

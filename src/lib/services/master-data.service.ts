@@ -19,8 +19,8 @@ import {
 import { loadHeStageMap } from "./master-import.he";
 import { loadReferenceData } from "./master-import.service";
 import { checkStep, type IssueCode, type NormalStep, type Scope } from "./master-import.rules";
-import { evaluateReadiness, type Finding, type Readiness } from "./master-data.readiness";
-import { loadVariants, writeRouteVariant, type RouteCtx } from "./master-data.routes";
+import { evaluateReadiness, fieldsOf, type Finding, type Readiness } from "./master-data.readiness";
+import { loadVariants, routeSignature, writeRouteVariant, type RouteCtx } from "./master-data.routes";
 
 /**
  * Lean Core M3 — master-data mutations (part families, routes, grades).
@@ -137,7 +137,7 @@ export async function approvePartFamily(actor: Actor, input: PartFamilyIdInput):
     const { ctx, ref, heStages } = await routeContext(tx, actor.tenantId);
     const variants = await loadVariants(tx, actor.tenantId, part.componentTypeId, ctx);
     const readiness = evaluateReadiness(
-      { code: part.componentType.code, scope: part.equipmentScope as Scope, routeSource: part.routeSource },
+      { code: part.componentType.code, scope: part.equipmentScope as Scope, routeSource: part.routeSource, makeBuy: part.makeBuy },
       variants,
       ref,
       heStages,
@@ -244,7 +244,7 @@ export interface SaveRouteResult {
  * numbers are not. Completeness only blocks approval.
  */
 export async function saveRouteDraft(actor: Actor, input: SaveRouteDraftInput): Promise<SaveRouteResult> {
-  const { partFamilyId, variant, steps } = saveRouteDraftSchema.parse(input);
+  const { partFamilyId, variant, steps, baseSignature } = saveRouteDraftSchema.parse(input);
   guardEdit(actor);
 
   const seen = new Set<number>();
@@ -268,6 +268,14 @@ export async function saveRouteDraft(actor: Actor, input: SaveRouteDraftInput): 
     const part = await lockedPart(tx, actor.tenantId, partFamilyId);
     refuseApproved(part.status, "route");
     const { ctx, ref, heStages } = await routeContext(tx, actor.tenantId);
+
+    // Stale-write guard: the editor sends the signature of the variant it loaded.
+    // Without it, two editors on one draft would silently overwrite each other.
+    if (baseSignature !== undefined) {
+      const current = (await loadVariants(tx, actor.tenantId, part.componentTypeId, ctx)).find((v) => v.variant === variant);
+      const have = current ? current.signature : routeSignature([]);
+      if (have !== baseSignature) throw new AppError(ERROR_CODES.STALE_WRITE, { variant });
+    }
 
     const normal: NormalStep[] = steps
       .map((s) => ({
@@ -308,7 +316,7 @@ export async function saveRouteDraft(actor: Actor, input: SaveRouteDraftInput): 
         heStages,
       )) {
         if (f.severity === "ERROR" && STRUCTURAL.has(f.code)) {
-          structural.push({ variant, seq: s.seq, code: f.code, message: f.message });
+          structural.push({ variant, seq: s.seq, code: f.code, message: f.message, fields: fieldsOf(f.code, f.meta) });
         }
       }
     }
@@ -337,7 +345,7 @@ export async function saveRouteDraft(actor: Actor, input: SaveRouteDraftInput): 
     }
     const states = await loadVariants(tx, actor.tenantId, part.componentTypeId, ctx);
     const readiness = evaluateReadiness(
-      { code: part.componentType.code, scope: part.equipmentScope as Scope, routeSource: part.routeSource },
+      { code: part.componentType.code, scope: part.equipmentScope as Scope, routeSource: part.routeSource, makeBuy: part.makeBuy },
       states,
       ref,
       heStages,

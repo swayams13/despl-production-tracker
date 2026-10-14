@@ -1188,6 +1188,8 @@ export const saveRouteDraftSchema = z
     partFamilyId: id,
     variant: z.string().regex(/^[A-Z]$/, "A variant is a single capital letter"),
     steps: z.array(masterStepSchema).min(1, "A route needs at least one step"),
+    /** The `signature` of the variant as the editor loaded it; a mismatch is STALE_WRITE. Omit to skip the check. */
+    baseSignature: z.string().optional(),
   })
   .strict();
 export type SaveRouteDraftInput = z.input<typeof saveRouteDraftSchema>;

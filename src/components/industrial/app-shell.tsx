@@ -213,6 +213,11 @@ export function AppShell({
           { href: "/admin/qcp-templates", label: "QCP templates", icon: icons.admin },
         ]
       : []),
+    // Lean Core M3: part families and their routes. Literal role strings on
+    // purpose: this is a client file and must not import the service layer.
+    ...(["ADMIN", "PRODUCTION_HEAD", "ENGINEERING", "PLANNER"].some((r) => userRoles.includes(r))
+      ? [{ href: "/admin/master-data", label: "Master data", icon: icons.admin }]
+      : []),
     ...(userRoles.includes("ADMIN") || userRoles.includes("MANAGEMENT")
       ? [{ href: "/admin", label: "Admin", icon: icons.admin }]
       : []),
