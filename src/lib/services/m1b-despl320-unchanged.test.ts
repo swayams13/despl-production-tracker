@@ -39,7 +39,19 @@ describe.skipIf(!RUN_DB)("Lean Core M1 PR B — DESPL-320 regenerates unchanged 
   it("has no step-level mapping rows, so every rollup is the operation-level join", async () => {
     const job = await despl320();
     if (!job) return;
-    expect(await owner.routeStepFamilySeq.count({ where: { familyId: job.familyId } })).toBe(0);
+    // Only the routes DESPL-320's own components pin: db:seed adds a demo "Shell Course" route
+    // (M3 master-data demo) with step-level rows that no DESPL-320 component uses.
+    const pinned = await owner.component.findMany({
+      where: { jobId: job.id, routeVersionId: { not: null } },
+      select: { routeVersionId: true },
+    });
+    expect(pinned.length).toBeGreaterThan(0);
+    const routeVersionIds = pinned.map((c) => c.routeVersionId!);
+    expect(
+      await owner.routeStepFamilySeq.count({
+        where: { familyId: job.familyId, routeStep: { routeVersionId: { in: routeVersionIds } } },
+      }),
+    ).toBe(0);
   });
 
   it("loadMappedOps equals the pre-M1 operation-level join for every numeric process on every unit", async () => {
