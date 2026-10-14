@@ -1,22 +1,29 @@
 import { Prisma } from "@/generated/prisma/client";
-import { withJob, type Tx } from "@/lib/db";
-import { type Actor, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
+import { withJob, withTenant, type Tx } from "@/lib/db";
+import { type Actor, assertNotClientUser, requireDepartmentScope, requireRole, ROLES } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError, SEQUENCE_OVERRIDE_OPERATOR_MESSAGE, type ErrorCode } from "@/lib/shared/errors";
 import { checkReportedAt, checkStart, type FloorItem, type WorkKind } from "@/lib/shared/floor-rules";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
-import { recordWorkSchema, type RecordWorkInput } from "@/lib/shared/schemas";
+import { inspectSchema, recordWorkSchema, type InspectInput, type RecordWorkInput } from "@/lib/shared/schemas";
 import type { WorkCalendarInput } from "@/lib/schedule";
 import {
   assertEvidenceSatisfied,
   assertNoOpenHoldPoint,
   assertNoOpenNcr,
+  loadMappedOps,
   loadPlanNotifyContext,
   lockFloorUnits,
+  lockProcessPlanForUpdate,
   resolveCalendarsForJobs,
+  rollupForAssemblyStep,
+  rollupForComponentOperation,
   rollupProcessPlan,
   type RollupChange,
 } from "./_shared";
+import { inspectAssemblyStepTx } from "./assembly.service";
+import { rejectComponentOperationTx, verifyComponentOperationTx } from "./component.service";
+import { rejectProcess, verifyProcess } from "./process.service";
 import { loadFloorFacts, rowKey, type FloorFacts, type WorkRow } from "./work.facts";
 import { assertPerformedByValid } from "./welding.service";
 import { notify, userIdsWithRole } from "./notifications.service";
@@ -518,5 +525,117 @@ async function notifyQc(
         payload: { jobId: job.id, unitId, items: list },
       })),
     ),
+  );
+}
+
+// ── inspect ──────────────────────────────────────────────────────────────
+
+export interface InspectResult {
+  kind: WorkKind;
+  targetId: number;
+  result: "ACCEPT" | "REJECT";
+  from: string;
+  to: string;
+  rolledUp: RollupChange[];
+}
+
+/** The rejection category a QC reject files under: the given one, else the tenant's REWORK_QUALITY, else OTHER. */
+async function rejectionCategoryId(tx: Tx, tenantId: number, categoryId?: number): Promise<number> {
+  if (categoryId != null) {
+    const c = await tx.delayCategoryRef.findFirst({ where: { id: categoryId, tenantId, active: true }, select: { id: true } });
+    if (!c) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "DelayCategoryRef", categoryId });
+    return c.id;
+  }
+  const defaults = await tx.delayCategoryRef.findMany({
+    where: { tenantId, active: true, code: { in: ["REWORK_QUALITY", "OTHER"] } },
+    select: { id: true, code: true },
+  });
+  const c = defaults.find((d) => d.code === "REWORK_QUALITY") ?? defaults[0];
+  if (!c) {
+    throw new AppError(
+      ERROR_CODES.VALIDATION_FAILED,
+      { field: "categoryId" },
+      "Choose a rejection category; none is set up as the default.",
+    );
+  }
+  return c.id;
+}
+
+/**
+ * Lean Core L1.2e: QC's one write — accept or reject an item. Wraps the
+ * existing verify/reject bodies (maker–checker, hold-point and NCR handling,
+ * QCP execution sync with its AUD-004 external-party guard) and then rolls up
+ * the plan the item feeds, all in one transaction under the unit's floor lock.
+ *
+ * - ASSEMBLY_STEP: SUBMITTED, or an INSPECTION-kind step QC records directly.
+ * - COMPONENT_OP: SUBMITTED only.
+ * - PROCESS_PLAN: a SUBMITTED non-derived plan only (derived plans are never
+ *   submitted: DERIVED_STATUS). // ponytail: delegates to verifyProcess /
+ *   rejectProcess, which own a RepeatableRead transaction, so this path takes
+ *   no unit lock; a non-derived plan has no mapped items for a batch to race.
+ *
+ * Not flag-gated (services are called directly by tests); the Server Action is.
+ */
+export async function inspect(actor: Actor, input: InspectInput): Promise<InspectResult> {
+  const { kind, targetId, result, reason, categoryId, testTypeId } = inspectSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.QC);
+  const done = (from: string, to: string, rolledUp: RollupChange[] = []): InspectResult => ({
+    kind,
+    targetId,
+    result,
+    from,
+    to,
+    rolledUp,
+  });
+
+  if (kind === "PROCESS_PLAN") {
+    const plan = await withTenant(actor.tenantId, async (tx) => {
+      const p = await lockProcessPlanForUpdate(tx, targetId, actor.tenantId);
+      const mapped = await loadMappedOps(tx, { jobProcessId: p.jobProcessId, unitId: p.unitId, jobId: p.jobId });
+      if (mapped.length > 0) throw new AppError(ERROR_CODES.DERIVED_STATUS, { processPlanId: p.id });
+      return p;
+    });
+    const updated =
+      result === "ACCEPT"
+        ? await verifyProcess(actor, { processPlanId: targetId })
+        : await rejectProcess(actor, { processPlanId: targetId, reason: reason! });
+    return done(plan.status, updated.status);
+  }
+
+  const target = await withTenant(actor.tenantId, async (tx) =>
+    kind === "ASSEMBLY_STEP"
+      ? tx.assemblyStep.findFirst({
+          where: { id: targetId, unit: { equipment: { job: { tenantId: actor.tenantId } } } },
+          select: { jobId: true, unitId: true },
+        })
+      : tx.componentOperation
+          .findFirst({
+            where: { id: targetId, component: { equipment: { job: { tenantId: actor.tenantId } } } },
+            select: { jobId: true, component: { select: { unitId: true } } },
+          })
+          .then((o) => (o ? { jobId: o.jobId, unitId: o.component.unitId } : null)),
+  );
+  if (!target) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: ENTITY[kind], id: targetId });
+
+  return withJob(
+    actor.tenantId,
+    target.jobId,
+    async (tx) => {
+      await lockFloorUnits(tx, target.jobId, [target.unitId]);
+      const category = result === "REJECT" ? await rejectionCategoryId(tx, actor.tenantId, categoryId) : 0;
+      if (kind === "ASSEMBLY_STEP") {
+        const r = await inspectAssemblyStepTx(tx, actor, { assemblyStepId: targetId, result, reason, categoryId: category, testTypeId });
+        const change = await rollupForAssemblyStep(tx, actor, targetId);
+        return done(r.from, r.step.status, change ? [change] : []);
+      }
+      const updated =
+        result === "ACCEPT"
+          ? await verifyComponentOperationTx(tx, actor, targetId)
+          : await rejectComponentOperationTx(tx, actor, { componentOperationId: targetId, categoryId: category, detail: reason });
+      const change = await rollupForComponentOperation(tx, actor, targetId);
+      return done("SUBMITTED", updated.status, change ? [change] : []);
+    },
+    { timeoutMs: 30_000 },
   );
 }
