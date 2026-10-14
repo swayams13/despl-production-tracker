@@ -377,6 +377,33 @@ export async function verifyComponentOperation(
   });
 }
 
+/**
+ * P1 (Phase 5), non-throwing: null when an op flagged OperationRef.requiresDftGate
+ * has a recorded coating system and enough accepted DFT readings; else what is
+ * missing. "Accepted" is self-attested by whoever recorded the reading; there
+ * is no spec'd min/max micron range to check against. Shared by
+ * verifyComponentOperationTx and recordWork's QC-free Done (L1.2 review).
+ */
+export async function findDftShortfall(
+  tx: Tx,
+  componentOperationId: number,
+): Promise<{ hasPaintRecord: boolean; acceptedCoats: number; requiredCoats: number } | null> {
+  const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId } });
+  // Coverage is per DISTINCT coat, not a raw accepted-row count — three
+  // accepted readings all against the same coatNumber (or all with it
+  // omitted) must not satisfy coatsPlanned: 3 (task review Important #1).
+  // groupBy folds duplicate coatNumbers together, including a null
+  // coatNumber as its own single group (the "untagged" case the
+  // coatsPlanned-unset/DEFAULT_COATS_REQUIRED=1 path relies on).
+  const acceptedCoatGroups = await tx.dftReading.groupBy({
+    by: ["coatNumber"],
+    where: { componentOperationId, accepted: true },
+  });
+  const acceptedCoats = acceptedCoatGroups.length;
+  const requiredCoats = paintRecord?.coatsPlanned ?? DEFAULT_COATS_REQUIRED;
+  return !paintRecord || acceptedCoats < requiredCoats ? { hasPaintRecord: !!paintRecord, acceptedCoats, requiredCoats } : null;
+}
+
 /** verifyComponentOperation's body for a caller that already holds the transaction (inspect). */
 export async function verifyComponentOperationTx(
   tx: Tx,
@@ -394,27 +421,8 @@ export async function verifyComponentOperationTx(
   // min/max micron range to check against (open question noted in the
   // schema comment and the task report — not silently resolved here).
   if (requiresDftGate) {
-    const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId: op.id } });
-    // Coverage is per DISTINCT coat, not a raw accepted-row count — three
-    // accepted readings all against the same coatNumber (or all with it
-    // omitted) must not satisfy coatsPlanned: 3 (task review Important #1).
-    // groupBy folds duplicate coatNumbers together, including a null
-    // coatNumber as its own single group (the "untagged" case the
-    // coatsPlanned-unset/DEFAULT_COATS_REQUIRED=1 path relies on).
-    const acceptedCoatGroups = await tx.dftReading.groupBy({
-      by: ["coatNumber"],
-      where: { componentOperationId: op.id, accepted: true },
-    });
-    const distinctAcceptedCoats = acceptedCoatGroups.length;
-    const requiredCoats = paintRecord?.coatsPlanned ?? DEFAULT_COATS_REQUIRED;
-    if (!paintRecord || distinctAcceptedCoats < requiredCoats) {
-      throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, {
-        componentOperationId: op.id,
-        hasPaintRecord: !!paintRecord,
-        acceptedCoats: distinctAcceptedCoats,
-        requiredCoats,
-      });
-    }
+    const shortfall = await findDftShortfall(tx, op.id);
+    if (shortfall) throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, { componentOperationId: op.id, ...shortfall });
   }
 
   // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr(s)

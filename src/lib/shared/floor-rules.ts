@@ -313,7 +313,6 @@ export function h3DataGaps(facts: UnitFacts): OpItem[] {
 
 export const BACKDATE_WINDOW_HOURS = 72;
 const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
 
 /**
  * Hours in [from, to) that fall on a working day of `calendar`, every IST day

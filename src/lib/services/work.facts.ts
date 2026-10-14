@@ -32,6 +32,8 @@ export interface WorkRow {
   templateJointRef?: string | null;
   weldJointId?: number | null;
   componentId?: number;
+  /** COMPONENT_OP: OperationRef.requiresDftGate (a QC-free Done still needs the coats). */
+  requiresDftGate?: boolean;
   /** Current drawing revision, stamped as Component.builtToRevisionId when CUTTING starts on it. */
   currentRevisionId?: number | null;
   jobProcessId?: number;
@@ -87,7 +89,7 @@ export async function loadFloorFacts(
         startedAt: true,
         reportedStartAt: true,
         operationId: true,
-        operation: { select: { code: true, defaultDepartmentId: true } },
+        operation: { select: { code: true, defaultDepartmentId: true, requiresDftGate: true } },
         component: { select: { id: true, routeVersionId: true, pressureRetaining: true, governingDrawingId: true } },
       },
     }),
@@ -229,6 +231,7 @@ export async function loadFloorFacts(
       departmentId: o.operation.defaultDepartmentId,
       startedAt: o.reportedStartAt ?? o.startedAt,
       componentId: o.component.id,
+      requiresDftGate: o.operation.requiresDftGate,
       currentRevisionId: state === "RELEASED" || state === "AT_RISK" ? current!.id : null,
     });
   }

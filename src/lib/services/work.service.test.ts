@@ -112,7 +112,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
             for (let i = 0; i < 100; i++) {
               const [w] = await owner.$queryRaw<{ n: bigint }[]>`
                 SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%work_requests%'`;
-              if (w.n > 0n) break;
+              if (Number(w.n) > 0) break;
               await new Promise((r) => setTimeout(r, 100));
             }
             lockError = await owner.$queryRaw`SELECT id FROM process_plans WHERE id = ${foreign} FOR UPDATE NOWAIT`.then(
@@ -575,6 +575,52 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect((await rec(sup, j, "DONE", [[P, j.plan("22", 0)]])).applied).toMatchObject([{ to: "COMPLETE" }]);
     });
 
+    // Review fix (14 Oct): a QC-free item written straight to COMPLETE still meets what QC verify refuses on.
+    describe("false on a step or operation: the item's own hold, NCR and evidence still refuse (invariant 4)", () => {
+      const ncrOnOp = async (j: WorkJob, status: "OPEN" | "REWORK_IN_PROGRESS") => {
+        const rej = await owner.componentOperationRejection.create({
+          data: { componentOperationId: j.op("BRKT", "ROLLING"), categoryId: o.category.id, rejectedBy: head.userId, jobId: j.job.id },
+        });
+        await owner.ncr.create({ data: { componentOperationRejectionId: rej.id, jobId: j.job.id, status } });
+      };
+      const ncrOnStep = async (j: WorkJob) => {
+        const rej = await owner.assemblyStepRejection.create({
+          data: { assemblyStepId: j.step(1), categoryId: o.category.id, rejectedBy: head.userId, jobId: j.job.id },
+        });
+        await owner.ncr.create({ data: { assemblyStepRejectionId: rej.id, jobId: j.job.id } });
+      };
+      const qcFreeOp = (code = "ROLLING") => o.job({ components: [{ tag: "BRKT", ops: [{ code, requiresQc: false }] }] });
+
+      it.each<[string, () => Promise<[WorkJob, [Kind, number]]>, string]>([
+        ["an operation with an open NCR", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "OPEN"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }, ERROR_CODES.NCR_OPEN],
+        ["an operation whose NCR is in rework", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "REWORK_IN_PROGRESS"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }, ERROR_CODES.NCR_OPEN],
+        ["a step with an open NCR", async () => { const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] }); await ncrOnStep(j); return [j, [S, j.step(1)]]; }, ERROR_CODES.NCR_OPEN],
+        ["a step with its own open blocking H point", async () => { const j = await o.job({ steps: [{ seq: 1, requiresQc: false, hold: true }] }); return [j, [S, j.step(1)]]; }, ERROR_CODES.HOLD_POINT_OPEN],
+        [
+          "a DFT-gated operation with no accepted coats",
+          async () => {
+            const j = await qcFreeOp("PAINTING");
+            const op = await owner.componentOperation.findUniqueOrThrow({ where: { id: j.op("BRKT", "PAINTING") } });
+            await owner.operationRef.update({ where: { id: op.operationId }, data: { requiresDftGate: true } });
+            return [j, [OP, op.id]];
+          },
+          ERROR_CODES.DFT_NOT_ACCEPTED,
+        ],
+      ])("%s: DONE is refused; nothing written", async (_l, setup, expected) => {
+        const [j, [kind, id]] = await setup();
+        const r = await rec(sup, j, "DONE", [[kind, id]]);
+        expect(refusal(r, id)?.code, JSON.stringify(r)).toBe(expected);
+        const row = kind === S ? await stepRow(id) : await owner.componentOperation.findUniqueOrThrow({ where: { id } });
+        expect(row.status).toBe("NOT_STARTED");
+      });
+
+      it("requiresQc true: the same NCR does not stop Done reaching SUBMITTED (QC verify handles it)", async () => {
+        const j = await o.job({ components: [{ tag: "BRKT", ops: [{ code: "ROLLING" }] }] });
+        await ncrOnOp(j, "REWORK_IN_PROGRESS");
+        expect((await rec(sup, j, "DONE", [[OP, j.op("BRKT", "ROLLING")]])).applied).toMatchObject([{ to: "SUBMITTED" }]);
+      });
+    });
+
     it("false: Done goes straight to COMPLETE, audited, no QC notification", async () => {
       const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] });
       const r = await rec(sup, j, "DONE", [[S, j.step(1)]]);
@@ -674,12 +720,13 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect(await rollup(j)).toMatchObject({ from: "IN_PROGRESS", to: "COMPLETE" });
     });
 
-    it("all items COMPLETE but a mapped item has an open NCR: stays IN_PROGRESS", async () => {
+    it("all items COMPLETE but a mapped item has an open NCR: not COMPLETE", async () => {
+      // recordWork itself now refuses a QC-free Done on an item with an open NCR, so the NCR arrives after.
       const j = await mapped();
+      await rec(sup, j, "DONE", [[S, j.step(1)], [S, j.step(2)]]);
       const rej = await owner.assemblyStepRejection.create({ data: { assemblyStepId: j.step(1), categoryId: o.category.id, rejectedBy: head.userId, jobId: j.job.id } });
       await owner.ncr.create({ data: { assemblyStepRejectionId: rej.id, jobId: j.job.id } });
-      const r = await rec(sup, j, "DONE", [[S, j.step(1)], [S, j.step(2)]]);
-      expect(r.rolledUp).toMatchObject([{ to: "IN_PROGRESS" }]);
+      expect(await rollup(j)).toMatchObject({ from: "COMPLETE", to: "IN_PROGRESS" });
       expect((await planRow(j.plan("20", 0))).status).toBe("IN_PROGRESS");
     });
 

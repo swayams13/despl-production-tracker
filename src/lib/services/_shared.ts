@@ -841,6 +841,28 @@ export async function findOpenNcrOperations(
 }
 
 /**
+ * Non-throwing, item grain (L1.2 review): the ids of this step's or
+ * operation's own NCRs still blocking (OPEN_NCR_STATUSES). recordWork refuses
+ * a QC-free Done to COMPLETE on them, since no QC verify will close them.
+ */
+export async function findOpenItemNcrIds(
+  tx: Tx,
+  kind: "ASSEMBLY_STEP" | "COMPONENT_OP",
+  id: number,
+): Promise<number[]> {
+  const rows = await tx.ncr.findMany({
+    where: {
+      status: { in: [...OPEN_NCR_STATUSES] },
+      ...(kind === "ASSEMBLY_STEP"
+        ? { assemblyStepRejection: { assemblyStepId: id } }
+        : { componentOperationRejection: { componentOperationId: id } }),
+    },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
+/**
  * S10 — the reverse quality gate: packing/dispatch have no way today to
  * refuse a unit carrying an open non-conformance. Unlike `assertNoOpenNcr`,
  * this is unit-grain, not (jobProcessId, unit)-grain — packing/dispatch

@@ -11,6 +11,7 @@ import {
   assertEvidenceSatisfied,
   assertNoOpenHoldPoint,
   assertNoOpenNcr,
+  findOpenItemNcrIds,
   loadMappedOps,
   loadPlanNotifyContext,
   lockFloorUnits,
@@ -22,7 +23,7 @@ import {
   type RollupChange,
 } from "./_shared";
 import { inspectAssemblyStepTx } from "./assembly.service";
-import { rejectComponentOperationTx, verifyComponentOperationTx } from "./component.service";
+import { findDftShortfall, rejectComponentOperationTx, verifyComponentOperationTx } from "./component.service";
 import { rejectProcess, verifyProcess } from "./process.service";
 import { loadFloorFacts, rowKey, type FloorFacts, type WorkRow } from "./work.facts";
 import { assertPerformedByValid } from "./welding.service";
@@ -370,6 +371,16 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     await assertNoOpenHoldPoint(tx, args);
     await assertNoOpenNcr(tx, args);
     await assertEvidenceSatisfied(tx, args);
+  }
+  // Same for a step or operation (review fix): its own H point, NCR and DFT evidence. The plan it
+  // feeds is gated by rollupProcessPlan.
+  if (item.kind !== "PROCESS_PLAN" && to === "COMPLETE") {
+    const ref = { kind: item.kind, id: item.id };
+    if (item.openBlockingHold) throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, { ...ref, unitId: row.unitId });
+    const ncrIds = await findOpenItemNcrIds(tx, item.kind, item.id);
+    if (ncrIds.length) throw new AppError(ERROR_CODES.NCR_OPEN, { ...ref, ncrIds });
+    const dft = row.requiresDftGate ? await findDftShortfall(tx, item.id) : null;
+    if (dft) throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, { componentOperationId: item.id, ...dft });
   }
 
   // ── Writes ──
