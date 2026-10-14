@@ -11,6 +11,7 @@ import {
 } from "@/lib/authz";
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { deriveRequiresQc } from "@/lib/shared/floor-rules";
 import { assertKitReady, assertDrawingReleased } from "./_shared";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
@@ -668,17 +669,21 @@ export async function materializeComponentsFromBomItems(
   ];
   const operationRefs =
     operationIds.length > 0
-      ? await tx.operationRef.findMany({ where: { id: { in: operationIds } }, select: { id: true, requiresQc: true } })
+      ? await tx.operationRef.findMany({ where: { id: { in: operationIds } }, select: { id: true, code: true, requiresQc: true } })
       : [];
   const requiresQcByOperationId = new Map(operationRefs.map((o) => [o.id, o.requiresQc]));
+  const codeByOperationId = new Map(operationRefs.map((o) => [o.id, o.code]));
 
   // Lean Core L1.2 (D2, H2/H3): pressureRetaining copied from the APPROVED part
   // family only (D15) — a draft master-data flag must not switch on a HARD rule.
-  const pressureFamilies = await tx.partFamily.findMany({
-    where: { componentTypeId: { in: typeIds }, status: "APPROVED", pressureRetaining: true },
-    select: { componentTypeId: true },
+  const approvedFamilies = await tx.partFamily.findMany({
+    where: { componentTypeId: { in: typeIds }, status: "APPROVED" },
+    select: { componentTypeId: true, pressureRetaining: true },
   });
-  const pressureRetainingTypeIds = new Set(pressureFamilies.map((f) => f.componentTypeId));
+  const pressureRetainingTypeIds = new Set(approvedFamilies.filter((f) => f.pressureRetaining).map((f) => f.componentTypeId));
+  // L1.2c (D3): requiresQc is derived by rule only for types whose pressure
+  // flag has been reviewed (an APPROVED family); anything else keeps today's value.
+  const reviewedTypeIds = new Set(approvedFamilies.map((f) => f.componentTypeId));
 
   let componentCount = 0;
   let skippedNoRoute = 0;
@@ -718,7 +723,15 @@ export async function materializeComponentsFromBomItems(
             seq: step.seq,
             operationId: step.operationId,
             status: OperationStatus.NOT_STARTED,
-            requiresQc: effectiveRequiresQc(step.requiresQc, requiresQcByOperationId.get(step.operationId) ?? true),
+            requiresQc:
+              effectiveRequiresQc(step.requiresQc, requiresQcByOperationId.get(step.operationId) ?? true) &&
+              (!reviewedTypeIds.has(b.componentTypeId!) ||
+                deriveRequiresQc({
+                  kind: "COMPONENT_OP",
+                  opCode: codeByOperationId.get(step.operationId),
+                  pressure: pressureRetainingTypeIds.has(b.componentTypeId!),
+                  qcpLinked: false,
+                }).requiresQc),
             jobId,
           })),
         });
