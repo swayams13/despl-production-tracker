@@ -642,6 +642,60 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
     });
   });
 
+  // ── Parity with the legacy component-op start (review fix, 14 Oct) ──────────
+  describe("parity: the same fixture through legacy startComponentOperation and recordWork", () => {
+    type Kit = "short" | "ready" | null;
+    interface Fixture {
+      component: { tag: string; pressure?: boolean; issued?: boolean; heatNumber?: string; ops: Array<{ code: string }> };
+      kit: Kit;
+      code: string | null;
+    }
+    /** Links the component to a BOM line (qtyPer 1); "ready" stocks one, "short" stocks none. */
+    async function build(f: Fixture) {
+      const j = await o.job({ components: [f.component] });
+      const componentId = j.components.get(`${f.component.tag}:0`)!;
+      if (f.kit) {
+        const bom = await owner.bomItem.create({
+          data: { jobId: j.job.id, equipmentId: j.equipment.id, itemNo: 9, partName: f.component.tag, sourceQty: "1", qtyPer: "1" },
+        });
+        if (f.kit === "ready") await owner.stockLot.create({ data: { jobId: j.job.id, bomItemId: bom.id, location: "Y1", qty: "1" } });
+        await owner.component.update({ where: { id: componentId }, data: { bomItemId: bom.id } });
+      }
+      return { j, id: j.op(f.component.tag, f.component.ops[0].code), componentId };
+    }
+
+    it.each<[string, Fixture]>([
+      ["kit short (MATERIAL_NOT_AVAILABLE)", { component: { tag: "BRKT", ops: [{ code: "ROLLING" }] }, kit: "short", code: ERROR_CODES.MATERIAL_NOT_AVAILABLE }],
+      ["kit ready", { component: { tag: "BRKT", ops: [{ code: "ROLLING" }] }, kit: "ready", code: null }],
+      ["no BOM link (seam, no gate)", { component: { tag: "BRKT", ops: [{ code: "ROLLING" }] }, kit: null, code: null }],
+      ["CUTTING, no drawing link, non-pressure", { component: { tag: "SKIRT", ops: [{ code: "CUTTING" }] }, kit: null, code: null }],
+      [
+        "CUTTING, no drawing link, pressure part (H3 data gap)",
+        { component: { tag: "SHELL", pressure: true, issued: true, heatNumber: "H1", ops: [{ code: "CUTTING" }] }, kit: null, code: null },
+      ],
+    ])("%s", async (_l, f) => {
+      const { startComponentOperation } = await import("./component.service");
+      const legacy = await build(f);
+      let legacyCode: string | null = null;
+      try {
+        await startComponentOperation(sup, { componentOperationId: legacy.id });
+      } catch (e) {
+        legacyCode = isAppError(e) ? e.code : String(e);
+      }
+      const lean = await build(f);
+      const r = await rec(sup, lean.j, "START", [[OP, lean.id]]);
+      const leanCode = r.refused[0]?.code ?? null;
+
+      expect([legacyCode, leanCode], JSON.stringify(r)).toEqual([f.code, f.code]);
+      const statuses = await Promise.all([legacy.id, lean.id].map(async (id) => (await owner.componentOperation.findUniqueOrThrow({ where: { id } })).status));
+      expect(statuses).toEqual(f.code ? ["NOT_STARTED", "NOT_STARTED"] : ["IN_PROGRESS", "IN_PROGRESS"]);
+      const stamps = await Promise.all(
+        [legacy.componentId, lean.componentId].map(async (id) => (await owner.component.findUniqueOrThrow({ where: { id } })).builtToRevisionId),
+      );
+      expect(stamps).toEqual([null, null]);
+    });
+  });
+
   // ── Batches ──────────────────────────────────────────────────────────────
   describe("partial-success batches", () => {
     it("refused items stay unchanged and unaudited; applied ones are audited", async () => {

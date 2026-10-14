@@ -9,6 +9,7 @@ import { inspectSchema, recordWorkSchema, type InspectInput, type RecordWorkInpu
 import type { WorkCalendarInput } from "@/lib/schedule";
 import {
   assertEvidenceSatisfied,
+  assertKitReady,
   assertNoOpenHoldPoint,
   assertNoOpenNcr,
   findOpenItemNcrIds,
@@ -312,6 +313,8 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
       throw new AppError(check.code, check.meta, operator ? SEQUENCE_OVERRIDE_OPERATOR_MESSAGE : undefined);
     }
     overridden = check.overridden;
+    // Parity with startComponentOperation (B7): the component's BOM line must not be short.
+    if (item.kind === "COMPONENT_OP") await assertKitReady(tx, row.componentId!, actor.tenantId);
   }
 
   // Invariant 7 as revised: a late Done carries its reason in the same action.
