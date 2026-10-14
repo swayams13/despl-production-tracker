@@ -1,0 +1,277 @@
+import type { Tx } from "@/lib/db";
+import {
+  drawingStateOf,
+  type FloorItem,
+  type ItemStatus,
+  type OpItem,
+  type PlanItem,
+  type StepItem,
+  type UnitFacts,
+  type WorkKind,
+} from "@/lib/shared/floor-rules";
+import { loadOpSeqResolver, openQcpItemIdsForUnit } from "./_shared";
+
+/**
+ * Lean Core L1.2: the per-unit snapshot floor-rules.ts evaluates, loaded once
+ * per unit (or once for the job's unit-less items) inside recordWork's
+ * transaction, after the unit's floor lock is held. recordWork mutates the
+ * FloorItem objects in place as it applies items, so a later item in the same
+ * batch sees an earlier one's new status.
+ */
+
+/** What recordWork needs about an item beyond the rule facts. */
+export interface WorkRow {
+  item: FloorItem;
+  unitId: number | null;
+  requiresQc: boolean;
+  departmentId: number | null;
+  /** COALESCE(reportedStartAt, startedAt / actualStart). */
+  startedAt: Date | null;
+  stepKind?: "WORK" | "INSPECTION";
+  /** Template step's own jointRef: the legacy "bind a weld joint before submit" rule keys off it. */
+  templateJointRef?: string | null;
+  weldJointId?: number | null;
+  componentId?: number;
+  /** Current drawing revision, stamped as Component.builtToRevisionId when CUTTING starts on it. */
+  currentRevisionId?: number | null;
+  jobProcessId?: number;
+  plannedFinish?: Date | null;
+  hasDelayReason?: boolean;
+  /** PROCESS_PLAN only: has mapped steps/operations, so its status is derived. */
+  derived?: boolean;
+}
+
+export interface FloorFacts {
+  facts: UnitFacts;
+  rows: Map<string, WorkRow>;
+  /** The unit's (or job's) process plans by TemplateProcess seq. */
+  plansBySeq: Map<number, WorkRow>;
+}
+
+export const rowKey = (kind: WorkKind, id: number) => `${kind}:${id}`;
+
+const numericSeq = (code: string) => (/^\d+$/.test(code) ? Number(code) : null);
+
+export async function loadFloorFacts(
+  tx: Tx,
+  job: { id: number; familyId: number },
+  unitId: number | null,
+): Promise<FloorFacts> {
+  const [steps, ops, plans, excluded, resolveSeq] = await Promise.all([
+    unitId == null
+      ? Promise.resolve([])
+      : tx.assemblyStep.findMany({
+          where: { unitId, jobId: job.id },
+          select: {
+            id: true,
+            seq: true,
+            status: true,
+            requiresQc: true,
+            role: true,
+            jointRef: true,
+            pressurePart: true,
+            startedAt: true,
+            reportedStartAt: true,
+            weldJointId: true,
+            qcpItemId: true,
+            templateStep: { select: { kind: true, jointRef: true, leadTimeProcessSeq: true, defaultDepartmentId: true } },
+          },
+        }),
+    tx.componentOperation.findMany({
+      where: { jobId: job.id, component: { unitId } },
+      select: {
+        id: true,
+        seq: true,
+        status: true,
+        requiresQc: true,
+        startedAt: true,
+        reportedStartAt: true,
+        operationId: true,
+        operation: { select: { code: true, defaultDepartmentId: true } },
+        component: { select: { id: true, routeVersionId: true, pressureRetaining: true, governingDrawingId: true } },
+      },
+    }),
+    tx.processPlan.findMany({
+      where: {
+        jobId: job.id,
+        scheduleRun: { isCurrent: true },
+        // JOB-grain plans (unitId null) belong to every unit's facts too (D2 SOFT on processes 1–11, PAINT_AFTER_HYDRO).
+        OR: unitId == null ? [{ unitId: null }] : [{ unitId: null }, { unitId }],
+      },
+      select: {
+        id: true,
+        status: true,
+        unitId: true,
+        jobProcessId: true,
+        plannedFinish: true,
+        actualStart: true,
+        reportedStartAt: true,
+        ownerDepartmentId: true,
+        jobProcess: { select: { code: true, requiresQc: true } },
+        _count: { select: { delayReasons: true } },
+      },
+    }),
+    tx.jobProcess.findMany({ where: { jobId: job.id, included: false }, select: { code: true } }),
+    loadOpSeqResolver(tx, job.familyId),
+  ]);
+  // Component route order: position in the canonical route (legacy
+  // findPreviousComponentOperation's notion), extras after it by raw seq.
+  const routeVersionIds = [...new Set(ops.map((o) => o.component.routeVersionId).filter((v): v is number => v != null))];
+  const routeSteps = routeVersionIds.length
+    ? await tx.routeStep.findMany({
+        where: { routeVersionId: { in: routeVersionIds } },
+        orderBy: { seq: "asc" },
+        select: { routeVersionId: true, operationId: true },
+      })
+    : [];
+  const routeSeq = (o: (typeof ops)[number]) => {
+    if (o.component.routeVersionId == null) return o.seq;
+    const idx = routeSteps
+      .filter((s) => s.routeVersionId === o.component.routeVersionId)
+      .findIndex((s) => s.operationId === o.operationId);
+    return idx >= 0 ? idx : 10_000 + o.seq;
+  };
+
+  // H2 / H3 inputs for the components on this unit.
+  const componentIds = [...new Set(ops.map((o) => o.component.id))];
+  const drawingIds = [...new Set(ops.map((o) => o.component.governingDrawingId).filter((d): d is number => d != null))];
+  const [issues, identifications, revisions] = await Promise.all([
+    componentIds.length
+      ? tx.stockTxn.findMany({
+          where: { componentId: { in: componentIds }, type: "ISSUE" },
+          select: { componentId: true, stockLot: { select: { heatNumber: true } } },
+        })
+      : Promise.resolve([]),
+    componentIds.length
+      ? tx.materialIdentification.findMany({ where: { componentId: { in: componentIds } }, select: { componentId: true } })
+      : Promise.resolve([]),
+    // RLS (job_isolation) hides another job's revisions, so a cross-job link reads NOT_RELEASED.
+    drawingIds.length
+      ? tx.drawingRevision.findMany({
+          where: { assemblyDrawingId: { in: drawingIds } },
+          orderBy: { revisionNo: "desc" },
+          select: { id: true, assemblyDrawingId: true, status: true, atRiskReleasedAt: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const issued = new Set(issues.map((t) => t.componentId));
+  const heatPicked = new Set([
+    ...identifications.map((m) => m.componentId),
+    ...issues.filter((t) => t.stockLot.heatNumber).map((t) => t.componentId),
+  ]);
+  const currentRevision = new Map<number, (typeof revisions)[number]>();
+  for (const r of revisions) if (!currentRevision.has(r.assemblyDrawingId)) currentRevision.set(r.assemblyDrawingId, r);
+
+  // D12: an uncleared blocking H point on a step's own QcpItem.
+  const stepQcpIds = steps.map((s) => s.qcpItemId).filter((q): q is number => q != null);
+  const blockingQcp = stepQcpIds.length
+    ? await tx.qcpItem.findMany({
+        where: { id: { in: stepQcpIds }, partyCodes: { some: { qcpCode: { blocksCompletion: true } } } },
+        select: { id: true },
+      })
+    : [];
+  const openQcp = new Set(unitId == null ? [] : await openQcpItemIdsForUnit(tx, unitId, blockingQcp.map((q) => q.id)));
+
+  const rows = new Map<string, WorkRow>();
+  const plansBySeq = new Map<number, WorkRow>();
+  const items: FloorItem[] = [];
+
+  for (const s of steps) {
+    const item: StepItem = {
+      kind: "ASSEMBLY_STEP",
+      id: s.id,
+      status: s.status as ItemStatus,
+      processSeq: s.templateStep.leadTimeProcessSeq,
+      openBlockingHold: s.qcpItemId != null && openQcp.has(s.qcpItemId),
+      seq: s.seq,
+      stepKind: s.templateStep.kind,
+      role: s.role,
+      jointRef: s.jointRef,
+      pressurePart: s.pressurePart,
+    };
+    items.push(item);
+    rows.set(rowKey(item.kind, item.id), {
+      item,
+      unitId,
+      requiresQc: s.requiresQc,
+      departmentId: s.templateStep.defaultDepartmentId,
+      startedAt: s.reportedStartAt ?? s.startedAt,
+      stepKind: s.templateStep.kind,
+      templateJointRef: s.templateStep.jointRef,
+      weldJointId: s.weldJointId,
+    });
+  }
+
+  for (const o of ops) {
+    const drawingId = o.component.governingDrawingId;
+    const current = drawingId != null ? currentRevision.get(drawingId) : undefined;
+    const item: OpItem = {
+      kind: "COMPONENT_OP",
+      id: o.id,
+      status: o.status as ItemStatus,
+      processSeq: resolveSeq({ operationId: o.operationId, seq: o.seq, routeVersionId: o.component.routeVersionId }),
+      // ponytail: no QCP link exists at component-op grain yet, so HOLD_LINK never fires on ops.
+      openBlockingHold: false,
+      componentId: o.component.id,
+      routeSeq: routeSeq(o),
+      opCode: o.operation.code,
+      pressureRetaining: o.component.pressureRetaining,
+      materialIssued: issued.has(o.component.id),
+      heatPicked: heatPicked.has(o.component.id),
+      drawing: drawingStateOf(current ?? null, drawingId != null),
+    };
+    items.push(item);
+    const state = item.drawing;
+    rows.set(rowKey(item.kind, item.id), {
+      item,
+      unitId,
+      requiresQc: o.requiresQc,
+      departmentId: o.operation.defaultDepartmentId,
+      startedAt: o.reportedStartAt ?? o.startedAt,
+      componentId: o.component.id,
+      currentRevisionId: state === "RELEASED" || state === "AT_RISK" ? current!.id : null,
+    });
+  }
+
+  const mappedSeqs = new Set(items.map((i) => i.processSeq).filter((s): s is number => s != null));
+  for (const p of plans) {
+    const processSeq = numericSeq(p.jobProcess.code);
+    const item: PlanItem = {
+      kind: "PROCESS_PLAN",
+      id: p.id,
+      status: p.status,
+      processSeq,
+      openBlockingHold: false,
+    };
+    items.push(item);
+    const row: WorkRow = {
+      item,
+      unitId: p.unitId,
+      requiresQc: p.jobProcess.requiresQc,
+      departmentId: p.ownerDepartmentId,
+      startedAt: p.reportedStartAt ?? p.actualStart,
+      jobProcessId: p.jobProcessId,
+      plannedFinish: p.plannedFinish,
+      hasDelayReason: p._count.delayReasons > 0,
+      derived: p.unitId != null && processSeq != null && mappedSeqs.has(processSeq),
+    };
+    rows.set(rowKey(item.kind, item.id), row);
+    // A unit plan wins over a job plan for the same seq (a process is one grain or the other).
+    if (processSeq != null && (!plansBySeq.has(processSeq) || p.unitId != null)) plansBySeq.set(processSeq, row);
+  }
+
+  const hasAssemblySequence =
+    unitId != null ? steps.length > 0 : (await tx.assemblyStep.count({ where: { jobId: job.id } })) > 0;
+
+  return {
+    facts: {
+      items,
+      excludedProcessSeqs: excluded.map((e) => numericSeq(e.code)).filter((s): s is number => s != null),
+      hasAssemblySequence,
+      // ponytail: H5/H6 concessions arrive with the rule NCR columns (L1.2f); none exist before that.
+      concessions: [],
+    },
+    rows,
+    plansBySeq,
+  };
+}
