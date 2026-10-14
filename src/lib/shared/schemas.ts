@@ -1236,3 +1236,77 @@ export const setMaterialStatusSchema = z
   })
   .strict();
 export type SetMaterialStatusInput = z.input<typeof setMaterialStatusSchema>;
+
+/**
+ * Lean Core L1.2: recordWork / inspect. `reportedAt` is the one client time
+ * invariant 1 (revised 7 Oct, D4) allows — the server still stamps every
+ * actual_* and recordedAt, and checks reportedAt against the window
+ * (floor-rules.ts checkReportedAt).
+ */
+export const OVERRIDE_CATEGORIES = [
+  "MATERIAL_READY_EARLY", // Material/part ready early
+  "CREW_OR_MACHINE_FREE", // Crew or machine free, upstream not ready
+  "ACCESS_AVAILABLE_NOW", // Crane/access/space available now
+  "CLIENT_PRIORITY", // Client or delivery priority
+  "OTHER", // needs text
+] as const;
+export type OverrideCategory = (typeof OVERRIDE_CATEGORIES)[number];
+
+export const sequenceOverrideSchema = z
+  .object({
+    category: z.enum(OVERRIDE_CATEGORIES),
+    note: z.string().trim().max(500).optional(),
+  })
+  .strict()
+  .refine((o) => o.category !== "OTHER" || !!o.note, { message: "Say why when you choose Other", path: ["note"] });
+
+export const workItemKindSchema = z.enum(["COMPONENT_OP", "ASSEMBLY_STEP", "PROCESS_PLAN"]);
+
+export const recordWorkSchema = z
+  .object({
+    requestId: z.uuid().optional(),
+    jobId: id,
+    action: z.enum(["START", "DONE"]),
+    reportedAt: z.iso.datetime({ offset: true }).optional(),
+    items: z
+      .array(
+        z
+          .object({
+            kind: workItemKindSchema,
+            id,
+            detail: z
+              .object({
+                performedByWelderId: id.optional(),
+                performedByUserId: id.optional(),
+                weldJointId: id.optional(),
+                newJoint: z.string().trim().min(1).max(64).optional(),
+                remarks: z.string().trim().max(1000).optional(),
+                qtyGood: z.number().int().nonnegative().optional(),
+                qtyRejected: z.number().int().nonnegative().optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100)
+      .refine((items) => new Set(items.map((i) => `${i.kind}:${i.id}`)).size === items.length, {
+        message: "Each item may appear only once",
+      }),
+    override: sequenceOverrideSchema.optional(),
+    lateReason: z.object({ categoryId: id, note: z.string().trim().max(500).optional() }).strict().optional(),
+  })
+  .strict();
+export type RecordWorkInput = z.input<typeof recordWorkSchema>;
+
+export const inspectSchema = z
+  .object({
+    kind: workItemKindSchema,
+    targetId: id,
+    result: z.enum(["ACCEPT", "REJECT"]),
+    reason: z.string().trim().max(1000).optional(),
+  })
+  .strict()
+  .refine((i) => i.result !== "REJECT" || !!i.reason, { message: "Give a reason to reject", path: ["reason"] });
+export type InspectInput = z.input<typeof inspectSchema>;
