@@ -2,6 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
 import { audited, recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { deriveRequiresQc } from "@/lib/shared/floor-rules";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
 import { closeNcr } from "./ncr.service";
@@ -565,7 +566,19 @@ export async function materializeAssemblyStepsFromTemplate(
         templateStepId: step.id,
         seq: step.seq,
         qcpItemId,
-        requiresQc: step.requiresQc,
+        // D3 (L1.2c): derived by rule only where the template step carries a
+        // role (reviewed facts); a role-less step keeps the template value.
+        // Either level can waive QC, hence the AND.
+        requiresQc:
+          step.requiresQc &&
+          (!step.role ||
+            deriveRequiresQc({
+              kind: "ASSEMBLY_STEP",
+              stepKind: step.kind,
+              role: step.role,
+              qcpLinked: qcpItemId != null,
+              pressure: step.pressurePart,
+            }).requiresQc),
         role: step.role,
         jointRef: step.jointRef,
         pressurePart: step.pressurePart,

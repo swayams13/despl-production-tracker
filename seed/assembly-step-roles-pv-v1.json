@@ -1,0 +1,394 @@
+{
+  "$schema": "despl.assemblyStepRoles.v1",
+  "reviewStatus": "DRAFT_NEEDS_SIGNOFF",
+  "signoff": {
+    "requiredFrom": [
+      "SJ (Production Head)",
+      "QC head"
+    ],
+    "signedOffBy": null,
+    "signedOffAt": null,
+    "howToApprove": "Change reviewStatus to REVIEWED only after both have signed off the roles, joint labels and pressure flags below. scripts/lean-backfill-floor-facts.ts --apply refuses a DRAFT file unless --allow-draft is given (tests and throwaway databases only)."
+  },
+  "source": "seed/assembly-template-pressure-vessel-v1.json (54 steps, A to Q). Drafted 14 Oct 2026 for Lean Core L1.2c from CLAUDE.md D2 (H1 to H6), D3 and D12. Nothing here is applied to any shared database.",
+  "template": {
+    "family": "PRESSURE_VESSEL",
+    "assemblyTemplateVersion": 1
+  },
+  "components": {
+    "appliesToJobNumbers": [
+      "DESPL-320"
+    ],
+    "note": "pressureRetaining by ComponentTypeRef.code for the DESPL-320 pilot job only. The backfill only ever raises false to true; false entries are documentation. Other jobs take the flag from approved master-data part families at intake.",
+    "pressureRetainingByComponentType": {
+      "SKIRT": false,
+      "PLATE": true,
+      "DISHED_END": true,
+      "FLANGE": true,
+      "PIPE": true,
+      "FORGING": true,
+      "COUPLING": true
+    }
+  },
+  "steps": [
+    {
+      "seq": 1,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "Document / procedure / material gate: no joint, no role."
+    },
+    {
+      "seq": 2,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 3,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 4,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 5,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "Material inspection of pressure parts. No role: heat-number and issue checks live on the component CUTTING operation (H2), not on this step."
+    },
+    {
+      "seq": 6,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 7,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 8,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 9,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: cutting and marking of shell and dished ends is pressure-part work, but assembly steps have no CUTTING role. H2/H3 gate the component CUTTING operation instead. D3 would make this requiresQc true (heat-number transfer); with role null the template default (true) stays, so nothing changes. QC head to confirm."
+    },
+    {
+      "seq": 10,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 11,
+      "role": "HEAT_TREATMENT",
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: simulation heat treatment of a test coupon is a heat-treatment record but not the vessel's final PWHT, so HEAT_TREATMENT (does not trigger H5). Not a pressure part itself. The rule gives requiresQc false because the template kind is INSPECTION (QC records it); the QC head decides if a test-coupon record should be true."
+    },
+    {
+      "seq": 12,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: edge preparation is not fit-up (no FIT_UP role). Dished-end edge prep before welding is not gated by H1."
+    },
+    {
+      "seq": 13,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: edge preparation is not fit-up (no FIT_UP role)."
+    },
+    {
+      "seq": 14,
+      "role": "FIT_UP",
+      "jointRef": "LS-1",
+      "pressurePart": true
+    },
+    {
+      "seq": 15,
+      "role": "WELD",
+      "jointRef": "LS-1",
+      "pressurePart": true,
+      "note": "jointRef matches the template's own LS-1 on this row."
+    },
+    {
+      "seq": 16,
+      "role": "NDT",
+      "jointRef": "LS-1",
+      "pressurePart": true,
+      "note": "INSPECTION step recorded by QC via inspect; role NDT so H1 orders it after the weld and H6 waits for it before hydro."
+    },
+    {
+      "seq": 17,
+      "role": "NDT",
+      "jointRef": "LS-1",
+      "pressurePart": true
+    },
+    {
+      "seq": 18,
+      "role": "FIT_UP",
+      "jointRef": "NF-M1,NF-N2,NF-N3",
+      "pressurePart": true,
+      "note": "GUESS: joint labels NF-* (nozzle-to-flange/elbow) are invented, pending DESPL's weld-map joint numbering. Kept distinct from NS-* (nozzle-to-shell) so H1 does not chain unrelated joints. One step covers three joints, comma-separated."
+    },
+    {
+      "seq": 19,
+      "role": "WELD",
+      "jointRef": "NF-M1,NF-N2,NF-N3",
+      "pressurePart": true,
+      "note": "GUESS: same NF-* labels as step 18. The template's own jointRef is null here (several joints), so weld-joint binding is unchanged."
+    },
+    {
+      "seq": 20,
+      "role": "NDT",
+      "jointRef": "NF-M1,NF-N2,NF-N3",
+      "pressurePart": true,
+      "note": "GUESS: same NF-* labels."
+    },
+    {
+      "seq": 21,
+      "role": "NDT",
+      "jointRef": "NF-M1,NF-N2,NF-N3",
+      "pressurePart": true,
+      "note": "GUESS: same NF-* labels. RT of circ seam on nozzle pipe to flange."
+    },
+    {
+      "seq": 22,
+      "role": "FIT_UP",
+      "jointRef": "CS-2",
+      "pressurePart": true
+    },
+    {
+      "seq": 23,
+      "role": "WELD",
+      "jointRef": "CS-2",
+      "pressurePart": true,
+      "note": "jointRef matches the template's own CS-2 on this row."
+    },
+    {
+      "seq": 24,
+      "role": "NDT",
+      "jointRef": "CS-2",
+      "pressurePart": true
+    },
+    {
+      "seq": 25,
+      "role": "NDT",
+      "jointRef": "CS-2",
+      "pressurePart": true
+    },
+    {
+      "seq": 26,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: marking for nozzles is layout, not fit-up. No role."
+    },
+    {
+      "seq": 27,
+      "role": "FIT_UP",
+      "jointRef": "NS-M1,NS-N1,NS-N2,NS-N3,NS-N4,NS-N5,NS-N6",
+      "pressurePart": true,
+      "note": "GUESS: joint labels NS-* (nozzle-to-shell and dished end, M1 and N1 to N6) are invented, pending the weld-map numbering."
+    },
+    {
+      "seq": 28,
+      "role": "WELD",
+      "jointRef": "NS-M1,NS-N1,NS-N2,NS-N3,NS-N4,NS-N5,NS-N6",
+      "pressurePart": true,
+      "note": "GUESS: same NS-* labels."
+    },
+    {
+      "seq": 29,
+      "role": "NDT",
+      "jointRef": "NS-M1,NS-N1,NS-N2,NS-N3,NS-N4,NS-N5,NS-N6",
+      "pressurePart": true,
+      "note": "GUESS: same NS-* labels."
+    },
+    {
+      "seq": 30,
+      "role": "NDT",
+      "jointRef": "NS-M1,NS-N1,NS-N2,NS-N3",
+      "pressurePart": true,
+      "note": "GUESS: same NS-* labels as step 28. The QAP names only M1 and N1 to N3 for ultrasonic test (N4 to N6 are visual only); taken as printed, QC head to confirm."
+    },
+    {
+      "seq": 31,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "Internal clearance before closing the dished end. No role; not a joint step."
+    },
+    {
+      "seq": 32,
+      "role": "FIT_UP",
+      "jointRef": "CS-1",
+      "pressurePart": true
+    },
+    {
+      "seq": 33,
+      "role": "WELD",
+      "jointRef": "CS-1",
+      "pressurePart": true,
+      "note": "jointRef matches the template's own CS-1 on this row."
+    },
+    {
+      "seq": 34,
+      "role": "NDT",
+      "jointRef": "CS-1",
+      "pressurePart": true
+    },
+    {
+      "seq": 35,
+      "role": "NDT",
+      "jointRef": "CS-1",
+      "pressurePart": true
+    },
+    {
+      "seq": 36,
+      "role": "FIT_UP",
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: lifting lug and name-plate bracket are attachments, so pressurePart false (D3: non-pressure attachments are requiresQc false). If the code treats a lug welded to the shell as pressure-part welding, set pressurePart true; H5/H6 would then apply to it."
+    },
+    {
+      "seq": 37,
+      "role": "WELD",
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: same as step 36. No jointRef (weld map has no label yet)."
+    },
+    {
+      "seq": 38,
+      "role": "WELD",
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: same as step 36."
+    },
+    {
+      "seq": 39,
+      "role": "FIT_UP",
+      "jointRef": "SK-1",
+      "pressurePart": true,
+      "note": "GUESS: D3 lists skirt-to-head as a pressure-retaining joint, so pressurePart true here even though the SKIRT component type is not pressure-retaining. SK-1 is an invented label."
+    },
+    {
+      "seq": 40,
+      "role": "WELD",
+      "jointRef": "SK-1",
+      "pressurePart": true,
+      "note": "GUESS: same as step 39. The QAP has no joint-specific NDT for the skirt weld; steps 43 to 45 (all weld joints, after PWHT) cover it."
+    },
+    {
+      "seq": 41,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "Pre-PWHT clearance gate. No role."
+    },
+    {
+      "seq": 42,
+      "role": "FINAL_PWHT",
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "This INSPECTION-kind step is the unit's PWHT record (the only step with FINAL_PWHT). H4 needs it COMPLETE before hydro; H5 refuses welding once it has started. QC head to confirm that step 41 (clearance) is not the one that should carry the role. The rule gives requiresQc false because the template kind is INSPECTION (QC records it via inspect); D3 lists PWHT as a test record, so the QC head decides whether QC's own record needs a second sign-off."
+    },
+    {
+      "seq": 43,
+      "role": "NDT",
+      "jointRef": null,
+      "pressurePart": true,
+      "note": "Post-PWHT visual of all weld joints: pressure joints, no single jointRef, so no H1 chain. H6 needs it COMPLETE before hydro."
+    },
+    {
+      "seq": 44,
+      "role": "NDT",
+      "jointRef": null,
+      "pressurePart": true,
+      "note": "Post-PWHT MPT of all weld joints; same reasoning as step 43."
+    },
+    {
+      "seq": 45,
+      "role": "NDT",
+      "jointRef": null,
+      "pressurePart": true,
+      "note": "Post-PWHT RT and PAUT/TOFD; same reasoning as step 43."
+    },
+    {
+      "seq": 46,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "Clearance for hydro. No role."
+    },
+    {
+      "seq": 47,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "Pre-hydro clearance. No role: a HYDRO role here would make H6 'weld after hydro' fire at the clearance, not the test."
+    },
+    {
+      "seq": 48,
+      "role": "HYDRO",
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "The hydrostatic test. The only HYDRO step: H4/H6 gate it, H6 weld-after-hydro keys off it starting."
+    },
+    {
+      "seq": 49,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: post-hydro MPT/LPT must NOT be NDT with pressurePart true: H6 would then require it complete before hydro, a deadlock. Role null on purpose."
+    },
+    {
+      "seq": 50,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 51,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false,
+      "note": "GUESS: painting requiresQc true by D3 (DFT record) but with role null the template default (true) stays. PAINT_AFTER_HYDRO is keyed on the process plan (29, 30), not this step."
+    },
+    {
+      "seq": 52,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 53,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    },
+    {
+      "seq": 54,
+      "role": null,
+      "jointRef": null,
+      "pressurePart": false
+    }
+  ]
+}

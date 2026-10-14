@@ -20,6 +20,21 @@ export type AssemblyRole = "FIT_UP" | "WELD" | "NDT" | "HEAT_TREATMENT" | "FINAL
 /** AT_RISK = released at risk by the Production Head (H3). NO_LINK = no governing drawing (data gap, H3 no-op). */
 export type DrawingState = "RELEASED" | "AT_RISK" | "NOT_RELEASED" | "NO_LINK";
 
+/**
+ * H3 state of a governing drawing from its CURRENT (highest revisionNo)
+ * revision. An at-risk release belongs to one revision row, so a newer
+ * revision (no at-risk fields) voids it by becoming current.
+ */
+export function drawingStateOf(
+  current: { status: string; atRiskReleasedAt: Date | null } | null | undefined,
+  linked = true,
+): DrawingState {
+  if (!linked) return "NO_LINK";
+  if (!current) return "NOT_RELEASED";
+  if (current.status === "RELEASED") return "RELEASED";
+  return current.atRiskReleasedAt ? "AT_RISK" : "NOT_RELEASED";
+}
+
 interface ItemBase {
   id: number;
   status: ItemStatus;
