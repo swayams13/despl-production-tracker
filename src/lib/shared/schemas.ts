@@ -207,6 +207,10 @@ export const dispositionNcrSchema = z
   .strict();
 export type DispositionNcrInput = z.infer<typeof dispositionNcrSchema>;
 
+/** Decision 2 (14 Oct): QC ratifies a concession accepted per a code clause; the NCR closes. */
+export const ratifyConcessionSchema = z.object({ ncrId: id }).strict();
+export type RatifyConcessionInput = z.infer<typeof ratifyConcessionSchema>;
+
 /** Put a process plan ON_HOLD with a recorded reason. */
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
 export type HoldProcessInput = z.infer<typeof holdProcessSchema>;

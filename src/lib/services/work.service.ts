@@ -373,7 +373,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     throw new AppError(ERROR_CODES.VALIDATION_FAILED, { assemblyStepId: item.id, jointRef: row.templateJointRef }, JOINT_REQUIRED);
   }
 
-  const to = action === "START" ? "IN_PROGRESS" : row.requiresQc ? "SUBMITTED" : "COMPLETE";
+  let to: "IN_PROGRESS" | "SUBMITTED" | "COMPLETE" = action === "START" ? "IN_PROGRESS" : row.requiresQc ? "SUBMITTED" : "COMPLETE";
   // Invariant 4: a plan written straight to COMPLETE (no QC verify) passes what verifyProcess refuses on.
   if (item.kind === "PROCESS_PLAN" && to === "COMPLETE") {
     const args = { jobProcessId: row.jobProcessId!, unitId: row.unitId, jobId: ctx.job.id };
@@ -386,10 +386,16 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
   if (item.kind !== "PROCESS_PLAN" && to === "COMPLETE") {
     const ref = { kind: item.kind, id: item.id };
     if (item.openBlockingHold) throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, { ...ref, unitId: row.unitId });
+    // Decision 4 (14 Oct): an item QC rejected is QC's to re-verify, whatever requiresQc says. Refusing
+    // the Done left it unable to complete or to close its NCR, so it goes to SUBMITTED instead (QC verify
+    // then carries the legacy rework loop, its disposition gate and the DFT gate).
     const ncrIds = await findOpenItemNcrIds(tx, item.kind, item.id);
-    if (ncrIds.length) throw new AppError(ERROR_CODES.NCR_OPEN, { ...ref, ncrIds });
-    const dft = row.requiresDftGate ? await findDftShortfall(tx, item.id) : null;
-    if (dft) throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, { componentOperationId: item.id, ...dft });
+    if (ncrIds.length) {
+      to = "SUBMITTED";
+    } else {
+      const dft = row.requiresDftGate ? await findDftShortfall(tx, item.id) : null;
+      if (dft) throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, { componentOperationId: item.id, ...dft });
+    }
   }
 
   // ── Writes ──

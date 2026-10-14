@@ -293,13 +293,16 @@ async function completeStepLocked(tx: Tx, actor: Actor, step: LockedStep, to: Op
   });
 
   return audited(tx, actor, async () => {
+    // One instant for both stamps: two new Date() calls could straddle a millisecond and trip
+    // assembly_steps_finish_after_start on a step completed straight from NOT_STARTED.
+    const now = new Date();
     const updated = await tx.assemblyStep.update({
       where: { id: step.id },
       data: {
         status: to,
-        finishedAt: new Date(),
+        finishedAt: now,
         verifiedBy: actor.userId,
-        ...(step.startedAt == null ? { startedAt: new Date() } : {}),
+        ...(step.startedAt == null ? { startedAt: now } : {}),
       },
     });
     for (const ncr of openNcrs) {
@@ -521,7 +524,7 @@ async function rejectStepLocked(
  * the submitter, and for an INSPECTION step not whoever recorded or performed
  * ANY preceding WORK step of the same template group (same joint where the
  * step names one); with no such step there is no maker and it refuses. ACCEPT
- * of an INSPECTION step also needs every one of those steps SUBMITTED or
+ * and REJECT of an INSPECTION step also need every one of those steps SUBMITTED or
  * COMPLETE (INSPECT_PRECONDITION). No Production Head exception until D11 is
  * decided.
  */
@@ -549,7 +552,8 @@ export async function inspectAssemblyStepTx(
       throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { reason: "recorded a preceding work step", precedingStepId: mine.id });
     }
     const open = makers.filter((m) => m.status !== "SUBMITTED" && m.status !== "COMPLETE");
-    if (args.result === "ACCEPT" && open.length > 0) {
+    // Decision 6 (14 Oct): REJECT too. QC cannot open an NCR against work that was never recorded.
+    if (open.length > 0) {
       throw new AppError(ERROR_CODES.INSPECT_PRECONDITION, { assemblyStepId: step.id, openStepIds: open.map((m) => m.id) });
     }
   }

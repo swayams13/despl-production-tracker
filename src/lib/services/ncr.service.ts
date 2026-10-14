@@ -10,8 +10,10 @@ import { notify, userIdsWithRole } from "./notifications.service";
 import {
   dispositionNcrSchema,
   raiseRuleNcrSchema,
+  ratifyConcessionSchema,
   type DispositionNcrInput,
   type RaiseRuleNcrInput,
+  type RatifyConcessionInput,
 } from "@/lib/shared/schemas";
 import type { AssemblyStepRole, Ncr, NcrStatus, NcrDisposition, NcrRuleCode } from "@/generated/prisma/client";
 
@@ -45,6 +47,12 @@ const REWORK_DISPOSITIONS: NcrDisposition[] = ["REWORK", "REPAIR"];
 
 /** L1.2f: the step a rule NCR's repair repeats, and back. */
 const RULE_ROLE: Record<NcrRuleCode, AssemblyStepRole> = { H5: "FINAL_PWHT", H6: "HYDRO" };
+/**
+ * What a repair reopens (decision 3, 14 Oct): a repeated final PWHT invalidates a
+ * hydro already done (H4: hydro needs the final PWHT), so an H5 repair reopens
+ * both. An H6 repair reopens the hydro alone.
+ */
+const REOPEN_ROLES: Record<NcrRuleCode, AssemblyStepRole[]> = { H5: ["FINAL_PWHT", "HYDRO"], H6: ["HYDRO"] };
 const ROLE_RULE: Partial<Record<AssemblyStepRole, NcrRuleCode>> = { FINAL_PWHT: "H5", HYDRO: "H6" };
 
 /**
@@ -230,16 +238,70 @@ async function assertConcessionNotByMaker(tx: Tx, actor: Actor, ncr: Ncr): Promi
 }
 
 /**
+ * Decision 2 (14 Oct): QC ratifies a concession the Production Head accepted per a
+ * code clause, which closes the NCR. The same person cannot accept and ratify
+ * (invariant 3, admins not exempt). There is no QC head role yet (decision 1),
+ * so any QC user may ratify; the ratifier is recorded as closedBy and in the audit
+ * row. A single QC inspector who raised the NCR may ratify it (D11).
+ */
+export async function ratifyConcession(actor: Actor, input: RatifyConcessionInput): Promise<Ncr> {
+  const { ncrId } = ratifyConcessionSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.QC);
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const { ncr } = await lockNcrForUpdate(tx, ncrId, actor.tenantId);
+    if (ncr.ruleCode == null || ncr.disposition !== "CONCESSION" || ncr.concessionApprovedById == null) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { ncrId },
+        "Only an H5/H6 NCR accepted per a code clause awaits ratification.",
+      );
+    }
+    if (ncr.concessionApprovedById === actor.userId) {
+      throw new AppError(
+        ERROR_CODES.MAKER_CHECKER_VIOLATION,
+        { ncrId, reason: "accepted this concession" },
+        "You accepted this concession, so you cannot ratify it. Another QC user must.",
+      );
+    }
+    const to = assertNcrTransition("close", ncr.status);
+    return audited(tx, actor, async () => {
+      const now = new Date();
+      const updated = await tx.ncr.update({ where: { id: ncr.id }, data: { status: to, closedBy: actor.userId, closedAt: now } });
+      return {
+        result: updated,
+        audit: {
+          action: "ncr.concession.ratify",
+          entityType: "Ncr",
+          entityId: ncr.id,
+          before: { status: ncr.status },
+          after: {
+            status: updated.status,
+            ruleCode: ncr.ruleCode,
+            codeClause: ncr.codeClause,
+            concessionApprovedById: ncr.concessionApprovedById,
+            ratifiedBy: actor.userId,
+          },
+          eventType: "ncr.concession.ratified",
+          eventPayload: { ncrId: ncr.id },
+        },
+      };
+    });
+  });
+}
+
+/**
  * L1.2f REPAIR of a rule NCR: "repair + repeat PWHT/hydro" reopens the unit's
- * FINAL_PWHT (H5) or HYDRO (H6) steps to NOT_STARTED, so H5/H6 stop refusing
- * the weld, and rolls their plans back. The original times stay in the audit
+ * FINAL_PWHT (H5; and HYDRO with it, decision 3) or HYDRO (H6) steps to
+ * NOT_STARTED, so H5/H6 stop refusing the weld, and rolls their plans back. The original times stay in the audit
  * row (invariant 6). The NCR closes when the repeated step is complete again
  * (closeRuleNcrsOnRedo).
  */
 async function reopenForRepair(tx: Tx, actor: Actor, ncr: Ncr, unitId: number | null): Promise<number[]> {
   if (unitId == null) return [];
   const steps = await tx.assemblyStep.findMany({
-    where: { unitId, jobId: ncr.jobId, role: RULE_ROLE[ncr.ruleCode!], status: { not: "NOT_STARTED" } },
+    where: { unitId, jobId: ncr.jobId, role: { in: REOPEN_ROLES[ncr.ruleCode!] }, status: { not: "NOT_STARTED" } },
     orderBy: { id: "asc" },
   });
   for (const s of steps) {

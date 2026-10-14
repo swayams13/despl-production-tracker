@@ -16,7 +16,7 @@ describe.skipIf(!RUN_DB)("L1.2f H5/H6 rule NCRs (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { withJob } = await import("@/lib/db");
   const { recordWork, inspect } = await import("./work.service");
-  const { raiseRuleNcr, dispositionNcr } = await import("./ncr.service");
+  const { raiseRuleNcr, dispositionNcr, ratifyConcession } = await import("./ncr.service");
   const { assertUnitHasNoOpenNcr } = await import("./_shared");
   const { loadQcCockpit } = await import("./qc-cockpit.read");
   const { createDispatchBatch, addUnitToBatch } = await import("./dispatch.service");
@@ -343,6 +343,97 @@ describe.skipIf(!RUN_DB)("L1.2f H5/H6 rule NCRs (DB)", async () => {
     const r = await work(sup, j, "START", [[OP, cleatOp(j, "H5")], [S, j.step(3)]]);
     expect(r.applied.map((a) => a.id)).toEqual([cleatOp(j, "H5")]);
     expect(r.refused.map((x) => x.code)).toEqual([ERROR_CODES.WELD_AFTER_PWHT]);
+  });
+
+  // ── Decision 3 (14 Oct): an H5 repair repeats the hydro it invalidates ───
+  it("an H5 repair reopens the final PWHT AND a completed hydro, and the weld is then allowed", async () => {
+    const j = await o.job({
+      processes: [{ code: "20" }, { code: "21" }, { code: "27" }],
+      steps: [
+        { seq: 1, role: "WELD", jointRef: "J1", pressurePart: true, processSeq: 20 },
+        { seq: 2, kind: "INSPECTION", role: "FINAL_PWHT", processSeq: 21 },
+        { seq: 3, role: "HYDRO", processSeq: 27, requiresQc: false },
+        { seq: 4, role: "FIT_UP", jointRef: "J2", pressurePart: true, processSeq: 20 },
+      ],
+    });
+    await work(sup, j, "DONE", [[S, j.step(1)]]);
+    await accept(qc, j.step(1));
+    await accept(qc, j.step(2));
+    const ncr = await raise(qc, j, "H5", S, j.step(4));
+    expect((await work(sup, j, "DONE", [[S, j.step(3)]])).applied).toMatchObject([{ to: "COMPLETE" }]);
+    expect(await planStatus(j.plan("27", 0))).toBe("COMPLETE");
+
+    await dispositionNcr(qc, { ncrId: ncr.id, disposition: "REPAIR" });
+    expect((await stepRow(j.step(2))).status).toBe("NOT_STARTED");
+    expect((await stepRow(j.step(3))).status).toBe("NOT_STARTED");
+    expect(await planStatus(j.plan("21", 0))).not.toBe("COMPLETE");
+    expect(await planStatus(j.plan("27", 0))).not.toBe("COMPLETE");
+    const audit = await owner.auditLog.findFirstOrThrow({ where: { tenantId: o.tenantId, action: "ncr.disposition", entityId: String(ncr.id) } });
+    expect((audit.after as { reopenedAssemblyStepIds: number[] }).reopenedAssemblyStepIds.sort()).toEqual([j.step(2), j.step(3)].sort());
+
+    // Neither H5 nor H6 refuses the weld now. The reopened hydro (an earlier open WORK step) is only
+    // the SOFT sequence order: a supervisor starts it early with a reason, which proves the HARD rules passed.
+    const refused = await work(sup, j, "START", [[S, j.step(4)]]);
+    expect(refused.refused.map((r) => r.code)).toEqual([ERROR_CODES.SEQUENCE_OVERRIDE_REQUIRED]);
+    const r = await recordWork(sup, {
+      jobId: j.job.id,
+      action: "START",
+      items: [{ kind: S, id: j.step(4) }],
+      override: { category: "OTHER", note: "repair" },
+    });
+    expect(r.applied, JSON.stringify(r.refused)).toHaveLength(1);
+  });
+
+  // ── Decision 2 (14 Oct): QC ratifies a concession, which closes the NCR ──
+  describe("ratifyConcession", () => {
+    async function conceded() {
+      const j = await pastTrigger("H5");
+      const ncr = await raise(qc, j, "H5");
+      await dispositionNcr(head, { ncrId: ncr.id, disposition: "CONCESSION", codeClause: "UG-99" });
+      return { j, ncr };
+    }
+
+    it.each<[string, () => Actor, string]>([
+      ["the Production Head (QC ratifies)", () => head, ERROR_CODES.FORBIDDEN],
+      ["a supervisor", () => sup, ERROR_CODES.FORBIDDEN],
+      ["a client user", () => ({ ...qc, clientId: 1 }), ERROR_CODES.FORBIDDEN],
+      ["another tenant's QC", () => bQc, ERROR_CODES.NOT_FOUND],
+    ])("%s is refused; the NCR stays DISPOSITIONED", async (_l, actor, expected) => {
+      const { ncr } = await conceded();
+      expect(await code(ratifyConcession(actor(), { ncrId: ncr.id }))).toBe(expected);
+      expect(await ncrRow(ncr.id)).toMatchObject({ status: "DISPOSITIONED", closedBy: null });
+    });
+
+    it("the person who accepted it cannot also ratify it (a Production Head holding QC)", async () => {
+      const hq = await o.user("ratifyhq", ["PRODUCTION_HEAD", "QC"]);
+      const j = await pastTrigger("H5");
+      const ncr = await raise(qc, j, "H5");
+      await dispositionNcr(hq, { ncrId: ncr.id, disposition: "CONCESSION", codeClause: "UG-99" });
+      expect(await code(ratifyConcession(hq, { ncrId: ncr.id }))).toBe(ERROR_CODES.MAKER_CHECKER_VIOLATION);
+      expect((await ncrRow(ncr.id)).status).toBe("DISPOSITIONED");
+    });
+
+    it("an NCR that is not an accepted concession is refused: still OPEN, repaired, or an ordinary rejection", async () => {
+      const j = await pastTrigger("H5");
+      const open = await raise(qc, j, "H5");
+      expect(await code(ratifyConcession(qc, { ncrId: open.id }))).toBe(ERROR_CODES.VALIDATION_FAILED);
+      const oj = await o.job({ processes: [{ code: "20" }], steps: [{ seq: 1, processSeq: 20 }] });
+      await work(sup, oj, "DONE", [[S, oj.step(1)]]);
+      await inspect(qc, { kind: S, targetId: oj.step(1), result: "REJECT", reason: "undercut", categoryId: o.category.id });
+      const ordinary = await owner.ncr.findFirstOrThrow({ where: { jobId: oj.job.id } });
+      await dispositionNcr(qc, { ncrId: ordinary.id, disposition: "CONCESSION" });
+      expect(await code(ratifyConcession(qc, { ncrId: ordinary.id }))).toBe(ERROR_CODES.VALIDATION_FAILED);
+      expect((await ncrRow(ordinary.id)).status).toBe("DISPOSITIONED");
+    });
+
+    it("QC ratifies: the NCR closes, audited, and it is no longer an open NCR for the QC cockpit", async () => {
+      const { ncr } = await conceded();
+      const closed = await ratifyConcession(qc2, { ncrId: ncr.id });
+      expect(closed).toMatchObject({ status: "CLOSED", closedBy: qc2.userId, concessionApprovedById: head.userId });
+      const audit = await owner.auditLog.findFirstOrThrow({ where: { tenantId: o.tenantId, action: "ncr.concession.ratify", entityId: String(ncr.id) } });
+      expect(audit.after).toMatchObject({ status: "CLOSED", ratifiedBy: qc2.userId });
+      expect(await code(ratifyConcession(qc2, { ncrId: ncr.id }))).toBe(ERROR_CODES.INVALID_STATE_TRANSITION);
+    });
   });
 
   // ── CONCESSION maker-checker (invariant 3; found by review 14 Oct) ──────
