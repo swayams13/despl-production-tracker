@@ -98,7 +98,7 @@ export const PWHT_PROCESS_SEQ = 21;
 export const HYDRO_PROCESS_SEQ = 27;
 const PAINT_PROCESS_SEQS = [29, 30];
 /** D2: processes 1–11 are planning/procurement order, job grain, SOFT. */
-const OFFICE_PROCESS_MAX_SEQ = 11;
+export const OFFICE_PROCESS_MAX_SEQ = 11;
 
 /** H1 default (14 Oct): a predecessor counts as done once submitted; real holds come through D12. */
 const isDone = (i: FloorItem) => i.status === "SUBMITTED" || i.status === "COMPLETE";

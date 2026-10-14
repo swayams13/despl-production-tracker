@@ -32,6 +32,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
   let operator: Actor;
   let planner: Actor;
   let bSup: Actor;
+  let qc: Actor;
   beforeAll(async () => {
     o = await makeWorkOrg(owner, "A");
     b = await makeWorkOrg(owner, "B");
@@ -40,7 +41,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
     head = await o.user("head", ["PRODUCTION_HEAD"]);
     operator = await o.user("operator", ["OPERATOR"], [o.fab.id]);
     planner = await o.user("planner", ["PLANNER"], [o.fab.id]);
-    await o.user("qc", ["QC"]);
+    qc = await o.user("qc", ["QC"]);
     bSup = await b.user("bsup", ["SUPERVISOR"], [b.fab.id]);
   });
   afterAll(async () => {
@@ -95,6 +96,32 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
     it("a client user is refused FORBIDDEN before anything runs", async () => {
       const j = await o.job({ steps: [{ seq: 1 }] });
       await expectThrownCode(rec({ ...head, clientId: 1 }, j, "START", [[S, j.step(1)]]), ERROR_CODES.FORBIDDEN);
+    });
+
+    // Review fix (14 Oct): floor writes are an allowlist, not "anyone not a client".
+    it.each(["MANAGEMENT", "STORES", "ENGINEERING", "QC", "CLIENT_VIEWER"])(
+      "a %s user (in the item's department) is refused FORBIDDEN; nothing is written",
+      async (role) => {
+        const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] });
+        const who = await o.user(role.toLowerCase(), [role], [o.fab.id]);
+        for (const action of ["START", "DONE"] as const) {
+          await expectThrownCode(rec(who, j, action, [[S, j.step(1)]]), ERROR_CODES.FORBIDDEN);
+        }
+        expect((await stepRow(j.step(1))).status).toBe("NOT_STARTED");
+        expect(await audits("AssemblyStep", j.step(1))).toBe(0);
+      },
+    );
+
+    it("a planner is refused FORBIDDEN on anything but processes 1–11; the office plan applies", async () => {
+      const j = await o.job({
+        processes: [{ code: "3", grain: "JOB", requiresQc: false }, { code: "22" }],
+        steps: [{ seq: 1 }],
+        components: [{ tag: "BRKT", ops: [{ code: "ROLLING" }] }],
+      });
+      const r = await rec(planner, j, "START", [[P, j.plan("3")], [P, j.plan("22", 0)], [S, j.step(1)], [OP, j.op("BRKT", "ROLLING")]]);
+      expect(r.applied.map((a) => a.id)).toEqual([j.plan("3")]);
+      expect(r.refused.map((x) => x.code)).toEqual([ERROR_CODES.FORBIDDEN, ERROR_CODES.FORBIDDEN, ERROR_CODES.FORBIDDEN]);
+      expect((await stepRow(j.step(1))).status).toBe("NOT_STARTED");
     });
 
     it("a supervisor outside the item's department is refused FORBIDDEN per item", async () => {
@@ -487,7 +514,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       const s = await stepRow(j.step(1));
       expect([s.status, s.submittedBy, s.finishedAt]).toEqual(["SUBMITTED", sup.userId, null]);
       const notes = await owner.notification.findMany({
-        where: { tenantId: o.tenantId, type: "ITEM_SUBMITTED", entityType: "Unit", entityId: { in: j.units.map((u) => u.id) } },
+        where: { recipientId: qc.userId, type: "ITEM_SUBMITTED", entityType: "Unit", entityId: { in: j.units.map((u) => u.id) } },
       });
       expect(notes.map((n) => n.entityId).sort()).toEqual(j.units.map((u) => u.id).sort());
       expect(notes[0].title).toMatch(/^2 items awaiting your verification/);
@@ -642,7 +669,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
 
     it("a JOB-grain plan (unitId null) is written directly: requiresQc false → COMPLETE, true → SUBMITTED", async () => {
       const j = await o.job({ processes: [{ code: "3", grain: "JOB", requiresQc: false }, { code: "33", grain: "JOB" }] });
-      const r = await rec(planner, j, "DONE", [[P, j.plan("3")], [P, j.plan("33")]], override);
+      const r = await rec(head, j, "DONE", [[P, j.plan("3")], [P, j.plan("33")]], override);
       expect(r.applied.map((a) => [a.id, a.to])).toEqual([
         [j.plan("3"), "COMPLETE"],
         [j.plan("33"), "SUBMITTED"],

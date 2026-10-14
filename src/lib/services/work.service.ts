@@ -1,9 +1,9 @@
 import { Prisma } from "@/generated/prisma/client";
 import { withJob, withTenant, type Tx } from "@/lib/db";
-import { type Actor, assertNotClientUser, requireDepartmentScope, requireRole, ROLES } from "@/lib/authz";
+import { type Actor, assertNotClientUser, hasRole, requireDepartmentScope, requireRole, ROLES } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError, SEQUENCE_OVERRIDE_OPERATOR_MESSAGE, type ErrorCode } from "@/lib/shared/errors";
-import { checkReportedAt, checkStart, type FloorItem, type WorkKind } from "@/lib/shared/floor-rules";
+import { checkReportedAt, checkStart, OFFICE_PROCESS_MAX_SEQ, type FloorItem, type WorkKind } from "@/lib/shared/floor-rules";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import { inspectSchema, recordWorkSchema, type InspectInput, type RecordWorkInput } from "@/lib/shared/schemas";
 import type { WorkCalendarInput } from "@/lib/schedule";
@@ -73,6 +73,8 @@ const START_ACTIONS: Record<WorkKind, string[]> = {
   ASSEMBLY_STEP: ["assemblyStep.start", "work.start", "work.done"],
   PROCESS_PLAN: ["process.start", "work.start", "work.done"],
 };
+/** Who records floor work (review fix, 14 Oct). PLANNER: processes 1–11 only. */
+const FLOOR_ROLES = [ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN] as const;
 const JOINT_REQUIRED =
   "This weld step needs a joint bound before it can be marked done. Pick an existing joint, or log it first.";
 
@@ -117,6 +119,8 @@ function nearest(open: FloorItem[]): FloorItem {
 export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<RecordWorkResult> {
   const { requestId, jobId, action, items, override, lateReason, ...rest } = recordWorkSchema.parse(input);
   assertNotClientUser(actor);
+  // Floor-write allowlist; a planner is further limited to processes 1–11 per item (applyItem).
+  requireRole(actor, ...FLOOR_ROLES, ROLES.PLANNER);
   const reportedAt = rest.reportedAt ? new Date(rest.reportedAt) : null;
 
   return withJob(
@@ -254,6 +258,10 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
 
   if (row.departmentId == null) {
     throw new AppError(ERROR_CODES.GATING_BLOCKED, { reason: "operation has no defaultDepartmentId configured" });
+  }
+  const office = item.kind === "PROCESS_PLAN" && item.processSeq != null && item.processSeq <= OFFICE_PROCESS_MAX_SEQ;
+  if (!hasRole(actor, ...FLOOR_ROLES) && !office) {
+    throw new AppError(ERROR_CODES.FORBIDDEN, { reason: "a planner records processes 1–11 only", kind: item.kind, id: item.id });
   }
   requireDepartmentScope(actor, row.departmentId);
   if (row.stepKind === "INSPECTION") throw new AppError(ERROR_CODES.INSPECT_REQUIRED, { assemblyStepId: item.id });
