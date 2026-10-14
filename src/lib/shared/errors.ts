@@ -125,6 +125,12 @@ export const ERROR_CODES = {
   SCHEDULE_ENVELOPE_INVALID: "SCHEDULE_ENVELOPE_INVALID",
   /** A Server Action belonging to a feature switched off in src/lib/shared/flags.ts (Lean Core §4 freeze list). */
   FEATURE_FROZEN: "FEATURE_FROZEN",
+  /** Master data (M3): an APPROVED part family or grade was edited directly; it must be revised (with a reason) first. */
+  REVISE_REQUIRED: "REVISE_REQUIRED",
+  /** Master data (M3): approval refused; `detail.blockers` lists what is missing. */
+  APPROVAL_BLOCKED: "APPROVAL_BLOCKED",
+  /** Master data (M3): a master-data part family was changed through a legacy editor that bypasses approval. */
+  USE_MASTER_DATA: "USE_MASTER_DATA",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -214,6 +220,12 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This job's envelope data is inconsistent (minimum duration exceeds maximum) and cannot be scheduled. Contact an administrator.",
   FEATURE_FROZEN:
     "This feature is switched off while the pilot runs. Ask the Production Head if you need it; only the system administrator can switch it back on.",
+  REVISE_REQUIRED:
+    "This is approved. Revise it first, with a reason, to change it; the approved version stays in use until the revision is approved.",
+  APPROVAL_BLOCKED:
+    "This cannot be approved yet. Fix what is listed and try again.",
+  USE_MASTER_DATA:
+    "This is a master-data part family. Change it under Master data, where edits go through review and approval.",
 };
 
 /**

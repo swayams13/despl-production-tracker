@@ -2,9 +2,10 @@ import { withTenant, type Tx } from "@/lib/db";
 import { assertNotClientUser, hasRole, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import type { MasterDataStatus, PartMakeBuy, StdTimeBasis, StdTimeUnit, TemplateStatus } from "@/generated/prisma/client";
+import type { MasterDataStatus, PartMakeBuy } from "@/generated/prisma/client";
 import { existingHe, heContent, heSignature, HE_FAMILY, HE_TEMPLATE_NAME } from "./master-import.he";
-import { deriveDimensionKeys, stepSignature, type PartDecision, type VariantDecision } from "./master-import.rules";
+import { writeRouteVariant } from "./master-data.routes";
+import { deriveDimensionKeys, type PartDecision, type VariantDecision } from "./master-import.rules";
 import {
   buildReport,
   dbPartFamilySignature,
@@ -163,135 +164,25 @@ export async function applyWithDb(
   }
 
   async function applyRoute(v: VariantDecision, p: PartDecision, typeId: number, status: MasterDataStatus) {
-    const wantStatus: TemplateStatus = status === "APPROVED" ? "PUBLISHED" : "DRAFT";
-    const wantSig = JSON.stringify(v.steps.map((s) => stepSignature(s)));
-    const route = await tx.routeTemplate.findFirst({
-      where: { tenantId, componentTypeId: typeId, familyId: null, variant: v.variant },
-      select: {
-        id: true,
-        versions: {
-          orderBy: { version: "desc" },
-          take: 1,
-          select: {
-            id: true,
-            version: true,
-            status: true,
-            steps: {
-              orderBy: { seq: "asc" },
-              select: {
-                id: true, seq: true, printed: true, optional: true, stdTime: true, stdTimeUnit: true, stdTimeBasis: true,
-                conditionText: true, acceptanceStandard: true, recordDocument: true,
-                operation: { select: { code: true } },
-                department: { select: { name: true } },
-              },
-            },
-          },
-        },
-      },
-    });
-    const latest = route?.versions[0];
-
-    let haveSig: string | null = null;
-    if (latest) {
-      const maps = await tx.routeStepFamilySeq.findMany({
-        where: { tenantId, routeStepId: { in: latest.steps.map((s) => s.id) } },
-        select: { routeStepId: true, leadTimeProcessSeq: true, familyId: true },
+    const w = await writeRouteVariant(
+      tx,
+      { tenantId, operationId, departmentId, pvFamilyId, heFamilyId },
+      { typeId, variant: v.variant, name: p.name, steps: v.steps, wantStatus: status === "APPROVED" ? "PUBLISHED" : "DRAFT" },
+    );
+    written.routes[w.outcome]++;
+    written.stageMappingRows += w.mappingRows;
+    if (w.action === "published") {
+      await audit("masterImport.route.publish", "RouteTemplateVersion", w.versionId!, { status: w.previousStatus }, { status: "PUBLISHED", partCode: p.code, variant: v.variant });
+    } else if (w.action !== "unchanged") {
+      await audit(`masterImport.route.${w.outcome}`, "RouteTemplateVersion", w.versionId!, undefined, {
+        partCode: p.code,
+        variant: v.variant,
+        version: w.version,
+        status: w.status,
+        steps: v.steps.length,
+        stageMappings: w.mappingRows,
       });
-      haveSig = JSON.stringify(
-        latest.steps.map((s) =>
-          stepSignature({
-            seq: s.seq,
-            operationCode: s.operation.code,
-            whatIsDone: s.printed ?? "",
-            department: s.department?.name ?? "",
-            stdTime: s.stdTime == null ? null : Number(s.stdTime.toString()),
-            stdTimeUnit: s.stdTimeUnit,
-            stdTimeBasis: s.stdTimeBasis,
-            conditional: s.optional,
-            conditionText: s.conditionText ?? "",
-            acceptanceStandard: s.acceptanceStandard ?? "",
-            recordDocument: s.recordDocument ?? "",
-            pvStage: maps.find((m) => m.routeStepId === s.id && m.familyId === pvFamilyId)?.leadTimeProcessSeq ?? null,
-            heStage: maps.find((m) => m.routeStepId === s.id && m.familyId === heFamilyId)?.leadTimeProcessSeq ?? null,
-          }),
-        ),
-      );
     }
-
-    if (latest && haveSig === wantSig) {
-      if (wantStatus === "PUBLISHED" && latest.status !== "PUBLISHED") {
-        await tx.routeTemplateVersion.update({ where: { id: latest.id }, data: { status: "PUBLISHED" } });
-        await audit("masterImport.route.publish", "RouteTemplateVersion", latest.id, { status: latest.status }, { status: "PUBLISHED", partCode: p.code, variant: v.variant });
-        written.routes.update++;
-      } else {
-        written.routes.unchanged++;
-      }
-      return;
-    }
-
-    let routeId = route?.id;
-    if (!routeId) {
-      routeId = (
-        await tx.routeTemplate.create({
-          data: { tenantId, componentTypeId: typeId, familyId: null, name: p.name, variant: v.variant },
-          select: { id: true },
-        })
-      ).id;
-    }
-
-    let versionId: number;
-    let version: number;
-    let outcome: "create" | "update";
-    if (latest && latest.status === "DRAFT") {
-      // A draft is mutable: replace its steps (stage mappings cascade).
-      await tx.routeStep.deleteMany({ where: { routeVersionId: latest.id } });
-      await tx.routeTemplateVersion.update({ where: { id: latest.id }, data: { status: wantStatus } });
-      versionId = latest.id;
-      version = latest.version;
-      outcome = "update";
-    } else {
-      version = (latest?.version ?? 0) + 1;
-      versionId = (
-        await tx.routeTemplateVersion.create({ data: { routeId, version, status: wantStatus }, select: { id: true } })
-      ).id;
-      outcome = latest ? "update" : "create";
-    }
-
-    const created = await tx.routeStep.createManyAndReturn({
-      data: v.steps.map((s) => ({
-        routeVersionId: versionId,
-        seq: s.seq,
-        operationId: operationId.get(s.operationCode)!,
-        printed: s.whatIsDone || null,
-        optional: s.conditional,
-        departmentId: departmentId.get(s.department)!,
-        stdTime: s.stdTime,
-        stdTimeUnit: s.stdTimeUnit as StdTimeUnit | null,
-        stdTimeBasis: s.stdTimeBasis as StdTimeBasis | null,
-        stdTimeStatus: "PROPOSED" as const, // D17: nothing in an import validates a time
-        conditionText: s.conditionText || null,
-        acceptanceStandard: s.acceptanceStandard || null,
-        recordDocument: s.recordDocument || null,
-        requiresQc: true,
-      })),
-      select: { id: true, seq: true },
-    });
-    const idBySeq = new Map(created.map((c) => [c.seq, c.id]));
-    const mappings = v.steps.flatMap((s) => [
-      ...(s.pvStage != null ? [{ tenantId, routeStepId: idBySeq.get(s.seq)!, familyId: pvFamilyId!, leadTimeProcessSeq: s.pvStage }] : []),
-      ...(s.heStage != null ? [{ tenantId, routeStepId: idBySeq.get(s.seq)!, familyId: heFamilyId!, leadTimeProcessSeq: s.heStage }] : []),
-    ]);
-    if (mappings.length > 0) await tx.routeStepFamilySeq.createMany({ data: mappings });
-    written.stageMappingRows += mappings.length;
-    written.routes[outcome]++;
-    await audit(`masterImport.route.${outcome}`, "RouteTemplateVersion", versionId, undefined, {
-      partCode: p.code,
-      variant: v.variant,
-      version,
-      status: wantStatus,
-      steps: v.steps.length,
-      stageMappings: mappings.length,
-    });
   }
 
   // ── Material grades ─────────────────────────────────────────────────────

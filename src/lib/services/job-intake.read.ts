@@ -324,8 +324,9 @@ export async function loadRouteTemplateAdmin(actor: Actor): Promise<RouteTemplat
 
   return withTenant(actor.tenantId, async (tx) => {
     const [componentTypes, families, operations, departments] = await Promise.all([
+      // M3: part families are edited under Master data, not in this legacy route editor.
       tx.componentTypeRef.findMany({
-        where: { tenantId: actor.tenantId },
+        where: { tenantId: actor.tenantId, kind: "RAW_FORM" },
         orderBy: { name: "asc" },
       }),
       tx.productFamily.findMany({
@@ -346,7 +347,7 @@ export async function loadRouteTemplateAdmin(actor: Actor): Promise<RouteTemplat
     ]);
 
     const routes = await tx.routeTemplate.findMany({
-      where: { tenantId: actor.tenantId },
+      where: { tenantId: actor.tenantId, componentType: { kind: "RAW_FORM" } },
       include: {
         family: { select: { id: true, name: true } },
         versions: {

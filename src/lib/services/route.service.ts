@@ -54,6 +54,11 @@ export async function createOrReviseRouteTemplate(
     if (!componentType) {
       throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ComponentTypeRef", componentTypeId });
     }
+    // M3: a master-data part family is changed under Master data, where edits are
+    // reviewed and approved. This editor would publish a version with no approval.
+    if (componentType.kind === "PART_FAMILY") {
+      throw new AppError(ERROR_CODES.USE_MASTER_DATA, { componentTypeId, code: componentType.code });
+    }
     if (familyId != null) {
       const family = await tx.productFamily.findFirst({ where: { id: familyId, tenantId: actor.tenantId } });
       if (!family) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProductFamily", familyId });

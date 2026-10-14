@@ -62,21 +62,20 @@ describe.skipIf(!RUN_DB)("Lean Core M1 master-data schema (DB)", async () => {
     await owner.$disconnect();
   });
 
-  describe("part-family approval CHECKs (maker–checker at the DB)", () => {
-    it("rejects an approver who is the recorded preparer", async () => {
+  describe("part-family approval CHECKs", () => {
+    it("allows an approver who is also the preparer (one Production Head; flagged by the service, not forbidden by the DB)", async () => {
       const t = await newPartFamilyType(a);
-      await expect(
-        owner.partFamily.create({
-          data: {
-            tenantId: a.tenantId,
-            componentTypeId: t.id,
-            preparedById: a.preparer.id,
-            approvedById: a.preparer.id,
-            approvedAt: new Date(),
-            status: "APPROVED",
-          },
-        }),
-      ).rejects.toThrow(/part_families_approver_not_preparer_chk|check constraint/i);
+      const row = await owner.partFamily.create({
+        data: {
+          tenantId: a.tenantId,
+          componentTypeId: t.id,
+          preparedById: a.preparer.id,
+          approvedById: a.preparer.id,
+          approvedAt: new Date(),
+          status: "APPROVED",
+        },
+      });
+      expect(row.approvedById).toBe(row.preparedById);
     });
 
     it("rejects APPROVED with no approver or no approval date", async () => {

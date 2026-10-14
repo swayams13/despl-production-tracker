@@ -99,6 +99,8 @@ export interface NormalStep {
   conditionText: string;
   acceptanceStandard: string;
   recordDocument: string;
+  /** Step-level QC (effective QC = this AND the operation's). The workbook has no column: true. */
+  requiresQc: boolean;
 }
 
 export interface VariantDecision {
@@ -198,7 +200,7 @@ const decimalOrNull = (s: string): number | null => (/^\d+(\.\d+)?$/.test(s.trim
 const yes = (s: string): boolean => /^y(es)?$/i.test(s.trim());
 
 /** Stable comparison key for a route step; shared by the dry-run and (PR B) apply. */
-export function stepSignature(s: Pick<NormalStep, "seq" | "operationCode" | "whatIsDone" | "department" | "stdTime" | "stdTimeUnit" | "stdTimeBasis" | "conditional" | "conditionText" | "acceptanceStandard" | "recordDocument" | "pvStage" | "heStage">): string {
+export function stepSignature(s: Pick<NormalStep, "seq" | "operationCode" | "whatIsDone" | "department" | "stdTime" | "stdTimeUnit" | "stdTimeBasis" | "conditional" | "conditionText" | "acceptanceStandard" | "recordDocument" | "requiresQc" | "pvStage" | "heStage">): string {
   return JSON.stringify([
     s.seq,
     s.operationCode,
@@ -211,9 +213,80 @@ export function stepSignature(s: Pick<NormalStep, "seq" | "operationCode" | "wha
     s.conditionText,
     s.acceptanceStandard,
     s.recordDocument,
+    s.requiresQc,
     s.pvStage,
     s.heStage,
   ]);
+}
+
+export interface StepCheckInput {
+  scope: Scope | null;
+  partCode: string;
+  /** Operation as the caller names it (workbook label or operation name), for messages. */
+  operationLabel: string;
+  /** Tracker operation code; null when the caller already reported it as unknown. */
+  operationCode: string | null;
+  department: string;
+  /** The step number as typed, for messages. */
+  seqText: string;
+  pvStage: number | null;
+  heStage: number | null;
+  /** true = nothing was entered; false with a null stage = an invalid entry the caller reported. */
+  pvBlank: boolean;
+  heBlank: boolean;
+}
+
+export interface StepFinding {
+  code: IssueCode;
+  severity: Severity;
+  message: string;
+  meta?: Record<string, unknown>;
+}
+
+/**
+ * Checks one route step against the tracker's own vocabulary and stages. The
+ * single source of these rules: the importer calls it per workbook row and the
+ * Master data editor / approval call it per saved step, so a route cannot be
+ * saved or approved under looser rules than it was imported under.
+ */
+export function checkStep(
+  c: StepCheckInput,
+  ref: ReferenceData,
+  heStages: ReadonlyMap<number, { department: string }>,
+): StepFinding[] {
+  const out: StepFinding[] = [];
+  const err = (code: IssueCode, message: string, meta?: Record<string, unknown>) =>
+    out.push({ code, severity: "ERROR", message, meta });
+  const warn = (code: IssueCode, message: string, meta?: Record<string, unknown>) =>
+    out.push({ code, severity: "WARNING", message, meta });
+
+  if (c.operationCode && !ref.operationCodes.has(c.operationCode)) {
+    err("UNKNOWN_OPERATION", `Operation "${c.operationLabel}" maps to ${c.operationCode}, which does not exist in the tracker.`, { operation: c.operationLabel, operationCode: c.operationCode });
+  }
+  if (!c.department) err("MISSING_DEPARTMENT", `Step ${c.seqText} of ${c.partCode} has no department.`);
+  else if (!ref.departmentNames.has(c.department)) err("UNKNOWN_DEPARTMENT", `Department "${c.department}" is not a tracker department.`, { department: c.department });
+
+  const wantPv = c.scope === "PV" || c.scope === "BOTH";
+  const wantHe = c.scope === "HE" || c.scope === "BOTH";
+  const missing = [wantPv && c.pvBlank ? "PV" : null, wantHe && c.heBlank ? "HE" : null].filter(Boolean);
+  if (missing.length > 0) err("MISSING_STAGE", `Step ${c.seqText} of ${c.partCode} has no ${missing.join(" or ")} stage number.`, { missing });
+  if (c.pvStage != null && !ref.pvStages.has(c.pvStage)) err("UNKNOWN_STAGE_NUMBER", `PV stage ${c.pvStage} is not one of the tracker's PV stages.`, { family: "PV", stage: c.pvStage });
+  if (c.heStage != null && !heStages.has(c.heStage)) err("UNKNOWN_STAGE_NUMBER", `HE stage ${c.heStage} is not in the HE Stages sheet.`, { family: "HE", stage: c.heStage });
+
+  // Plausibility (warnings): is this the stage this operation normally counts toward?
+  if (c.pvStage != null && c.operationCode) {
+    const def = ref.operationDefaultStage.get(c.operationCode);
+    if (def != null && def !== c.pvStage) {
+      warn("STAGE_DIFFERS_FROM_OPERATION_DEFAULT", `${c.operationLabel} normally counts toward PV stage ${def}, but step ${c.seqText} of ${c.partCode} says ${c.pvStage}.`, { operationCode: c.operationCode, operationDefault: def, pvStage: c.pvStage });
+    }
+  }
+  if (c.department) {
+    const pvDept = c.pvStage != null ? ref.pvStages.get(c.pvStage)?.department : null;
+    if (pvDept && pvDept !== c.department) warn("DEPARTMENT_STAGE_MISMATCH", `Step ${c.seqText} of ${c.partCode} is done by ${c.department} but PV stage ${c.pvStage} belongs to ${pvDept}.`, { family: "PV", stage: c.pvStage, stageDepartment: pvDept, department: c.department });
+    const heDept = c.heStage != null ? heStages.get(c.heStage)?.department : null;
+    if (heDept && heDept !== c.department) warn("DEPARTMENT_STAGE_MISMATCH", `Step ${c.seqText} of ${c.partCode} is done by ${c.department} but HE stage ${c.heStage} belongs to ${heDept}.`, { family: "HE", stage: c.heStage, stageDepartment: heDept, department: c.department });
+  }
+  return out;
 }
 
 export function evaluateMaster(wb: ParsedWorkbook, ref: ReferenceData, opts: EvaluateOptions): Evaluation {
@@ -376,20 +449,10 @@ export function evaluateMaster(wb: ParsedWorkbook, ref: ReferenceData, opts: Eva
 
     const operationCode = OPERATIONS[r.operation] ?? null;
     if (!operationCode) bad("UNKNOWN_OPERATION", `Operation "${r.operation}" is not in the approved operation list.`, { operation: r.operation });
-    else if (!ref.operationCodes.has(operationCode)) bad("UNKNOWN_OPERATION", `Operation "${r.operation}" maps to ${operationCode}, which does not exist in the tracker.`, { operation: r.operation, operationCode });
 
-    if (!r.department) bad("MISSING_DEPARTMENT", `Step ${r.seq} of ${r.partCode} has no department.`);
-    else if (!ref.departmentNames.has(r.department)) bad("UNKNOWN_DEPARTMENT", `Department "${r.department}" is not a tracker department.`, { department: r.department });
-
-    const wantPv = part.scope === "PV" || part.scope === "BOTH";
-    const wantHe = part.scope === "HE" || part.scope === "BOTH";
     const pvStage = r.pvStage === "" ? null : intOrNull(r.pvStage);
     const heStage = r.heStage === "" ? null : intOrNull(r.heStage);
     if ((r.pvStage !== "" && pvStage == null) || (r.heStage !== "" && heStage == null)) bad("INVALID_VALUE", `Stage numbers must be whole numbers (PV "${r.pvStage}", HE "${r.heStage}").`, { field: "stage" });
-    const missing = [wantPv && r.pvStage === "" ? "PV" : null, wantHe && r.heStage === "" ? "HE" : null].filter(Boolean);
-    if (missing.length > 0) bad("MISSING_STAGE", `Step ${r.seq} of ${r.partCode} has no ${missing.join(" or ")} stage number.`, { missing });
-    if (pvStage != null && !ref.pvStages.has(pvStage)) bad("UNKNOWN_STAGE_NUMBER", `PV stage ${pvStage} is not one of the tracker's PV stages.`, { family: "PV", stage: pvStage });
-    if (heStage != null && !heNumbers.has(heStage)) bad("UNKNOWN_STAGE_NUMBER", `HE stage ${heStage} is not in the HE Stages sheet.`, { family: "HE", stage: heStage });
 
     let stdTime: number | null = null;
     let unit: string | null = null;
@@ -406,18 +469,24 @@ export function evaluateMaster(wb: ParsedWorkbook, ref: ReferenceData, opts: Eva
       if (/proposed/i.test(r.remarks)) at("PROPOSED_STD_TIME", "WARNING", `Standard time for step ${r.seq} of ${r.partCode} is a proposed value, not validated.`);
     }
 
-    // Plausibility (warnings): is this the stage this operation normally counts toward?
-    if (pvStage != null && operationCode) {
-      const def = ref.operationDefaultStage.get(operationCode);
-      if (def != null && def !== pvStage) {
-        at("STAGE_DIFFERS_FROM_OPERATION_DEFAULT", "WARNING", `${r.operation} normally counts toward PV stage ${def}, but step ${r.seq} of ${r.partCode} says ${pvStage}.`, { operationCode, operationDefault: def, pvStage });
-      }
-    }
-    if (r.department) {
-      const pvDept = pvStage != null ? ref.pvStages.get(pvStage)?.department : null;
-      if (pvDept && pvDept !== r.department) at("DEPARTMENT_STAGE_MISMATCH", "WARNING", `Step ${r.seq} of ${r.partCode} is done by ${r.department} but PV stage ${pvStage} belongs to ${pvDept}.`, { family: "PV", stage: pvStage, stageDepartment: pvDept, department: r.department });
-      const heDept = heStage != null ? heNumbers.get(heStage)?.department : null;
-      if (heDept && heDept !== r.department) at("DEPARTMENT_STAGE_MISMATCH", "WARNING", `Step ${r.seq} of ${r.partCode} is done by ${r.department} but HE stage ${heStage} belongs to ${heDept}.`, { family: "HE", stage: heStage, stageDepartment: heDept, department: r.department });
+    for (const f of checkStep(
+      {
+        scope: part.scope,
+        partCode: r.partCode,
+        operationLabel: r.operation,
+        operationCode,
+        department: r.department,
+        seqText: r.seq,
+        pvStage,
+        heStage,
+        pvBlank: r.pvStage === "",
+        heBlank: r.heStage === "",
+      },
+      ref,
+      heNumbers,
+    )) {
+      if (f.severity === "ERROR") bad(f.code, f.message, f.meta);
+      else at(f.code, f.severity, f.message, f.meta);
     }
 
     const normal: NormalStep = {
@@ -435,6 +504,7 @@ export function evaluateMaster(wb: ParsedWorkbook, ref: ReferenceData, opts: Eva
       conditionText: r.condition,
       acceptanceStandard: r.acceptance,
       recordDocument: r.record,
+      requiresQc: true,
     };
     const byVariant = stepsByPart.get(r.partCode) ?? new Map();
     const list = byVariant.get(variant) ?? [];
