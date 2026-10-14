@@ -50,3 +50,6 @@ next-env.d.ts
 /.superpowers/
 .worktrees/
 .env.rehearse
+
+# development loop (scripts/loop/run.sh)
+/.loop/
