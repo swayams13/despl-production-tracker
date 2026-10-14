@@ -28,7 +28,12 @@ describe.skipIf(!RUN_DB || !existsSync(FILE))("apply the 11 Oct workbook (DB)", 
     const [departments, operations, types] = await Promise.all([
       owner.department.findMany({ where: { tenantId: source.id }, select: { code: true, name: true } }),
       owner.operationRef.findMany({ where: { tenantId: source.id }, select: { code: true, name: true } }),
-      owner.componentTypeRef.findMany({ where: { tenantId: source.id }, select: { code: true, name: true } }),
+      // Not PART_FAMILY: those are what the import creates (db:seed adds a demo SHL-01 one), and a
+      // copy without its `kind` would read as a non-part-family type and block the part's own code.
+      owner.componentTypeRef.findMany({
+        where: { tenantId: source.id, NOT: { kind: "PART_FAMILY" } },
+        select: { code: true, name: true },
+      }),
     ]);
     await owner.department.createMany({ data: departments.map((d) => ({ ...d, tenantId })) });
     await owner.operationRef.createMany({ data: operations.map((o) => ({ ...o, tenantId })) });
