@@ -1302,8 +1302,8 @@ export async function loadPredecessorStates(
 // ── Lean Core L1.2: floor locks and the derived process plan ─────────────
 
 /** Two-key advisory-lock namespaces (a different keyspace from stock.service's one-key lock). */
-const FLOOR_LOCK_JOB = 1201;
-const FLOOR_LOCK_UNIT = 1202;
+export const FLOOR_LOCK_JOB = 1201;
+export const FLOOR_LOCK_UNIT = 1202;
 
 /**
  * L1.2: serialise every floor write on a unit (the job, for unit-less items).

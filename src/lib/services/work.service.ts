@@ -163,7 +163,6 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
         override,
         lateReason,
         requestId,
-        lateFiled: new Set(),
         categories: null,
       };
 
@@ -228,8 +227,6 @@ interface BatchContext {
   override: RecordWorkInput["override"];
   lateReason: RecordWorkInput["lateReason"];
   requestId: string | undefined;
-  /** Plans given a DelayReason earlier in this batch: one reason per plan. */
-  lateFiled: Set<number>;
   categories: Array<{ id: number; code: string; name: string }> | null;
 }
 
@@ -292,7 +289,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     const plan = item.kind === "PROCESS_PLAN" ? row : item.processSeq != null ? facts.plansBySeq.get(item.processSeq) : undefined;
     if (plan?.plannedFinish && plan.plannedFinish < istCalendarDayMarker(reportedAt ?? now)) {
       late = true;
-      if (!plan.hasDelayReason && !ctx.lateFiled.has(plan.item.id)) {
+      if (!plan.hasDelayReason) {
         if (!ctx.lateReason) {
           ctx.categories ??= await tx.delayCategoryRef.findMany({
             where: { tenantId: actor.tenantId, active: true },
@@ -450,7 +447,7 @@ async function fileLateReason(ctx: BatchContext, planRow: WorkRow): Promise<void
     eventType: "DelayReasonFiled",
     eventPayload: { processPlanId: planRow.item.id, categoryId, ownerDepartmentId: planRow.departmentId },
   });
-  ctx.lateFiled.add(planRow.item.id);
+  // The row is shared through plansBySeq: later items of this batch see the reason.
   planRow.hasDelayReason = true;
 
   const heads = await userIdsWithRole(tx, actor.tenantId, ROLES.PRODUCTION_HEAD);
