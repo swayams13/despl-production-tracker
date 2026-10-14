@@ -3,9 +3,11 @@ import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentS
 import { audited, recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { deriveRequiresQc } from "@/lib/shared/floor-rules";
+import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
 import { closeNcr } from "./ncr.service";
+import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
 import { notify, userIdsWithRole } from "./notifications.service";
 import { recordQcpExecutionTx } from "./qcp.service";
 import {
@@ -52,6 +54,10 @@ export function assertAssemblyStepTransition(action: AssemblyStepAction, from: O
   return assertStateTransition(ASSEMBLY_STEP_TRANSITIONS, action, from, "AssemblyStep");
 }
 
+type LockedStep = AssemblyStep & {
+  templateStep: { seq: number; defaultDepartmentId: number; kind: string; jointRef: string | null; groupCode: string };
+};
+
 /**
  * Locks the row FOR UPDATE and re-reads tenant-scoped (join through
  * unit.equipment.job.tenantId), same discipline as component.service.ts's
@@ -64,15 +70,26 @@ async function lockAssemblyStepForUpdate(
   tx: Tx,
   assemblyStepId: number,
   tenantId: number,
+  opts: { unitLock?: boolean } = {},
 ): Promise<{
-  step: AssemblyStep & { templateStep: { seq: number; defaultDepartmentId: number; kind: string; jointRef: string | null } };
+  step: LockedStep;
   previousStep: { seq: number; status: OperationStatus } | null;
 }> {
+  if (opts.unitLock) {
+    // L1.2e: the unit's floor lock goes BEFORE the row lock, as in recordWork.
+    const pre = await tx.assemblyStep.findFirst({
+      where: { id: assemblyStepId, unit: { equipment: { job: { tenantId } } } },
+      select: { jobId: true, unitId: true },
+    });
+    if (pre) await lockFloorUnits(tx, pre.jobId, [pre.unitId]);
+  }
   await tx.$queryRaw`SELECT id FROM assembly_steps WHERE id = ${assemblyStepId} FOR UPDATE`;
 
   const step = await tx.assemblyStep.findFirst({
     where: { id: assemblyStepId, unit: { equipment: { job: { tenantId } } } },
-    include: { templateStep: { select: { seq: true, defaultDepartmentId: true, kind: true, jointRef: true } } },
+    include: {
+      templateStep: { select: { seq: true, defaultDepartmentId: true, kind: true, jointRef: true, groupCode: true } },
+    },
   });
   if (!step) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyStep", assemblyStepId });
   // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
@@ -124,7 +141,7 @@ export async function startAssemblyStep(actor: Actor, input: StartAssemblyStepIn
       },
     });
 
-    return audited(tx, actor, async () => {
+    const started = await audited(tx, actor, async () => {
       const updated = await tx.assemblyStep.update({
         where: { id: step.id },
         data: { status: to, startedAt: new Date() },
@@ -145,6 +162,9 @@ export async function startAssemblyStep(actor: Actor, input: StartAssemblyStepIn
         },
       };
     });
+    // L1.2e: starting the first mapped step moves a derived plan to IN_PROGRESS.
+    if (FEATURES.leanFloor) await rollupForAssemblyStep(tx, actor, started.id);
+    return started;
   });
 }
 
@@ -229,96 +249,113 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { step } = await lockAssemblyStepForUpdate(tx, assemblyStepId, actor.tenantId);
-    assertMakerChecker(actor, step.submittedBy);
-    const to = assertAssemblyStepTransition("verify", step.status);
+    const updated = await verifyAssemblyStepTx(tx, actor, assemblyStepId);
+    // L1.2e: with the lean floor on, a mapped plan takes its status from its steps.
+    if (FEATURES.leanFloor) await rollupForAssemblyStep(tx, actor, updated.id);
+    return updated;
+  });
+}
 
-    // N1 (Phase 5): re-verifying a reworked step closes its open Ncr(s) and
-    // records the elapsed rework time. findMany, not findFirst — see the
-    // matching comment in component.service.ts's verifyComponentOperation
-    // (task review Critical #1): repeated reject→resubmit→reject cycles can
-    // leave more than one Ncr open for the same step.
-    //
-    // AUD-026: an Ncr still OPEN was never dispositioned — closing it here
-    // would skip dispositionNcr entirely and record no engineering decision.
-    // Refuse before touching anything if any linked Ncr is still OPEN; only
-    // DISPOSITIONED/REWORK_IN_PROGRESS ones are eligible to close.
-    const undispositioned = await tx.ncr.count({
-      where: { status: "OPEN", assemblyStepRejection: { assemblyStepId: step.id } },
+/** verifyAssemblyStep's body for a caller that already holds the transaction. */
+export async function verifyAssemblyStepTx(tx: Tx, actor: Actor, assemblyStepId: number): Promise<AssemblyStep> {
+  const { step } = await lockAssemblyStepForUpdate(tx, assemblyStepId, actor.tenantId);
+  assertMakerChecker(actor, step.submittedBy);
+  const to = assertAssemblyStepTransition("verify", step.status);
+  return completeStepLocked(tx, actor, step, to);
+}
+
+/** Everything verify does once the row is locked and the maker–checker and transition checks have passed. */
+async function completeStepLocked(tx: Tx, actor: Actor, step: LockedStep, to: OperationStatus): Promise<AssemblyStep> {
+  // N1 (Phase 5): re-verifying a reworked step closes its open Ncr(s) and
+  // records the elapsed rework time. findMany, not findFirst — see the
+  // matching comment in component.service.ts's verifyComponentOperation
+  // (task review Critical #1): repeated reject→resubmit→reject cycles can
+  // leave more than one Ncr open for the same step.
+  //
+  // AUD-026: an Ncr still OPEN was never dispositioned — closing it here
+  // would skip dispositionNcr entirely and record no engineering decision.
+  // Refuse before touching anything if any linked Ncr is still OPEN; only
+  // DISPOSITIONED/REWORK_IN_PROGRESS ones are eligible to close.
+  const undispositioned = await tx.ncr.count({
+    where: { status: "OPEN", assemblyStepRejection: { assemblyStepId: step.id } },
+  });
+  if (undispositioned > 0) {
+    throw new AppError(ERROR_CODES.NCR_NOT_DISPOSITIONED, { assemblyStepId: step.id, undispositioned });
+  }
+  const openNcrs = await tx.ncr.findMany({
+    where: { status: { in: ["DISPOSITIONED", "REWORK_IN_PROGRESS"] }, assemblyStepRejection: { assemblyStepId: step.id } },
+  });
+
+  return audited(tx, actor, async () => {
+    const updated = await tx.assemblyStep.update({
+      where: { id: step.id },
+      data: {
+        status: to,
+        finishedAt: new Date(),
+        verifiedBy: actor.userId,
+        ...(step.startedAt == null ? { startedAt: new Date() } : {}),
+      },
     });
-    if (undispositioned > 0) {
-      throw new AppError(ERROR_CODES.NCR_NOT_DISPOSITIONED, { assemblyStepId: step.id, undispositioned });
+    for (const ncr of openNcrs) {
+      await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
     }
-    const openNcrs = await tx.ncr.findMany({
-      where: { status: { in: ["DISPOSITIONED", "REWORK_IN_PROGRESS"] }, assemblyStepRejection: { assemblyStepId: step.id } },
-    });
-
-    return audited(tx, actor, async () => {
-      const updated = await tx.assemblyStep.update({
-        where: { id: step.id },
-        data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
+    // A4: an INSPECTION step verifying IS the QCP checkpoint result — record
+    // it so assertNoOpenHoldPoint and the QCP/hold-point view see the same
+    // truth the assembly view just showed, instead of the linked QcpItem
+    // staying stuck PENDING forever (verify already proved QC role + not
+    // the submitter, via assertMakerChecker above).
+    if (step.templateStep.kind === "INSPECTION" && step.qcpItemId != null) {
+      // AUD-004: an internal DESPL employee verifying this step must not
+      // manufacture evidence that a THIRD PARTY (client TPI, buyer TPI,
+      // EIL TPIA, ...) witnessed something they were never actually
+      // present for — assertMakerChecker above only proves two different
+      // internal humans were involved, it says nothing about an external
+      // inspector. InspectionParty.code has no boolean "is this internal"
+      // column; the real marker used by every seeded QCP template is
+      // InspectionParty.code === the tenant's own Organization.code (see
+      // seed/qcp-templates.json's observedPartySets, where "DESPL" is the
+      // party code and matches Organization.code exactly). If any BLOCKING
+      // party code on this checkpoint belongs to a party other than that,
+      // skip the auto-record entirely — leave the checkpoint exactly as it
+      // is (no execution row, still open per assertNoOpenHoldPoint) until
+      // someone records it for real via recordQcpExecution.
+      const partyCodes = await tx.qcpItemPartyCode.findMany({
+        where: { qcpItemId: step.qcpItemId },
+        select: { qcpCode: { select: { blocksCompletion: true } }, inspectionParty: { select: { code: true } } },
       });
-      for (const ncr of openNcrs) {
-        await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
-      }
-      // A4: an INSPECTION step verifying IS the QCP checkpoint result — record
-      // it so assertNoOpenHoldPoint and the QCP/hold-point view see the same
-      // truth the assembly view just showed, instead of the linked QcpItem
-      // staying stuck PENDING forever (verify already proved QC role + not
-      // the submitter, via assertMakerChecker above).
-      if (step.templateStep.kind === "INSPECTION" && step.qcpItemId != null) {
-        // AUD-004: an internal DESPL employee verifying this step must not
-        // manufacture evidence that a THIRD PARTY (client TPI, buyer TPI,
-        // EIL TPIA, ...) witnessed something they were never actually
-        // present for — assertMakerChecker above only proves two different
-        // internal humans were involved, it says nothing about an external
-        // inspector. InspectionParty.code has no boolean "is this internal"
-        // column; the real marker used by every seeded QCP template is
-        // InspectionParty.code === the tenant's own Organization.code (see
-        // seed/qcp-templates.json's observedPartySets, where "DESPL" is the
-        // party code and matches Organization.code exactly). If any BLOCKING
-        // party code on this checkpoint belongs to a party other than that,
-        // skip the auto-record entirely — leave the checkpoint exactly as it
-        // is (no execution row, still open per assertNoOpenHoldPoint) until
-        // someone records it for real via recordQcpExecution.
-        const partyCodes = await tx.qcpItemPartyCode.findMany({
-          where: { qcpItemId: step.qcpItemId },
-          select: { qcpCode: { select: { blocksCompletion: true } }, inspectionParty: { select: { code: true } } },
+      const org = await tx.organization.findUnique({ where: { id: actor.tenantId }, select: { code: true } });
+      const externalBlocking = partyCodes.some(
+        (pc) => pc.qcpCode.blocksCompletion && pc.inspectionParty.code !== org?.code,
+      );
+      if (!externalBlocking) {
+        const exec = await recordQcpExecutionTx(tx, actor, {
+          qcpItemId: step.qcpItemId,
+          unitId: step.unitId,
+          result: "ACCEPTED",
+          jobId: step.jobId,
         });
-        const org = await tx.organization.findUnique({ where: { id: actor.tenantId }, select: { code: true } });
-        const externalBlocking = partyCodes.some(
-          (pc) => pc.qcpCode.blocksCompletion && pc.inspectionParty.code !== org?.code,
-        );
-        if (!externalBlocking) {
-          const exec = await recordQcpExecutionTx(tx, actor, {
-            qcpItemId: step.qcpItemId,
-            unitId: step.unitId,
-            result: "ACCEPTED",
-            jobId: step.jobId,
-          });
-          await recordAudit(tx, actor, {
-            action: "qcp.record",
-            entityType: "QcpExecution",
-            entityId: exec.id,
-            after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
-            eventType: "QcpExecutionRecorded",
-            eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
-          });
-        }
+        await recordAudit(tx, actor, {
+          action: "qcp.record",
+          entityType: "QcpExecution",
+          entityId: exec.id,
+          after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
+          eventType: "QcpExecutionRecorded",
+          eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "ACCEPTED" },
+        });
       }
-      return {
-        result: updated,
-        audit: {
-          action: "assemblyStep.verify",
-          entityType: "AssemblyStep",
-          entityId: step.id,
-          before: { status: step.status, verifiedBy: step.verifiedBy },
-          after: { status: updated.status, verifiedBy: updated.verifiedBy, finishedAt: updated.finishedAt },
-          eventType: "AssemblyStepVerified",
-          eventPayload: { assemblyStepId: step.id, submittedBy: step.submittedBy, verifiedBy: actor.userId },
-        },
-      };
-    });
+    }
+    return {
+      result: updated,
+      audit: {
+        action: "assemblyStep.verify",
+        entityType: "AssemblyStep",
+        entityId: step.id,
+        before: { status: step.status, verifiedBy: step.verifiedBy },
+        after: { status: updated.status, verifiedBy: updated.verifiedBy, finishedAt: updated.finishedAt },
+        eventType: "AssemblyStepVerified",
+        eventPayload: { assemblyStepId: step.id, submittedBy: step.submittedBy, verifiedBy: actor.userId },
+      },
+    };
   });
 }
 
@@ -334,116 +371,191 @@ export async function verifyAssemblyStep(actor: Actor, input: VerifyAssemblyStep
  * joint's welders).
  */
 export async function rejectAssemblyStep(actor: Actor, input: RejectAssemblyStepInput): Promise<AssemblyStep> {
-  const { assemblyStepId, categoryId, detail, testTypeId } = rejectAssemblyStepSchema.parse(input);
+  const parsed = rejectAssemblyStepSchema.parse(input);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { step } = await lockAssemblyStepForUpdate(tx, assemblyStepId, actor.tenantId);
-    assertMakerChecker(actor, step.submittedBy);
-    const to = assertAssemblyStepTransition("reject", step.status);
+    const updated = await rejectAssemblyStepTx(tx, actor, parsed);
+    if (FEATURES.leanFloor) await rollupForAssemblyStep(tx, actor, updated.id);
+    return updated;
+  });
+}
 
-    if (testTypeId != null && step.weldJointId == null) {
-      throw new AppError(
-        ERROR_CODES.VALIDATION_FAILED,
-        { assemblyStepId },
-        "No weld joint is bound to this step yet — an NDT result needs a joint to attach to.",
+/**
+ * rejectAssemblyStep's body for a caller that already holds the transaction.
+ * L1.2e: takes the unit's floor lock before the row lock (recordWork's order),
+ * so a reject and a concurrent Start/Done batch on the unit serialise.
+ */
+export async function rejectAssemblyStepTx(tx: Tx, actor: Actor, input: RejectAssemblyStepInput): Promise<AssemblyStep> {
+  const { step } = await lockAssemblyStepForUpdate(tx, input.assemblyStepId, actor.tenantId, { unitLock: true });
+  assertMakerChecker(actor, step.submittedBy);
+  const to = assertAssemblyStepTransition("reject", step.status);
+  return rejectStepLocked(tx, actor, step, to, input);
+}
+
+async function rejectStepLocked(
+  tx: Tx,
+  actor: Actor,
+  step: LockedStep,
+  to: OperationStatus,
+  { assemblyStepId, categoryId, detail, testTypeId }: RejectAssemblyStepInput,
+): Promise<AssemblyStep> {
+  if (testTypeId != null && step.weldJointId == null) {
+    throw new AppError(
+      ERROR_CODES.VALIDATION_FAILED,
+      { assemblyStepId },
+      "No weld joint is bound to this step yet — an NDT result needs a joint to attach to.",
+    );
+  }
+
+  return audited(tx, actor, async () => {
+    const updated = await tx.assemblyStep.update({
+      where: { id: step.id },
+      data: { status: to, submittedBy: null, ...(step.startedAt == null ? { startedAt: new Date() } : {}) },
+    });
+    const rejection = await tx.assemblyStepRejection.create({
+      data: { assemblyStepId: step.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId, jobId: step.jobId },
+    });
+    // N1 (Phase 5): every rejection opens exactly one Ncr for QC to disposition.
+    await tx.ncr.create({ data: { assemblyStepRejectionId: rejection.id, jobId: step.jobId } });
+
+    // S14 — was silent. QC is who dispositions an Ncr (S11's disposition
+    // UI), same transaction as the ncr.create above (a failed notify rolls
+    // back the whole reject).
+    const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
+    if (qcIds.length > 0) {
+      const ctx = await tx.assemblyStep.findUniqueOrThrow({
+        where: { id: step.id },
+        select: {
+          templateStep: { select: { activity: true } },
+          unit: { select: { serialNo: true, equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } } } },
+        },
+      });
+      await notify(
+        tx,
+        actor.tenantId,
+        qcIds.map((recipientId) => ({
+          recipientId,
+          type: "NCR_OPENED",
+          entityType: "AssemblyStep",
+          entityId: step.id,
+          title: `NCR opened: ${ctx.templateStep.activity}`,
+          body: `${ctx.unit.equipment.job.jobNumber} · Unit ${ctx.unit.serialNo}`,
+          payload: { jobId: ctx.unit.equipment.jobId, unitId: step.unitId },
+        })),
       );
     }
 
-    return audited(tx, actor, async () => {
-      const updated = await tx.assemblyStep.update({
-        where: { id: step.id },
-        data: { status: to, submittedBy: null },
+    if (testTypeId != null && step.weldJointId != null) {
+      const ndt = await recordNdtResultTx(tx, actor, step.weldJointId, testTypeId, "REJECT");
+      // recordNdtResultTx itself is bare (no audited() wrapper, shared with
+      // rejectAssemblyStep's other caller, recordNdtResult, which supplies
+      // its own) — record this write's own audit row here so the "an NdtResult
+      // was created" mutation is never silently un-audited (invariant #5).
+      await recordAudit(tx, actor, {
+        action: "welding.recordNdt",
+        entityType: "NdtResult",
+        entityId: ndt.id,
+        after: { weldJointId: step.weldJointId, testTypeId, result: "REJECT" },
+        eventType: "NdtResultRecorded",
+        eventPayload: { ndtResultId: ndt.id, weldJointId: step.weldJointId, result: "REJECT" },
       });
-      const rejection = await tx.assemblyStepRejection.create({
-        data: { assemblyStepId: step.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId, jobId: step.jobId },
+    }
+    // A4: mirror of verifyAssemblyStep's sync — a rejected INSPECTION step
+    // is itself a QCP checkpoint result (REJECTED), not a silent no-op that
+    // leaves the linked QcpItem looking untouched while the assembly view
+    // shows real activity.
+    if (step.templateStep.kind === "INSPECTION" && step.qcpItemId != null) {
+      const exec = await recordQcpExecutionTx(tx, actor, {
+        qcpItemId: step.qcpItemId,
+        unitId: step.unitId,
+        result: "REJECTED",
+        remarks: detail ?? null,
+        jobId: step.jobId,
       });
-      // N1 (Phase 5): every rejection opens exactly one Ncr for QC to disposition.
-      await tx.ncr.create({ data: { assemblyStepRejectionId: rejection.id, jobId: step.jobId } });
-
-      // S14 — was silent. QC is who dispositions an Ncr (S11's disposition
-      // UI), same transaction as the ncr.create above (a failed notify rolls
-      // back the whole reject).
-      const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
-      if (qcIds.length > 0) {
-        const ctx = await tx.assemblyStep.findUniqueOrThrow({
-          where: { id: step.id },
-          select: {
-            templateStep: { select: { activity: true } },
-            unit: { select: { serialNo: true, equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } } } },
-          },
-        });
-        await notify(
-          tx,
-          actor.tenantId,
-          qcIds.map((recipientId) => ({
-            recipientId,
-            type: "NCR_OPENED",
-            entityType: "AssemblyStep",
-            entityId: step.id,
-            title: `NCR opened: ${ctx.templateStep.activity}`,
-            body: `${ctx.unit.equipment.job.jobNumber} · Unit ${ctx.unit.serialNo}`,
-            payload: { jobId: ctx.unit.equipment.jobId, unitId: step.unitId },
-          })),
-        );
-      }
-
-      if (testTypeId != null && step.weldJointId != null) {
-        const ndt = await recordNdtResultTx(tx, actor, step.weldJointId, testTypeId, "REJECT");
-        // recordNdtResultTx itself is bare (no audited() wrapper, shared with
-        // rejectAssemblyStep's other caller, recordNdtResult, which supplies
-        // its own) — record this write's own audit row here so the "an NdtResult
-        // was created" mutation is never silently un-audited (invariant #5).
-        await recordAudit(tx, actor, {
-          action: "welding.recordNdt",
-          entityType: "NdtResult",
-          entityId: ndt.id,
-          after: { weldJointId: step.weldJointId, testTypeId, result: "REJECT" },
-          eventType: "NdtResultRecorded",
-          eventPayload: { ndtResultId: ndt.id, weldJointId: step.weldJointId, result: "REJECT" },
-        });
-      }
-      // A4: mirror of verifyAssemblyStep's sync — a rejected INSPECTION step
-      // is itself a QCP checkpoint result (REJECTED), not a silent no-op that
-      // leaves the linked QcpItem looking untouched while the assembly view
-      // shows real activity.
-      if (step.templateStep.kind === "INSPECTION" && step.qcpItemId != null) {
-        const exec = await recordQcpExecutionTx(tx, actor, {
-          qcpItemId: step.qcpItemId,
-          unitId: step.unitId,
-          result: "REJECTED",
-          remarks: detail ?? null,
-          jobId: step.jobId,
-        });
-        await recordAudit(tx, actor, {
-          action: "qcp.record",
-          entityType: "QcpExecution",
-          entityId: exec.id,
-          after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "REJECTED" },
-          eventType: "QcpExecutionRecorded",
-          eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "REJECTED" },
-        });
-      }
-      return {
-        result: updated,
-        audit: {
-          action: "assemblyStep.reject",
-          entityType: "AssemblyStep",
-          entityId: step.id,
-          before: { status: step.status, submittedBy: step.submittedBy },
-          after: { status: updated.status, submittedBy: updated.submittedBy, categoryId, detail },
-          eventType: "AssemblyStepRejected",
-          eventPayload: {
-            assemblyStepId: step.id,
-            submittedBy: step.submittedBy,
-            rejectedBy: actor.userId,
-            categoryId,
-            detail,
-          },
+      await recordAudit(tx, actor, {
+        action: "qcp.record",
+        entityType: "QcpExecution",
+        entityId: exec.id,
+        after: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "REJECTED" },
+        eventType: "QcpExecutionRecorded",
+        eventPayload: { qcpItemId: step.qcpItemId, unitId: step.unitId, attemptNo: exec.attemptNo, result: "REJECTED" },
+      });
+    }
+    return {
+      result: updated,
+      audit: {
+        action: "assemblyStep.reject",
+        entityType: "AssemblyStep",
+        entityId: step.id,
+        before: { status: step.status, submittedBy: step.submittedBy },
+        after: { status: updated.status, submittedBy: updated.submittedBy, categoryId, detail },
+        eventType: "AssemblyStepRejected",
+        eventPayload: {
+          assemblyStepId: step.id,
+          submittedBy: step.submittedBy,
+          rejectedBy: actor.userId,
+          categoryId,
+          detail,
         },
-      };
-    });
+      },
+    };
   });
+}
+
+/**
+ * Lean Core L1.2e: QC accepts or rejects a step, in the caller's transaction.
+ * A SUBMITTED step goes through the same verify/reject bodies as the legacy
+ * paths. An INSPECTION-kind step is never submitted by anyone (recordWork
+ * refuses it with INSPECT_REQUIRED), so QC's accept completes it directly from
+ * NOT_STARTED / IN_PROGRESS, and a reject opens its rejection + NCR and leaves
+ * it IN_PROGRESS for re-inspection. Maker–checker (invariant 3): QC role, not
+ * the submitter, and for an INSPECTION step not whoever recorded the nearest
+ * preceding WORK step of the same template group. No Production Head
+ * exception until D11 is decided.
+ */
+export async function inspectAssemblyStepTx(
+  tx: Tx,
+  actor: Actor,
+  args: { assemblyStepId: number; result: "ACCEPT" | "REJECT"; reason?: string; categoryId: number; testTypeId?: number },
+): Promise<{ from: OperationStatus; step: AssemblyStep }> {
+  const { step } = await lockAssemblyStepForUpdate(tx, args.assemblyStepId, actor.tenantId, { unitLock: true });
+  assertMakerChecker(actor, step.submittedBy);
+  const inspection = step.templateStep.kind === "INSPECTION";
+  if (inspection) {
+    const maker = await tx.assemblyStep.findFirst({
+      where: {
+        unitId: step.unitId,
+        seq: { lt: step.seq },
+        templateStep: { kind: "WORK", groupCode: step.templateStep.groupCode },
+      },
+      orderBy: { seq: "desc" },
+      select: { id: true, submittedBy: true },
+    });
+    if (maker?.submittedBy === actor.userId) {
+      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, {
+        reason: "recorded the preceding work step",
+        precedingStepId: maker.id,
+      });
+    }
+  }
+
+  const accept = args.result === "ACCEPT";
+  const direct = inspection && (step.status === "NOT_STARTED" || step.status === "IN_PROGRESS");
+  const to: OperationStatus = direct
+    ? accept
+      ? "COMPLETE"
+      : "IN_PROGRESS"
+    : assertAssemblyStepTransition(accept ? "verify" : "reject", step.status);
+  const updated = accept
+    ? await completeStepLocked(tx, actor, step, to)
+    : await rejectStepLocked(tx, actor, step, to, {
+        assemblyStepId: step.id,
+        categoryId: args.categoryId,
+        detail: args.reason,
+        testTypeId: args.testTypeId,
+      });
+  return { from: step.status, step: updated };
 }
 
 /**

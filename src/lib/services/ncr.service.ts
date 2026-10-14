@@ -3,6 +3,7 @@ import { type Actor, assertNotClientUser, requireRole, ROLES } from "@/lib/authz
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { assertStateTransition } from "./state-machine";
+import { lockFloorUnits } from "./_shared";
 import { dispositionNcrSchema, type DispositionNcrInput } from "@/lib/shared/schemas";
 import type { Ncr, NcrStatus, NcrDisposition } from "@/generated/prisma/client";
 
@@ -41,25 +42,41 @@ const REWORK_DISPOSITIONS: NcrDisposition[] = ["REWORK", "REPAIR"];
  * component/unit → equipment → job → tenantId chain.
  */
 async function lockNcrForUpdate(tx: Tx, ncrId: number, tenantId: number): Promise<Ncr> {
-  await tx.$queryRaw`SELECT id FROM ncrs WHERE id = ${ncrId} FOR UPDATE`;
-
-  const ncr = await tx.ncr.findFirst({
-    where: {
-      id: ncrId,
-      OR: [
-        {
-          componentOperationRejection: {
-            componentOperation: { component: { equipment: { job: { tenantId } } } },
-          },
+  const where = {
+    id: ncrId,
+    OR: [
+      {
+        componentOperationRejection: {
+          componentOperation: { component: { equipment: { job: { tenantId } } } },
         },
-        {
-          assemblyStepRejection: {
-            assemblyStep: { unit: { equipment: { job: { tenantId } } } },
-          },
+      },
+      {
+        assemblyStepRejection: {
+          assemblyStep: { unit: { equipment: { job: { tenantId } } } },
         },
-      ],
+      },
+    ],
+  };
+  // L1.2e: the unit's floor lock goes BEFORE the row lock, as in recordWork, so a
+  // disposition and a concurrent Start/Done batch on the same unit serialise.
+  const pre = await tx.ncr.findFirst({
+    where,
+    select: {
+      jobId: true,
+      assemblyStepRejection: { select: { assemblyStep: { select: { unitId: true } } } },
+      componentOperationRejection: { select: { componentOperation: { select: { component: { select: { unitId: true } } } } } },
     },
   });
+  if (pre) {
+    const unitId =
+      pre.assemblyStepRejection?.assemblyStep.unitId ??
+      pre.componentOperationRejection?.componentOperation.component.unitId ??
+      null;
+    await lockFloorUnits(tx, pre.jobId, [unitId]);
+  }
+  await tx.$queryRaw`SELECT id FROM ncrs WHERE id = ${ncrId} FOR UPDATE`;
+
+  const ncr = await tx.ncr.findFirst({ where });
   if (!ncr) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Ncr", ncrId });
   // H1 job-level RLS backstop: scope every subsequent query in THIS
   // transaction to the Ncr's own (denormalized) jobId, same pattern as

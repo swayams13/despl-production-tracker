@@ -1409,3 +1409,51 @@ export async function rollupProcessPlan(
   });
   return { processPlanId: plan.id, from: plan.status, to };
 }
+
+/**
+ * L1.2e: roll up the plan one assembly step feeds (its template step's
+ * leadTimeProcessSeq), in the caller's transaction. Null for an unmapped step
+ * or a unit-less one. Callers: inspect, and the legacy step paths when
+ * FEATURES.leanFloor is on.
+ */
+export async function rollupForAssemblyStep(tx: Tx, actor: Actor, assemblyStepId: number): Promise<RollupChange | null> {
+  const s = await tx.assemblyStep.findUnique({
+    where: { id: assemblyStepId },
+    select: { jobId: true, unitId: true, templateStep: { select: { leadTimeProcessSeq: true } } },
+  });
+  return rollupForSeq(tx, actor, s?.jobId, s?.unitId, s?.templateStep.leadTimeProcessSeq);
+}
+
+/** L1.2e: same for a component operation (seq resolved through the family's step/operation mapping). */
+export async function rollupForComponentOperation(
+  tx: Tx,
+  actor: Actor,
+  componentOperationId: number,
+): Promise<RollupChange | null> {
+  const o = await tx.componentOperation.findUnique({
+    where: { id: componentOperationId },
+    select: {
+      jobId: true,
+      seq: true,
+      operationId: true,
+      component: { select: { unitId: true, routeVersionId: true } },
+      job: { select: { familyId: true } },
+    },
+  });
+  if (!o) return null;
+  const resolve = await loadOpSeqResolver(tx, o.job.familyId);
+  const seq = resolve({ operationId: o.operationId, seq: o.seq, routeVersionId: o.component.routeVersionId });
+  return rollupForSeq(tx, actor, o.jobId, o.component.unitId, seq);
+}
+
+async function rollupForSeq(
+  tx: Tx,
+  actor: Actor,
+  jobId: number | undefined,
+  unitId: number | null | undefined,
+  seq: number | null | undefined,
+): Promise<RollupChange | null> {
+  if (jobId == null || unitId == null || seq == null) return null;
+  const jp = await tx.jobProcess.findFirst({ where: { jobId, code: String(seq) }, select: { id: true } });
+  return jp ? rollupProcessPlan(tx, actor, jp.id, unitId) : null;
+}
