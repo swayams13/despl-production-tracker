@@ -18,7 +18,7 @@
  * result usable directly as a Prisma filter bound, not just in application code.
  */
 
-const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+export const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 /** The UTC-midnight marker for `instant`'s calendar date in IST. Comparable
  * with any stored calendar-day field via plain `<`/`<=`/`>`/`>=`. */

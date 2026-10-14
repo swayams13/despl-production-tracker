@@ -133,6 +133,32 @@ export const ERROR_CODES = {
   USE_MASTER_DATA: "USE_MASTER_DATA",
   /** A database transaction ran out of time; nothing it did was saved. */
   TRANSACTION_TIMEOUT: "TRANSACTION_TIMEOUT",
+  /** Lean Core L1.2: a process plan with mapped steps/operations takes its status from them (rollupProcessPlan); direct start/submit/verify is refused. */
+  DERIVED_STATUS: "DERIVED_STATUS",
+  /** L1.2 (D2 SOFT): an earlier step in the sequence is still open; starting early needs an override reason. `detail.canOverride` says whether this actor may give one. */
+  SEQUENCE_OVERRIDE_REQUIRED: "SEQUENCE_OVERRIDE_REQUIRED",
+  /** L1.2 (D4): the reported time is outside the allowed window. `detail.reason` is FUTURE | TOO_OLD | BEFORE_RELEASE | DONE_BEFORE_START. */
+  REPORTED_AT_OUT_OF_WINDOW: "REPORTED_AT_OUT_OF_WINDOW",
+  /** L1.2/L1.4: marking a late item Done needs a categorised late reason in the same action. */
+  LATE_REASON_REQUIRED: "LATE_REASON_REQUIRED",
+  /** L1.2: an INSPECTION step is recorded by QC through inspect, not by recordWork. */
+  INSPECT_REQUIRED: "INSPECT_REQUIRED",
+  /** D2 H1: fit-up → weld → NDT on the same joint, out of order. */
+  JOINT_SEQUENCE_BLOCKED: "JOINT_SEQUENCE_BLOCKED",
+  /** D2 H2: pressure-part cutting before the material is issued. */
+  MATERIAL_NOT_ISSUED: "MATERIAL_NOT_ISSUED",
+  /** D2 H2: pressure-part cutting before the heat number is picked. */
+  HEAT_NUMBER_NOT_PICKED: "HEAT_NUMBER_NOT_PICKED",
+  /** D2 H4: hydro before the unit's final PWHT is complete. */
+  PWHT_NOT_COMPLETE: "PWHT_NOT_COMPLETE",
+  /** D2 H6: hydro before every weld and NDT step on the unit's pressure joints is complete. */
+  HYDRO_PREREQUISITES_INCOMPLETE: "HYDRO_PREREQUISITES_INCOMPLETE",
+  /** D2 H5: welding on a pressure part after the unit's final PWHT; routed to an NCR. */
+  WELD_AFTER_PWHT: "WELD_AFTER_PWHT",
+  /** D2 H6: welding on a pressure part after hydro; routed to an NCR. */
+  WELD_AFTER_HYDRO: "WELD_AFTER_HYDRO",
+  /** Invariant 2 (always HARD): surface preparation (29) and painting (30) need hydro (27) complete. */
+  PAINT_BEFORE_HYDRO: "PAINT_BEFORE_HYDRO",
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -229,7 +255,36 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   USE_MASTER_DATA:
     "This is a master-data part family. Change it under Master data, where edits go through review and approval.",
   TRANSACTION_TIMEOUT: "That took too long, so nothing was saved. Try again; if it keeps happening, split the file.",
+  DERIVED_STATUS:
+    "This stage's status comes from its steps and operations. Record work on those instead; the stage updates itself.",
+  SEQUENCE_OVERRIDE_REQUIRED:
+    "An earlier step in the sequence is still open. A supervisor can start this early by choosing a reason.",
+  REPORTED_AT_OUT_OF_WINDOW:
+    "That time is not allowed: it is in the future, before the job was released, before the work started, or more than 72 working hours ago. An administrator can correct older entries.",
+  LATE_REASON_REQUIRED:
+    "This work is past its planned finish. Choose a late reason to mark it done.",
+  INSPECT_REQUIRED:
+    "This is an inspection step. QC records it by accepting or rejecting the inspection.",
+  JOINT_SEQUENCE_BLOCKED:
+    "An earlier step on this joint is not done yet. Fit-up comes before welding, and welding before NDT. Record the earlier step first.",
+  MATERIAL_NOT_ISSUED:
+    "Material for this pressure part has not been issued. Stores must issue it before cutting.",
+  HEAT_NUMBER_NOT_PICKED:
+    "No heat number is picked for this pressure part. Stores or QC must pick it before cutting.",
+  PWHT_NOT_COMPLETE:
+    "Final PWHT on this unit is not complete. Hydro can start only after QC accepts the PWHT.",
+  HYDRO_PREREQUISITES_INCOMPLETE:
+    "Some welds or NDT on this unit's pressure joints are not complete. Finish and get them accepted by QC before hydro.",
+  WELD_AFTER_PWHT:
+    "Final PWHT on this unit has started, so welding on a pressure part is not allowed. QC must raise an NCR; repair needs PWHT repeated, or the Production Head can accept it per a code clause.",
+  WELD_AFTER_HYDRO:
+    "Hydro on this unit has started, so welding on a pressure part is not allowed. QC must raise an NCR; repair needs hydro repeated, or the Production Head can accept it per a code clause.",
+  PAINT_BEFORE_HYDRO:
+    "Hydro on this unit is not complete. Surface preparation and painting can start only after hydro is accepted.",
 };
+
+/** D2: what an operator sees instead of SEQUENCE_OVERRIDE_REQUIRED's default, since they cannot override. */
+export const SEQUENCE_OVERRIDE_OPERATOR_MESSAGE = "Ask your supervisor to start this early.";
 
 /**
  * A refusal the UI can explain. Throw this from the service layer — never a
