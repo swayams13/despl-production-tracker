@@ -3,7 +3,7 @@ import { withJob, withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertNotClientUser, hasRole, requireDepartmentScope, requireRole, ROLES } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError, SEQUENCE_OVERRIDE_OPERATOR_MESSAGE, type ErrorCode } from "@/lib/shared/errors";
-import { checkReportedAt, checkStart, OFFICE_PROCESS_MAX_SEQ, type FloorItem, type WorkKind } from "@/lib/shared/floor-rules";
+import { checkReportedAt, checkStart, evaluateHard, OFFICE_PROCESS_MAX_SEQ, type FloorItem, type WorkKind } from "@/lib/shared/floor-rules";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import { inspectSchema, recordWorkSchema, type InspectInput, type RecordWorkInput } from "@/lib/shared/schemas";
 import type { WorkCalendarInput } from "@/lib/schedule";
@@ -146,7 +146,7 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
 
       // After the lock: a concurrent duplicate of this request has committed by now.
       if (requestId) {
-        const prior = await tx.workRequest.findFirst({ where: { requestId } });
+        const prior = await tx.workRequest.findFirst({ where: { tenantId: actor.tenantId, requestId } });
         if (prior) {
           if (prior.actorId !== actor.userId || prior.jobId !== job.id) {
             throw new AppError(ERROR_CODES.VALIDATION_FAILED, { requestId }, "This request id was already used for another request.");
@@ -315,6 +315,10 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     overridden = check.overridden;
     // Parity with startComponentOperation (B7): the component's BOM line must not be short.
     if (item.kind === "COMPONENT_OP") await assertKitReady(tx, row.componentId!, actor.tenantId);
+  } else {
+    // Review fix: Done of a started item re-runs H5/H6 (rework finished after the final PWHT / hydro).
+    const hard = evaluateHard(item, facts.facts, "DONE");
+    if (hard) throw new AppError(hard.code, hard.meta);
   }
 
   // Invariant 7 as revised: a late Done carries its reason in the same action.

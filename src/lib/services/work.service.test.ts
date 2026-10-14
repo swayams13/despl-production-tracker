@@ -382,6 +382,33 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect(refusal(r, j.step(2))?.meta).toMatchObject({ rule: "H6", routeTo: "NCR" });
     });
 
+    // Review fix: rework after a QC reject is back IN_PROGRESS, so its Done after the final PWHT or
+    // hydro is welding after it (D2 H5/H6); only the START check ran before.
+    it.each<[string, JobSpec, string | null]>([
+      [
+        "H5: Done of an in-progress pressure weld after final PWHT",
+        { steps: [{ seq: 1, kind: "INSPECTION", role: "FINAL_PWHT" }, { seq: 2, role: "WELD", jointRef: "J9", pressurePart: true }] },
+        ERROR_CODES.WELD_AFTER_PWHT,
+      ],
+      [
+        "H6: Done of an in-progress pressure fit-up after hydro started",
+        { steps: [{ seq: 1, role: "HYDRO" }, { seq: 2, role: "FIT_UP", jointRef: "J9", pressurePart: true }] },
+        ERROR_CODES.WELD_AFTER_HYDRO,
+      ],
+      ["H5 lets a non-pressure weld finish after PWHT", { steps: [{ seq: 1, kind: "INSPECTION", role: "FINAL_PWHT" }, { seq: 2, role: "WELD" }] }, null],
+    ])("%s", async (_l, spec, code) => {
+      const j = await o.job(spec);
+      await owner.assemblyStep.update({ where: { id: j.step(2) }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+      await owner.assemblyStep.update({ where: { id: j.step(1) }, data: { status: "COMPLETE" } });
+      const r = await rec(head, j, "DONE", [[S, j.step(2)]]);
+      if (code) {
+        expect(refusal(r, j.step(2))?.code, JSON.stringify(r)).toBe(code);
+        expect((await stepRow(j.step(2))).status).toBe("IN_PROGRESS");
+      } else {
+        expect(r.applied, JSON.stringify(r.refused)).toMatchObject([{ id: j.step(2), to: "SUBMITTED" }]);
+      }
+    });
+
     it("H3 stamps the revision the part was cut to", async () => {
       const j = await o.job(pressureCut({ issued: true, heatNumber: "H1", drawing: "RELEASED" }));
       await rec(sup, j, "START", [[OP, j.op("SHELL", "CUTTING")]]);
@@ -471,11 +498,13 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect(refusal(r, j.op("SHELL", "CUTTING"))?.code).toBe(ERROR_CODES.MATERIAL_NOT_ISSUED);
     });
 
-    it("processes 1–11 (job grain): a planner may override office order", async () => {
+    // Review fix: D2 "Override: Supervisor and above" — a planner records 1–11 but cannot override their order.
+    it("processes 1–11 (job grain): a planner is refused even with a reason; the Production Head may override", async () => {
       const j = await o.job({ steps: [{ seq: 1 }], processes: [{ code: "3", grain: "JOB" }, { code: "5", grain: "JOB" }] });
-      const refused = await rec(planner, j, "START", [[P, j.plan("5")]]);
-      expect(refusal(refused, j.plan("5"))?.meta).toMatchObject({ canOverride: true });
-      const r = await rec(planner, j, "START", [[P, j.plan("5")]], { override: { category: "CLIENT_PRIORITY" } });
+      const refused = await rec(planner, j, "START", [[P, j.plan("5")]], { override: { category: "CLIENT_PRIORITY" } });
+      expect(refusal(refused, j.plan("5"))).toMatchObject({ code: ERROR_CODES.SEQUENCE_OVERRIDE_REQUIRED, meta: { canOverride: false } });
+      expect((await planRow(j.plan("5"))).status).toBe("NOT_STARTED");
+      const r = await rec(head, j, "START", [[P, j.plan("5")]], { override: { category: "CLIENT_PRIORITY" } });
       expect(r.applied).toMatchObject([{ id: j.plan("5"), overridden: true }]);
       expect(await owner.sequenceOverride.findFirst({ where: { targetKind: P, targetId: j.plan("5") } })).toMatchObject({
         predecessorTargetId: j.plan("3"),

@@ -478,6 +478,67 @@ describe.skipIf(!RUN_DB)("L1.2e inspect, derived switch, unit lock (DB)", async 
     });
   });
 
+  // ── Review fix: the legacy step/op start and submit run the D2 HARD rules with the switch on ──
+  describe("leanFloor switch: legacy step/op start and submit cannot bypass the D2 HARD rules", () => {
+    const pwhtThenWeld = { steps: [{ seq: 1, kind: "INSPECTION" as const, role: "FINAL_PWHT" as const }, { seq: 2, role: "WELD" as const, pressurePart: true }] };
+    const pwhtDone = (j: WorkJob) => owner.assemblyStep.update({ where: { id: j.step(1) }, data: { status: "COMPLETE" } });
+    const inProgress = { status: "IN_PROGRESS" as const, startedAt: new Date() };
+    interface Case {
+      spec: JobSpec;
+      setup?: (j: WorkJob) => Promise<unknown>;
+      call: (j: WorkJob) => Promise<unknown>;
+      on: string;
+    }
+    it.each<[string, Case]>([
+      [
+        "H2: legacy start of pressure-part cutting with no material issued",
+        {
+          spec: { components: [{ tag: "SHELL", pressure: true, ops: [{ code: "CUTTING" }] }] },
+          call: (j) => startComponentOperation(sup, { componentOperationId: j.op("SHELL", "CUTTING") }),
+          on: ERROR_CODES.MATERIAL_NOT_ISSUED,
+        },
+      ],
+      [
+        "H5: legacy start of a pressure weld after final PWHT (the previous step is complete)",
+        { spec: pwhtThenWeld, setup: pwhtDone, call: (j) => startAssemblyStep(sup, { assemblyStepId: j.step(2) }), on: ERROR_CODES.WELD_AFTER_PWHT },
+      ],
+      [
+        "H5: legacy submit of an in-progress pressure weld after final PWHT",
+        {
+          spec: pwhtThenWeld,
+          setup: async (j) => {
+            await pwhtDone(j);
+            await owner.assemblyStep.update({ where: { id: j.step(2) }, data: inProgress });
+          },
+          call: (j) => submitAssemblyStep(sup, { assemblyStepId: j.step(2) }),
+          on: ERROR_CODES.WELD_AFTER_PWHT,
+        },
+      ],
+      [
+        "H5: legacy submit of an in-progress pressure welding operation after final PWHT",
+        {
+          spec: { ...pwhtThenWeld, components: [{ tag: "SHELL", pressure: true, ops: [{ code: "WELDING" }] }] },
+          setup: async (j) => {
+            await pwhtDone(j);
+            await owner.componentOperation.update({ where: { id: j.op("SHELL", "WELDING") }, data: inProgress });
+          },
+          call: (j) => submitComponentOperation(sup, { componentOperationId: j.op("SHELL", "WELDING") }),
+          on: ERROR_CODES.WELD_AFTER_PWHT,
+        },
+      ],
+    ])("%s: refused with the switch on, today's outcome with it off", async (_l, c) => {
+      process.env.LEAN_FLOOR = "on";
+      const on = await o.job(c.spec);
+      await c.setup?.(on);
+      expect(await code(c.call(on))).toBe(c.on);
+
+      delete process.env.LEAN_FLOOR;
+      const off = await o.job(c.spec);
+      await c.setup?.(off);
+      expect(await code(c.call(off))).toBeNull();
+    });
+  });
+
   // ── the unit lock on the QC writers ─────────────────────────────────────
   describe("QC writers wait for the unit's floor lock", () => {
     /** Holds the unit's advisory lock on its own connection; `run` must not settle until it is released. */

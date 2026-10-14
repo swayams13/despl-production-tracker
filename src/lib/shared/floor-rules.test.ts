@@ -125,6 +125,23 @@ describe("HARD rules — violations first, then pass and not-applicable", () => 
   });
 });
 
+describe("HARD at DONE of an item already started (review fix): only H5/H6", () => {
+  // Rework after a QC reject goes back to IN_PROGRESS; finishing it after the final PWHT or hydro is welding after it.
+  const fitRun = step(14, { role: "FIT_UP", jointRef: "CS-1", pressurePart: true, status: "IN_PROGRESS" });
+  const cases: Array<[string, FloorItem, UnitFacts, string | null]> = [
+    ["H5 finishing a pressure weld after final PWHT", nozzleWeld("IN_PROGRESS"), facts([pwht("COMPLETE"), nozzleWeld("IN_PROGRESS")]), "WELD_AFTER_PWHT"],
+    ["H6 finishing a pressure fit-up after hydro started", fitRun, facts([hydro("IN_PROGRESS"), fitRun]), "WELD_AFTER_HYDRO"],
+    ["H5 concession still exempts its own target", nozzleWeld("IN_PROGRESS"),
+      facts([pwht("COMPLETE"), nozzleWeld("IN_PROGRESS")], { concessions: [{ rule: "H5", kind: "ASSEMBLY_STEP", id: 19 }] }), null],
+    ["non-pressure weld after PWHT is fine", step(30, { role: "WELD", status: "IN_PROGRESS" }), facts([pwht("COMPLETE")]), null],
+    ["H1 is a START rule: not re-run at DONE", weld("IN_PROGRESS"), facts([fit("IN_PROGRESS"), weld("IN_PROGRESS")]), null],
+    ["H2 is a START rule: not re-run at DONE", op(1, { heatPicked: false, status: "IN_PROGRESS" }), facts([]), null],
+  ];
+  it.each(cases)("%s", (_name, item, f, code) => {
+    expect(evaluateHard(item, f, "DONE")?.code ?? null).toBe(code);
+  });
+});
+
 describe("SOFT (D2) and override authority", () => {
   const nozzleFit = step(18, { role: "FIT_UP", jointRef: "N1", pressurePart: true });
   const sup = { roles: ["SUPERVISOR"], hasOverride: true };
@@ -139,7 +156,9 @@ describe("SOFT (D2) and override authority", () => {
     ["HARD wins over an override", weld(), facts([fit(), weld()]), sup, "JOINT_SEQUENCE_BLOCKED"],
     ["SUPERVISOR override passes", nozzleFit, facts([fit("IN_PROGRESS"), nozzleFit]), sup, null],
     ["PRODUCTION_HEAD override passes", nozzleFit, facts([fit("IN_PROGRESS"), nozzleFit]), { roles: ["PRODUCTION_HEAD"], hasOverride: true }, null],
-    ["PLANNER override passes on processes 1–11", plan(5, 5), facts([plan(4, 4), plan(5, 5)]), { roles: ["PLANNER"], hasOverride: true }, null],
+    // D2 "Override: Supervisor and above" (review fix): a planner records 1–11 but does not override their order.
+    ["PLANNER cannot override processes 1–11 either", plan(5, 5), facts([plan(4, 4), plan(5, 5)]), { roles: ["PLANNER"], hasOverride: true }, "SEQUENCE_OVERRIDE_REQUIRED"],
+    ["SUPERVISOR override passes on processes 1–11", plan(5, 5), facts([plan(4, 4), plan(5, 5)]), sup, null],
     ["earlier INSPECTION steps are excluded", nozzleFit, facts([step(17, { stepKind: "INSPECTION" }), nozzleFit]), { roles: [], hasOverride: false }, null],
     ["earlier done (SUBMITTED) step is not open", nozzleFit, facts([fit("SUBMITTED"), nozzleFit]), { roles: [], hasOverride: false }, null],
     ["no assembly sequence → no SOFT gating", nozzleFit, facts([fit("IN_PROGRESS"), nozzleFit], { hasAssemblySequence: false }), { roles: [], hasOverride: false }, null],

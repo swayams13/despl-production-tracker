@@ -8,6 +8,7 @@ import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
 import { closeNcr } from "./ncr.service";
 import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
+import { assertFloorHard } from "./work.facts";
 import { notify, userIdsWithRole } from "./notifications.service";
 import { recordQcpExecutionTx } from "./qcp.service";
 import {
@@ -118,9 +119,12 @@ export async function startAssemblyStep(actor: Actor, input: StartAssemblyStepIn
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { step, previousStep } = await lockAssemblyStepForUpdate(tx, assemblyStepId, actor.tenantId);
+    const lean = FEATURES.leanFloor;
+    const { step, previousStep } = await lockAssemblyStepForUpdate(tx, assemblyStepId, actor.tenantId, { unitLock: lean });
     requireDepartmentScope(actor, step.templateStep.defaultDepartmentId);
     const to = assertAssemblyStepTransition("start", step.status);
+    // Review fix: with the lean floor on, the D2 HARD rules hold on this path too.
+    if (lean) await assertFloorHard(tx, "ASSEMBLY_STEP", step.id, "START");
 
     if (previousStep && previousStep.status !== "COMPLETE") {
       throw new AppError(ERROR_CODES.GATING_BLOCKED, {
@@ -180,9 +184,11 @@ export async function submitAssemblyStep(actor: Actor, input: SubmitAssemblyStep
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { step } = await lockAssemblyStepForUpdate(tx, assemblyStepId, actor.tenantId);
+    const lean = FEATURES.leanFloor;
+    const { step } = await lockAssemblyStepForUpdate(tx, assemblyStepId, actor.tenantId, { unitLock: lean });
     requireDepartmentScope(actor, step.templateStep.defaultDepartmentId);
     const to = assertAssemblyStepTransition("submit", step.status);
+    if (lean) await assertFloorHard(tx, "ASSEMBLY_STEP", step.id, "DONE");
 
     if (step.templateStep.jointRef != null && weldJointId == null && newJoint == null && step.weldJointId == null) {
       throw new AppError(

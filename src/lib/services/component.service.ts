@@ -13,6 +13,7 @@ import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { deriveRequiresQc } from "@/lib/shared/floor-rules";
 import { assertKitReady, assertDrawingReleased, lockFloorUnits, rollupForComponentOperation } from "./_shared";
+import { assertFloorHard } from "./work.facts";
 import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
@@ -208,13 +209,17 @@ export async function startComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
+    const lean = FEATURES.leanFloor;
     const { op, departmentId, operationCode, previousOp } = await lockComponentOperationForUpdate(
       tx,
       componentOperationId,
       actor.tenantId,
+      { unitLock: lean },
     );
     requireOperationDepartment(actor, departmentId);
     const to = assertComponentOpTransition("start", op.status);
+    // Review fix: with the lean floor on, the D2 HARD rules (H2 etc.) hold on this path too.
+    if (lean) await assertFloorHard(tx, "COMPONENT_OP", op.id, "START");
 
     if (previousOp && previousOp.status !== "COMPLETE") {
       throw new AppError(ERROR_CODES.GATING_BLOCKED, {
@@ -305,9 +310,13 @@ export async function submitComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    const lean = FEATURES.leanFloor;
+    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId, {
+      unitLock: lean,
+    });
     requireOperationDepartment(actor, departmentId);
     const to = assertComponentOpTransition("submit", op.status);
+    if (lean) await assertFloorHard(tx, "COMPONENT_OP", op.id, "DONE");
     await assertPerformedByValid(tx, actor, performedByWelderId, performedByUserId);
 
     // F3/F4 fields are all optional (schema) — `undefined` here (rather than

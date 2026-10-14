@@ -241,8 +241,20 @@ export const HARD_RULES: HardRule[] = [
   },
 ];
 
-export function evaluateHard(item: FloorItem, facts: UnitFacts): (RuleRefusal & { rule: HardRule["id"] }) | null {
+/**
+ * At DONE of an item already started only H5/H6 run again (review fix): rework
+ * reopened after a QC reject and finished after the final PWHT or hydro is
+ * welding after it. The other rules are about when work may begin.
+ */
+const DONE_RULES: ReadonlySet<HardRule["id"]> = new Set(["H5", "H6"]);
+
+export function evaluateHard(
+  item: FloorItem,
+  facts: UnitFacts,
+  phase: "START" | "DONE" = "START",
+): (RuleRefusal & { rule: HardRule["id"] }) | null {
   for (const rule of HARD_RULES) {
+    if (phase === "DONE" && !DONE_RULES.has(rule.id)) continue;
     const r = rule.check(item, facts);
     if (r) return { ...r, rule: rule.id };
   }
@@ -272,15 +284,9 @@ export function evaluateSoft(item: FloorItem, facts: UnitFacts): FloorItem[] {
   return earlier.filter((e) => !isDone(e) && !linked.has(e));
 }
 
-/** D2 override authority: Supervisor and Production Head; Planner for processes 1–11. Never Admin alone, never Operator. */
-export function canOverride(roles: readonly string[], item: FloorItem): boolean {
-  if (roles.includes("SUPERVISOR") || roles.includes("PRODUCTION_HEAD")) return true;
-  return (
-    roles.includes("PLANNER") &&
-    item.kind === "PROCESS_PLAN" &&
-    item.processSeq !== null &&
-    item.processSeq <= OFFICE_PROCESS_MAX_SEQ
-  );
+/** D2 override authority: "Supervisor and above" — Supervisor and Production Head. Never Admin alone, Operator or Planner. */
+export function canOverride(roles: readonly string[]): boolean {
+  return roles.includes("SUPERVISOR") || roles.includes("PRODUCTION_HEAD");
 }
 
 export type StartCheck =
@@ -297,7 +303,7 @@ export function checkStart(
   if (hard) return { ok: false, code: hard.code, meta: hard.meta };
   const open = evaluateSoft(item, facts);
   if (!open.length) return { ok: true, overridden: [] };
-  const allowed = canOverride(actor.roles, item);
+  const allowed = canOverride(actor.roles);
   if (!allowed || !actor.hasOverride) {
     return { ok: false, code: "SEQUENCE_OVERRIDE_REQUIRED", meta: { canOverride: allowed, open: open.map(ref) } };
   }
