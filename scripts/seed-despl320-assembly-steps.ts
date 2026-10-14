@@ -136,7 +136,17 @@ async function main() {
       const qcpItemId = resolveQcpItemId(step);
       if (qcpItemId != null) boundToQcp++;
       await prisma.assemblyStep.create({
-        data: { jobId: unit.jobId, unitId: unit.id, templateStepId: step.id, seq: step.seq, qcpItemId },
+        data: {
+          jobId: unit.jobId,
+          unitId: unit.id,
+          templateStepId: step.id,
+          seq: step.seq,
+          qcpItemId,
+          // L1.2 (D2): job-level copies, as createJob does.
+          role: step.role,
+          jointRef: step.jointRef,
+          pressurePart: step.pressurePart,
+        },
       });
       created++;
     }

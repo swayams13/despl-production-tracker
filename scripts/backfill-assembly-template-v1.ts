@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { TemplateStatus } from "../src/generated/prisma/enums";
+import type { AssemblyStepRole } from "../src/generated/prisma/enums";
 
 const prisma = new PrismaClient({
   datasourceUrl: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
@@ -36,6 +37,9 @@ interface AssemblyTemplateFile {
     defaultDepartment: string;
     jointRef?: string;
     leadTimeProcessSeq?: number;
+    /// L1.2 (D2): optional; absent = null / false, today's behaviour.
+    role?: AssemblyStepRole;
+    pressurePart?: boolean;
   }[];
 }
 
@@ -85,6 +89,8 @@ async function main() {
       qcpSrNo: s.srNo,
       jointRef: s.jointRef ?? null,
       leadTimeProcessSeq: s.leadTimeProcessSeq ?? null,
+      role: s.role ?? null,
+      pressurePart: s.pressurePart ?? false,
     })),
   });
 

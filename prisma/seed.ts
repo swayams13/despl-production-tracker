@@ -26,6 +26,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { hash } from "@node-rs/argon2";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
+import type { AssemblyStepRole } from "../src/generated/prisma/enums";
 import {
   ProcessEdgeType,
   Sourcing,
@@ -226,6 +227,9 @@ interface AssemblyTemplateFile {
     defaultDepartment: string;
     jointRef?: string;
     leadTimeProcessSeq?: number;
+    /// L1.2 (D2): optional; absent = null / false, today's behaviour.
+    role?: AssemblyStepRole;
+    pressurePart?: boolean;
   }[];
 }
 
@@ -856,6 +860,8 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
           qcpSrNo: s.srNo,
           jointRef: s.jointRef ?? null,
           leadTimeProcessSeq: s.leadTimeProcessSeq ?? null,
+          role: s.role ?? null,
+          pressurePart: s.pressurePart ?? false,
         })),
       });
       stats.assemblyTemplateSteps = await tx.assemblyTemplateStep.count({ where: { versionId: asmV1.id } });

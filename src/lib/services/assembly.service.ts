@@ -17,7 +17,7 @@ import {
   type VerifyAssemblyStepInput,
   type RejectAssemblyStepInput,
 } from "@/lib/shared/schemas";
-import type { AssemblyStep, OperationStatus } from "@/generated/prisma/client";
+import type { AssemblyStep, AssemblyStepRole, OperationStatus } from "@/generated/prisma/client";
 
 /**
  * F8's third consumer (state-machine.ts's own comment named this ahead of
@@ -549,14 +549,28 @@ export async function materializeAssemblyStepsFromTemplate(
     seq: number;
     qcpItemId: number | null;
     requiresQc: boolean;
+    role: AssemblyStepRole | null;
+    jointRef: string | null;
+    pressurePart: boolean;
     jobId: number;
   }[] = [];
   for (const unitId of unitIds) {
     for (const step of steps) {
       const qcpItemId = resolveQcpItemId(step);
       if (qcpItemId != null) boundToQcp++;
-      // Lean Core L1.1 (D3): copied at intake, like grain/enforcement.
-      rows.push({ unitId, templateStepId: step.id, seq: step.seq, qcpItemId, requiresQc: step.requiresQc, jobId });
+      // Lean Core L1.1 (D3) / L1.2 (D2): copied at intake, like grain/enforcement;
+      // the floor rules read the job row, never the template.
+      rows.push({
+        unitId,
+        templateStepId: step.id,
+        seq: step.seq,
+        qcpItemId,
+        requiresQc: step.requiresQc,
+        role: step.role,
+        jointRef: step.jointRef,
+        pressurePart: step.pressurePart,
+        jobId,
+      });
       stepCount++;
     }
   }

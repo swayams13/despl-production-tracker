@@ -672,6 +672,14 @@ export async function materializeComponentsFromBomItems(
       : [];
   const requiresQcByOperationId = new Map(operationRefs.map((o) => [o.id, o.requiresQc]));
 
+  // Lean Core L1.2 (D2, H2/H3): pressureRetaining copied from the APPROVED part
+  // family only (D15) — a draft master-data flag must not switch on a HARD rule.
+  const pressureFamilies = await tx.partFamily.findMany({
+    where: { componentTypeId: { in: typeIds }, status: "APPROVED", pressureRetaining: true },
+    select: { componentTypeId: true },
+  });
+  const pressureRetainingTypeIds = new Set(pressureFamilies.map((f) => f.componentTypeId));
+
   let componentCount = 0;
   let skippedNoRoute = 0;
   const usedTags = new Set<string>();
@@ -698,6 +706,7 @@ export async function materializeComponentsFromBomItems(
           tag,
           componentTypeId: b.componentTypeId!,
           routeVersionId: routeVersion.id,
+          pressureRetaining: pressureRetainingTypeIds.has(b.componentTypeId!),
           jobId,
         },
       });
