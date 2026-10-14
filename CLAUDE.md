@@ -17,9 +17,9 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | ID | Decision | Default until decided | Status |
 |---|---|---|---|
 | D1 | Working days or calendar days | `CALENDAR_DAYS_6DAY_WEEK` (Sun off) | Provisional (Swayam, 4 Sep) — SJ to confirm |
-| D2 | Which edges become SOFT (see build prompt §8.2 item 4: nozzle work precedes CS-1) | All HARD | Open |
-| D3 | Which items get `requiresQc = false` | All `true` | Open |
-| D4 | Backdating window | 72 hours | Open |
+| D2 | Which edges become SOFT (see build prompt §8.2 item 4: nozzle work precedes CS-1) | All HARD until decided | **Proposed** (14 Oct) — see note D2 below; SJ to answer, then record |
+| D3 | Which items get `requiresQc = false` | All `true` | **Decided** (Swayam, 14 Oct) — derived by rule, see note D3 below |
+| D4 | Backdating window | 72 hours | **Decided** (Swayam, 14 Oct) — 72 h, three refinements, see note D4 below |
 | D5 | Pilot job + departments; JOB-grain process list | Planning/PPC, Fabrication, QC; processes 1–11 and 33 | Open |
 | D6 | Devices and floor Wi-Fi | Design for both | Open |
 | D7 | Department representatives; welder list | Placeholder accounts | Open |
@@ -45,7 +45,13 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | D27 | Backup retention, remote access, system administrator | Nightly, 14 days, LAN only | Open |
 | D28 | Git integration: PRs into `main` behind flags, or a long-lived `redesign` branch | PRs into `main` behind flags; tag `pre-redesign` first | Open |
 
-**Do not start L1.2 until D2, D3 and D4 are recorded.**
+**Do not start L1.2 until D2, D3 and D4 are recorded.** *(14 Oct 2026: D3 and D4 are decided; D2 is only proposed, so L1.2 stays blocked on D2 until SJ answers its open item.)*
+
+**Decision notes (14 Oct 2026, Swayam):**
+
+- **D2 — PROPOSED, not in force.** Process-DAG edges (the 36-process graph) become schedule-only: planned dates and lateness, never a floor refusal. Floor gating moves to each job's per-unit assembly sequence, copied from master data at BOM release, because assembly order is job-specific (DESPL-320: nozzles before top-head closure; DE0423: heads first, then nozzles). Within that sequence: **HARD** = same-joint fit-up → weld → NDT; a pressure part is not cut until material is issued and its heat number picked; PWHT before hydro (21 → 27); no welding on a pressure-retaining part after the unit's PWHT (refuse and point to an NCR — **needs QC head confirmation before it is coded**); plus the always-HARD rules of invariant 2. **SOFT** = order between different joints or sub-assemblies (nozzles vs head closure, attachments/skirt vs circ seams, clearance work), normal department overlaps (rolling before all plates are cut, edge prep with cutting, Machine Shop 12–14 ahead of shell fabrication) and planning/procurement order (processes 1–11). Only the Production Head acknowledges overrides; a batch "done" carries one reason; an edge overridden on most units of a job means the master sequence is wrong — fix the route. **Open for SJ:** may cutting of pressure parts start before the drawing is released for fabrication? Proposal: HARD unless they routinely cut at risk with client consent. Until recorded as Decided, all edges stay HARD and L1.2 is not built on this.
+- **D3 — DECIDED.** `requiresQc` is derived by rule, not a hand list; the QC head reviews the derived list once. `true` when the step is linked to a QCP point of any party (H, W, R, RW, R&A); or is fit-up/welding on a pressure-retaining joint (shell long and circ seams, head-to-shell, nozzle-to-shell, nozzle-to-flange, skirt-to-head); or is heat-number transfer at cutting of a pressure part; or is a test/treatment record (PWHT/PFHT, hydro, final dimensional, painting DFT, name-plate stamping). Everything else is `false` (handling, non-pressure cutting and marking, rolling and edge prep, non-pressure attachments, office processes 1–11). QC's own Inspection operations are the checker of the preceding work step, recorded against the QCP point, and need no second QC verify; the same-inspector case is D11. **Record D12 (does an H point block the part or the whole unit; proposal: the part) together with this.**
+- **D4 — DECIDED.** `BACKDATE_WINDOW_HOURS` stays 72. Refinements: (1) lower bound is the job's BOM / floor release date, not the order date (replaces the order-date bound in invariant 1), and Done ≥ Start for the same item; (2) the window is counted in working hours from the D1 calendar — if that is too much for v1, keep 72 calendar hours and accept admin corrections around shutdowns; (3) the pilot's same-day metric (≥ 90 %) uses `recordedAt − reportedAt`, so a generous window does not hide late logging, while on-time KPIs keep `COALESCE(reportedAt, recordedAt)`. Beyond the window: the admin correction flow, no in-app confirm. Separate operator (24 h) and supervisor (72 h) windows: not in the pilot unless SJ asks. D1 is still provisional, so refinement (2) rests on it.
 
 ### Frozen (Lean Core §4) — keep the code, hide it, no new work
 
