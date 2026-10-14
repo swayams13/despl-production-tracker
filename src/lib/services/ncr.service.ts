@@ -286,7 +286,9 @@ export async function raiseRuleNcr(actor: Actor, input: RaiseRuleNcrInput): Prom
       const job = await tx.job.findFirstOrThrow({ where: { id: target.jobId, tenantId: actor.tenantId }, select: { id: true, familyId: true, jobNumber: true } });
       const { facts, rows } = await loadFloorFacts(tx, job, target.unitId);
       const row = rows.get(rowKey(kind, targetId));
-      const refusal = row ? HARD_RULES.find((r) => r.id === rule)!.check(row.item, facts) : null;
+      // H5/H6 refuse only a Start (NOT_STARTED) or a Done (IN_PROGRESS); a weld submitted or complete is not refused.
+      const refusable = row && (row.item.status === "NOT_STARTED" || row.item.status === "IN_PROGRESS");
+      const refusal = refusable ? HARD_RULES.find((r) => r.id === rule)!.check(row.item, facts) : null;
       if (refusal?.meta.routeTo !== "NCR") {
         throw new AppError(
           ERROR_CODES.VALIDATION_FAILED,
@@ -294,7 +296,7 @@ export async function raiseRuleNcr(actor: Actor, input: RaiseRuleNcrInput): Prom
           `${rule} does not refuse this item now, so there is nothing to raise an NCR for.`,
         );
       }
-      const open = await tx.ncr.findFirst({ where: { [field]: targetId, ruleCode: rule, status: "OPEN" }, select: { id: true } });
+      const open = await tx.ncr.findFirst({ where: { jobId: job.id, [field]: targetId, ruleCode: rule, status: "OPEN" }, select: { id: true } });
       if (open) {
         throw new AppError(ERROR_CODES.VALIDATION_FAILED, { ncrId: open.id }, "An NCR under this rule is already open for this item.");
       }

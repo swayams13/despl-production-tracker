@@ -133,6 +133,8 @@ describe.skipIf(!RUN_DB)("L1.2f H5/H6 rule NCRs (DB)", async () => {
       ["another tenant's QC (the item is not found)", (j) => raise(bQc, j, "H5"), ERROR_CODES.NOT_FOUND],
       ["the wrong rule (H6 where H5 refuses)", (j) => raise(qc, j, "H6"), ERROR_CODES.VALIDATION_FAILED],
       ["a non-pressure item (no rule refuses it)", (j) => raise(qc, j, "H5", S, j.step(2)), ERROR_CODES.VALIDATION_FAILED],
+      // Review: H5/H6 refuse only Start (NOT_STARTED) and Done (IN_PROGRESS); a weld finished before the trigger is not refused.
+      ["a weld completed before the final PWHT", (j) => raise(qc, j, "H5", S, j.step(1)), ERROR_CODES.VALIDATION_FAILED],
     ])("%s is refused and nothing is written", async (_l, call, expected) => {
       const j = await pastTrigger("H5");
       expect(await code(call(j))).toBe(expected);
@@ -142,6 +144,16 @@ describe.skipIf(!RUN_DB)("L1.2f H5/H6 rule NCRs (DB)", async () => {
     it("before the trigger has started the rule does not refuse, so there is nothing to raise", async () => {
       const j = await o.job(RULES.H5.spec());
       expect(await code(raise(qc, j, "H5"))).toBe(ERROR_CODES.VALIDATION_FAILED);
+    });
+
+    it("a weld submitted before the final PWHT (awaiting QC, not refused by H5) has nothing to raise", async () => {
+      const j = await o.job(RULES.H5.spec());
+      await work(sup, j, "DONE", [[S, j.step(1)]]);
+      await accept(qc, j.step(1));
+      expect((await work(sup, j, "DONE", [[S, j.step(3)]])).applied).toMatchObject([{ to: "SUBMITTED" }]);
+      await RULES.H5.doTrigger(j);
+      expect(await code(raise(qc, j, "H5"))).toBe(ERROR_CODES.VALIDATION_FAILED);
+      expect(await owner.ncr.count({ where: { jobId: j.job.id } })).toBe(0);
     });
 
     it("a second NCR while one is OPEN for the same item and rule is refused", async () => {
