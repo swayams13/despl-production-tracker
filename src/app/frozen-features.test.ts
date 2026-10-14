@@ -71,15 +71,27 @@ beforeEach(() => {
 });
 
 describe("FEATURES defaults (build prompt §4)", () => {
-  it("ships exactly the five switches, all off", async () => {
+  it("ships the five frozen switches off, plus leanFloor (L1.2e), off unless LEAN_FLOOR=on", async () => {
     const { FEATURES } = await vi.importActual<typeof import("@/lib/shared/flags")>("@/lib/shared/flags");
-    expect(FEATURES).toEqual({
-      clientPortal: false,
-      multiFamilyIntake: false,
-      cpmReplanUi: false,
-      analytics: false,
-      agents: false,
-    });
+    const was = process.env.LEAN_FLOOR;
+    try {
+      delete process.env.LEAN_FLOOR;
+      expect(FEATURES).toEqual({
+        clientPortal: false,
+        multiFamilyIntake: false,
+        cpmReplanUi: false,
+        analytics: false,
+        agents: false,
+        leanFloor: false,
+      });
+      for (const [value, expected] of [["on", true], ["1", false], ["off", false]] as const) {
+        process.env.LEAN_FLOOR = value;
+        expect(FEATURES.leanFloor, value).toBe(expected);
+      }
+    } finally {
+      if (was === undefined) delete process.env.LEAN_FLOOR;
+      else process.env.LEAN_FLOOR = was;
+    }
   });
 });
 
