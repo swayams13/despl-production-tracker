@@ -360,61 +360,18 @@ body {
   --track: #c4c9d0;
   --hover-border: #4a5260; /* == --muted: darker than --border #858b94 */
 }
-.theme-industrial.theme-outdoor {
-  --bg: #000; --surface: #000; --surface-2: #0c0f12; --border: #7c8b99;
-  --text: #fff; --muted: #d6dee5; --muted-2: #aeb9c2;
-  --accent: #ff9a4d; --accent-fg: #000;
-  --s-idle: #9aa3ac; --s-progress: #8fb6ff; --s-submitted: #c9a8ff;
-  --s-hold: #ffd24d; --s-overdue: #ff8b7a; --s-complete: #5be08f;
-  --border-width: 2px;
-  --mixp: 0%; --bordp: 100%; --wb: 500; --wt: 700;
-  --track: #6c7784;
-  --hover-border: #aeb9c2; /* == --muted-2: brighter than --border #7c8b99 */
-}
-
-/* ── AA-audit fixes (D27 task 6) ────────────────────────────────────────
-   Only rules the computed WCAG check actually failed once light/outdoor went
-   live are touched, and only in the palette that failed — the dark palette is
-   deliberately left byte-identical to `main` (see the report for its own
-   pre-existing shortfalls, which are frozen by that same requirement). */
-
-/* Status chips. The six .c-* rgba tints stay exactly as shipped — measured
-   against the light surface they still carry their labels (complete 4.62,
-   progress 4.84, submitted 5.62, overdue 4.62), so there is nothing to fix
-   there and a blanket re-tint would only make them worse. Two rules do fail:
-
-   .c-idle hardcodes color:#9aa0a8, a grey picked for a near-black chip — 1.76:1
-   over the light tint. --s-idle itself is no better (3.16), because the dot and
-   the label want different luminances; --muted is the readable neutral. 4.71.
-   .c-hold's label is --s-hold #9a6c05, whose ceiling on pure white is 4.64, so
-   no background can carry it to 4.5 on --surface-2. Halving the tint recovers
-   most of the gap (4.24 -> 4.45); the rest is a spec-level hue question. */
+/* ── Floor AA fixes ─────────────────────────────────────────────────────
+   Chips carry a 6% tint everywhere (frame 00). .c-idle hardcodes a grey
+   picked for a near-black chip, so on Floor it takes --muted instead. */
 .theme-industrial.theme-light .c-idle { color: var(--muted); }
-.theme-industrial.theme-outdoor .c-idle { color: var(--s-idle); }
 
 /* Gantt "actual" bar label: rgba(0,0,0,.75) reads on the dark palette's bright
    fills, not on light's darker ones (1.9:1 against --s-complete #1f7d4c). */
 .theme-industrial.theme-light .g-actual b { color: rgba(255, 255, 255, .92); }
 
-/* Matrix zero cell and the alert badges hardcode colours that vanish on
-   outdoor's black ground (3.07:1 and 1.44:1).
-
-   `.rail-item .badge-alert` is listed separately on purpose: the shell's icon
-   rail (added AFTER this audit ran) restates `color: #fff` at line ~717 with
-   the same specificity as `.theme-industrial.theme-outdoor .badge-alert`, and
-   being later in the file it won — silently re-shipping the exact 1.44:1
-   failure this block claims to fix, in the badge's ONLY real render context.
-   The bare selector stays for any future non-rail use. */
-.theme-industrial.theme-outdoor .mx-zero { color: var(--muted-2); }
-.theme-industrial.theme-outdoor .badge-alert,
-.theme-industrial.theme-outdoor .rail-item .badge-alert,
-.theme-industrial.theme-outdoor .bn-badge { color: #000; }
-
-/* The welding "standard duration" rail keeps its original dark grey (the dark
-   palette must render identically to main); the other two palettes take the
-   tokenised value, since #3a3f47 is invisible on outdoor's black. */
-.theme-industrial.theme-light .gbar i.std,
-.theme-industrial.theme-outdoor .gbar i.std { background: var(--track); }
+/* The welding "standard duration" rail keeps its original dark grey on Control
+   room; Floor takes the tokenised value. */
+.theme-industrial.theme-light .gbar i.std { background: var(--track); }
 
 .theme-industrial .mono { font-family: var(--font-jbmono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
 
