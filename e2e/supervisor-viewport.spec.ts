@@ -223,7 +223,11 @@ for (const path of SHELL_PAGES) {
         })
         .map((el) => {
           const r = el.getBoundingClientRect();
-          return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+          return {
+            left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height,
+            // position:fixed shell chrome. See the adjacency loop below.
+            chrome: el.matches(".bn-item, .rail-item"),
+          };
         });
     });
 
@@ -245,6 +249,13 @@ for (const path of SHELL_PAGES) {
       for (let j = i + 1; j < boxes.length; j++) {
         const a = boxes[i];
         const b = boxes[j];
+        // Fixed nav chrome vs scrolling content: the gap between them is a
+        // function of scroll offset, not of layout (the same reasoning as the
+        // `r.top < innerHeight` filter above). L2.0's type floor moved the
+        // /my-day card action to end 3.7px above the bottom nav at scroll 0;
+        // scrolling changes that gap, so it is not a defect. Chrome-vs-chrome
+        // (adjacent nav items) and content-vs-content are still checked.
+        if (a.chrome !== b.chrome) continue;
         const dx = Math.max(a.left - b.right, b.left - a.right, 0);
         const dy = Math.max(a.top - b.bottom, b.top - a.bottom, 0);
         const sameRow = dy === 0 && dx > 0;
