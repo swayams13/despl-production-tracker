@@ -29,7 +29,7 @@ async function signIn(page: import("@playwright/test").Page, email: string, stat
   // authenticated page carrying the "Sign out" control (src/app/page.tsx's
   // role redirect always lands somewhere inside the shell).
   await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(page.locator(".person-btn:visible")).toBeVisible();
 
   await page.context().storageState({ path: statePath });
 }

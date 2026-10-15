@@ -23,7 +23,7 @@ async function signedIn(browser: Browser, email: string): Promise<Page> {
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(page.locator(".person-btn:visible")).toBeVisible();
   return page;
 }
 

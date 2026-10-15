@@ -13,10 +13,11 @@ import { nextThemeState, themeLabel } from "@/lib/theme";
 import type { NotificationRow } from "@/lib/services/notifications.read";
 import { fmtWhen, notificationHref } from "@/lib/notifications-ui";
 import type { JobListItem } from "@/lib/services/jobs.read";
+import { activeItem, navFor, sidebarJobs, type NavIcon, type NavItem } from "@/lib/shared/nav";
 
 // Icons inlined from the mockup (lucide-react is pinned at an atypical 1.x here;
 // the approved SVGs are the pixel reference anyway).
-const icons = {
+const icons: Record<NavIcon | "themeMoon" | "themeSun", ReactNode> = {
   dashboard: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <rect x="3" y="3" width="7" height="9" rx="1" />
@@ -52,14 +53,14 @@ const icons = {
       <path d="M5 19l7-14 7 14M8 13h8" />
     </svg>
   ),
-  bom: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <path d="M3 7l9-4 9 4-9 4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4" />
-    </svg>
-  ),
   reports: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" />
+    </svg>
+  ),
+  newJob: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 5v14M5 12h14" />
     </svg>
   ),
   admin: (
@@ -76,22 +77,10 @@ const icons = {
       <path d="M4 6.5h16M4 12h16M4 17.5h10" />
     </svg>
   ),
-  navBoard: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3.2" y="3.2" width="17.6" height="17.6" rx="2.4" />
-      <path d="M9 17v-4.2M15 17V8.4" />
-    </svg>
-  ),
   navAlerts: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 9.5a6 6 0 0112 0v4.5l2 3H4l2-3z" />
       <path d="M9.8 20.2a2.6 2.6 0 004.4 0" />
-    </svg>
-  ),
-  navProfile: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="8" r="3.8" />
-      <path d="M4.5 20.5c1.4-3.8 4.2-5.6 7.5-5.6s6.1 1.8 7.5 5.6" />
     </svg>
   ),
   themeMoon: (
@@ -107,53 +96,12 @@ const icons = {
   ),
 };
 
-// Destinations shared by the tablet icon rail and phone bottom nav
-// (Task 4, SPEC-supervisor-ui-v3 §3 SupervisorNav row, extended by S13 with
-// the three real desktop-sidebar destinations a shop-floor tablet had no way
-// to reach below 1024px). Order is exact.
-// ponytail: /workspace, /qc, /jobs reuse the desktop icon set (icons.*) rather
-// than adding new navXxx-style glyphs in the thicker rail stroke — a visual
-// mismatch, not a functional one. Match the stroke style when someone revisits
-// the icon set.
-const SHELL_NAV: { href: string; label: string; icon: ReactNode; badge?: "overdue" | "unread" }[] = [
-  { href: "/my-day", label: "Today", icon: icons.navToday, badge: "overdue" },
-  { href: "/workspace", label: "Workspace", icon: icons.workspace },
-  { href: "/qc", label: "QC", icon: icons.qc },
-  { href: "/jobs", label: "Jobs", icon: icons.jobs },
-  { href: "/board", label: "Board", icon: icons.navBoard },
-  { href: "/alerts", label: "Alerts", icon: icons.navAlerts, badge: "unread" },
-  { href: "/profile", label: "Profile", icon: icons.navProfile },
-];
-
-/** Resolves a SHELL_NAV item's badge count from the two real counts AppShell receives. */
-function shellNavBadgeCount(badge: "overdue" | "unread" | undefined, overdueCount: number, unreadCount: number): number {
+/** Count shown on a nav item, from the two real counts AppShell receives. */
+function badgeCount(badge: NavItem["badge"], overdueCount: number, unreadCount: number): number {
   if (badge === "overdue") return overdueCount;
   if (badge === "unread") return unreadCount;
   return 0;
 }
-
-const NAV: { group: string; items: { href: string; label: string; icon: ReactNode; badge?: number }[] }[] = [
-  {
-    group: "Overview",
-    items: [
-      { href: "/dashboard", label: "Dashboard", icon: icons.dashboard },
-      { href: "/jobs", label: "Jobs", icon: icons.jobs },
-    ],
-  },
-  {
-    group: "Execution",
-    items: [
-      { href: "/workspace", label: "My Workspace", icon: icons.workspace },
-      { href: "/departments", label: "Departments", icon: icons.departments },
-      { href: "/qc", label: "QC & Hold Points", icon: icons.qc },
-      { href: "/welding", label: "Welding", icon: icons.welding },
-    ],
-  },
-  {
-    group: "Records",
-    items: [{ href: "/reports", label: "Reports", icon: icons.reports }],
-  },
-];
 
 const ROLE_LABEL: Record<string, string> = {
   ADMIN: "Admin",
@@ -189,39 +137,17 @@ export function AppShell({
   const roleLabel = userRoles.map((r) => ROLE_LABEL[r] ?? r).join(" / ") || "—";
   const [bellOpen, setBellOpen] = useState(false);
   const [jobOpen, setJobOpen] = useState(false);
+  const [personOpen, setPersonOpen] = useState<"foot" | "top" | null>(null);
 
-  // "Equipment types" / "Process routes" listed before "/admin" so
-  // pathname.startsWith() picks the more specific match first (see `active`
-  // below) when on /admin/equipment-types or /admin/templates — otherwise
-  // the shorter "/admin" href would win.
-  const adminGroupItems = [
-    ...(userRoles.includes("ADMIN") || userRoles.includes("PRODUCTION_HEAD")
-      ? [
-          { href: "/admin/families", label: "Product families", icon: icons.admin },
-          { href: "/admin/equipment-types", label: "Equipment types", icon: icons.admin },
-          { href: "/admin/templates", label: "Process routes", icon: icons.admin },
-          { href: "/admin/routes", label: "Component routes", icon: icons.admin },
-          { href: "/admin/qcp-templates", label: "QCP templates", icon: icons.admin },
-        ]
-      : []),
-    // Lean Core M3: part families and their routes. Literal role strings on
-    // purpose: this is a client file and must not import the service layer.
-    ...(["ADMIN", "PRODUCTION_HEAD", "ENGINEERING", "PLANNER"].some((r) => userRoles.includes(r))
-      ? [{ href: "/admin/master-data", label: "Master data", icon: icons.admin }]
-      : []),
-    ...(userRoles.includes("ADMIN") || userRoles.includes("MANAGEMENT")
-      ? [{ href: "/admin", label: "Admin", icon: icons.admin }]
-      : []),
-  ];
-  const nav = adminGroupItems.length > 0 ? [...NAV, { group: "Admin", items: adminGroupItems }] : NAV;
-  const active = nav.flatMap((g) => g.items).find((i) => pathname.startsWith(i.href));
+  const { primary, more } = navFor(userRoles);
+  const active = activeItem([...primary, ...more], pathname);
+  const sidebarJobList = primary.some((i) => i.href === "/jobs") ? sidebarJobs(jobs) : [];
 
-  // Job switcher badge: the job the URL is scoped to (/jobs/:id), falling
-  // back to the first real job when browsing cross-job pages. No demo/mock
-  // fallback — CLAUDE.md hard-bans mock data inside components, so with zero
-  // jobs this renders the same honest empty state as the dropdown below.
-  const jobIdMatch = pathname.match(/^\/jobs\/(\d+)/);
-  const currentJob = (jobIdMatch ? jobs.find((j) => j.id === Number(jobIdMatch[1])) : undefined) ?? jobs[0];
+  // Job switcher (12C): shown only inside a job (/jobs/:id). Switching goes to
+  // the job's page: there are no job tabs before L2.8 (sub-routes are
+  // job-specific), so "keep the current tab" has nothing to keep yet.
+  const jobIdMatch = pathname.match(/^\/jobs\/(\d+)(?:\/.*)?$/);
+  const currentJob = jobIdMatch ? jobs.find((j) => j.id === Number(jobIdMatch[1])) : undefined;
 
   const openNotification = async (n: NotificationRow) => {
     if (!n.readAt) await markNotificationReadAction(n.id);
@@ -270,6 +196,51 @@ export function AppShell({
     });
   };
 
+  // Person-block menu (12B): role, theme and sign out. One element, rendered
+  // in the sidebar foot (desktop) and the topbar (tablet, phone) — CSS shows
+  // whichever the breakpoint wants. The menu stays open while the theme cycles.
+  const personMenu = (placement: "foot" | "top") => (
+    <div className={`person person-${placement}`}>
+      <button
+        type="button"
+        className="person-btn"
+        aria-haspopup="menu"
+        aria-expanded={personOpen === placement}
+        aria-label={`Account menu, ${userName}`}
+        onClick={() => setPersonOpen((v) => (v === placement ? null : placement))}
+      >
+        <span className="avatar">{initials}</span>
+        <span className="person-id">
+          <b>{userName}</b>
+          <small>{roleLabel}</small>
+        </span>
+      </button>
+      {personOpen === placement && (
+        <div className="drop person-drop" role="menu">
+          <div className="d-row person-who">
+            {userName}
+            <small>{roleLabel}</small>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            className="d-row person-item person-theme"
+            aria-label={`Theme: ${themeText}. Switch theme`}
+            aria-busy={themePending}
+            aria-disabled={themePending}
+            onClick={cycleTheme}
+          >
+            {themeIcon}
+            <span>Theme: {themeText}</span>
+          </button>
+          <button type="button" role="menuitem" className="d-row person-item" onClick={() => logout()}>
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -277,37 +248,57 @@ export function AppShell({
           <b>DESPL</b>
           <span>Production Tracker</span>
         </div>
-        {nav.map((g) => (
-          <div className="navgrp" key={g.group}>
-            <h6>{g.group}</h6>
-            {g.items.map((it) => (
+        <div className="navgrp">
+          {primary.map((it) => (
+            <Link
+              key={it.href}
+              href={it.href}
+              className={`nav-item${active?.href === it.href ? " active" : ""}`}
+            >
+              {icons[it.icon]}
+              {it.label}
+              {badgeCount(it.badge, overdueCount, notifications.unreadCount) > 0 ? (
+                <span className="badge">{badgeCount(it.badge, overdueCount, notifications.unreadCount)}</span>
+              ) : null}
+            </Link>
+          ))}
+        </div>
+        {sidebarJobList.length > 0 && (
+          <div className="navgrp">
+            <h6>Active jobs</h6>
+            {sidebarJobList.map((j) => (
+              <Link
+                key={j.id}
+                href={`/jobs/${j.id}`}
+                className={`nav-item nav-job${currentJob?.id === j.id ? " active" : ""}`}
+              >
+                <span className="mono">{j.jobNumber}</span>
+                {j.forecastVarianceDays != null && j.forecastVarianceDays > 0 ? (
+                  <span className="badge">+{j.forecastVarianceDays}d</span>
+                ) : null}
+              </Link>
+            ))}
+            <Link href="/jobs" className="nav-item nav-all-jobs">
+              All jobs
+            </Link>
+          </div>
+        )}
+        {more.length > 0 && (
+          <div className="navgrp">
+            <h6>More</h6>
+            {more.map((it) => (
               <Link
                 key={it.href}
                 href={it.href}
-                className={`nav-item${pathname.startsWith(it.href) ? " active" : ""}`}
+                className={`nav-item${active?.href === it.href ? " active" : ""}`}
               >
-                {it.icon}
+                {icons[it.icon]}
                 {it.label}
-                {it.href === "/workspace" && overdueCount > 0 ? <span className="badge">{overdueCount}</span> : null}
               </Link>
             ))}
           </div>
-        ))}
-        <div className="user">
-          <div className="avatar">{initials}</div>
-          <div>
-            <b style={{ fontWeight: 500 }}>{userName}</b>
-            <small>{roleLabel}</small>
-          </div>
-          <button
-            className="btn"
-            style={{ marginLeft: "auto", padding: "4px 8px" }}
-            aria-label="Sign out"
-            onClick={() => logout()}
-          >
-            Sign out
-          </button>
-        </div>
+        )}
+        <div className="user">{personMenu("foot")}</div>
       </aside>
 
       {/* Tablet icon rail (640-1023px, SPEC-responsive-app-v2 §3.1) — rendered
@@ -317,42 +308,37 @@ export function AppShell({
           a JS matchMedia toggle. */}
       <nav className="icon-rail" aria-label="Primary">
         <div className="rail-avatar">{initials}</div>
-        {SHELL_NAV.map((it) => {
-          const isActive = pathname.startsWith(it.href);
-          const count = shellNavBadgeCount(it.badge, overdueCount, notifications.unreadCount);
+        {primary.map((it) => {
+          const count = badgeCount(it.badge, overdueCount, notifications.unreadCount);
           return (
-            <Link key={it.href} href={it.href} className={`rail-item${isActive ? " active" : ""}`}>
-              {it.icon}
+            <Link
+              key={it.href}
+              href={it.href}
+              className={`rail-item${active?.href === it.href ? " active" : ""}`}
+            >
+              {icons[it.icon]}
               <span>{it.label}</span>
               {count > 0 && it.badge === "overdue" && <span className="badge">{count}</span>}
               {count > 0 && it.badge === "unread" && <span className="badge-alert">{count}</span>}
             </Link>
           );
         })}
-        <div className="rail-spacer" />
-        <button
-          type="button"
-          className="rail-item rail-theme"
-          aria-label={`Theme: ${themeText}. Switch theme`}
-          aria-busy={themePending}
-          aria-disabled={themePending}
-          onClick={cycleTheme}
-        >
-          {themeIcon}
-          <span>{themeText}</span>
-        </button>
       </nav>
 
       {/* Phone bottom nav (<640px) — same unconditional-render + CSS-toggle pattern. */}
+      {/* A multi-role union can exceed what a phone bar holds: first five in registry order. */}
       <nav className="bottom-nav" aria-label="Primary">
-        {SHELL_NAV.map((it) => {
-          const isActive = pathname.startsWith(it.href);
-          const count = shellNavBadgeCount(it.badge, overdueCount, notifications.unreadCount);
+        {primary.slice(0, 5).map((it) => {
+          const count = badgeCount(it.badge, overdueCount, notifications.unreadCount);
           return (
-            <Link key={it.href} href={it.href} className={`bn-item${isActive ? " active" : ""}`}>
+            <Link
+              key={it.href}
+              href={it.href}
+              className={`bn-item${active?.href === it.href ? " active" : ""}`}
+            >
               <span className="bn-icon-wrap">
-                {it.icon}
-                {count > 0 && it.badge === "unread" && <em className="bn-badge">{count}</em>}
+                {icons[it.icon]}
+                {count > 0 && <em className="bn-badge">{count}</em>}
               </span>
               <span>{it.label}</span>
             </Link>
@@ -363,40 +349,30 @@ export function AppShell({
       <div className="main">
         <div className="topbar">
           <span className="crumb">
-            {active ? (
+            {currentJob ? (
               <>
-                Overview / <b>{active.label}</b>
+                <Link href="/jobs">Jobs</Link> / <b>{currentJob.jobNumber}</b>
               </>
             ) : (
-              <b>DESPL</b>
+              <b>{active?.label ?? "DESPL"}</b>
             )}
           </span>
 
+          {currentJob && (
           <div className="jobswitch" onClick={() => setJobOpen((v) => !v)}>
-            {currentJob ? (
-              <>
-                <span className="mono" style={{ fontSize: "var(--fs-sm, 12px)" }}>
-                  {currentJob.jobNumber}
-                </span>
-                <span style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>
-                  {currentJob.projectName ?? currentJob.familyName}
-                </span>
-                <StageSpine variant="mini" segments={currentJob.unitRollup} />
-              </>
-            ) : (
-              <span style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>No jobs yet</span>
-            )}
+            <span className="mono" style={{ fontSize: "var(--fs-sm, 12px)" }}>
+              {currentJob.jobNumber}
+            </span>
+            <span style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>
+              {currentJob.projectName ?? currentJob.familyName}
+            </span>
+            <StageSpine variant="mini" segments={currentJob.unitRollup} />
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8B919A" strokeWidth={2}>
               <path d="M6 9l6 6 6-6" />
             </svg>
             {jobOpen && (
               <div className="drop" style={{ left: 0, right: "auto", minWidth: 320 }}>
-                {jobs.length === 0 ? (
-                  <div className="d-row" style={{ color: "var(--muted)" }}>
-                    No jobs yet
-                  </div>
-                ) : (
-                  jobs.map((j) => (
+                {jobs.map((j) => (
                     <div
                       className="d-row"
                       key={j.id}
@@ -415,27 +391,16 @@ export function AppShell({
                             : `forecast ${j.forecastVarianceDays > 0 ? "+" : "−"}${Math.abs(j.forecastVarianceDays)}d`}
                       </small>
                     </div>
-                  ))
-                )}
+                ))}
               </div>
             )}
           </div>
+          )}
 
           <div className="right">
-            {/* Phase 6 (U7) is where a real ⌘K command palette lands — until
-                then no control renders here rather than one that does nothing
-                (CLAUDE.md "no dead controls", audit §8 item 6). */}
-            <button
-              type="button"
-              className="topbar-theme"
-              aria-label={`Theme: ${themeText}. Switch theme`}
-              aria-busy={themePending}
-              aria-disabled={themePending}
-              onClick={cycleTheme}
-            >
-              {themeIcon}
-              <span className="tt-label">{themeText}</span>
-            </button>
+            {/* ⌘K (12D) lands after L2.2 (it needs /u/[publicId] and a unit/person
+                search read); until then no control renders here rather than one
+                that does nothing (CLAUDE.md "no dead controls"). */}
             <button className="bell" onClick={() => setBellOpen((v) => !v)} aria-label="Notifications">
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
                 <path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -479,6 +444,7 @@ export function AppShell({
                 </div>
               )}
             </button>
+            {personMenu("top")}
           </div>
         </div>
 

@@ -190,9 +190,9 @@ for (const path of SHELL_PAGES) {
       // which is covered there once rather than re-discovered here.
       const sidebar = document.querySelector<HTMLElement>(".sidebar");
       const desktopShell = !!sidebar && getComputedStyle(sidebar).display !== "none";
-      const sel = '.btn, .rail-item, .bn-item, .topbar-theme, input:not([type="checkbox"]):not([type="radio"]), select';
+      const sel = '.btn, .rail-item, .bn-item, .person-btn, .person-item, input:not([type="checkbox"]):not([type="radio"]), select';
       const all = Array.from(document.querySelectorAll<HTMLElement>(sel)).filter(
-        (el) => !el.closest(".sidebar") && !(desktopShell && el.classList.contains("topbar-theme")),
+        (el) => !el.closest(".sidebar") && !(desktopShell && el.classList.contains("person-btn")),
       );
       // Drop elements nested inside another matched element (an icon-in-button
       // etc. always "overlaps" its own ancestor button) — only leaf actionable
@@ -365,12 +365,13 @@ test("SYSTEM + a fine pointer stays on Control room (no theme-light)", async ({ 
   await ctx.close();
 });
 
-// ── /board /alerts /profile reachability — no dead link from each shell variant ──
+// ── shell reachability — no dead link from each shell variant ──
+// L2.1: the supervisor's bar is the nav registry's SUPERVISOR items (Today, Team,
+// Jobs); /board and /profile are gone. [label, path, page heading]
 const NAV_TARGETS = [
-  ["Board", "/board"],
-  ["Alerts", "/alerts"],
-  ["Profile", "/profile"],
-  ["Today", "/my-day"],
+  ["Jobs", "/jobs", "Jobs"],
+  ["Team", "/workspace", "My Workspace"],
+  ["Today", "/my-day", "My Day"],
 ] as const;
 
 // REAL FINDING, discovered while writing this test (not present before this
@@ -404,26 +405,26 @@ test.fail(
 // protected pages reachable by direct navigation (deep link/bookmark),
 // exactly like the desktop case below — the breakpoint collision above is a
 // missing NAV LINK, not a broken route.
-test("shell reachability: tablet — /board /alerts /profile are live, protected routes reachable by direct navigation", async ({ page }, testInfo) => {
+test("shell reachability: tablet — /alerts /workspace /jobs are live, protected routes reachable by direct navigation", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "tablet", "tablet-specific: see the two comments above");
-  for (const [label, path] of [["Board", "/board"], ["Alerts", "/alerts"], ["Profile", "/profile"]] as const) {
+  for (const [label, path] of [["Alerts", "/alerts"], ["My Workspace", "/workspace"], ["Jobs", "/jobs"]] as const) {
     await page.goto(path);
     await expect(page).toHaveURL(new RegExp(`${path}$`));
-    await expect(page.getByRole("heading", { name: label })).toBeVisible();
+    await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
   }
 });
 
-// Starts from /board, not /my-day — the dedicated test below covers /my-day
+// Starts from /alerts, not /my-day — the dedicated test below covers /my-day
 // itself as a starting point (it used to be a broken one; see that test's
-// comment). This proves Board -> Alerts -> Profile -> Today(/my-day) is
-// fully reachable via the bottom nav.
-test("shell reachability: phone bottom nav reaches Board/Alerts/Profile/Today", async ({ page }, testInfo) => {
+// comment). This proves Jobs -> Team -> Today(/my-day) is fully reachable
+// via the bottom nav.
+test("shell reachability: phone bottom nav reaches Jobs/Team/Today", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "phone", "phone-specific nav surface (.bottom-nav)");
-  await page.goto("/board");
-  for (const [label, path] of NAV_TARGETS) {
+  await page.goto("/alerts");
+  for (const [label, path, heading] of NAV_TARGETS) {
     await page.locator(".bottom-nav .bn-item", { hasText: label }).click();
     await expect(page).toHaveURL(new RegExp(`${path}$`));
-    await expect(page.getByRole("heading", { name: label === "Today" ? "My Day" : label })).toBeVisible();
+    await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
   }
 });
 
@@ -436,8 +437,8 @@ test("shell reachability: phone bottom nav is reachable while ON /my-day itself"
   test.skip(testInfo.project.name !== "phone", "phone-specific nav surface (.bottom-nav)");
   await page.goto("/my-day");
   expect(await page.evaluate(() => window.innerHeight)).toBeLessThanOrEqual(900);
-  await page.locator(".bottom-nav .bn-item", { hasText: "Board" }).click({ timeout: 3000 });
-  await expect(page).toHaveURL(/\/board$/);
+  await page.locator(".bottom-nav .bn-item", { hasText: "Jobs" }).click({ timeout: 3000 });
+  await expect(page).toHaveURL(/\/jobs$/);
 });
 
 // Desktop's sidebar deliberately has NO Board/Alerts/Profile link — a
@@ -451,12 +452,12 @@ test("shell reachability: phone bottom nav is reachable while ON /my-day itself"
 // would be a regression to add here, out of this task's scope). What IS
 // testable and IS the actual gate concern: the routes are live, protected,
 // and not a dead end when reached directly (deep link, bookmark, ⌘K later).
-test("shell reachability: desktop — /board /alerts /profile are live, protected routes reachable by direct navigation", async ({ page }, testInfo) => {
+test("shell reachability: desktop — /alerts /workspace /jobs are live, protected routes reachable by direct navigation", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "desktop-specific: see the comment above this test");
-  for (const [label, path] of [["Board", "/board"], ["Alerts", "/alerts"], ["Profile", "/profile"]] as const) {
+  for (const [label, path] of [["Alerts", "/alerts"], ["My Workspace", "/workspace"], ["Jobs", "/jobs"]] as const) {
     await page.goto(path);
     await expect(page).toHaveURL(new RegExp(`${path}$`));
-    await expect(page.getByRole("heading", { name: label })).toBeVisible();
+    await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
   }
 });
 
@@ -468,7 +469,7 @@ test("protected routes redirect to /login when unauthenticated", async ({ browse
   // came back with `setup`'s despl_session cookie already attached).
   const ctx = await browser.newContext({ storageState: undefined }); // genuinely logged out
   const page = await ctx.newPage();
-  for (const path of ["/board", "/alerts", "/profile"]) {
+  for (const path of ["/workspace", "/alerts", "/jobs"]) {
     await page.goto(path);
     await expect(page).toHaveURL(/\/login/);
   }
@@ -545,7 +546,10 @@ const THEME_CYCLE = ["Automatic", "Floor", "Control room"] as const;
  * starting state, since the cycle order is fixed (Automatic -> Floor ->
  * Control room -> Automatic, src/lib/theme.ts's nextThemeState). */
 async function setTheme(page: Page, target: (typeof THEME_CYCLE)[number]) {
-  const btn = page.locator(".topbar-theme");
+  // The theme control lives in the person menu (L2.1); the menu stays open while it cycles.
+  // Open it only if a previous call left it open (the button toggles).
+  const btn = page.locator(".person-theme");
+  if ((await btn.count()) === 0) await page.locator(".person-btn:visible").click();
   for (let i = 0; i < THEME_CYCLE.length; i++) {
     const current = ((await btn.textContent()) ?? "").trim();
     if (current.includes(target)) return;
