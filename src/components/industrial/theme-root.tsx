@@ -14,7 +14,7 @@ import { themeClassName, type ThemeState } from "@/lib/theme";
  * runs before the browser paints anything after it — including the rest of
  * this div's own children — so it gives the same zero-flash guarantee, just
  * correctly scoped. It only ever runs for a genuine SYSTEM preference; an
- * explicit LIGHT/DARK/Outdoor was already resolved correctly server-side, and
+ * explicit LIGHT/DARK (or a stored outdoorMode, read as Floor) was already resolved correctly server-side, and
  * nothing is interpolated into the script (the preference is branched on at
  * render time), so there is no escaping hazard.
  *
@@ -23,21 +23,21 @@ import { themeClassName, type ThemeState } from "@/lib/theme";
  */
 const SYSTEM_THEME_SCRIPT =
   "(function(){var e=document.currentScript.parentElement;" +
-  "if(window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)" +
+  "if(window.matchMedia&&matchMedia('(pointer: coarse)').matches)" +
   "e.classList.add('theme-light');})();";
 
 interface ThemeContextValue extends ThemeState {
   /** The class string for THIS render, with SYSTEM already resolved. */
   themeClass: string;
-  /** SYSTEM resolved to light by the OS. False under an explicit preference. */
-  systemLight: boolean;
+  /** Automatic resolved to Floor by a coarse primary pointer. False under an explicit preference. */
+  autoFloor: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   themePreference: "SYSTEM",
   outdoorMode: false,
   themeClass: "theme-industrial",
-  systemLight: false,
+  autoFloor: false,
 });
 
 /**
@@ -62,7 +62,8 @@ export function ThemeRoot({
   const isSystem = themePreference === "SYSTEM" && !outdoorMode;
 
   /**
-   * Whether SYSTEM currently resolves to light. Starts false so the first
+   * Whether Automatic currently resolves to Floor (coarse primary pointer).
+   * Starts false so the first
    * client render matches the server's dark guess (same reasoning as the
    * script above), then the effect corrects it.
    *
@@ -71,30 +72,30 @@ export function ThemeRoot({
    * the admin dialogs) re-declare the palette class from the context below.
    * A DOM-only correction left them reading the unresolved "theme-industrial"
    * and rendering a dark sheet over a light page — the state of any SYSTEM
-   * user on a light-preferring OS. (That is no longer the DEFAULT state:
+   * user on a coarse-pointer device. (That is no longer the DEFAULT state:
    * users predating the theme system were back-filled to an explicit DARK,
    * migration 20260818120000_theme_preference_dark_backfill. It still applies
    * to new accounts, which keep the SYSTEM column default, and to /login,
    * which is always SYSTEM because there is no user row to read yet.)
    *
    * It is also the ONLY matchMedia listener in the app: AppShell's theme
-   * button reads `systemLight` from the context for its sun/moon icon rather
+   * button reads `autoFloor` from the context for its sun/moon icon rather
    * than running a second one for the same fact.
    */
-  const [systemLight, setSystemLight] = useState(false);
+  const [autoFloor, setSystemLight] = useState(false);
   useEffect(() => {
     if (!isSystem) {
       setSystemLight(false);
       return;
     }
-    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const mq = window.matchMedia("(pointer: coarse)");
     const sync = () => setSystemLight(mq.matches);
     sync();
     mq.addEventListener("change", sync);
     return () => mq.removeEventListener("change", sync);
   }, [isSystem]);
 
-  const themeClass = themeClassName(isSystem && systemLight ? "LIGHT" : themePreference, outdoorMode);
+  const themeClass = themeClassName(isSystem && autoFloor ? "LIGHT" : themePreference, outdoorMode);
 
   return (
     // suppressHydrationWarning: the inline script below mutates this element's
@@ -102,7 +103,7 @@ export function ThemeRoot({
     // element is dynamic, so this suppresses exactly the mismatch we caused.
     <div suppressHydrationWarning className={className ? `${themeClass} ${className}` : themeClass}>
       {isSystem ? <script dangerouslySetInnerHTML={{ __html: SYSTEM_THEME_SCRIPT }} /> : null}
-      <ThemeContext.Provider value={{ themePreference, outdoorMode, themeClass, systemLight }}>
+      <ThemeContext.Provider value={{ themePreference, outdoorMode, themeClass, autoFloor }}>
         {children}
       </ThemeContext.Provider>
     </div>

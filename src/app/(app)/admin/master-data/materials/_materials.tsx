@@ -193,7 +193,7 @@ export function MaterialsView({
       )}
 
       {rows.length === 0 && editing !== "new" ? (
-        <div className="card" style={{ padding: 16, fontSize: 13 }}>
+        <div className="card" style={{ padding: 16, fontSize: "var(--fs-md, 13px)" }}>
           {totals.all === 0
             ? "No material grades yet. Load the Standard Parts Master on the Import tab, or add a grade."
             : "No grades match these filters."}
@@ -313,7 +313,7 @@ export function MaterialsView({
           title={`Revise ${reviseFor.spec} ${reviseFor.grade}`}
           footer={<ModalConfirmFooter onCancel={() => setReviseFor(null)} onConfirm={revise} confirmLabel={busy ? "Reopening…" : "Revise grade"} disabled={busy || reason.trim().length < 5} />}
         >
-          <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
+          <div style={{ display: "grid", gap: 10, fontSize: "var(--fs-md, 13px)" }}>
             <p style={{ margin: 0 }}>The grade goes back to draft and needs review and approval again.</p>
             <label style={{ display: "grid", gap: 4 }}>
               Why is it being revised? (at least 5 characters)

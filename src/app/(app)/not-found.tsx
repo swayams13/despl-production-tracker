@@ -5,7 +5,7 @@ export default function AppNotFound() {
     <div className="page-h" style={{ flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
       <h1>Page not found</h1>
       <div className="card" style={{ maxWidth: 480, padding: 16 }}>
-        <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 13 }}>
+        <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: "var(--fs-md, 13px)" }}>
           That page doesn&apos;t exist, or you don&apos;t have access to it.
         </p>
         <Link href="/" className="btn btn-accent">

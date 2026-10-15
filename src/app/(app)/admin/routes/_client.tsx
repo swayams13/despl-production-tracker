@@ -89,7 +89,7 @@ export function RouteTemplateAdminClient({ admin }: { admin: RouteTemplateAdmin 
           <div className="card" key={ct.componentTypeId} style={{ marginBottom: 14 }}>
             <div className="hd">
               <h3>{ct.componentTypeName}</h3>
-              <span className="mono" style={{ color: "var(--muted)", fontSize: 11 }}>{ct.componentTypeCode}</span>
+              <span className="mono" style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{ct.componentTypeCode}</span>
             </div>
 
             <div style={{ padding: "0 16px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -152,7 +152,7 @@ export function RouteTemplateAdminClient({ admin }: { admin: RouteTemplateAdmin 
               {admin.operationFamilySeqs.map((o) => (
                 <tr className="row" key={o.operationRefId}>
                   <td><span className="mono">{o.operationCode}</span> — {o.operationName}</td>
-                  <td style={{ color: "var(--muted)", fontSize: 12 }}>
+                  <td style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>
                     {o.mappings.length === 0
                       ? "Not set for any family"
                       : o.mappings.map((m) => `${m.familyName}: seq ${m.leadTimeProcessSeq}`).join(", ")}
@@ -207,13 +207,13 @@ function RouteGroup({
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 600, fontSize: 12.5 }}>{title}</span>
+        <span style={{ fontWeight: 600, fontSize: "var(--fs-sm, 12px)" }}>{title}</span>
         {latest && (
           <>
             <StatusChip status="complete" label={`v${latest.version}`} />
-            <span style={{ color: "var(--muted)", fontSize: 11 }}>{latest.stepCount} steps</span>
+            <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{latest.stepCount} steps</span>
             {latest.jobCount > 0 && (
-              <span className="mono" style={{ color: "var(--accent)", fontSize: 11, fontWeight: 600 }}>
+              <span className="mono" style={{ color: "var(--accent)", fontSize: "var(--fs-xs, 11px)", fontWeight: 600 }}>
                 {latest.jobCount} component{latest.jobCount === 1 ? "" : "s"} pinned
               </span>
             )}
@@ -468,7 +468,7 @@ function StepRow({
           ))}
           <option value="__new__">+ New operation…</option>
         </select>
-        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "var(--fs-sm, 12px)" }}>
           <input type="checkbox" checked={step.optional} onChange={(e) => onChange({ optional: e.target.checked })} />
           Optional
         </label>
@@ -577,7 +577,7 @@ function MappingDialog({
               />
             </div>
             {error && (
-              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 10, fontSize: 11 }}>
+              <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 10, fontSize: "var(--fs-xs, 11px)" }}>
                 <span className="chip c-overdue"><i />{error.code}</span>
                 <span style={{ color: "var(--muted)", flex: "1 1 160px" }}>{error.message}</span>
               </div>

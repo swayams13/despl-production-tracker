@@ -330,7 +330,7 @@ export function StepEditor({
                             ["acceptanceStandard", "Acceptance standard"],
                             ["recordDocument", "Record / document"],
                           ] as const).map(([field, label]) => (
-                            <label key={field} style={{ display: "grid", gap: 2, fontSize: 11, color: "var(--muted)" }}>
+                            <label key={field} style={{ display: "grid", gap: 2, fontSize: "var(--fs-xs, 11px)", color: "var(--muted)" }}>
                               {label}
                               <input className="ws-detail" value={r[field]} onChange={(e) => update(r.key, { [field]: e.target.value } as Partial<EditorRow>)} />
                             </label>

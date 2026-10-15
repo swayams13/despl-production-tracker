@@ -114,7 +114,7 @@ function CommandRow({
       <td className="mono" style={{ color: "var(--muted)", width: 90 }}>{row.jobNumber}</td>
       <td>
         {row.processName}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
           {row.stageLabel}
           {showDept ? ` · ${row.deptName}` : ""}
           {row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}
@@ -193,15 +193,15 @@ function ReassignModal({
     >
       {step === 1 ? (
         <>
-          <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 12px" }}>{row.jobNumber} · {row.stageLabel}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</p>
-          <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>New owner</label>
+          <p style={{ color: "var(--muted)", fontSize: "var(--fs-md, 13px)", margin: "0 0 12px" }}>{row.jobNumber} · {row.stageLabel}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</p>
+          <label style={{ display: "block", fontSize: "var(--fs-xs, 11px)", color: "var(--muted)", marginBottom: 4 }}>New owner</label>
           <select className="btn" style={{ width: "100%" }} value={targetId} onChange={(e) => setTargetId(e.target.value ? Number(e.target.value) : "")} aria-label="New owner">
             <option value="">Choose a member…</option>
             {members.map((m) => <option key={m.userId} value={m.userId}>{m.name}</option>)}
           </select>
         </>
       ) : (
-        <p style={{ fontSize: 13, margin: 0 }}>
+        <p style={{ fontSize: "var(--fs-md, 13px)", margin: 0 }}>
           Reassign <b>{row.processName}</b> from <b>{fromName}</b> to <b>{target?.name}</b>?
         </p>
       )}
@@ -233,11 +233,11 @@ function TeamSection({ team, canAct }: { team: TeamMemberRow[]; canAct: boolean 
           {team.map((member) => (
             <details key={member.userId} open={member.overdueCount > 0}>
               <summary style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", listStyle: "none" }}>
-                <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>
+                <div className="avatar" style={{ width: 24, height: 24, fontSize: "var(--fs-xs, 11px)" }}>
                   {member.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
                 </div>
-                <b style={{ fontSize: 13 }}>{member.name}</b>
-                <span className="mono" style={{ color: "var(--muted)", fontSize: 11.5 }}>{member.openCount} open</span>
+                <b style={{ fontSize: "var(--fs-md, 13px)" }}>{member.name}</b>
+                <span className="mono" style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{member.openCount} open</span>
                 {member.overdueCount > 0 && (
                   <span className="chip c-overdue"><i />{member.overdueCount} overdue</span>
                 )}
@@ -247,7 +247,7 @@ function TeamSection({ team, canAct }: { team: TeamMemberRow[]; canAct: boolean 
                   <p className="note" style={{ margin: "8px 0", textAlign: "left" }}>No open items.</p>
                 ) : (
                   member.items.map((item) => (
-                    <div key={item.ranked.plan.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: 12 }}>
+                    <div key={item.ranked.plan.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: "var(--fs-sm, 12px)" }}>
                       <span>
                         {item.processName}
                         <span style={{ color: "var(--muted)" }}> · {item.jobNumber} · {item.stageLabel}</span>

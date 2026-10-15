@@ -63,7 +63,7 @@ function AlertRow({ n }: { n: NotificationRow }) {
       onClick={href ? open : undefined}
     >
       <div style={{ flex: 1, minWidth: 0 }}>{body}</div>
-      <span className="mono" style={{ color: "var(--muted)", fontSize: 11, flexShrink: 0 }}>{fmtWhen(n.createdAt)}</span>
+      <span className="mono" style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)", flexShrink: 0 }}>{fmtWhen(n.createdAt)}</span>
       {!n.readAt && (
         <button
           type="button"

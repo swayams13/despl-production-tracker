@@ -110,7 +110,7 @@ export function WeldingClient({
                       strokeWidth={1.5}
                     />
                   </svg>
-                  <span style={{ fontSize: 10 }}>14-day output</span>
+                  <span style={{ fontSize: "var(--fs-xs, 11px)" }}>14-day output</span>
                 </span>
               </div>
               {w.flagged && (
@@ -427,7 +427,7 @@ function LogJointForm({
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
         {welders.map((w) => (
-          <label key={w.welderId} style={{ display: "flex", gap: 5, alignItems: "center", fontSize: 12, color: "var(--muted)" }}>
+          <label key={w.welderId} style={{ display: "flex", gap: 5, alignItems: "center", fontSize: "var(--fs-sm, 12px)", color: "var(--muted)" }}>
             <input type="checkbox" checked={welderIds.has(w.welderId)} onChange={() => toggleWelder(w.welderId)} />
             {w.name}
           </label>

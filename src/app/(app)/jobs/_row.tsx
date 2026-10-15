@@ -36,7 +36,7 @@ export function JobCardView({ job }: { job: JobListItem }) {
     <div className="rt-card" onClick={() => router.push(`/jobs/${job.id}`)} style={{ cursor: "pointer" }}>
       <div className="rt-card-top">
         <b className="mono">{job.jobNumber}</b>
-        <span className="mono" style={{ fontSize: 12 }}>{job.percentComplete}%</span>
+        <span className="mono" style={{ fontSize: "var(--fs-sm, 12px)" }}>{job.percentComplete}%</span>
       </div>
       <div className="rt-card-meta">
         {job.familyName} · {job.projectName ?? "—"} · {job.unitCount} unit{job.unitCount === 1 ? "" : "s"}

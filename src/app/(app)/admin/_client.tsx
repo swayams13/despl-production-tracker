@@ -528,7 +528,7 @@ function ConfirmDeactivateDialog({
             <Dialog.Title asChild><h2>Deactivate {row.name}?</h2></Dialog.Title>
           </div>
           <div className="sh-body">
-            <p style={{ fontSize: 13, margin: 0 }}>
+            <p style={{ fontSize: "var(--fs-md, 13px)", margin: 0 }}>
               {row.openItemsCount > 0
                 ? `This person still has ${row.openItemsCount} open item${row.openItemsCount === 1 ? "" : "s"} assigned. Deactivating does not release them — a supervisor, Production Head, or admin can release each item from My Day's "Held by teammates" list.`
                 : "This person has no open items assigned."}

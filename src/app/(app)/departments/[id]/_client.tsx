@@ -55,7 +55,7 @@ export function DepartmentDetailClient({ dept, commandCenterCode }: { dept: Dept
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd">
           <h3>Open items</h3>
-          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{dept.openItems.length} · click a row to open the stage panel</span>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{dept.openItems.length} · click a row to open the stage panel</span>
         </div>
         {dept.openItems.length === 0 ? (
           <p className="note" style={{ margin: "16px 0" }}>Nothing open for this department.</p>

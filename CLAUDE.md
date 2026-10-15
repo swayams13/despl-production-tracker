@@ -251,6 +251,8 @@ Industrial control-room aesthetic. Density and precision of Linear / Vercel dash
 
 ### Design tokens
 
+> **Superseded 15 Oct 2026 (L2.0):** the values below are the old dark palette. Two themes now: **Control room** (dark, base `.theme-industrial`) and **Floor** (light, `.theme-light`, default on coarse pointers; the control cycles Automatic → Floor → Control room). Token values live in `globals.css` and are guarded by `src/app/theme-tokens.test.ts`; frame 00 of `design/lean-core/` is the source, build prompt §8.2 item 22 the deviation. Inline `fontSize` literals are gone: use `var(--fs-*)`. The black Outdoor palette is retired.
+
 Colors (CSS variables in `globals.css`):
 
 - `--bg` #0B0C0E · `--surface` #141619 · `--surface-2` #1C1F24 · `--border` #262A30

@@ -54,7 +54,7 @@ export function MilestoneTimeline({ items, onItemClick, className }: MilestoneTi
                   title={item.detail ?? item.label}
                   aria-label={item.detail ?? `${item.label}: ${tokens.label}`}
                   className={cn(
-                    "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ring-4 ring-[var(--surface)]",
+                    "flex h-6 w-6 items-center justify-center rounded-full text-[11px] coarse:text-xs font-bold ring-4 ring-[var(--surface)]",
                     interactive && "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--accent)]",
                   )}
                   style={{ backgroundColor: tokens.fg, color: "#ffffff" }}
@@ -62,7 +62,7 @@ export function MilestoneTimeline({ items, onItemClick, className }: MilestoneTi
                   <span aria-hidden="true">{ICON_BY_STATUS[item.status]}</span>
                 </button>
                 <span className="line-clamp-2 text-xs font-medium leading-tight">{item.label}</span>
-                {item.date && <span className="tabular text-[11px] text-[var(--muted-fg)]">{item.date}</span>}
+                {item.date && <span className="tabular text-[11px] coarse:text-xs text-[var(--muted-fg)]">{item.date}</span>}
               </div>
               {i < items.length - 1 && (
                 <div

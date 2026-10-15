@@ -116,7 +116,7 @@ function QcpSectionRows({
   return (
     <>
       <tr>
-        <td colSpan={9} style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".5px", color: "var(--muted)", background: "var(--surface-2)", fontWeight: 600 }}>
+        <td colSpan={9} style={{ fontSize: "var(--fs-xs, 11px)", textTransform: "uppercase", letterSpacing: ".5px", color: "var(--muted)", background: "var(--surface-2)", fontWeight: 600 }}>
           {sec.title}
         </td>
       </tr>
@@ -163,7 +163,7 @@ function QcpRow({
       <td className="mono" style={{ color: "var(--muted)" }}>{row.srNo}</td>
       <td>{row.activity}</td>
       <td><span className="hclass">{row.classCode}</span></td>
-      <td className="mono" style={{ color: "var(--muted)", fontSize: 11.5 }}>{row.acceptanceCriteria ?? "—"}</td>
+      <td className="mono" style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{row.acceptanceCriteria ?? "—"}</td>
       <td>{row.qcCode ?? "—"}</td>
       <td>{row.tpiCode ?? "—"}</td>
       <td><span className={`chip ${CHIP[row.status] ?? "c-idle"}`}><i />{row.status}</span></td>

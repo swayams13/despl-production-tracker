@@ -122,7 +122,7 @@ function RefusalNote({ refusal }: { refusal: Refusal | null }) {
     // normally — found live in Task 2.4's browser pass (a real
     // REASON_REQUIRED refusal rendered as an unreadable vertical word
     // stack).
-    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6, fontSize: 11 }} onClick={stop}>
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6, fontSize: "var(--fs-xs, 11px)" }} onClick={stop}>
       <span className="chip c-overdue"><i />{refusal.code}</span>
       <span style={{ color: "var(--muted)", flex: "1 1 160px" }}>{refusal.message}</span>
     </div>
@@ -159,8 +159,8 @@ function MineActionButton({
       </button>
     );
   if (row.ranked.state === "SUBMITTED")
-    return <span style={{ color: "var(--muted)", fontSize: 11 }}>Awaiting QC</span>;
-  return <span style={{ color: "var(--muted)", fontSize: 11 }}>Blocked</span>;
+    return <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>Awaiting QC</span>;
+  return <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>Blocked</span>;
 }
 
 /**
@@ -220,7 +220,7 @@ function MineRowView({
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
       </td>
       <td className="mono">{fmtDue(row.ranked.plan.plannedFinish)}</td>
       <td className="num mono" style={{ color: overdue ? "var(--s-overdue)" : "var(--muted)" }}>
@@ -324,7 +324,7 @@ function PoolRowView({
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
       </td>
       <td className="mono">{fmtDue(row.ranked.plan.plannedFinish)}</td>
       <td className="num" style={{ minWidth: 220 }}>
@@ -445,7 +445,7 @@ function QcQueueRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage: () =
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
         {rejecting && (
           <div style={{ display: "flex", gap: 6, marginTop: 6 }} onClick={stop}>
             <input className="ws-detail" style={{ maxWidth: 260 }} placeholder="Reason for rejection" value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Rejection reason" autoFocus />
@@ -508,10 +508,10 @@ function SelfSubmittedRowView({ row, onOpenStage }: { row: MyDayRow; onOpenStage
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
       </td>
       <td className="num" style={{ width: 200 }}>
-        <span style={{ color: "var(--muted)", fontSize: 11 }}>Awaiting QC — submitted by you</span>
+        <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>Awaiting QC — submitted by you</span>
       </td>
     </tr>
   );
@@ -566,12 +566,12 @@ function TeamHeldRowView({
   return (
     <tr className="row" {...clickableRowProps(clickable ? onOpenStage : undefined)}>
       <td style={{ width: 40 }}>
-        <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials(row.assigneeName ?? "—")}</div>
+        <div className="avatar" style={{ width: 24, height: 24, fontSize: "var(--fs-xs, 11px)" }}>{initials(row.assigneeName ?? "—")}</div>
       </td>
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.assigneeName ?? "—"} · {row.stageLabel} · {row.deptName}</div>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{row.assigneeName ?? "—"} · {row.stageLabel} · {row.deptName}</div>
       </td>
       <td className="mono">{fmtDue(row.ranked.plan.plannedFinish)}</td>
       <td className="num">
@@ -612,7 +612,7 @@ function TeamHeldCardView({
         <StatusChip status={status} label={label} />
       </div>
       <div className="rt-card-meta">
-        <div className="avatar" style={{ width: 20, height: 20, fontSize: 9, display: "inline-flex", verticalAlign: "middle", marginRight: 6 }}>{initials(row.assigneeName ?? "—")}</div>
+        <div className="avatar" style={{ width: 20, height: 20, fontSize: "var(--fs-xs, 11px)", display: "inline-flex", verticalAlign: "middle", marginRight: 6 }}>{initials(row.assigneeName ?? "—")}</div>
         {row.assigneeName ?? "—"} · {row.stageLabel} · {row.deptName}
       </div>
       <div className="rt-card-row">
@@ -641,7 +641,7 @@ function CompletedRowView({ row }: { row: MyDayRow }) {
       <td className="mono" style={{ color: "var(--muted)" }}>{row.jobNumber}</td>
       <td>
         {row.processName}
-        <div style={{ color: "var(--muted)", fontSize: 11 }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
+        <div style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{row.stageLabel} · {row.deptName}{row.serialNo !== "—" ? ` · ${row.serialNo}` : ""}</div>
       </td>
       <td className="mono">{fmtDue(finish)}</td>
       <td className="num">
@@ -702,8 +702,8 @@ function QueueMineAction({
   if (row.ranked.state === "ON_HOLD")
     return <button className={cls} disabled={pending} onClick={(e) => { stop(e); run(() => resumeAction(planId), "Resumed."); }}>Resume</button>;
   if (row.ranked.state === "SUBMITTED")
-    return <span style={{ color: "var(--muted)", fontSize: 11 }}>Awaiting QC</span>;
-  return <span style={{ color: "var(--muted)", fontSize: 11 }}>Blocked</span>;
+    return <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>Awaiting QC</span>;
+  return <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>Blocked</span>;
 }
 
 function MineQueueCardView({ row, top, onOpenStage }: { row: MyDayRow; top: boolean; onOpenStage: () => void }) {
@@ -1109,7 +1109,7 @@ export function MyDayClient({
           <b>Held by teammates</b>
           <span className="meta">Read-only</span>
           <span className="chip c-idle"><i />{view.teamHeld.length}</span>
-          <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{teamHeldOpen ? "Hide ▲" : "Show ▼"}</span>
+          <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{teamHeldOpen ? "Hide ▲" : "Show ▼"}</span>
         </div>
         {teamHeldOpen && (
           view.teamHeld.length === 0 ? (
@@ -1148,7 +1148,7 @@ export function MyDayClient({
           <b>Completed</b>
           <span className="meta">Last 30 days · read-only</span>
           <span className="chip c-idle"><i />{view.completed.length}</span>
-          <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{completedOpen ? "Hide ▲" : "Show ▼"}</span>
+          <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{completedOpen ? "Hide ▲" : "Show ▼"}</span>
         </div>
         {completedOpen && (
           view.completed.length === 0 ? (

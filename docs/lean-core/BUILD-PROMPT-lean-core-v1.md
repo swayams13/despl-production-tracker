@@ -302,6 +302,10 @@ The Claude Design files are in `design/lean-core/`: `DESPL Tracker.dc.html` (fra
 
 21. Frames 02C–07B have no Scan in the sidebar, and 04A/06A (Portfolio · Team · Board) disagree with 12B (Portfolio · Jobs · Digest). Use one `NAV_ITEMS` registry: OPERATOR Today · Scan · Alerts; SUPERVISOR Today · Team · Scan · Jobs; QC Queue · Scan · Jobs; PLANNER Jobs · New job; PRODUCTION_HEAD Team (department switcher) · Portfolio · Flags · Jobs; MANAGEMENT Portfolio · Jobs · Digest; ADMIN Users & departments · Templates · Settings. "Board" is never a top-level item. Put language, theme and sign out in the person-block menu. Cap the sidebar job list to active jobs worst-first with an "All jobs" link.
 
+**Tokens (L2.0, added 15 Oct 2026)**
+
+22. Colour tokens follow frame 00, not the L2.0 line in Phase 2: its #3A4048 border is 1.58:1 as a control edge and #5C6068 idle is under 3:1. Control edges are `--border` #676C72 (dark) / #858B94 (Floor); #3A4048 is the decorative `--divider`. "Outdoor" is retired: Floor is the light theme, Control room the dark one, and a stored `outdoorMode` is read as Floor.
+
 ### 8.3 Needed but not drawn
 
 - **Welder capture:** marking a weld step done records the welder(s); NDT results per joint feed welder repair rate (`Welder`, `WeldLog`, `NdtResult` exist). Add to L2.2; welder output view in L2.5.

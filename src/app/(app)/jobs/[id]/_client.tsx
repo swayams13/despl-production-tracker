@@ -102,7 +102,7 @@ export function JobDetailClient({
   return (
     <>
       <div className="page-h">
-        <h1 className="mono" style={{ fontSize: 20 }}>{header.jobNumber}</h1>
+        <h1 className="mono" style={{ fontSize: "var(--fs-xl, 20px)" }}>{header.jobNumber}</h1>
         <span className="sub">
           {header.equipmentName ?? "—"} · {header.familyName} · {header.unitCount} units
         </span>
@@ -222,7 +222,7 @@ export function JobDetailClient({
             <div className="card">
               <div className="hd">
                 <h3>Units × stage matrix</h3>
-                <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>click a cell to open the stage panel</span>
+                <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>click a cell to open the stage panel</span>
               </div>
               {unitSpines.length === 0 ? (
                 <p className="note" style={{ margin: "16px 0" }}>No current schedule for this job.</p>
@@ -233,7 +233,7 @@ export function JobDetailClient({
                       <tr>
                         <td className="ulab" />
                         {unitSpines[0].segments.map((s) => (
-                          <td key={s.stageNo} style={{ textAlign: "center", color: "#565b63", fontSize: 11 }} className="mono">
+                          <td key={s.stageNo} style={{ textAlign: "center", color: "#565b63", fontSize: "var(--fs-xs, 11px)" }} className="mono">
                             {s.stageNo}
                           </td>
                         ))}
@@ -343,7 +343,7 @@ function ExceptionsCard({
             </div>
           ))}
           {exceptions.length > 8 && (
-            <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
+            <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
               +{exceptions.length - 8} more — see the stage spine and matrix above
             </div>
           )}
@@ -357,7 +357,7 @@ function ActivityRow({ e }: { e: ActivityEvent }) {
   const initials = e.actorName ? e.actorName.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase() : "—";
   return (
     <div className="feed-row">
-      <div className="avatar" style={{ width: 24, height: 24, fontSize: 10 }}>{initials}</div>
+      <div className="avatar" style={{ width: 24, height: 24, fontSize: "var(--fs-xs, 11px)" }}>{initials}</div>
       <div>
         <b style={{ fontWeight: 500 }}>{e.actorName ?? "System"}</b>{" "}
         {e.label}

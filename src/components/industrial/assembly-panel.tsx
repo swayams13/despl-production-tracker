@@ -69,7 +69,7 @@ export function AssemblyPanel({ jobId, data }: { jobId: number; data: AssemblyGr
     <div className="card" style={{ gridColumn: "1 / -1" }}>
       <div className="hd">
         <h3>Assembly &amp; weld sequence — A to Q</h3>
-        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>
+        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
           {doneSteps} of {totalSteps} complete
         </span>
         {data.units.length > 1 && (
@@ -140,7 +140,7 @@ function AssemblyStepItem({
       <div className="sh-route-step-hd">
         <i style={{ background: STAGE_STATUS[mapStatus(step.status)].colorVar }} />
         <span className="sh-route-step-name">
-          <span className="mono" style={{ color: "var(--muted)", fontSize: 10 }}>{step.srNo}</span> {step.activity}
+          <span className="mono" style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{step.srNo}</span> {step.activity}
           {step.kind === "INSPECTION" && <span className="sh-route-step-badge">INSP</span>}
         </span>
         <span className="sh-route-step-status">{statusLabel(step.status)}</span>
@@ -164,7 +164,7 @@ function AssemblyStepMeta({ step }: { step: AssemblyStepRow }) {
   const hasMeta = operator || step.remarks || step.weldJoint || step.rejection;
   if (!hasMeta) return null;
   return (
-    <div className="sh-route-step-meta" style={{ padding: "0 0 6px 22px", fontSize: 11, color: "var(--muted)" }}>
+    <div className="sh-route-step-meta" style={{ padding: "0 0 6px 22px", fontSize: "var(--fs-xs, 11px)", color: "var(--muted)" }}>
       {operator && <span>{operator}</span>}
       {step.weldJoint && (
         <span>
