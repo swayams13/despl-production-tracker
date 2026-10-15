@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
+import { FEATURES } from "@/lib/shared/flags";
 import { withTenant } from "@/lib/db";
 import { loadMyDay } from "@/lib/services/myday.read";
 import { PageHeader } from "@/components/industrial/page-header";
@@ -43,6 +44,11 @@ export default async function MyDay() {
   const actor = await getActor();
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
+  // L2.3: with the lean floor on, Today replaces this page for the roles that have it.
+  // QC keeps this page (its "With QC" tab) until the QC queue (L2.6) takes that over.
+  if (FEATURES.leanFloor && hasRole(actor, ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) {
+    redirect("/today");
+  }
 
   const [view, depts] = await Promise.all([loadMyDay(actor), myDepartments(actor.tenantId, actor.departmentIds)]);
 

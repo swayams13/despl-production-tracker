@@ -26,10 +26,20 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     for (const role of ["OPERATOR", "SUPERVISOR", "QC"]) {
       expect(hrefs(navFor([role]).primary), role).not.toContain("/scan");
     }
-    expect(hrefs(navFor(["OPERATOR"], { leanFloor: true }).primary)).toEqual(["/my-day", "/scan", "/alerts"]);
-    expect(hrefs(navFor(["SUPERVISOR"], { leanFloor: true }).primary)).toEqual(["/my-day", "/workspace", "/scan", "/jobs"]);
+    expect(hrefs(navFor(["OPERATOR"], { leanFloor: true }).primary)).toEqual(["/today", "/scan", "/alerts"]);
+    expect(hrefs(navFor(["SUPERVISOR"], { leanFloor: true }).primary)).toEqual(["/today", "/workspace", "/scan", "/jobs"]);
     expect(hrefs(navFor(["QC"], { leanFloor: true }).primary)).toEqual(["/qc", "/scan", "/jobs"]);
     expect(hrefs(navFor(["PLANNER"], { leanFloor: true }).primary)).not.toContain("/scan");
+  });
+
+  it("Today is /my-day until leanFloor is on, then /today (one entry, same position)", () => {
+    for (const role of ["OPERATOR", "SUPERVISOR"]) {
+      expect(hrefs(navFor([role]).primary)[0]).toBe("/my-day");
+      expect(hrefs(navFor([role], { leanFloor: true }).primary)[0]).toBe("/today");
+    }
+    expect(navFor(["SUPERVISOR"], { leanFloor: true }).primary.find((i) => i.href === "/today")?.badge).toBe("overdue");
+    // a role without Today is untouched by the switch
+    expect(hrefs(navFor(["QC"], { leanFloor: true }).primary)).not.toContain("/today");
   });
 
   it("is the union across roles with one entry per href", () => {
@@ -82,12 +92,27 @@ describe("landingFor", () => {
   it.each(table)("%j -> %s", (roles, href) => {
     expect(landingFor(roles)).toBe(href);
   });
+
+  it.each<[string[], string]>([
+    [["OPERATOR"], "/today"],
+    [["SUPERVISOR"], "/today"],
+    [["SUPERVISOR", "QC"], "/today"],
+    [["QC"], "/qc"],
+    [["PLANNER"], "/jobs"],
+    [["PRODUCTION_HEAD"], "/dashboard"],
+    [[], "/workspace"],
+  ])("with leanFloor on: %j -> %s", (roles, href) => {
+    expect(landingFor(roles, { leanFloor: true })).toBe(href);
+  });
 });
 
 describe("no dead controls: every registry href is a real page", () => {
-  it.each(NAV_ITEMS.map((i) => [i.id, i.href] as const))("%s -> %s", (_id, href) => {
-    expect(existsSync(join(process.cwd(), "src/app/(app)", href, "page.tsx"))).toBe(true);
-  });
+  it.each(NAV_ITEMS.flatMap((i) => [[i.id, i.href] as const, ...(i.hrefWhen ? [[`${i.id} (leanFloor)`, i.hrefWhen.leanFloor] as const] : [])]))(
+    "%s -> %s",
+    (_id, href) => {
+      expect(existsSync(join(process.cwd(), "src/app/(app)", href, "page.tsx"))).toBe(true);
+    },
+  );
   it("landing targets are real pages", () => {
     for (const roles of [["OPERATOR"], ["QC"], ["PLANNER"], ["MANAGEMENT"], ["STORES"], []]) {
       expect(existsSync(join(process.cwd(), "src/app/(app)", landingFor(roles), "page.tsx"))).toBe(true);

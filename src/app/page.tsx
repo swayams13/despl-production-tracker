@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { landingFor } from "@/lib/shared/nav";
+import { FEATURES } from "@/lib/shared/flags";
 
 /**
  * Role-based landing redirect: forced password change and client users first,
@@ -12,5 +13,5 @@ export default async function Home() {
   if (!actor) redirect("/login");
   if (actor.mustChangePassword) redirect("/account/password");
   if (actor.clientId !== null) redirect("/portal");
-  redirect(landingFor(actor.roles));
+  redirect(landingFor(actor.roles, { leanFloor: FEATURES.leanFloor }));
 }

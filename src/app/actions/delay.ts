@@ -13,6 +13,7 @@ export async function fileDelayAction(
     await fileDelayReason(await requireActor(), { processPlanId, categoryId, detail });
     revalidatePath("/workspace");
     revalidatePath("/my-day");
+    revalidatePath("/today");
       return { ok: true };
   } catch (e) {
     return toActionError(e);

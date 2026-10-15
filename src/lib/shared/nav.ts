@@ -26,6 +26,12 @@ export interface NavItem {
   badge?: "overdue" | "unread";
   /** Hidden until the named switch is on (a route that 404s while it is off is a dead control). */
   needs?: "leanFloor";
+  /** The href while a switch is on (Today: /my-day until leanFloor, then /today). */
+  hrefWhen?: { leanFloor: string };
+}
+
+export interface NavSwitches {
+  leanFloor?: boolean;
 }
 
 const FLOOR_AND_OFFICE: readonly RoleCode[] = [
@@ -35,8 +41,7 @@ const FLOOR_AND_OFFICE: readonly RoleCode[] = [
 // Order is the display order; the first entry for an href wins on de-dup, so
 // a role's primary label beats the "more" one (e.g. QC "Queue" over "QC & hold points").
 export const NAV_ITEMS: readonly NavItem[] = [
-  // L2.3: /my-day -> /today
-  { id: "today", href: "/my-day", label: "Today", icon: "navToday", roles: ["OPERATOR", "SUPERVISOR"], group: "primary", badge: "overdue" },
+  { id: "today", href: "/my-day", hrefWhen: { leanFloor: "/today" }, label: "Today", icon: "navToday", roles: ["OPERATOR", "SUPERVISOR"], group: "primary", badge: "overdue" },
   // L2.5: /workspace -> /team
   { id: "team", href: "/workspace", label: "Team", icon: "workspace", roles: ["SUPERVISOR", "PRODUCTION_HEAD"], group: "primary" },
   { id: "qc-queue", href: "/qc", label: "Queue", icon: "qc", roles: ["QC"], group: "primary" },
@@ -61,15 +66,19 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "master-data", href: "/admin/master-data", label: "Master data", icon: "admin", roles: ["ADMIN", "PRODUCTION_HEAD", "ENGINEERING", "PLANNER"], group: "more" },
 ];
 
-/** First match wins, so the order is the precedence (management tier, then supervisor over QC: today's order). */
-const LANDING: readonly (readonly [RoleCode, string])[] = [
+/**
+ * First match wins, so the order is the precedence (management tier, then
+ * supervisor over QC: today's order). The third column is the landing while
+ * leanFloor is on.
+ */
+const LANDING: readonly (readonly [RoleCode, string, string?])[] = [
   ["MANAGEMENT", "/dashboard"],
   ["PRODUCTION_HEAD", "/dashboard"], // L2.5: /team
   ["ADMIN", "/dashboard"],
   ["PLANNER", "/jobs"],
-  ["SUPERVISOR", "/my-day"], // L2.3: /today
+  ["SUPERVISOR", "/my-day", "/today"],
   ["QC", "/qc"],
-  ["OPERATOR", "/my-day"], // L2.3: /today
+  ["OPERATOR", "/my-day", "/today"],
   ["ENGINEERING", "/jobs"],
   ["STORES", "/jobs"],
 ];
@@ -77,8 +86,10 @@ const LANDING: readonly (readonly [RoleCode, string])[] = [
 /** A shape none of the roles cover still gets a real page, as before. */
 const LANDING_FALLBACK = "/workspace";
 
-export function landingFor(roles: readonly string[]): string {
-  return LANDING.find(([r]) => roles.includes(r))?.[1] ?? LANDING_FALLBACK;
+export function landingFor(roles: readonly string[], on: NavSwitches = {}): string {
+  const hit = LANDING.find(([r]) => roles.includes(r));
+  if (!hit) return LANDING_FALLBACK;
+  return (on.leanFloor && hit[2]) || hit[1];
 }
 
 export interface NavSet {
@@ -87,12 +98,14 @@ export interface NavSet {
 }
 
 /** Union across the user's roles, registry order, one entry per href. */
-export function navFor(roles: readonly string[], on: { leanFloor?: boolean } = {}): NavSet {
+export function navFor(roles: readonly string[], on: NavSwitches = {}): NavSet {
   const seen = new Set<string>();
   const out: NavSet = { primary: [], more: [] };
-  for (const item of NAV_ITEMS) {
-    if (seen.has(item.href) || !item.roles.some((r) => roles.includes(r))) continue;
-    if (item.needs && !on[item.needs]) continue;
+  for (const raw of NAV_ITEMS) {
+    if (!raw.roles.some((r) => roles.includes(r))) continue;
+    if (raw.needs && !on[raw.needs]) continue;
+    const item = on.leanFloor && raw.hrefWhen ? { ...raw, href: raw.hrefWhen.leanFloor } : raw;
+    if (seen.has(item.href)) continue;
     seen.add(item.href);
     out[item.group].push(item);
   }

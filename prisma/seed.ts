@@ -1502,6 +1502,8 @@ async function seedDemo(
           [d.code],
         );
       }
+      // Lean Core L2.3: one floor operator, so Today's "Claim next" can be tried.
+      await mkUser("operator.fabrication@despl.local", "Fabrication Operator", ["OPERATOR"], ["FABRICATION"]);
       await mkUser("client@example.local", "Client Viewer", ["CLIENT_VIEWER"], [], client.id);
       // One extra all-access login for the demo walkthrough: every role +
       // every department, so one person can click through every module
