@@ -23,5 +23,9 @@ export default defineConfig({
     // where it previously couldn't. Serialize files only for this tier — the
     // pure suite (`pnpm test`) keeps full parallelism.
     fileParallelism: !process.env.RUN_DB_TESTS,
+    // The DB tier does real round-trips against a growing database on a shared CI runner: at the
+    // 5 s default a different test timed out on every main push (portfolio.read, client-snapshot,
+    // work.rule-ncr). 30 s still fails a hung test, just not a slow one.
+    ...(process.env.RUN_DB_TESTS ? { testTimeout: 30_000, hookTimeout: 60_000 } : {}),
   },
 });
