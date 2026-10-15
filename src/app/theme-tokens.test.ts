@@ -69,7 +69,7 @@ describe("type floor and retired palette", () => {
       .split("\n")
       .map((l, i) => [i + 1, l] as const)
       .filter(([, l]) => !l.includes("cred-slip"))
-      .flatMap(([n, l]) => [...l.matchAll(/font-size:\s*([\d.]+)px/g)].filter((m) => Number(m[1]) < 11).map((m) => `${n}: ${m[0]}`));
+      .flatMap(([n, l]) => [...l.matchAll(/(?:font-size|font):[^;}]*?\b([\d.]+)px/g)].filter((m) => Number(m[1]) < 11).map((m) => `${n}: ${m[0]}`));
     expect(bad).toEqual([]);
   });
 
@@ -77,7 +77,7 @@ describe("type floor and retired palette", () => {
     expect(css).not.toMatch(/\.theme-outdoor/);
   });
 
-  it("has no numeric inline fontSize literal left in .tsx (use var(--fs-*))", () => {
+  it("has no numeric inline fontSize or text-[<11px] literal left in .tsx (use var(--fs-*))", () => {
     const root = join(__dirname, "..");
     const hits: string[] = [];
     const walk = (dir: string) => {
@@ -88,7 +88,7 @@ describe("type floor and retired palette", () => {
         } else if (f.endsWith(".tsx")) {
           readFileSync(f, "utf8")
             .split("\n")
-            .forEach((l, i) => /fontSize:\s*[\d.]/.test(l) && hits.push(`${f.slice(root.length)}:${i + 1}`));
+            .forEach((l, i) => (/fontSize:\s*[\d.]/.test(l) || /text-\[(?:[0-9]|10(?:\.5)?)px\]/.test(l)) && hits.push(`${f.slice(root.length)}:${i + 1}`));
         }
       }
     };

@@ -510,7 +510,7 @@ body {
 .theme-industrial .sh-route-step-hd i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .theme-industrial .sh-route-step-name { flex: 1; }
 .theme-industrial .sh-route-step-status { color: var(--muted); font-size: 11px; }
-.theme-industrial .sh-route-step-badge { font: 600 10px/1 "JetBrains Mono", monospace; color: var(--accent); background: color-mix(in oklab, var(--accent) var(--mixp), var(--surface)); border-radius: 8px; padding: 3px 6px; }
+.theme-industrial .sh-route-step-badge { font: 600 11px/1 "JetBrains Mono", monospace; color: var(--accent); background: color-mix(in oklab, var(--accent) var(--mixp), var(--surface)); border-radius: 8px; padding: 3px 6px; }
 .theme-industrial .sh-route-step-checkpoints { padding: 8px 10px 9px 25px; border-top: var(--border-width) solid var(--border); font-size: 11.5px; color: var(--muted); display: flex; flex-direction: column; gap: 5px; }
 .theme-industrial .sh-route-step-checkpoints .mono { color: var(--text); margin-right: 6px; }
 
@@ -629,6 +629,9 @@ body {
 .theme-industrial select.btn { color: var(--muted); font-family: inherit; }
 .theme-industrial input.ws-detail { background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 12px; padding: 5px 8px; width: 100%; font-family: inherit; }
 .theme-industrial input.ws-detail:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+/* A select sizes to its longest option; on a phone that pushed /jobs/new to
+   895px wide and widened the whole layout viewport (L2.0 staging check). */
+.theme-industrial select.ws-detail { width: 100%; max-width: 100%; }
 .theme-industrial .sumchips { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
 .theme-industrial .ws-card { margin-bottom: 14px; }
 .theme-industrial .ws-card .hd b { font-size: 13px; font-weight: 600; color: var(--text); }
@@ -671,7 +674,7 @@ body {
 }
 .theme-industrial .queue-card { background: var(--surface); border: var(--border-width) solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 10px; }
 .theme-industrial .queue-card.top { border-color: var(--accent); }
-.theme-industrial .queue-ribbon { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: var(--accent); color: var(--accent-fg); font: 700 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: .12em; }
+.theme-industrial .queue-ribbon { height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 12px; background: var(--accent); color: var(--accent-fg); font: 700 11px "JetBrains Mono", ui-monospace, monospace; letter-spacing: .12em; }
 .theme-industrial .queue-card-body { padding: 13px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
 .theme-industrial .queue-card-meta { display: flex; justify-content: space-between; gap: 8px; font: 500 11px "JetBrains Mono", ui-monospace, monospace; color: var(--muted-2); }
 .theme-industrial .queue-card-due { font-weight: 600; color: var(--muted); }
@@ -692,7 +695,7 @@ body {
 .theme-industrial .queue-scoreboard-grid > div:nth-last-child(-n+2) { border-bottom: none; }
 .theme-industrial .queue-scoreboard-grid .v { font: 700 26px "JetBrains Mono", ui-monospace, monospace; line-height: 1; }
 .theme-industrial .queue-scoreboard-grid .sub { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
-.theme-industrial .queue-section-label { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 0; font: 600 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: .12em; color: var(--muted-2); margin-bottom: 10px; }
+.theme-industrial .queue-section-label { display: flex; align-items: center; justify-content: space-between; padding: 2px 2px 0; font: 600 11px "JetBrains Mono", ui-monospace, monospace; letter-spacing: .12em; color: var(--muted-2); margin-bottom: 10px; }
 
 @media (pointer: coarse) {
   /* Closes a Task 7-disclosed gap: SPEC §5's separate 56px primary-action
@@ -987,7 +990,8 @@ body {
 /* new-job wizard (/jobs/new) — step rail + family-card selection states.
    Everything else in the wizard reuses .card/.hd/.dept-grid/.dept-card/
    .drop/.d-row/.ws-detail/.sh-kv/.emp-grid/.emp-hint/.chip verbatim. */
-.theme-industrial .wiz-steps { display: flex; gap: 4px; margin-bottom: 16px; }
+.theme-industrial .wiz-steps { display: flex; gap: 4px; margin-bottom: 16px; overflow-x: auto; }
+.theme-industrial .wiz-step { min-width: max-content; }
 .theme-industrial .wiz-step { flex: 1; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 11.5px; color: var(--muted); }
 .theme-industrial .wiz-step-n { width: 20px; height: 20px; min-width: 20px; border-radius: 50%; background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; color: var(--muted); }
 .theme-industrial .wiz-step.done { border-color: var(--s-complete); }
@@ -1134,6 +1138,72 @@ body {
     font-size: 12px;
   }
   .theme-industrial { --fs-xs: 12px; }
+  /* Every other selector that declares 11px/11.5px: 12px on a coarse pointer
+     (generated from the declarations above; keep in step when adding one). */
+  .theme-industrial .logo span,
+  .theme-industrial .navgrp h6,
+  .theme-industrial .nav-item .badge,
+  .theme-industrial .avatar,
+  .theme-industrial .user small,
+  .theme-industrial .kbd,
+  .theme-industrial .bell em,
+  .theme-industrial .drop .d-row small,
+  .theme-industrial .card .hd h3,
+  .theme-industrial .chip,
+  .theme-industrial .tag,
+  .theme-industrial .spine-lab,
+  .theme-industrial .sh-sec,
+  .theme-industrial .sh-route-step-status,
+  .theme-industrial .sh-route-step-badge,
+  .theme-industrial .sh-route-step-checkpoints,
+  .theme-industrial .sh-hold-card .sub,
+  .theme-industrial .emp-hint,
+  .theme-industrial th,
+  .theme-industrial .ws-card .hd .meta,
+  .theme-industrial .ws-err,
+  .theme-industrial .filter-chip,
+  .theme-industrial .note,
+  .theme-industrial .rt-card-meta,
+  .theme-industrial .queue-ribbon,
+  .theme-industrial .queue-card-meta,
+  .theme-industrial .queue-scoreboard-grid .sub,
+  .theme-industrial .queue-section-label,
+  .theme-industrial .topbar-theme,
+  .theme-industrial .rail-item span,
+  .theme-industrial .rail-item .badge,
+  .theme-industrial .rail-item .badge-alert,
+  .theme-industrial .bn-item span,
+  .theme-industrial .bn-badge,
+  .theme-industrial .kpi h6,
+  .theme-industrial .kpi .sub,
+  .theme-industrial .stat h6,
+  .theme-industrial .stat .v small,
+  .theme-industrial .legend,
+  .theme-industrial .cp-row .t span,
+  .theme-industrial .dept-tag,
+  .theme-industrial .hclass,
+  .theme-industrial .bars .b span,
+  .theme-industrial .delta,
+  .theme-industrial .weld-card .role,
+  .theme-industrial .weld-stats,
+  .theme-industrial .dept-card .rep,
+  .theme-industrial .dept-nums,
+  .theme-industrial .week-cell .dy,
+  .theme-industrial .week-cell .ld,
+  .theme-industrial .uxs .ulab,
+  .theme-industrial .feed-row .when,
+  .theme-industrial .wiz-step,
+  .theme-industrial .wiz-step-n,
+  .theme-industrial .g-months,
+  .theme-industrial .g-dept-header,
+  .theme-industrial .g-name,
+  .theme-industrial .g-actual b,
+  .theme-industrial .g-todaylab,
+  .theme-industrial .bom-hd .car,
+  .theme-industrial .bom-hd .cnt,
+  .theme-industrial .bom-item .mat {
+    font-size: 12px;
+  }
 
   /* 44px hit areas (AUD-067, frame 00). The visible bar keeps its size: the
      extra height is a transparent border, clipped out of the background, and
@@ -1143,14 +1213,14 @@ body {
   .theme-industrial .spine > * {
     height: 44px;
     border-block: 15px solid transparent;
-    background-clip: padding-box;
+    background-clip: padding-box !important; /* inline `background:` shorthands reset it */
   }
   .theme-industrial .spine > *:hover { outline: none; }
   .theme-industrial .mx-cell {
     height: 44px;
     margin-block: -9px;
     border-block: 9px solid transparent;
-    background-clip: padding-box;
+    background-clip: padding-box !important; /* inline `background:` shorthands reset it */
   }
   .theme-industrial .bell { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
   .theme-industrial .tab { display: inline-flex; align-items: center; min-height: 44px; }

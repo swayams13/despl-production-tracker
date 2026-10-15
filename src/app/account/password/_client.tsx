@@ -18,7 +18,7 @@ export function ChangePasswordForm({ forced, theme }: { forced: boolean; theme: 
             <b className="text-[15px] tracking-[.5px]">
               {forced ? "Set your password" : "Change your password"}
             </b>
-            <span className="mt-1 block text-[10.5px] uppercase tracking-[1px] text-[var(--muted)]">
+            <span className="mt-1 block text-[11px] coarse:text-xs uppercase tracking-[1px] text-[var(--muted)]">
               {forced ? "Required before you can continue" : "DESPL Production Tracker"}
             </span>
           </div>
@@ -49,7 +49,7 @@ export function ChangePasswordForm({ forced, theme }: { forced: boolean; theme: 
               required
               className="ws-detail mt-1.5"
             />
-            <p className="mt-1 text-[10.5px] text-[var(--muted)]">At least 10 characters.</p>
+            <p className="mt-1 text-[11px] coarse:text-xs text-[var(--muted)]">At least 10 characters.</p>
 
             {state.error ? (
               <p

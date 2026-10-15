@@ -18,7 +18,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="mb-6 text-center">
             <b className="text-[15px] tracking-[.5px]">DESPL Production Tracker</b>
-            <span className="mt-1 block text-[10.5px] uppercase tracking-[1px] text-[var(--muted)]">
+            <span className="mt-1 block text-[11px] coarse:text-xs uppercase tracking-[1px] text-[var(--muted)]">
               Dhruv EPC Solutions Pvt. Ltd.
             </span>
           </div>
@@ -70,7 +70,7 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="mt-4 text-center text-[11px] text-[var(--muted)]">
+          <p className="mt-4 text-center text-[11px] coarse:text-xs text-[var(--muted)]">
             Accounts are created by an administrator. There is no self sign-up.
           </p>
         </div>
