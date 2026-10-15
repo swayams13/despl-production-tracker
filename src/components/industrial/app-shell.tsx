@@ -58,6 +58,11 @@ const icons: Record<NavIcon | "themeMoon" | "themeSun", ReactNode> = {
       <path d="M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 011 1v13a1 1 0 01-1 1H5a1 1 0 01-1-1V6a1 1 0 011-1z" />
     </svg>
   ),
+  scan: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M4 12h16" />
+    </svg>
+  ),
   newJob: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M12 5v14M5 12h14" />
@@ -123,6 +128,7 @@ export function AppShell({
   overdueCount,
   notifications,
   jobs,
+  leanFloor,
 }: {
   children: ReactNode;
   userName: string;
@@ -130,6 +136,8 @@ export function AppShell({
   overdueCount: number;
   notifications: { unreadCount: number; recent: NotificationRow[] };
   jobs: JobListItem[];
+  /** FEATURES.leanFloor, read on the server: Scan and its target exist only while it is on. */
+  leanFloor: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -139,7 +147,7 @@ export function AppShell({
   const [jobOpen, setJobOpen] = useState(false);
   const [personOpen, setPersonOpen] = useState<"foot" | "top" | null>(null);
 
-  const { primary, more } = navFor(userRoles);
+  const { primary, more } = navFor(userRoles, { leanFloor });
   const active = activeItem([...primary, ...more], pathname);
   const sidebarJobList = primary.some((i) => i.href === "/jobs") ? sidebarJobs(jobs) : [];
 

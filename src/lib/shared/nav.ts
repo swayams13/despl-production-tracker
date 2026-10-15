@@ -13,7 +13,7 @@ import type { RoleCode } from "@/lib/authz";
 
 export type NavIcon =
   | "dashboard" | "jobs" | "workspace" | "departments" | "qc" | "welding"
-  | "reports" | "admin" | "navToday" | "navAlerts" | "newJob";
+  | "reports" | "admin" | "navToday" | "navAlerts" | "newJob" | "scan";
 
 export interface NavItem {
   id: string;
@@ -24,6 +24,8 @@ export interface NavItem {
   /** `primary` renders everywhere (rail, phone bar); `more` in the sidebar only. */
   group: "primary" | "more";
   badge?: "overdue" | "unread";
+  /** Hidden until the named switch is on (a route that 404s while it is off is a dead control). */
+  needs?: "leanFloor";
 }
 
 const FLOOR_AND_OFFICE: readonly RoleCode[] = [
@@ -39,6 +41,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "team", href: "/workspace", label: "Team", icon: "workspace", roles: ["SUPERVISOR", "PRODUCTION_HEAD"], group: "primary" },
   { id: "qc-queue", href: "/qc", label: "Queue", icon: "qc", roles: ["QC"], group: "primary" },
   // L2.7: Portfolio gets its own page; /dashboard until then
+  { id: "scan", href: "/scan", label: "Scan", icon: "scan", roles: ["OPERATOR", "SUPERVISOR", "QC"], group: "primary", needs: "leanFloor" },
   { id: "portfolio", href: "/dashboard", label: "Portfolio", icon: "dashboard", roles: ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"], group: "primary" },
   { id: "jobs", href: "/jobs", label: "Jobs", icon: "jobs", roles: ["SUPERVISOR", "QC", "PLANNER", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN", "ENGINEERING", "STORES"], group: "primary" },
   { id: "new-job", href: "/jobs/new", label: "New job", icon: "newJob", roles: ["PLANNER"], group: "primary" },
@@ -84,11 +87,12 @@ export interface NavSet {
 }
 
 /** Union across the user's roles, registry order, one entry per href. */
-export function navFor(roles: readonly string[]): NavSet {
+export function navFor(roles: readonly string[], on: { leanFloor?: boolean } = {}): NavSet {
   const seen = new Set<string>();
   const out: NavSet = { primary: [], more: [] };
   for (const item of NAV_ITEMS) {
     if (seen.has(item.href) || !item.roles.some((r) => roles.includes(r))) continue;
+    if (item.needs && !on[item.needs]) continue;
     seen.add(item.href);
     out[item.group].push(item);
   }

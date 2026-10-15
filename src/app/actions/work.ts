@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
 import * as svc from "@/lib/services/work.service";
+import * as floor from "@/lib/services/floor.service";
 import { raiseRuleNcr } from "@/lib/services/ncr.service";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { FEATURES } from "@/lib/shared/flags";
@@ -39,4 +40,28 @@ export async function inspectAction(input: InspectInput): Promise<WithResult<svc
 /** L1.2f: QC raises the NCR an H5/H6 refusal routes to. */
 export async function raiseRuleNcrAction(input: RaiseRuleNcrInput): Promise<WithResult<{ ncrId: number }>> {
   return run(async () => ({ ncrId: (await raiseRuleNcr(await requireActor(), input)).id }));
+}
+
+/** L2.2: "Notify QC / Stores / ..." on a Floor refusal card. */
+export async function notifyBlockerAction(input: floor.NotifyBlockerInput): Promise<ActionResult> {
+  try {
+    if (!FEATURES.leanFloor) throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "leanFloor" });
+    await floor.notifyBlocker(await requireActor(), input);
+    return { ok: true };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** L2.2: bind (or log) the joint a weld step needs before Done; the sheet then sends recordWork with it. */
+export async function ensureJointAction(
+  input: floor.EnsureJointInput,
+): Promise<{ ok: true; weldJointId: number } | Exclude<ActionResult, { ok: true }>> {
+  try {
+    if (!FEATURES.leanFloor) throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "leanFloor" });
+    const r = await floor.ensureJointForStep(await requireActor(), input);
+    return { ok: true, weldJointId: r.weldJointId };
+  } catch (e) {
+    return toActionError(e) as Exclude<ActionResult, { ok: true }>;
+  }
 }

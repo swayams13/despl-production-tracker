@@ -66,5 +66,7 @@ export default defineConfig({
     // 3 minutes comfortably covers a cold rebuild + server start with room
     // to spare, without masking a genuinely hung server.
     timeout: 180_000,
+    // L2.2: the Floor screen and Scan are behind the switch; production stays off.
+    env: { LEAN_FLOOR: "on" },
   },
 });

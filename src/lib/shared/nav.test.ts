@@ -22,6 +22,16 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     expect(hrefs(navFor([role]).primary)).toEqual(expected);
   });
 
+  it("Scan appears only while leanFloor is on, in the spec's position", () => {
+    for (const role of ["OPERATOR", "SUPERVISOR", "QC"]) {
+      expect(hrefs(navFor([role]).primary), role).not.toContain("/scan");
+    }
+    expect(hrefs(navFor(["OPERATOR"], { leanFloor: true }).primary)).toEqual(["/my-day", "/scan", "/alerts"]);
+    expect(hrefs(navFor(["SUPERVISOR"], { leanFloor: true }).primary)).toEqual(["/my-day", "/workspace", "/scan", "/jobs"]);
+    expect(hrefs(navFor(["QC"], { leanFloor: true }).primary)).toEqual(["/qc", "/scan", "/jobs"]);
+    expect(hrefs(navFor(["PLANNER"], { leanFloor: true }).primary)).not.toContain("/scan");
+  });
+
   it("is the union across roles with one entry per href", () => {
     const { primary, more } = navFor(["SUPERVISOR", "QC"]);
     expect(hrefs(primary)).toEqual(["/my-day", "/workspace", "/qc", "/jobs"]);

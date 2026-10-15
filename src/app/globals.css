@@ -846,6 +846,58 @@ body {
   font-style: normal; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 5px;
 }
 
+/* Floor screen (L2.2). Rows are the tap targets; 48 px on coarse pointers (gloves). */
+.theme-industrial .fl-wrap { max-width: 640px; margin: 0 auto; padding-bottom: 96px; }
+.theme-industrial .fl-head h1 { font-size: 28px; font-weight: 600; margin: 0; }
+.theme-industrial .fl-head p { margin: 4px 0 0; color: var(--muted); }
+.theme-industrial .fl-head .spine-mini { display: flex; margin-top: 10px; }
+.theme-industrial .fl-dept { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; margin-top: 12px !important; }
+.theme-industrial .fl-group { margin-top: 18px; }
+.theme-industrial .fl-group h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 6px; }
+.theme-industrial .fl-group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.theme-industrial .fl-row { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+.theme-industrial .fl-s-in_progress { border-left-color: var(--s-progress); }
+.theme-industrial .fl-s-ready { border-left-color: var(--s-complete); }
+.theme-industrial .fl-s-blocked, .theme-industrial .fl-s-needs_override { border-left-color: var(--s-hold); }
+.theme-industrial .fl-s-with_qc, .theme-industrial .fl-s-qc_step { border-left-color: var(--s-submitted); }
+.theme-industrial .fl-line { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; }
+.theme-industrial .fl-main { min-width: 0; flex: 1 1 200px; display: grid; gap: 2px; }
+.theme-industrial .fl-main b { font-weight: 600; font-size: 14px; }
+.theme-industrial .fl-main span, .theme-industrial .fl-sub { color: var(--muted); font-size: 12px; }
+.theme-industrial .fl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-undo .btn, .theme-industrial .fl-more { min-height: 40px; }
+.theme-industrial .fl-done { min-width: 96px; }
+.theme-industrial .fl-refusal { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); display: grid; gap: 4px; font-size: 12px; }
+.theme-industrial .fl-refusal b { font-size: 13px; font-weight: 600; }
+.theme-industrial .fl-refusal .btn { justify-self: start; margin-top: 4px; }
+.theme-industrial .fl-result { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); display: grid; gap: 4px; font-size: 12px; }
+.theme-industrial .fl-result-warn { border-color: var(--s-hold); }
+.theme-industrial .fl-empty { margin-top: 18px; padding: 16px; border: 1px dashed var(--border); border-radius: 6px; display: grid; gap: 4px; color: var(--muted); }
+.theme-industrial .fl-empty b { color: var(--text); }
+.theme-industrial .fl-more { margin-top: 14px; width: 100%; }
+.theme-industrial .fl-undo-stack { position: fixed; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); display: grid; gap: 8px; z-index: 40; max-width: 616px; margin: 0 auto; }
+.theme-industrial .fl-undo { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); font-size: 13px; }
+.theme-industrial .fl-undo i { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; animation: fl-drain linear forwards; }
+@keyframes fl-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.theme-industrial .fl-sheet-ov { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
+.theme-industrial .fl-sheet { width: 100%; max-width: 640px; max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--border); border-radius: 12px 12px 0 0; padding: 16px; display: grid; gap: 14px; }
+.theme-industrial .fl-sheet h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.theme-industrial .fl-sheet p { margin: 0; }
+.theme-industrial .fl-sheet fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.theme-industrial .fl-sheet legend { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0; margin-bottom: 6px; }
+.theme-industrial .fl-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.theme-industrial .fl-chip { min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 22px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.theme-industrial .fl-chip.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, var(--surface)); font-weight: 600; }
+.theme-industrial .fl-units { display: grid; gap: 4px; }
+.theme-industrial .fl-unit { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.theme-industrial .fl-unit small { margin-left: auto; color: var(--muted); }
+.theme-industrial .fl-sheet-foot { justify-content: flex-end; position: sticky; bottom: 0; background: var(--surface); padding-top: 8px; }
+@media (pointer: coarse) {
+  .theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-undo .btn, .theme-industrial .fl-more { min-height: 48px; min-width: 48px; }
+  .theme-industrial .fl-chip, .theme-industrial .fl-unit { min-height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) { .theme-industrial .fl-undo i { animation: none; } }
+
 /* dashboard (§4.2) — ported 1:1 from the mockup */
 .theme-industrial .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 10px; }
 .theme-industrial .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; overflow: hidden; transition: border-color .15s; }
