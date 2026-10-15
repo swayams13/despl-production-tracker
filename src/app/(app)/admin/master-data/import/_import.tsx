@@ -134,7 +134,7 @@ export function MasterImport({ canApply, isHead, sections }: { canApply: boolean
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd"><h3>Workbook</h3></div>
         <div style={{ padding: "0 16px 16px", display: "grid", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>
+          <label style={{ display: "grid", gap: 6, fontSize: "var(--fs-md, 13px)" }}>
             Choose the Excel workbook (.xlsx, up to 4 MB)
             <input
               type="file"
@@ -144,14 +144,14 @@ export function MasterImport({ canApply, isHead, sections }: { canApply: boolean
             />
           </label>
           {fileProblem && (
-            <p role="alert" style={{ margin: 0, color: "var(--s-overdue)", fontSize: 13 }}>{fileProblem}</p>
+            <p role="alert" style={{ margin: 0, color: "var(--s-overdue)", fontSize: "var(--fs-md, 13px)" }}>{fileProblem}</p>
           )}
           {file && (
-            <p style={{ margin: 0, fontSize: 13 }}>
+            <p style={{ margin: 0, fontSize: "var(--fs-md, 13px)" }}>
               <span className="mono">{file.name}</span> · {kb(file.size)}
             </p>
           )}
-          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13 }}>
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: "var(--fs-md, 13px)" }}>
             <input
               type="checkbox"
               checked={allowDraft}
@@ -233,7 +233,7 @@ export function MasterImport({ canApply, isHead, sections }: { canApply: boolean
           </div>
 
           {noPartLoads(report) && (
-            <div className="card" style={{ marginBottom: 14, padding: 12, fontSize: 13 }}>
+            <div className="card" style={{ marginBottom: 14, padding: 12, fontSize: "var(--fs-md, 13px)" }}>
               No part will load: none is marked &ldquo;Approved by Production Head&rdquo;.{" "}
               {whatWillLoad(report.plan) !== "nothing"
                 ? `Still loads: ${whatWillLoad(report.plan)}, as drafts. Tick “Load parts that are not approved yet as drafts” to load the parts too.`
@@ -293,7 +293,7 @@ export function MasterImport({ canApply, isHead, sections }: { canApply: boolean
                         <span className="mono" style={{ marginLeft: "auto" }}>{g.count}</span>
                       </button>
                       {open && (
-                        <div style={{ padding: "0 16px 10px 40px", fontSize: 12 }}>
+                        <div style={{ padding: "0 16px 10px 40px", fontSize: "var(--fs-sm, 12px)" }}>
                           <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 4 }}>
                             {rows.map((i, n) => (
                               <li key={n}>
@@ -319,7 +319,7 @@ export function MasterImport({ canApply, isHead, sections }: { canApply: boolean
           </div>
 
           <details className="card" style={{ marginBottom: 14, padding: "10px 16px" }}>
-            <summary style={{ cursor: "pointer", fontSize: 13 }}>{sentence(report.parts.length, "part", "parts")} in this file</summary>
+            <summary style={{ cursor: "pointer", fontSize: "var(--fs-md, 13px)" }}>{sentence(report.parts.length, "part", "parts")} in this file</summary>
             <div style={{ overflowX: "auto", marginTop: 8 }}>
               <table>
                 <thead>
@@ -365,7 +365,7 @@ export function MasterImport({ canApply, isHead, sections }: { canApply: boolean
                 />
               }
             >
-              <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
+              <div style={{ display: "grid", gap: 10, fontSize: "var(--fs-md, 13px)" }}>
                 <p style={{ margin: 0 }}>This loads {whatWillLoad(report.plan)}.</p>
                 {approvedLoading > 0 && (
                   <p style={{ margin: 0 }}>
@@ -388,7 +388,7 @@ export function MasterImport({ canApply, isHead, sections }: { canApply: boolean
       {applied && applied.ok && applied.written && applied.plan && (
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="hd"><h3>Loaded</h3></div>
-          <div style={{ padding: "0 16px 16px", display: "grid", gap: 10, fontSize: 13 }}>
+          <div style={{ padding: "0 16px 16px", display: "grid", gap: 10, fontSize: "var(--fs-md, 13px)" }}>
             <p style={{ margin: 0 }}>
               Part families: planned {applied.plan.partFamilies.create + applied.plan.partFamilies.update}, written{" "}
               {applied.written.partFamilies.create + applied.written.partFamilies.update} · Routes: planned{" "}

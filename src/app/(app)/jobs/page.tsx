@@ -102,7 +102,7 @@ export default async function JobsList({
                         {j.unitRollup.length > 0 ? (
                           <StageSpine variant="mini" segments={j.unitRollup} />
                         ) : (
-                          <span style={{ color: "var(--muted)", fontSize: 11 }}>No schedule</span>
+                          <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>No schedule</span>
                         )}
                       </td>
                       <td>
@@ -110,7 +110,7 @@ export default async function JobsList({
                           <div className="pbar" style={{ flex: 1, marginTop: 0 }}>
                             <i style={{ width: `${j.percentComplete}%` }} />
                           </div>
-                          <span className="mono" style={{ fontSize: 12 }}>{j.percentComplete}%</span>
+                          <span className="mono" style={{ fontSize: "var(--fs-sm, 12px)" }}>{j.percentComplete}%</span>
                         </div>
                       </td>
                       <td>
@@ -131,7 +131,7 @@ export default async function JobsList({
                       <td className="num mono" style={{ color: j.openHoldPoints > 0 ? "var(--s-hold)" : "var(--muted)" }}>
                         {j.openHoldPoints}
                       </td>
-                      <td style={{ color: "var(--muted)", fontSize: 12 }}>{fmtWhen(j.lastActivityAt)}</td>
+                      <td style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>{fmtWhen(j.lastActivityAt)}</td>
                     </JobRow>
                   ))}
                 </tbody>

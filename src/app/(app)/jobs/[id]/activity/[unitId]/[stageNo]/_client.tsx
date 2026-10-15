@@ -45,7 +45,7 @@ function useRun(onRefusal: (r: { code: string; message: string } | null) => void
 function RefusalNote({ refusal }: { refusal: { code: string; message: string } | null }) {
   if (!refusal) return null;
   return (
-    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: 11 }}>
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: "var(--fs-xs, 11px)" }}>
       <span className="chip c-overdue"><i />{refusal.code}</span>
       <span style={{ color: "var(--muted)" }}>{refusal.message}</span>
     </div>
@@ -123,9 +123,9 @@ export function ActivityDetailClient({
             </div>
           );
         }
-        return <span style={{ color: "var(--muted)", fontSize: 12 }}>{isSelfSubmitted ? "Awaiting QC — submitted by you" : "Awaiting QC"}</span>;
+        return <span style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>{isSelfSubmitted ? "Awaiting QC — submitted by you" : "Awaiting QC"}</span>;
       case "COMPLETE":
-        return <span style={{ color: "var(--s-complete)", fontSize: 12, fontWeight: 600 }}>Completed</span>;
+        return <span style={{ color: "var(--s-complete)", fontSize: "var(--fs-sm, 12px)", fontWeight: 600 }}>Completed</span>;
       default:
         return null;
     }
@@ -159,7 +159,7 @@ export function ActivityDetailClient({
           <div className="hd"><h3>Hold points</h3></div>
           <div style={{ padding: 16, display: "grid", gap: 8 }}>
             {detail.holdPoints.map((h) => (
-              <div key={h.qcpItemId} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12 }}>
+              <div key={h.qcpItemId} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: "var(--fs-sm, 12px)" }}>
                 <span>{h.srNo} · {h.activity}</span>
                 <span style={{ color: h.status === "Cleared" ? "var(--s-complete)" : "var(--s-hold)" }}>{h.status}</span>
               </div>
@@ -173,7 +173,7 @@ export function ActivityDetailClient({
           <div className="hd"><h3>Delay reasons</h3></div>
           <div style={{ padding: 16, display: "grid", gap: 10 }}>
             {detail.delayReasons.map((d) => (
-              <div key={d.id} style={{ fontSize: 12 }}>
+              <div key={d.id} style={{ fontSize: "var(--fs-sm, 12px)" }}>
                 <div><b>{d.category}</b> · <span style={{ color: "var(--muted)" }}>{fmtDateTime(d.filedAt)}</span></div>
                 {d.detail && <div style={{ color: "var(--muted)" }}>{d.detail}</div>}
                 <div style={{ color: "var(--muted)" }}>filed by {d.filedByName}</div>
@@ -188,7 +188,7 @@ export function ActivityDetailClient({
           <div className="hd"><h3>Rejection history</h3></div>
           <div style={{ padding: 16, display: "grid", gap: 10 }}>
             {detail.rejections.map((r, i) => (
-              <div key={i} style={{ fontSize: 12 }}>
+              <div key={i} style={{ fontSize: "var(--fs-sm, 12px)" }}>
                 <div><span style={{ color: "var(--s-overdue)" }}>Rejected</span> · <span style={{ color: "var(--muted)" }}>{fmtDateTime(r.at)}</span></div>
                 {r.reason && <div style={{ color: "var(--muted)" }}>{r.reason}</div>}
                 <div style={{ color: "var(--muted)" }}>by {r.actorName ?? "—"}</div>
@@ -223,7 +223,7 @@ export function ActivityDetailClient({
             <div className="hd"><h3>Backing processes</h3></div>
             <div style={{ padding: 16, display: "grid", gap: 10 }}>
               {detail.backingPlans.map((p) => (
-                <div key={p.planId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: 12 }}>
+                <div key={p.planId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, fontSize: "var(--fs-sm, 12px)" }}>
                   <span>{p.processName}{p.isGoverning && <span className="tag" style={{ marginLeft: 8 }}>Governing</span>}</span>
                   <span style={{ color: "var(--muted)" }}>{p.status.replace("_", " ").toLowerCase()}</span>
                 </div>
@@ -293,8 +293,8 @@ export function ActivityDetailClient({
           />
         }
       >
-        <p style={{ color: "var(--muted)", fontSize: 13, margin: "0 0 12px" }}>This raises an NCR against {detail.serialNo} · {detail.stageName}.</p>
-        <label style={{ display: "block", fontSize: 11, color: "var(--muted)", marginBottom: 4 }}>Reason (required)</label>
+        <p style={{ color: "var(--muted)", fontSize: "var(--fs-md, 13px)", margin: "0 0 12px" }}>This raises an NCR against {detail.serialNo} · {detail.stageName}.</p>
+        <label style={{ display: "block", fontSize: "var(--fs-xs, 11px)", color: "var(--muted)", marginBottom: 4 }}>Reason (required)</label>
         <input className="ws-detail" value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} aria-label="Rejection reason" autoFocus />
       </Modal>
 

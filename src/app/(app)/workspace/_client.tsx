@@ -109,7 +109,7 @@ export function UnitRow({ row, categories }: { row: WsUnitRow; categories: Categ
         </>
       ) : (
         <>
-          <td colSpan={2} style={{ color: "var(--muted)", fontSize: 12 }}>{row.reasonText}</td>
+          <td colSpan={2} style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>{row.reasonText}</td>
           <td className="num"><UnitActionButton row={row} pending={pending} run={run} /></td>
         </>
       )}
@@ -138,7 +138,7 @@ function UnitActionButton({
   if (row.state === "ON_HOLD")
     return <button className="btn btn-accent" disabled={pending} onClick={() => run(() => resumeAction(row.planId), "Resumed.")}>Resume</button>;
   // BLOCKED — nothing actionable; the reason is shown in the row.
-  return <span style={{ color: "var(--muted)", fontSize: 11 }}>Blocked</span>;
+  return <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>Blocked</span>;
 }
 
 // ── One unit card (<1024px) — same handlers as UnitRow. ──────────────────

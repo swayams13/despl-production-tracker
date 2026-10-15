@@ -184,7 +184,7 @@ export function StageSheetLauncher({
                 <div className="sh-sec">Contributing operations ({d.backingPlans[0].contributingOps.length})</div>
                 {d.backingPlans[0].contributingOps.map((o, i) => (
                   <div key={i} className="hp-row" style={{ gridTemplateColumns: "auto 1fr auto", padding: "6px 0" }}>
-                    <span className="mono" style={{ color: "var(--muted)", fontSize: 10.5, textTransform: "uppercase" }}>{o.source}</span>
+                    <span className="mono" style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)", textTransform: "uppercase" }}>{o.source}</span>
                     <span>{o.label}</span>
                     <StatusChip status={o.status === "COMPLETE" ? "complete" : o.status === "SUBMITTED" ? "submitted" : o.status === "IN_PROGRESS" ? "progress" : "idle"} />
                   </div>
@@ -195,7 +195,7 @@ export function StageSheetLauncher({
 
           <div className="sh-sec">Why on hold</div>
           {d.holdPoints.filter((h) => h.status !== "Cleared").length === 0 ? (
-            <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No open hold points for this stage.</p>
+            <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No open hold points for this stage.</p>
           ) : (
             d.holdPoints
               .filter((h) => h.status !== "Cleared")
@@ -214,13 +214,13 @@ export function StageSheetLauncher({
 
           <div className="sh-sec">Why overdue</div>
           {overdueReasonPending && (
-            <p style={{ color: "var(--s-overdue)", fontSize: 12, margin: "0 0 6px" }}>
+            <p style={{ color: "var(--s-overdue)", fontSize: "var(--fs-sm, 12px)", margin: "0 0 6px" }}>
               Overdue{d.varianceDays != null && d.varianceDays > 0 ? ` ${d.varianceDays}d` : ""} · reason required
               {unreasonedOverduePlanIds.length > 1 && ` for ${unreasonedOverduePlanIds.length} backing processes`}
             </p>
           )}
           {d.delayReasons.length === 0 ? (
-            !overdueReasonPending && <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No delay reasons filed.</p>
+            !overdueReasonPending && <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No delay reasons filed.</p>
           ) : (
             d.delayReasons.map((r) => (
               <div key={r.id} className="sh-hist">
@@ -233,7 +233,7 @@ export function StageSheetLauncher({
             ))
           )}
           {d.status === "hold" && d.overduePip && (
-            <p style={{ color: "var(--muted)", fontSize: 11.5, marginTop: 8 }}>
+            <p style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)", marginTop: 8 }}>
               Overdue — the open hold point is the likely cause; file the matching reason.
             </p>
           )}
@@ -522,7 +522,7 @@ function BackingPlanRow({
         )}
       </div>
       {opsTotal > 0 && (
-        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
+        <div style={{ fontSize: "var(--fs-xs, 11px)", color: "var(--muted)", marginTop: 2 }}>
           {opsComplete}/{opsTotal} fabrication/assembly operations complete
           {opsComplete < opsTotal &&
             ` — waiting on ${plan.contributingOps

@@ -754,7 +754,7 @@ function PublishDialog({ versionId, onClose }: { versionId: number; onClose: () 
               <div style={{ marginTop: 14 }}>
                 <div className="sh-sec">Confirm before publishing</div>
                 {warnings.map((code) => (
-                  <label key={code} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 10, fontSize: 12 }}>
+                  <label key={code} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 10, fontSize: "var(--fs-sm, 12px)" }}>
                     <input type="checkbox" checked={acked.has(code)} onChange={() => toggleAck(code)} style={{ marginTop: 2 }} />
                     <span>{WARNING_COPY[code]}</span>
                   </label>

@@ -149,7 +149,7 @@ export function MasterDataList({ list, filters, sections }: { list: PartFamilyLi
 
       {list.rows.length === 0 ? (
         <div className="card" style={{ padding: 16 }}>
-          <p style={{ margin: "0 0 12px", fontSize: 13 }}>
+          <p style={{ margin: "0 0 12px", fontSize: "var(--fs-md, 13px)" }}>
             {anyFilter
               ? "No parts match these filters."
               : "No part families have been loaded yet. Engineering loads them from the Standard Parts Master workbook."}
@@ -231,7 +231,7 @@ export function MasterDataList({ list, filters, sections }: { list: PartFamilyLi
                         <StatusChip status={st.status} label={st.label} />
                       </div>
                       <div style={{ margin: "4px 0" }}>{r.name}</div>
-                      <div style={{ fontSize: 12, color: "var(--muted)" }}>
+                      <div style={{ fontSize: "var(--fs-sm, 12px)", color: "var(--muted)" }}>
                         {SCOPE_LABEL[r.scope]} · <Variants row={r} /> · {r.steps} steps · <ToFix row={r} />
                       </div>
                     </Link>

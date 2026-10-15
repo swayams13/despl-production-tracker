@@ -10,12 +10,12 @@ export default function AppError({ error, reset }: { error: Error & { digest?: s
     <div className="page-h" style={{ flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
       <h1>Something went wrong</h1>
       <div className="card" style={{ maxWidth: 480, padding: 16 }}>
-        <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: 13 }}>
+        <p style={{ margin: "0 0 12px", color: "var(--muted)", fontSize: "var(--fs-md, 13px)" }}>
           This page hit an unexpected error. Try again — if it keeps happening, report it with the
           reference below.
         </p>
         {error.digest && (
-          <p className="mono" style={{ margin: "0 0 12px", fontSize: 11, color: "var(--muted)" }}>
+          <p className="mono" style={{ margin: "0 0 12px", fontSize: "var(--fs-xs, 11px)", color: "var(--muted)" }}>
             Reference: {error.digest}
           </p>
         )}

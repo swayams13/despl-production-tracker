@@ -103,7 +103,7 @@ export function PortfolioBand({
             </Link>
           )}
           {!activeFilter && (
-            <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>
+            <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
               click a card above to filter
             </span>
           )}
@@ -150,7 +150,7 @@ export function PortfolioBand({
           </div>
         )}
         {cancelledCount > 0 && (
-          <div style={{ padding: "8px 16px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: 11 }}>
+          <div style={{ padding: "8px 16px", borderTop: "1px solid var(--border)", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
             {cancelledCount} cancelled — not shown
           </div>
         )}
@@ -218,7 +218,7 @@ function Row({ r }: { r: PortfolioRow }) {
       <td>
         <div className="otbar">
           <div className="bar"><i style={{ width: `${r.percentComplete}%`, background: "var(--s-complete)" }} /></div>
-          <span className="mono" style={{ fontSize: 11 }}>{r.percentComplete}%</span>
+          <span className="mono" style={{ fontSize: "var(--fs-xs, 11px)" }}>{r.percentComplete}%</span>
         </div>
       </td>
       <td>
@@ -243,14 +243,14 @@ function Row({ r }: { r: PortfolioRow }) {
         )}
       </td>
       <td className="mono" style={{ color: r.openHoldPoints > 0 ? "var(--s-hold)" : "var(--muted)" }}>{r.openHoldPoints}</td>
-      <td className="mono" style={{ fontSize: 11 }}>
+      <td className="mono" style={{ fontSize: "var(--fs-xs, 11px)" }}>
         <span style={{ color: "var(--s-complete)" }}>+{r.verifiedLast24h}</span>
         {" · "}
         <span style={{ color: r.newlyOverdueLast24h > 0 ? "var(--s-overdue)" : "var(--muted)" }}>{r.newlyOverdueLast24h} late</span>
         {" · "}
         <span style={{ color: r.holdsOpenedLast24h > 0 ? "var(--s-hold)" : "var(--muted)" }}>{r.holdsOpenedLast24h} hold</span>
       </td>
-      <td style={{ color: "var(--muted)", fontSize: 11 }}>{fmtRelative(r.lastActivityAt)}</td>
+      <td style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{fmtRelative(r.lastActivityAt)}</td>
     </tr>
   );
 }

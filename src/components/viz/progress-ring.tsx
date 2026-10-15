@@ -84,7 +84,7 @@ export function ProgressRing({
       {showValue && (
         <span
           className="absolute font-semibold"
-          style={{ fontSize: Math.max(10, size * 0.24), color: FILL_BY_TONE[tone] }}
+          style={{ fontSize: Math.max(11, size * 0.24), color: FILL_BY_TONE[tone] }}
           aria-hidden="true"
         >
           {Math.round(pct)}%

@@ -375,16 +375,16 @@ export function AppShell({
           <div className="jobswitch" onClick={() => setJobOpen((v) => !v)}>
             {currentJob ? (
               <>
-                <span className="mono" style={{ fontSize: 12 }}>
+                <span className="mono" style={{ fontSize: "var(--fs-sm, 12px)" }}>
                   {currentJob.jobNumber}
                 </span>
-                <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                <span style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>
                   {currentJob.projectName ?? currentJob.familyName}
                 </span>
                 <StageSpine variant="mini" segments={currentJob.unitRollup} />
               </>
             ) : (
-              <span style={{ color: "var(--muted)", fontSize: 12 }}>No jobs yet</span>
+              <span style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>No jobs yet</span>
             )}
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8B919A" strokeWidth={2}>
               <path d="M6 9l6 6 6-6" />

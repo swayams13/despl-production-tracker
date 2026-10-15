@@ -77,7 +77,7 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
       <div className="card">
         <div className="hd">
           <h3>Bill of materials — {bom.equipmentName}</h3>
-          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{totalItems} items</span>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{totalItems} items</span>
           {bom.equipments.length > 1 && (
             <select
               className="btn"
@@ -199,7 +199,7 @@ function SubAssemblyComponents({ jobId, bom }: { jobId: number; bom: BomTree }) 
     <div className="card" style={{ gridColumn: "1 / -1" }}>
       <div className="hd">
         <h3>Sub-assembly components — {components.length} tracked</h3>
-        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>No procurement BOM export yet — routed directly from the component register</span>
+        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>No procurement BOM export yet — routed directly from the component register</span>
         {bom.units.length > 1 && (
           <select
             className="btn"
@@ -238,7 +238,7 @@ function SubAssemblyComponents({ jobId, bom }: { jobId: number; bom: BomTree }) 
                 {comp.operations.length > 0 ? (
                   <RouteSteps jobId={jobId} operations={comp.operations} welders={bom.welders} delayCategories={bom.delayCategories} />
                 ) : (
-                  <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
+                  <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No component instance / operation route recorded yet.</p>
                 )}
               </div>
             )}
@@ -551,7 +551,7 @@ function ComponentDetail({
               A mixed known+unknown case (hasUnknownReceipt with a non-null receivedQty) must not read as a
               confident total either — task review I1. */}
           {item.procurement.status === "RECEIPT" && (
-            <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 11 }}>
+            <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
               {item.procurement.receivedQty != null
                 ? `${item.procurement.receivedQty} received${item.procurement.hasUnknownReceipt ? ", plus an unrecorded quantity" : ""}`
                 : "quantity not recorded"}
@@ -574,7 +574,7 @@ function ComponentDetail({
           {/* B8, Phase 4: heat traces to a specific serial once componentId is set —
               distinct from the equipment-shared BomItem grain everything else here reads at. */}
           {mtc?.componentId != null && (
-            <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: 11 }}>
+            <span style={{ marginLeft: 6, color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
               Traces to {comp && comp.id === mtc.componentId ? comp.tag : `component #${mtc.componentId}`}
             </span>
           )}
@@ -609,7 +609,7 @@ function ComponentDetail({
       {comp && comp.operations.length > 0 ? (
         <RouteSteps jobId={jobId} operations={comp.operations} welders={welders} delayCategories={delayCategories} />
       ) : (
-        <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No component instance / operation route recorded yet.</p>
+        <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No component instance / operation route recorded yet.</p>
       )}
 
       <div className="sh-sec">Process log</div>
@@ -625,7 +625,7 @@ function ComponentDetail({
             ))}
         </div>
       ) : (
-        <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No activity yet.</p>
+        <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No activity yet.</p>
       )}
     </div>
   );
@@ -720,9 +720,9 @@ function StockLotMoveControl({
   if (mode === "idle") {
     return (
       <span style={{ display: "inline-flex", gap: 4 }}>
-        <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setMode("ISSUE")}>Issue</button>
-        <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setMode("RETURN")}>Return</button>
-        <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} onClick={() => setMode("SCRAP")}>Scrap</button>
+        <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("ISSUE")}>Issue</button>
+        <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("RETURN")}>Return</button>
+        <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("SCRAP")}>Scrap</button>
       </span>
     );
   }
@@ -730,10 +730,10 @@ function StockLotMoveControl({
     <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
       <input className="ws-detail" type="number" min="0" step="any" placeholder="Qty" value={qty} onChange={(e) => setQty(e.target.value)} style={{ width: 70 }} autoFocus />
       <input className="ws-detail" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} style={{ width: 100 }} />
-      <button className="btn btn-accent" style={{ padding: "2px 8px", fontSize: 11 }} disabled={pending} onClick={submit}>
+      <button className="btn btn-accent" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} disabled={pending} onClick={submit}>
         {mode === "ISSUE" ? "Issue" : mode === "RETURN" ? "Return" : "Scrap"}
       </button>
-      <button className="btn" style={{ padding: "2px 8px", fontSize: 11 }} disabled={pending} onClick={() => setMode("idle")}>Cancel</button>
+      <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} disabled={pending} onClick={() => setMode("idle")}>Cancel</button>
     </span>
   );
 }
@@ -788,7 +788,7 @@ function StockSection({ jobId, item, componentId }: { jobId: number; item: BomIt
               <span>
                 <span className="mono">{lot.qty}</span> at {lot.location}
                 {lot.heatNumber ? ` · heat ${lot.heatNumber}` : ""}
-                <span style={{ color: "var(--muted)", fontSize: 11 }}> · {new Date(lot.receivedAt).toLocaleDateString()}</span>
+                <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}> · {new Date(lot.receivedAt).toLocaleDateString()}</span>
               </span>
               <StockLotMoveControl jobId={jobId} lotId={lot.id} componentId={componentId} />
             </li>
@@ -858,7 +858,7 @@ function GoverningDrawingSection({ jobId, drawing }: { jobId: number; drawing: B
           ))}
         </div>
       ) : (
-        <p style={{ color: "var(--muted)", fontSize: 12, margin: 0 }}>No revision issued yet — cutting cannot start.</p>
+        <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No revision issued yet — cutting cannot start.</p>
       )}
 
       {issuing ? (
@@ -964,7 +964,7 @@ function StepMeta({ op }: { op: BomComponentOp }) {
   const hasMeta = operator || op.remarks || qty || op.rejection;
   if (!hasMeta) return null;
   return (
-    <div className="sh-route-step-meta" style={{ padding: "0 0 6px 22px", fontSize: 11, color: "var(--muted)" }}>
+    <div className="sh-route-step-meta" style={{ padding: "0 0 6px 22px", fontSize: "var(--fs-xs, 11px)", color: "var(--muted)" }}>
       {operator && <span>{operator}</span>}
       {qty && <span>{operator ? " · " : ""}{qty}</span>}
       {op.remarks && <div>{op.remarks}</div>}

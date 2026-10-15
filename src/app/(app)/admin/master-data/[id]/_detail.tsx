@@ -111,7 +111,7 @@ export function PartFamilyDetailView({ detail, variant }: { detail: PartFamilyDe
         <p className="note" style={{ textAlign: "left", margin: "0 0 12px" }}>{detail.approveRefusal}</p>
       )}
 
-      <div className="card" style={{ marginBottom: 14, padding: "12px 16px", fontSize: 13, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="card" style={{ marginBottom: 14, padding: "12px 16px", fontSize: "var(--fs-md, 13px)", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <span>{SCOPE_LABEL[detail.scope]}</span>
         {detail.assemblyGroup && <><span aria-hidden>·</span><span>{detail.assemblyGroup}</span></>}
         {detail.makeBuy && <><span aria-hidden>·</span><span>{MAKE_BUY_LABEL[detail.makeBuy]}</span></>}
@@ -130,7 +130,7 @@ export function PartFamilyDetailView({ detail, variant }: { detail: PartFamilyDe
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14, marginBottom: 14 }}>
         <div className="card">
           <div className="hd"><h3>Approval</h3></div>
-          <dl style={{ margin: 0, padding: "0 16px 14px", display: "grid", gridTemplateColumns: "110px 1fr", rowGap: 6, fontSize: 13 }}>
+          <dl style={{ margin: 0, padding: "0 16px 14px", display: "grid", gridTemplateColumns: "110px 1fr", rowGap: 6, fontSize: "var(--fs-md, 13px)" }}>
             <dt style={{ color: "var(--muted)" }}>Last edited by</dt>
             <dd style={{ margin: 0 }}>{detail.preparedBy ?? "—"}</dd>
             <dt style={{ color: "var(--muted)" }}>Reviewed</dt>
@@ -161,7 +161,7 @@ export function PartFamilyDetailView({ detail, variant }: { detail: PartFamilyDe
               {detail.status === "APPROVED" ? "Approved." : "Nothing blocks approval."}
             </p>
           ) : (
-            <ul style={{ margin: 0, padding: "0 16px 12px", listStyle: "none", display: "grid", gap: 6, fontSize: 13 }}>
+            <ul style={{ margin: 0, padding: "0 16px 12px", listStyle: "none", display: "grid", gap: 6, fontSize: "var(--fs-md, 13px)" }}>
               {blockers.map((b, i) => (
                 <li key={i}>
                   <button type="button" className="btn btn-ghost" style={{ textAlign: "left" }} onClick={() => jump(b)}>
@@ -174,7 +174,7 @@ export function PartFamilyDetailView({ detail, variant }: { detail: PartFamilyDe
             </ul>
           )}
           {warnings.length > 0 && (
-            <details style={{ padding: "0 16px 12px", fontSize: 12, color: "var(--muted)" }}>
+            <details style={{ padding: "0 16px 12px", fontSize: "var(--fs-sm, 12px)", color: "var(--muted)" }}>
               <summary>{warnings.length} to check</summary>
               <ul style={{ margin: "6px 0 0", paddingLeft: 16 }}>
                 {warnings.map((w, i) => (
@@ -188,7 +188,7 @@ export function PartFamilyDetailView({ detail, variant }: { detail: PartFamilyDe
 
       {active == null && !editing ? (
         <div className="card" style={{ padding: 16 }}>
-          <p style={{ margin: "0 0 12px", fontSize: 13 }}>This part has no route yet.</p>
+          <p style={{ margin: "0 0 12px", fontSize: "var(--fs-md, 13px)" }}>This part has no route yet.</p>
           {detail.can.edit ? (
             <button type="button" className="btn btn-accent" onClick={() => setEditing(true)}>Add route (variant A)</button>
           ) : detail.can.revise ? (
@@ -303,7 +303,7 @@ export function PartFamilyDetailView({ detail, variant }: { detail: PartFamilyDe
                       <td>{s.acceptanceStandard || "—"}</td>
                       <td>{s.recordDocument || "—"}</td>
                       {active.changes && (
-                        <td style={{ fontSize: 12 }}>
+                        <td style={{ fontSize: "var(--fs-sm, 12px)" }}>
                           {ch?.kind === "added" && <span className="chip c-progress"><i />New</span>}
                           {ch?.kind === "changed" && <span title={ch.fields.join(", ")}>Changed: {ch.fields.join(", ")}</span>}
                         </td>
@@ -382,7 +382,7 @@ function ApproveDialog({ detail, onClose, onDone, onRefuse, onBlocked }: DialogP
       title={`Approve ${detail.code}?`}
       footer={<ModalConfirmFooter onCancel={onClose} onConfirm={confirm} confirmLabel={pending ? "Approving…" : "Approve part"} disabled={pending} />}
     >
-      <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
+      <div style={{ display: "grid", gap: 10, fontSize: "var(--fs-md, 13px)" }}>
         <p style={{ margin: 0 }}>
           {publishing.length > 0
             ? `Publishes ${publishing.map((v) => `variant ${v.variant} v${v.version}`).join(", ")}. Jobs created after this use the published version; jobs already running keep theirs.`
@@ -421,7 +421,7 @@ function ReviseDialog({ detail, onClose, onDone, onRefuse }: DialogProps) {
       title={`Revise ${detail.code}`}
       footer={<ModalConfirmFooter onCancel={onClose} onConfirm={confirm} confirmLabel={pending ? "Reopening…" : "Revise part"} disabled={pending || reason.trim().length < 5} />}
     >
-      <div style={{ display: "grid", gap: 10, fontSize: 13 }}>
+      <div style={{ display: "grid", gap: 10, fontSize: "var(--fs-md, 13px)" }}>
         <p style={{ margin: 0 }}>
           The part goes back to draft. The approved route stays in use for new jobs until the revision is approved.
         </p>
@@ -471,7 +471,7 @@ function EditPartDialog({ detail, onClose, onDone, onRefuse }: DialogProps) {
     });
 
   const field = (label: string, node: React.ReactNode) => (
-    <label style={{ display: "grid", gap: 4, fontSize: 12, color: "var(--muted)" }}>
+    <label style={{ display: "grid", gap: 4, fontSize: "var(--fs-sm, 12px)", color: "var(--muted)" }}>
       {label}
       {node}
     </label>
@@ -518,7 +518,7 @@ function EditPartDialog({ detail, onClose, onDone, onRefuse }: DialogProps) {
           </>,
         )}
         {field("Dimensions entered per job (comma separated)", <input className="ws-detail" value={f.dimensionKeys} onChange={(e) => setF({ ...f, dimensionKeys: e.target.value })} />)}
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: "var(--fs-md, 13px)" }}>
           <input type="checkbox" checked={f.isSpare} onChange={(e) => setF({ ...f, isSpare: e.target.checked })} />
           Also a spare
         </label>

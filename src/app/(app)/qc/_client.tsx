@@ -24,7 +24,7 @@ function stop(e: MouseEvent) {
 function RefusalNote({ refusal }: { refusal: Refusal | null }) {
   if (!refusal) return null;
   return (
-    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6, fontSize: 11 }} onClick={stop}>
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6, fontSize: "var(--fs-xs, 11px)" }} onClick={stop}>
       <span className="chip c-overdue"><i />{refusal.code}</span>
       <span style={{ color: "var(--muted)", flex: "1 1 160px" }}>{refusal.message}</span>
     </div>
@@ -135,7 +135,7 @@ function QueueRowCard({ row, onOpen }: { row: QcQueueRow; onOpen: () => void }) 
     <div className="rt-card" {...clickableRowProps(onOpen)}>
       <div className="rt-card-top">
         <b className="mono">{row.jobNumber}</b>
-        <span className="mono" style={{ color: "var(--muted)", fontSize: 12 }}>{row.serialNo}</span>
+        <span className="mono" style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>{row.serialNo}</span>
       </div>
       <div className="rt-card-meta">{row.processName} · {row.deptName}</div>
       <div className="rt-card-row">
@@ -188,7 +188,7 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd">
           <h3>Awaiting your verification</h3>
-          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{cockpit.queue.length} items · oldest first</span>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{cockpit.queue.length} items · oldest first</span>
         </div>
         {cockpit.queue.length === 0 ? (
           <p className="note" style={{ margin: "16px 0" }}>Nothing awaiting verification.</p>
@@ -221,7 +221,7 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd">
           <h3>Open hold points — QCP / ITP</h3>
-          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>{cockpit.holdPoints.length} open, by age</span>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{cockpit.holdPoints.length} open, by age</span>
         </div>
         {cockpit.holdPoints.length === 0 ? (
           <p className="note" style={{ margin: "16px 0" }}>No open hold points.</p>
@@ -259,7 +259,7 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="hd">
           <h3>NCRs awaiting disposition</h3>
-          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
             {cockpit.openNcrs.length} open · {cockpit.rework.openCount} total in rework/disposition ·{" "}
             {cockpit.rework.totalReworkHours}h avg rework closed
           </span>
@@ -270,14 +270,14 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
           cockpit.openNcrs.map((n) => (
             <div
               key={n.ncrId}
-              style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: "1px solid var(--border)", fontSize: 12 }}
+              style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: "1px solid var(--border)", fontSize: "var(--fs-sm, 12px)" }}
             >
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {n.entityLabel} · <span className="mono">{n.jobNumber}</span>
                 {n.serialNo ? ` · Unit ${n.serialNo}` : ""}
               </span>
               <span className="chip c-overdue"><i />{n.categoryName}</span>
-              <span style={{ color: "var(--muted)", fontSize: 11 }}>
+              <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
                 {n.rejectionDetail ?? "—"} · rejected by {n.rejectedByName}
               </span>
               {dispositioningId === n.ncrId ? (

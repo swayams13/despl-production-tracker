@@ -157,7 +157,7 @@ export function Sunburst({ data, size = 280, className }: SunburstProps) {
               border: "1px solid var(--border)",
               borderRadius: 6,
               padding: "6px 10px",
-              fontSize: 11,
+              fontSize: "var(--fs-xs, 11px)",
               textAlign: "center",
               whiteSpace: "nowrap",
             }}

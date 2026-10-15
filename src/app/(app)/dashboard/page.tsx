@@ -94,7 +94,7 @@ function PortfolioHealthCard({ data }: { data: SunburstNode[] }) {
     <div className="card" style={{ marginTop: 8, marginBottom: 8 }}>
       <div className="hd">
         <h3>Portfolio health</h3>
-        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>
+        <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>
           health → job → stage status
         </span>
       </div>
@@ -142,7 +142,7 @@ export default async function Dashboard({
         <PortfolioHealthCard data={sunburstData} />
         {portfolio.rows.length > 0 && (
           <div className="page-h" style={{ marginTop: 8 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 600 }}>
+            <h2 style={{ fontSize: "var(--fs-lg, 15px)", fontWeight: 600 }}>
               Project detail — <span className="mono">{selected?.jobNumber ?? "—"}</span>
             </h2>
             <JobSelector rows={portfolio.rows} jobId={jobId} healthSlug={healthSlug} />
@@ -179,7 +179,7 @@ export default async function Dashboard({
       <PortfolioHealthCard data={sunburstData} />
 
       <div className="page-h" style={{ marginTop: 8 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 600 }}>
+        <h2 style={{ fontSize: "var(--fs-lg, 15px)", fontWeight: 600 }}>
           Project detail — <span className="mono">{selected?.jobNumber}</span>
           {selected?.projectName ? <span style={{ color: "var(--muted)", fontWeight: 500 }}> · {selected.projectName}</span> : null}
         </h2>
@@ -286,7 +286,7 @@ export default async function Dashboard({
       <div className="card">
         <div className="hd">
           <h3>Department × status</h3>
-          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>click a cell to filter workspace</span>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>click a cell to filter workspace</span>
         </div>
         <div style={{ padding: "4px 8px 10px", overflowX: "auto" }}>
           <table className="matrix">
@@ -321,7 +321,7 @@ export default async function Dashboard({
                     ) : (
                       <div className="otbar">
                         <div className="bar"><i style={{ width: `${row.onTimePct}%`, background: onTimeColor(row.onTimePct) }} /></div>
-                        <span className="mono" style={{ fontSize: 11 }}>{row.onTimePct}%</span>
+                        <span className="mono" style={{ fontSize: "var(--fs-xs, 11px)" }}>{row.onTimePct}%</span>
                       </div>
                     )}
                   </td>
@@ -337,7 +337,7 @@ export default async function Dashboard({
           <div className="hd">
             <h3>Plans verified — per week</h3>
             {k.throughputTargetPerWeek !== null && (
-              <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>target {k.throughputTargetPerWeek} / wk to hit contractual date</span>
+              <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>target {k.throughputTargetPerWeek} / wk to hit contractual date</span>
             )}
           </div>
           <div style={{ padding: "16px 12px 10px" }}>
@@ -414,7 +414,7 @@ export default async function Dashboard({
         <div className="card">
           <div className="hd">
             <h3>Open hold points — QCP / ITP</h3>
-            <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 11 }}>top {k.holdPointsTop.length} of {k.openHoldPoints} by age</span>
+            <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>top {k.holdPointsTop.length} of {k.openHoldPoints} by age</span>
           </div>
           {k.holdPointsTop.length === 0 ? (
             <p className="note" style={{ margin: "16px 0" }}>No open hold points.</p>

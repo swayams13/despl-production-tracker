@@ -150,7 +150,7 @@ function FamilyGroup({
         <td
           colSpan={6}
           style={{
-            fontSize: 10.5,
+            fontSize: "var(--fs-xs, 11px)",
             textTransform: "uppercase",
             letterSpacing: ".5px",
             color: "var(--muted)",
@@ -365,7 +365,7 @@ function ConfirmDeactivateDialog({
             <Dialog.Title asChild><h2>Deactivate {row.name}?</h2></Dialog.Title>
           </div>
           <div className="sh-body">
-            <p style={{ fontSize: 13, margin: 0 }}>
+            <p style={{ fontSize: "var(--fs-md, 13px)", margin: 0 }}>
               Deactivating keeps existing jobs intact. Equipment already using this type is unaffected.
             </p>
             <p className="note" style={{ textAlign: "left" }}>
