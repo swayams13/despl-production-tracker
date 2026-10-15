@@ -331,6 +331,9 @@ body {
      invisible on outdoor's black ground (1.6:1); the dark value is the exact
      original hex, so the dark palette is byte-identical to before. */
   --track: #3a4048;
+  /* Type scale for what used to be inline fontSize literals (L2.0). xs is the
+     11px floor and rises to 12px on a coarse pointer, see the last block. */
+  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 20px;
   background: var(--bg);
   color-scheme: dark;
   color: var(--text);
@@ -1116,7 +1119,40 @@ body {
   .theme-industrial .week-cell .dy,
   .theme-industrial .bars .b span,
   .theme-industrial .g-actual b,
-  .theme-industrial .g-todaylab {
+  .theme-industrial .g-todaylab,
+  .theme-industrial .logo span,
+  .theme-industrial .navgrp h6,
+  .theme-industrial .nav-item .badge,
+  .theme-industrial .user small,
+  .theme-industrial .tag,
+  .theme-industrial .spine-lab,
+  .theme-industrial .sh-sec,
+  .theme-industrial .dept-tag,
+  .theme-industrial .week-cell .ld,
+  .theme-industrial .g-months,
+  .theme-industrial .g-dept-header {
     font-size: 12px;
   }
+  .theme-industrial { --fs-xs: 12px; }
+
+  /* 44px hit areas (AUD-067, frame 00). The visible bar keeps its size: the
+     extra height is a transparent border, clipped out of the background, and
+     the negative margin gives the layout space back. A border (not a
+     pseudo-element) because .pip-od/.pip-rej already own ::before/::after. */
+  .theme-industrial .spine { margin: -11px 0 -9px; }
+  .theme-industrial .spine > * {
+    height: 44px;
+    border-block: 15px solid transparent;
+    background-clip: padding-box;
+  }
+  .theme-industrial .spine > *:hover { outline: none; }
+  .theme-industrial .mx-cell {
+    height: 44px;
+    margin-block: -9px;
+    border-block: 9px solid transparent;
+    background-clip: padding-box;
+  }
+  .theme-industrial .bell { min-width: 44px; min-height: 44px; align-items: center; justify-content: center; }
+  .theme-industrial .tab { display: inline-flex; align-items: center; min-height: 44px; }
+  .theme-industrial .chip[role="button"] { min-height: 44px; }
 }

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { compositeOver, contrastRatio, type RGBA } from "../../e2e/wcag-contrast";
@@ -75,5 +75,24 @@ describe("type floor and retired palette", () => {
 
   it("has no theme-outdoor selector left", () => {
     expect(css).not.toMatch(/\.theme-outdoor/);
+  });
+
+  it("has no numeric inline fontSize literal left in .tsx (use var(--fs-*))", () => {
+    const root = join(__dirname, "..");
+    const hits: string[] = [];
+    const walk = (dir: string) => {
+      for (const name of readdirSync(dir)) {
+        const f = join(dir, name);
+        if (statSync(f).isDirectory()) {
+          if (name !== "node_modules" && name !== "generated") walk(f);
+        } else if (f.endsWith(".tsx")) {
+          readFileSync(f, "utf8")
+            .split("\n")
+            .forEach((l, i) => /fontSize:\s*[\d.]/.test(l) && hits.push(`${f.slice(root.length)}:${i + 1}`));
+        }
+      }
+    };
+    walk(root);
+    expect(hits).toEqual([]);
   });
 });
