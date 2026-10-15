@@ -621,9 +621,6 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       const qcFreeOp = (code = "ROLLING") => o.job({ components: [{ tag: "BRKT", ops: [{ code, requiresQc: false }] }] });
 
       it.each<[string, () => Promise<[WorkJob, [Kind, number]]>, string]>([
-        ["an operation with an open NCR", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "OPEN"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }, ERROR_CODES.NCR_OPEN],
-        ["an operation whose NCR is in rework", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "REWORK_IN_PROGRESS"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }, ERROR_CODES.NCR_OPEN],
-        ["a step with an open NCR", async () => { const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] }); await ncrOnStep(j); return [j, [S, j.step(1)]]; }, ERROR_CODES.NCR_OPEN],
         ["a step with its own open blocking H point", async () => { const j = await o.job({ steps: [{ seq: 1, requiresQc: false, hold: true }] }); return [j, [S, j.step(1)]]; }, ERROR_CODES.HOLD_POINT_OPEN],
         [
           "a DFT-gated operation with no accepted coats",
@@ -641,6 +638,21 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
         expect(refusal(r, id)?.code, JSON.stringify(r)).toBe(expected);
         const row = kind === S ? await stepRow(id) : await owner.componentOperation.findUniqueOrThrow({ where: { id } });
         expect(row.status).toBe("NOT_STARTED");
+      });
+
+      // Decision 4 (14 Oct): an item QC rejected is QC's to re-verify, whatever requiresQc says;
+      // refusing the Done left it with no way to complete or to close its NCR.
+      it.each<[string, () => Promise<[WorkJob, [Kind, number]]>]>([
+        ["an operation with an open NCR", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "OPEN"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }],
+        ["an operation whose NCR is in rework", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "REWORK_IN_PROGRESS"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }],
+        ["a step with an open NCR", async () => { const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] }); await ncrOnStep(j); return [j, [S, j.step(1)]]; }],
+      ])("%s: a QC-free DONE is routed to SUBMITTED for QC re-verify, not refused and not COMPLETE", async (_l, setup) => {
+        const [j, [kind, id]] = await setup();
+        const r = await rec(sup, j, "DONE", [[kind, id]]);
+        expect(r.refused, JSON.stringify(r.refused)).toHaveLength(0);
+        expect(r.applied).toMatchObject([{ from: "NOT_STARTED", to: "SUBMITTED" }]);
+        const row = kind === S ? await stepRow(id) : await owner.componentOperation.findUniqueOrThrow({ where: { id } });
+        expect(row).toMatchObject({ status: "SUBMITTED", submittedBy: sup.userId, finishedAt: null });
       });
 
       it("requiresQc true: the same NCR does not stop Done reaching SUBMITTED (QC verify handles it)", async () => {

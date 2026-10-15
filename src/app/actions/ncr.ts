@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
-import { dispositionNcr } from "@/lib/services/ncr.service";
+import { dispositionNcr, ratifyConcession } from "@/lib/services/ncr.service";
 import { toActionError, type ActionResult } from "./_action";
 
 /**
@@ -21,10 +21,24 @@ export async function dispositionNcrAction(
     notes?: string;
     reworkOwnerId?: number;
     reworkDueDate?: Date;
+    /** L1.2f: required for a CONCESSION on an H5/H6 rule NCR. */
+    codeClause?: string;
   },
 ): Promise<ActionResult> {
   try {
     await dispositionNcr(await requireActor(), { ncrId, disposition, ...detail });
+    revalidatePath("/workspace");
+    revalidatePath("/qc");
+    return { ok: true };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** Decision 2 (14 Oct): QC ratifies a concession the Production Head accepted; the NCR closes. */
+export async function ratifyConcessionAction(ncrId: number): Promise<ActionResult> {
+  try {
+    await ratifyConcession(await requireActor(), { ncrId });
     revalidatePath("/workspace");
     revalidatePath("/qc");
     return { ok: true };

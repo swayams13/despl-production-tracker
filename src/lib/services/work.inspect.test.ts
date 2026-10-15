@@ -198,6 +198,22 @@ describe.skipIf(!RUN_DB)("L1.2e inspect, derived switch, unit lock (DB)", async 
         expect(await owner.qcpExecution.count({ where: { jobId: j.job.id } })).toBe(0);
       });
 
+      // Decision 6 (14 Oct): QC cannot open an NCR against work that was never recorded.
+      it.each<[string, JobSpec["steps"], (j: WorkJob) => Promise<unknown>]>([
+        ["the preceding work step not started", [W(1), I(2)], async () => {}],
+        ["the preceding work step in progress", [W(1), I(2)], (j) => setStep(j.step(1), "IN_PROGRESS", null)],
+        ["one of two preceding work steps not done", [W(1), W(2), I(3)], (j) => setStep(j.step(2), "COMPLETE", sup)],
+      ])("REJECT with %s is refused INSPECT_PRECONDITION; no rejection, no NCR, no QCP execution", async (_l, steps, prep) => {
+        const j = await o.job({ processes: [{ code: "20" }], steps });
+        await prep(j);
+        const target = j.step(steps!.length);
+        expect(await code(inspectStep(qc, target, "REJECT"))).toBe(ERROR_CODES.INSPECT_PRECONDITION);
+        expect((await stepRow(target)).status).toBe("NOT_STARTED");
+        expect(await owner.assemblyStepRejection.count({ where: { jobId: j.job.id } })).toBe(0);
+        expect(await owner.ncr.count({ where: { jobId: j.job.id } })).toBe(0);
+        expect(await owner.qcpExecution.count({ where: { jobId: j.job.id } })).toBe(0);
+      });
+
       it("a work step on another joint does not hold the inspection back (H1 scope)", async () => {
         const j = await o.job({ processes: [{ code: "20" }], steps: [W(1, { jointRef: "J2" }), W(2, { jointRef: "J1" }), I(3, { jointRef: "J1" })] });
         await setStep(j.step(2), "COMPLETE", sup);

@@ -65,12 +65,22 @@ Decided by Swayam acting for the Production Head. Ratify: SJ (all), QC head (H5,
   - **H5** no welding on a pressure part after the unit's final PWHT → refuse and route to NCR. Only the final PWHT triggers it (PFHT of formed heads does not); local PWHT locks the whole unit. "Welding on a pressure part" = any weld whose fusion is on a pressure-retaining part, including cleats, lugs and clips; welding non-pressure parts to each other is allowed.
   - **H6** hydro needs every weld and NDT step on the unit's pressure joints complete; after hydro, welding on a pressure part is refused and routed to NCR.
   - Plus the always-HARD rules of invariant 2 (open blocking H point blocks stage completion; 29/30 need 27; dispatch refuses open NCR, open hold point or incomplete production).
-  - NCR resolution of H5/H6: "repair + repeat PWHT/hydro" reopens that step for the unit, or "accept per code exception" with QC head approval and the clause recorded.
+  - NCR resolution of H5/H6: "repair + repeat PWHT/hydro" reopens the unit's final PWHT **and a completed hydro** with it (an H6 repair reopens the hydro alone), or "accept per code exception": the Production Head accepts with a mandatory clause and QC ratifies (see "Review decisions" below).
+  - **Concession maker-checker (invariant 3, 14 Oct 2026):** whoever accepts an H5/H6 violation per a code clause did not raise its NCR and has no recorded write on the target item (its audit trail, `submittedBy`, `performedByUserId`); refused with `MAKER_CHECKER_VIOLATION`, admins not exempt. Another Production Head must accept it.
 - **SOFT** (allowed early with a reason; writes a `SequenceOverride` row and flags the item): starting a step while an earlier step in the unit's assembly sequence is open and no HARD rule links them (nozzles vs head closure, attachments and skirt vs circ seams, clearance work, internal-access work after closure); department overlaps (rolling before all plates are cut, edge prep with cutting, Machine Shop 12–14 ahead of shell fabrication); planning and procurement order, processes 1–11 (job grain). Internal-access-after-closure is reviewed after the pilot as a HARD candidate.
 - **Override:** Supervisor and above; operators see "Ask your supervisor to start this early". Reason chips: Material/part ready early · Crew or machine free, upstream not ready · Crane/access/space available now · Client or delivery priority · Other (needs text). A batch start across units takes one reason.
 - **Acknowledge:** `PRODUCTION_HEAD` only; never blocks work; unacknowledged after 2 working days → digest. The same step pair overridden on at least half of a job's units (minimum 3) → master-data review list for that assembly sequence.
 - **Jobs with no assembly sequence** (in-flight imports, legacy jobs): HARD rules only, no SOFT gating, no process-edge fallback.
 - **New data:** `pressureRetaining` on the part family / component; `jointRef` on weld and NDT steps (already on `AssemblyTemplateStep`); a unit-level "final PWHT" marker on the heat-treatment step.
+
+### L1.2 review decisions (decided 14 Oct 2026, Swayam; QC head to ratify 1–3 and 6)
+
+1. **Concession approver.** The Production Head accepts an H5/H6 violation per a code clause (mandatory clause, audited) and QC ratifies it. No `QC_HEAD` role until the QC head is named (D7); any QC user other than the accepter may ratify. This replaces "accept with QC head approval" in the D2 text.
+2. **Ratification closes the NCR.** `ratifyConcession` (QC role, not the accepter, audited `ncr.concession.ratify`) moves a DISPOSITIONED concession to CLOSED. Until ratified it keeps counting as open in the QC cockpit.
+3. **H5 repair reopens hydro too.** A repeated final PWHT invalidates a completed hydro (H4), so one repair reopens both; an H6 repair reopens hydro only.
+4. **QC-free item with an open NCR.** A Done on a step or operation with `requiresQc = false` and an open or in-rework rejection NCR goes to SUBMITTED for QC re-verify (the legacy rework loop and its disposition and DFT gates), not COMPLETE and not refused. Its own open hold point is still refused.
+5. **Kit-ready on every component-operation start** (pressure or not) stays, as on the legacy path. Revisit only if the pilot job's stock records are incomplete.
+6. **REJECT of an INSPECTION step needs the work done**, like ACCEPT: every preceding WORK step of the group (same joint where set) SUBMITTED or COMPLETE, else `INSPECT_PRECONDITION`.
 
 ### D12 — H-point blocking scope (provisional, 14 Oct 2026; QC head to ratify)
 

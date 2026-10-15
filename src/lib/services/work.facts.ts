@@ -290,6 +290,23 @@ export async function loadFloorFacts(
     if (processSeq != null && (!plansBySeq.has(processSeq) || p.unitId != null)) plansBySeq.set(processSeq, row);
   }
 
+  // L1.2f: H5/H6 NCRs accepted per a code clause exempt only their own target.
+  const concessionNcrs =
+    steps.length || ops.length
+      ? await tx.ncr.findMany({
+          where: {
+            jobId: job.id,
+            disposition: "CONCESSION",
+            ruleCode: { not: null },
+            OR: [
+              { targetAssemblyStepId: { in: steps.map((s) => s.id) } },
+              { targetComponentOperationId: { in: ops.map((o) => o.id) } },
+            ],
+          },
+          select: { ruleCode: true, targetAssemblyStepId: true, targetComponentOperationId: true },
+        })
+      : [];
+
   const hasAssemblySequence =
     unitId != null ? steps.length > 0 : (await tx.assemblyStep.count({ where: { jobId: job.id } })) > 0;
 
@@ -298,8 +315,11 @@ export async function loadFloorFacts(
       items,
       excludedProcessSeqs: excluded.map((e) => numericSeq(e.code)).filter((s): s is number => s != null),
       hasAssemblySequence,
-      // ponytail: H5/H6 concessions arrive with the rule NCR columns (L1.2f); none exist before that.
-      concessions: [],
+      concessions: concessionNcrs.map((n) =>
+        n.targetAssemblyStepId != null
+          ? { rule: n.ruleCode!, kind: "ASSEMBLY_STEP" as const, id: n.targetAssemblyStepId }
+          : { rule: n.ruleCode!, kind: "COMPONENT_OP" as const, id: n.targetComponentOperationId! },
+      ),
     },
     rows,
     plansBySeq,
