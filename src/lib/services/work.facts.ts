@@ -1,6 +1,8 @@
 import type { Tx } from "@/lib/db";
+import { AppError } from "@/lib/shared/errors";
 import {
   drawingStateOf,
+  evaluateHard,
   type FloorItem,
   type ItemStatus,
   type OpItem,
@@ -32,6 +34,8 @@ export interface WorkRow {
   templateJointRef?: string | null;
   weldJointId?: number | null;
   componentId?: number;
+  /** COMPONENT_OP: OperationRef.requiresDftGate (a QC-free Done still needs the coats). */
+  requiresDftGate?: boolean;
   /** Current drawing revision, stamped as Component.builtToRevisionId when CUTTING starts on it. */
   currentRevisionId?: number | null;
   jobProcessId?: number;
@@ -49,6 +53,31 @@ export interface FloorFacts {
 }
 
 export const rowKey = (kind: WorkKind, id: number) => `${kind}:${id}`;
+
+/**
+ * Review fix (14 Oct): with FEATURES.leanFloor on, the legacy step/op start
+ * and submit run the D2 HARD rules recordWork runs (START: all of them; DONE:
+ * H5/H6), so the legacy actions cannot bypass them. Their own legacy gates
+ * still apply on top. The caller holds the unit's floor lock.
+ */
+export async function assertFloorHard(
+  tx: Tx,
+  kind: "ASSEMBLY_STEP" | "COMPONENT_OP",
+  id: number,
+  phase: "START" | "DONE",
+): Promise<void> {
+  const job = { select: { id: true, familyId: true } } as const;
+  const src =
+    kind === "ASSEMBLY_STEP"
+      ? await tx.assemblyStep.findUniqueOrThrow({ where: { id }, select: { unitId: true, job } })
+      : await tx.componentOperation
+          .findUniqueOrThrow({ where: { id }, select: { component: { select: { unitId: true } }, job } })
+          .then((o) => ({ unitId: o.component.unitId, job: o.job }));
+  const facts = await loadFloorFacts(tx, src.job, src.unitId);
+  const row = facts.rows.get(rowKey(kind, id));
+  const hard = row ? evaluateHard(row.item, facts.facts, phase) : null;
+  if (hard) throw new AppError(hard.code, hard.meta);
+}
 
 const numericSeq = (code: string) => (/^\d+$/.test(code) ? Number(code) : null);
 
@@ -87,7 +116,7 @@ export async function loadFloorFacts(
         startedAt: true,
         reportedStartAt: true,
         operationId: true,
-        operation: { select: { code: true, defaultDepartmentId: true } },
+        operation: { select: { code: true, defaultDepartmentId: true, requiresDftGate: true } },
         component: { select: { id: true, routeVersionId: true, pressureRetaining: true, governingDrawingId: true } },
       },
     }),
@@ -229,6 +258,7 @@ export async function loadFloorFacts(
       departmentId: o.operation.defaultDepartmentId,
       startedAt: o.reportedStartAt ?? o.startedAt,
       componentId: o.component.id,
+      requiresDftGate: o.operation.requiresDftGate,
       currentRevisionId: state === "RELEASED" || state === "AT_RISK" ? current!.id : null,
     });
   }

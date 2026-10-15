@@ -2,6 +2,8 @@ import { withTenant, type Tx } from "@/lib/db";
 import { audited } from "@/lib/audit";
 import { requireRole, assertNotClientUser, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { FEATURES } from "@/lib/shared/flags";
+import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
 import {
   recordQcpExecutionSchema,
   approveQcpWaiverSchema,
@@ -83,6 +85,9 @@ export async function recordQcpExecution(
       where: { id: unitId, equipment: { job: { tenantId: actor.tenantId } } },
     });
     if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit", unitId });
+    // L1.2e: same unit floor lock as recordWork/inspect, so clearing a hold point
+    // cannot interleave with a batch on this unit.
+    await lockFloorUnits(tx, unit.jobId, [unit.id]);
 
     // AUD-077 (12_SECURITY_RBAC.md §6): qcpItemId was taken as given and
     // never checked against the unit's own job — a QcpItem from a different
@@ -115,7 +120,7 @@ export async function recordQcpExecution(
       }
     }
 
-    return audited(tx, actor, async () => {
+    const recorded = await audited(tx, actor, async () => {
       const exec = await recordQcpExecutionTx(tx, actor, { qcpItemId, unitId, result, remarks, jobId: unit.jobId });
       return {
         result: exec,
@@ -129,6 +134,12 @@ export async function recordQcpExecution(
         },
       };
     });
+    // L1.2e: clearing (or failing) a hold point can complete (or reopen) the plan its step feeds.
+    if (FEATURES.leanFloor) {
+      const step = await tx.assemblyStep.findFirst({ where: { qcpItemId, unitId }, select: { id: true } });
+      if (step) await rollupForAssemblyStep(tx, actor, step.id);
+    }
+    return recorded;
   });
 }
 

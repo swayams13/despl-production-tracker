@@ -1321,6 +1321,10 @@ export const inspectSchema = z
     targetId: id,
     result: z.enum(["ACCEPT", "REJECT"]),
     reason: z.string().trim().max(1000).optional(),
+    /** REJECT only: rejection category (DelayCategoryRef). Defaults to the tenant's REWORK_QUALITY, then OTHER. */
+    categoryId: id.optional(),
+    /** REJECT of a weld step with a bound joint: also records an NdtResult(REJECT) (as rejectAssemblyStep). */
+    testTypeId: id.optional(),
   })
   .strict()
   .refine((i) => i.result !== "REJECT" || !!i.reason, { message: "Give a reason to reject", path: ["reason"] });

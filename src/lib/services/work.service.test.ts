@@ -32,6 +32,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
   let operator: Actor;
   let planner: Actor;
   let bSup: Actor;
+  let qc: Actor;
   beforeAll(async () => {
     o = await makeWorkOrg(owner, "A");
     b = await makeWorkOrg(owner, "B");
@@ -40,7 +41,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
     head = await o.user("head", ["PRODUCTION_HEAD"]);
     operator = await o.user("operator", ["OPERATOR"], [o.fab.id]);
     planner = await o.user("planner", ["PLANNER"], [o.fab.id]);
-    await o.user("qc", ["QC"]);
+    qc = await o.user("qc", ["QC"]);
     bSup = await b.user("bsup", ["SUPERVISOR"], [b.fab.id]);
   });
   afterAll(async () => {
@@ -92,9 +93,74 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect((await stepRow(theirs.step(1))).status).toBe("NOT_STARTED");
     });
 
+    // Review fix (14 Oct): tenant/job RLS on process_plans already hid the row; lockItemRows now scopes by job too.
+    it("another tenant's process plan id is refused NOT_FOUND and its row is never locked", async () => {
+      const mine = await b.job({ steps: [{ seq: 1 }] });
+      const theirs = await o.job({ processes: [{ code: "22" }] });
+      const foreign = theirs.plan("22", 0);
+      const requestId = crypto.randomUUID();
+      let pending!: Promise<Result>;
+      let lockError: string | null = "not checked";
+      // An uncommitted work request with the same id: recordWork's final insert waits on it
+      // while holding every row lock it took, so a second connection can probe them.
+      await owner
+        .$transaction(
+          async (t) => {
+            await t.workRequest.create({ data: { jobId: mine.job.id, requestId, actorId: bSup.userId, response: {} } });
+            pending = rec(bSup, mine, "START", [[S, mine.step(1)], [P, foreign]], { requestId });
+            pending.catch(() => {});
+            for (let i = 0; i < 100; i++) {
+              const [w] = await owner.$queryRaw<{ n: bigint }[]>`
+                SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query ILIKE '%work_requests%'`;
+              if (Number(w.n) > 0) break;
+              await new Promise((r) => setTimeout(r, 100));
+            }
+            lockError = await owner.$queryRaw`SELECT id FROM process_plans WHERE id = ${foreign} FOR UPDATE NOWAIT`.then(
+              () => null,
+              (e: unknown) => String(e),
+            );
+            throw new Error("rollback");
+          },
+          { timeout: 20_000 },
+        )
+        .catch((e: Error) => {
+          if (e.message !== "rollback") throw e;
+        });
+      expect(lockError).toBeNull();
+      const r = await pending;
+      expect(refusal(r, foreign)?.code).toBe(ERROR_CODES.NOT_FOUND);
+      expect(r.applied.map((a) => a.id)).toEqual([mine.step(1)]);
+    });
+
     it("a client user is refused FORBIDDEN before anything runs", async () => {
       const j = await o.job({ steps: [{ seq: 1 }] });
       await expectThrownCode(rec({ ...head, clientId: 1 }, j, "START", [[S, j.step(1)]]), ERROR_CODES.FORBIDDEN);
+    });
+
+    // Review fix (14 Oct): floor writes are an allowlist, not "anyone not a client".
+    it.each(["MANAGEMENT", "STORES", "ENGINEERING", "QC", "CLIENT_VIEWER"])(
+      "a %s user (in the item's department) is refused FORBIDDEN; nothing is written",
+      async (role) => {
+        const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] });
+        const who = await o.user(role.toLowerCase(), [role], [o.fab.id]);
+        for (const action of ["START", "DONE"] as const) {
+          await expectThrownCode(rec(who, j, action, [[S, j.step(1)]]), ERROR_CODES.FORBIDDEN);
+        }
+        expect((await stepRow(j.step(1))).status).toBe("NOT_STARTED");
+        expect(await audits("AssemblyStep", j.step(1))).toBe(0);
+      },
+    );
+
+    it("a planner is refused FORBIDDEN on anything but processes 1–11; the office plan applies", async () => {
+      const j = await o.job({
+        processes: [{ code: "3", grain: "JOB", requiresQc: false }, { code: "22" }],
+        steps: [{ seq: 1 }],
+        components: [{ tag: "BRKT", ops: [{ code: "ROLLING" }] }],
+      });
+      const r = await rec(planner, j, "START", [[P, j.plan("3")], [P, j.plan("22", 0)], [S, j.step(1)], [OP, j.op("BRKT", "ROLLING")]]);
+      expect(r.applied.map((a) => a.id)).toEqual([j.plan("3")]);
+      expect(r.refused.map((x) => x.code)).toEqual([ERROR_CODES.FORBIDDEN, ERROR_CODES.FORBIDDEN, ERROR_CODES.FORBIDDEN]);
+      expect((await stepRow(j.step(1))).status).toBe("NOT_STARTED");
     });
 
     it("a supervisor outside the item's department is refused FORBIDDEN per item", async () => {
@@ -316,6 +382,33 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect(refusal(r, j.step(2))?.meta).toMatchObject({ rule: "H6", routeTo: "NCR" });
     });
 
+    // Review fix: rework after a QC reject is back IN_PROGRESS, so its Done after the final PWHT or
+    // hydro is welding after it (D2 H5/H6); only the START check ran before.
+    it.each<[string, JobSpec, string | null]>([
+      [
+        "H5: Done of an in-progress pressure weld after final PWHT",
+        { steps: [{ seq: 1, kind: "INSPECTION", role: "FINAL_PWHT" }, { seq: 2, role: "WELD", jointRef: "J9", pressurePart: true }] },
+        ERROR_CODES.WELD_AFTER_PWHT,
+      ],
+      [
+        "H6: Done of an in-progress pressure fit-up after hydro started",
+        { steps: [{ seq: 1, role: "HYDRO" }, { seq: 2, role: "FIT_UP", jointRef: "J9", pressurePart: true }] },
+        ERROR_CODES.WELD_AFTER_HYDRO,
+      ],
+      ["H5 lets a non-pressure weld finish after PWHT", { steps: [{ seq: 1, kind: "INSPECTION", role: "FINAL_PWHT" }, { seq: 2, role: "WELD" }] }, null],
+    ])("%s", async (_l, spec, code) => {
+      const j = await o.job(spec);
+      await owner.assemblyStep.update({ where: { id: j.step(2) }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+      await owner.assemblyStep.update({ where: { id: j.step(1) }, data: { status: "COMPLETE" } });
+      const r = await rec(head, j, "DONE", [[S, j.step(2)]]);
+      if (code) {
+        expect(refusal(r, j.step(2))?.code, JSON.stringify(r)).toBe(code);
+        expect((await stepRow(j.step(2))).status).toBe("IN_PROGRESS");
+      } else {
+        expect(r.applied, JSON.stringify(r.refused)).toMatchObject([{ id: j.step(2), to: "SUBMITTED" }]);
+      }
+    });
+
     it("H3 stamps the revision the part was cut to", async () => {
       const j = await o.job(pressureCut({ issued: true, heatNumber: "H1", drawing: "RELEASED" }));
       await rec(sup, j, "START", [[OP, j.op("SHELL", "CUTTING")]]);
@@ -405,11 +498,13 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect(refusal(r, j.op("SHELL", "CUTTING"))?.code).toBe(ERROR_CODES.MATERIAL_NOT_ISSUED);
     });
 
-    it("processes 1–11 (job grain): a planner may override office order", async () => {
+    // Review fix: D2 "Override: Supervisor and above" — a planner records 1–11 but cannot override their order.
+    it("processes 1–11 (job grain): a planner is refused even with a reason; the Production Head may override", async () => {
       const j = await o.job({ steps: [{ seq: 1 }], processes: [{ code: "3", grain: "JOB" }, { code: "5", grain: "JOB" }] });
-      const refused = await rec(planner, j, "START", [[P, j.plan("5")]]);
-      expect(refusal(refused, j.plan("5"))?.meta).toMatchObject({ canOverride: true });
-      const r = await rec(planner, j, "START", [[P, j.plan("5")]], { override: { category: "CLIENT_PRIORITY" } });
+      const refused = await rec(planner, j, "START", [[P, j.plan("5")]], { override: { category: "CLIENT_PRIORITY" } });
+      expect(refusal(refused, j.plan("5"))).toMatchObject({ code: ERROR_CODES.SEQUENCE_OVERRIDE_REQUIRED, meta: { canOverride: false } });
+      expect((await planRow(j.plan("5"))).status).toBe("NOT_STARTED");
+      const r = await rec(head, j, "START", [[P, j.plan("5")]], { override: { category: "CLIENT_PRIORITY" } });
       expect(r.applied).toMatchObject([{ id: j.plan("5"), overridden: true }]);
       expect(await owner.sequenceOverride.findFirst({ where: { targetKind: P, targetId: j.plan("5") } })).toMatchObject({
         predecessorTargetId: j.plan("3"),
@@ -487,7 +582,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       const s = await stepRow(j.step(1));
       expect([s.status, s.submittedBy, s.finishedAt]).toEqual(["SUBMITTED", sup.userId, null]);
       const notes = await owner.notification.findMany({
-        where: { tenantId: o.tenantId, type: "ITEM_SUBMITTED", entityType: "Unit", entityId: { in: j.units.map((u) => u.id) } },
+        where: { recipientId: qc.userId, type: "ITEM_SUBMITTED", entityType: "Unit", entityId: { in: j.units.map((u) => u.id) } },
       });
       expect(notes.map((n) => n.entityId).sort()).toEqual(j.units.map((u) => u.id).sort());
       expect(notes[0].title).toMatch(/^2 items awaiting your verification/);
@@ -509,6 +604,52 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect((await rec(sup, j, "DONE", [[P, j.plan("22", 0)]])).applied).toMatchObject([{ to: "COMPLETE" }]);
     });
 
+    // Review fix (14 Oct): a QC-free item written straight to COMPLETE still meets what QC verify refuses on.
+    describe("false on a step or operation: the item's own hold, NCR and evidence still refuse (invariant 4)", () => {
+      const ncrOnOp = async (j: WorkJob, status: "OPEN" | "REWORK_IN_PROGRESS") => {
+        const rej = await owner.componentOperationRejection.create({
+          data: { componentOperationId: j.op("BRKT", "ROLLING"), categoryId: o.category.id, rejectedBy: head.userId, jobId: j.job.id },
+        });
+        await owner.ncr.create({ data: { componentOperationRejectionId: rej.id, jobId: j.job.id, status } });
+      };
+      const ncrOnStep = async (j: WorkJob) => {
+        const rej = await owner.assemblyStepRejection.create({
+          data: { assemblyStepId: j.step(1), categoryId: o.category.id, rejectedBy: head.userId, jobId: j.job.id },
+        });
+        await owner.ncr.create({ data: { assemblyStepRejectionId: rej.id, jobId: j.job.id } });
+      };
+      const qcFreeOp = (code = "ROLLING") => o.job({ components: [{ tag: "BRKT", ops: [{ code, requiresQc: false }] }] });
+
+      it.each<[string, () => Promise<[WorkJob, [Kind, number]]>, string]>([
+        ["an operation with an open NCR", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "OPEN"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }, ERROR_CODES.NCR_OPEN],
+        ["an operation whose NCR is in rework", async () => { const j = await qcFreeOp(); await ncrOnOp(j, "REWORK_IN_PROGRESS"); return [j, [OP, j.op("BRKT", "ROLLING")]]; }, ERROR_CODES.NCR_OPEN],
+        ["a step with an open NCR", async () => { const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] }); await ncrOnStep(j); return [j, [S, j.step(1)]]; }, ERROR_CODES.NCR_OPEN],
+        ["a step with its own open blocking H point", async () => { const j = await o.job({ steps: [{ seq: 1, requiresQc: false, hold: true }] }); return [j, [S, j.step(1)]]; }, ERROR_CODES.HOLD_POINT_OPEN],
+        [
+          "a DFT-gated operation with no accepted coats",
+          async () => {
+            const j = await qcFreeOp("PAINTING");
+            const op = await owner.componentOperation.findUniqueOrThrow({ where: { id: j.op("BRKT", "PAINTING") } });
+            await owner.operationRef.update({ where: { id: op.operationId }, data: { requiresDftGate: true } });
+            return [j, [OP, op.id]];
+          },
+          ERROR_CODES.DFT_NOT_ACCEPTED,
+        ],
+      ])("%s: DONE is refused; nothing written", async (_l, setup, expected) => {
+        const [j, [kind, id]] = await setup();
+        const r = await rec(sup, j, "DONE", [[kind, id]]);
+        expect(refusal(r, id)?.code, JSON.stringify(r)).toBe(expected);
+        const row = kind === S ? await stepRow(id) : await owner.componentOperation.findUniqueOrThrow({ where: { id } });
+        expect(row.status).toBe("NOT_STARTED");
+      });
+
+      it("requiresQc true: the same NCR does not stop Done reaching SUBMITTED (QC verify handles it)", async () => {
+        const j = await o.job({ components: [{ tag: "BRKT", ops: [{ code: "ROLLING" }] }] });
+        await ncrOnOp(j, "REWORK_IN_PROGRESS");
+        expect((await rec(sup, j, "DONE", [[OP, j.op("BRKT", "ROLLING")]])).applied).toMatchObject([{ to: "SUBMITTED" }]);
+      });
+    });
+
     it("false: Done goes straight to COMPLETE, audited, no QC notification", async () => {
       const j = await o.job({ steps: [{ seq: 1, requiresQc: false }] });
       const r = await rec(sup, j, "DONE", [[S, j.step(1)]]);
@@ -527,6 +668,60 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       const ok = await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: S, id: j.step(1), detail: { weldJointId: joint.id } }] });
       expect(ok.applied).toHaveLength(1);
       expect((await stepRow(j.step(1))).weldJointId).toBe(joint.id);
+    });
+  });
+
+  // ── Parity with the legacy component-op start (review fix, 14 Oct) ──────────
+  describe("parity: the same fixture through legacy startComponentOperation and recordWork", () => {
+    type Kit = "short" | "ready" | null;
+    interface Fixture {
+      component: { tag: string; pressure?: boolean; issued?: boolean; heatNumber?: string; ops: Array<{ code: string }> };
+      kit: Kit;
+      code: string | null;
+    }
+    /** Links the component to a BOM line (qtyPer 1); "ready" stocks one, "short" stocks none. */
+    async function build(f: Fixture) {
+      const j = await o.job({ components: [f.component] });
+      const componentId = j.components.get(`${f.component.tag}:0`)!;
+      if (f.kit) {
+        const bom = await owner.bomItem.create({
+          data: { jobId: j.job.id, equipmentId: j.equipment.id, itemNo: 9, partName: f.component.tag, sourceQty: "1", qtyPer: "1" },
+        });
+        if (f.kit === "ready") await owner.stockLot.create({ data: { jobId: j.job.id, bomItemId: bom.id, location: "Y1", qty: "1" } });
+        await owner.component.update({ where: { id: componentId }, data: { bomItemId: bom.id } });
+      }
+      return { j, id: j.op(f.component.tag, f.component.ops[0].code), componentId };
+    }
+
+    it.each<[string, Fixture]>([
+      ["kit short (MATERIAL_NOT_AVAILABLE)", { component: { tag: "BRKT", ops: [{ code: "ROLLING" }] }, kit: "short", code: ERROR_CODES.MATERIAL_NOT_AVAILABLE }],
+      ["kit ready", { component: { tag: "BRKT", ops: [{ code: "ROLLING" }] }, kit: "ready", code: null }],
+      ["no BOM link (seam, no gate)", { component: { tag: "BRKT", ops: [{ code: "ROLLING" }] }, kit: null, code: null }],
+      ["CUTTING, no drawing link, non-pressure", { component: { tag: "SKIRT", ops: [{ code: "CUTTING" }] }, kit: null, code: null }],
+      [
+        "CUTTING, no drawing link, pressure part (H3 data gap)",
+        { component: { tag: "SHELL", pressure: true, issued: true, heatNumber: "H1", ops: [{ code: "CUTTING" }] }, kit: null, code: null },
+      ],
+    ])("%s", async (_l, f) => {
+      const { startComponentOperation } = await import("./component.service");
+      const legacy = await build(f);
+      let legacyCode: string | null = null;
+      try {
+        await startComponentOperation(sup, { componentOperationId: legacy.id });
+      } catch (e) {
+        legacyCode = isAppError(e) ? e.code : String(e);
+      }
+      const lean = await build(f);
+      const r = await rec(sup, lean.j, "START", [[OP, lean.id]]);
+      const leanCode = r.refused[0]?.code ?? null;
+
+      expect([legacyCode, leanCode], JSON.stringify(r)).toEqual([f.code, f.code]);
+      const statuses = await Promise.all([legacy.id, lean.id].map(async (id) => (await owner.componentOperation.findUniqueOrThrow({ where: { id } })).status));
+      expect(statuses).toEqual(f.code ? ["NOT_STARTED", "NOT_STARTED"] : ["IN_PROGRESS", "IN_PROGRESS"]);
+      const stamps = await Promise.all(
+        [legacy.componentId, lean.componentId].map(async (id) => (await owner.component.findUniqueOrThrow({ where: { id } })).builtToRevisionId),
+      );
+      expect(stamps).toEqual([null, null]);
     });
   });
 
@@ -608,12 +803,13 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       expect(await rollup(j)).toMatchObject({ from: "IN_PROGRESS", to: "COMPLETE" });
     });
 
-    it("all items COMPLETE but a mapped item has an open NCR: stays IN_PROGRESS", async () => {
+    it("all items COMPLETE but a mapped item has an open NCR: not COMPLETE", async () => {
+      // recordWork itself now refuses a QC-free Done on an item with an open NCR, so the NCR arrives after.
       const j = await mapped();
+      await rec(sup, j, "DONE", [[S, j.step(1)], [S, j.step(2)]]);
       const rej = await owner.assemblyStepRejection.create({ data: { assemblyStepId: j.step(1), categoryId: o.category.id, rejectedBy: head.userId, jobId: j.job.id } });
       await owner.ncr.create({ data: { assemblyStepRejectionId: rej.id, jobId: j.job.id } });
-      const r = await rec(sup, j, "DONE", [[S, j.step(1)], [S, j.step(2)]]);
-      expect(r.rolledUp).toMatchObject([{ to: "IN_PROGRESS" }]);
+      expect(await rollup(j)).toMatchObject({ from: "COMPLETE", to: "IN_PROGRESS" });
       expect((await planRow(j.plan("20", 0))).status).toBe("IN_PROGRESS");
     });
 
@@ -642,7 +838,7 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
 
     it("a JOB-grain plan (unitId null) is written directly: requiresQc false → COMPLETE, true → SUBMITTED", async () => {
       const j = await o.job({ processes: [{ code: "3", grain: "JOB", requiresQc: false }, { code: "33", grain: "JOB" }] });
-      const r = await rec(planner, j, "DONE", [[P, j.plan("3")], [P, j.plan("33")]], override);
+      const r = await rec(head, j, "DONE", [[P, j.plan("3")], [P, j.plan("33")]], override);
       expect(r.applied.map((a) => [a.id, a.to])).toEqual([
         [j.plan("3"), "COMPLETE"],
         [j.plan("33"), "SUBMITTED"],

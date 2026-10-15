@@ -28,6 +28,7 @@ import {
   type VerifyProcessInput,
 } from "@/lib/shared/schemas";
 import {
+  loadMappedOps,
   assertComponentOpsComplete,
   assertEvidenceSatisfied,
   assertNoOpenHoldPoint,
@@ -39,6 +40,8 @@ import {
   loadPlanNotifyContext,
 } from "./_shared";
 import { notify, userIdsWithRole } from "./notifications.service";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { FEATURES } from "@/lib/shared/flags";
 import type { ProcessPlan, ProcessPlanStatus } from "@/generated/prisma/client";
 
 /**
@@ -111,6 +114,18 @@ async function loadGate(
   return { edges, states };
 }
 
+/**
+ * Lean Core L1.2e (invariant 12 as revised): with the lean floor on, a unit's
+ * plan with mapped steps/operations takes its status from them
+ * (rollupProcessPlan), so a direct start/submit/verify/hold is refused. Off:
+ * unchanged. JOB-grain plans (unitId null) and unmapped plans are not derived.
+ */
+async function assertNotDerived(tx: Tx, plan: ProcessPlan): Promise<void> {
+  if (!FEATURES.leanFloor || plan.unitId == null) return;
+  const mapped = await loadMappedOps(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
+  if (mapped.length > 0) throw new AppError(ERROR_CODES.DERIVED_STATUS, { processPlanId: plan.id });
+}
+
 // ── Transitions ──────────────────────────────────────────────────────────
 
 /**
@@ -125,6 +140,7 @@ export async function startProcess(actor: Actor, input: StartProcessInput): Prom
   return withTenant(actor.tenantId, async (tx) => {
     const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     requireDepartmentScope(actor, plan.ownerDepartmentId);
+    await assertNotDerived(tx, plan);
     const to = assertTransition("start", plan.status);
 
     await assertNoUnfiledDelayBlock(tx, {
@@ -168,6 +184,7 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
   return withTenant(actor.tenantId, async (tx) => {
     const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     requireDepartmentScope(actor, plan.ownerDepartmentId);
+    await assertNotDerived(tx, plan);
     const to = assertTransition("submit", plan.status);
 
     await assertNoUnfiledDelayBlock(tx, {
@@ -260,6 +277,7 @@ export async function verifyProcess(actor: Actor, input: VerifyProcessInput): Pr
       async (tx) => {
         const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
         assertMakerChecker(actor, plan.submittedBy);
+        await assertNotDerived(tx, plan);
         const to = assertTransition("verify", plan.status);
 
         const { edges, states } = await loadGate(tx, plan);
@@ -361,6 +379,7 @@ export async function holdProcess(actor: Actor, input: HoldProcessInput): Promis
   return withTenant(actor.tenantId, async (tx) => {
     const plan = await lockProcessPlanForUpdate(tx, processPlanId, actor.tenantId);
     requireDepartmentScope(actor, plan.ownerDepartmentId);
+    await assertNotDerived(tx, plan);
     const to = assertTransition("hold", plan.status);
 
     return audited(tx, actor, async () => {

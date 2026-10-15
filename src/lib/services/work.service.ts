@@ -1,22 +1,31 @@
 import { Prisma } from "@/generated/prisma/client";
-import { withJob, type Tx } from "@/lib/db";
-import { type Actor, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
+import { withJob, withTenant, type Tx } from "@/lib/db";
+import { type Actor, assertNotClientUser, hasRole, requireDepartmentScope, requireRole, ROLES } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError, SEQUENCE_OVERRIDE_OPERATOR_MESSAGE, type ErrorCode } from "@/lib/shared/errors";
-import { checkReportedAt, checkStart, type FloorItem, type WorkKind } from "@/lib/shared/floor-rules";
+import { checkReportedAt, checkStart, evaluateHard, OFFICE_PROCESS_MAX_SEQ, type FloorItem, type WorkKind } from "@/lib/shared/floor-rules";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
-import { recordWorkSchema, type RecordWorkInput } from "@/lib/shared/schemas";
+import { inspectSchema, recordWorkSchema, type InspectInput, type RecordWorkInput } from "@/lib/shared/schemas";
 import type { WorkCalendarInput } from "@/lib/schedule";
 import {
   assertEvidenceSatisfied,
+  assertKitReady,
   assertNoOpenHoldPoint,
   assertNoOpenNcr,
+  findOpenItemNcrIds,
+  loadMappedOps,
   loadPlanNotifyContext,
   lockFloorUnits,
+  lockProcessPlanForUpdate,
   resolveCalendarsForJobs,
+  rollupForAssemblyStep,
+  rollupForComponentOperation,
   rollupProcessPlan,
   type RollupChange,
 } from "./_shared";
+import { inspectAssemblyStepTx } from "./assembly.service";
+import { findDftShortfall, rejectComponentOperationTx, verifyComponentOperationTx } from "./component.service";
+import { rejectProcess, verifyProcess } from "./process.service";
 import { loadFloorFacts, rowKey, type FloorFacts, type WorkRow } from "./work.facts";
 import { assertPerformedByValid } from "./welding.service";
 import { notify, userIdsWithRole } from "./notifications.service";
@@ -66,6 +75,8 @@ const START_ACTIONS: Record<WorkKind, string[]> = {
   ASSEMBLY_STEP: ["assemblyStep.start", "work.start", "work.done"],
   PROCESS_PLAN: ["process.start", "work.start", "work.done"],
 };
+/** Who records floor work (review fix, 14 Oct). PLANNER: processes 1–11 only. */
+const FLOOR_ROLES = [ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN] as const;
 const JOINT_REQUIRED =
   "This weld step needs a joint bound before it can be marked done. Pick an existing joint, or log it first.";
 
@@ -89,15 +100,21 @@ async function resolveUnits(tx: Tx, jobId: number, items: Item[]): Promise<Map<s
   ]);
 }
 
-/** FOR UPDATE on every item row, sorted by (kind, id): serialises with the legacy start/submit/verify paths. */
-async function lockItemRows(tx: Tx, items: Item[]): Promise<void> {
-  const ids = (k: WorkKind) => items.filter((i) => i.kind === k).map((i) => i.id).sort((a, b) => a - b);
+/**
+ * FOR UPDATE on every item row, sorted by (kind, id): serialises with the
+ * legacy start/submit/verify paths. Only ids resolveUnits found in this job,
+ * and job_id in each query: RLS already hides other jobs' rows, this does not
+ * rely on it.
+ */
+async function lockItemRows(tx: Tx, jobId: number, items: Item[], resolved: Map<string, number | null>): Promise<void> {
+  const ids = (k: WorkKind) =>
+    items.filter((i) => i.kind === k && resolved.has(rowKey(k, i.id))).map((i) => i.id).sort((a, b) => a - b);
   const steps = ids("ASSEMBLY_STEP");
   const ops = ids("COMPONENT_OP");
   const plans = ids("PROCESS_PLAN");
-  if (steps.length) await tx.$queryRaw`SELECT id FROM assembly_steps WHERE id = ANY(${steps}::int[]) ORDER BY id FOR UPDATE`;
-  if (ops.length) await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ANY(${ops}::int[]) ORDER BY id FOR UPDATE`;
-  if (plans.length) await tx.$queryRaw`SELECT id FROM process_plans WHERE id = ANY(${plans}::int[]) ORDER BY id FOR UPDATE`;
+  if (steps.length) await tx.$queryRaw`SELECT id FROM assembly_steps WHERE id = ANY(${steps}::int[]) AND job_id = ${jobId} ORDER BY id FOR UPDATE`;
+  if (ops.length) await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ANY(${ops}::int[]) AND job_id = ${jobId} ORDER BY id FOR UPDATE`;
+  if (plans.length) await tx.$queryRaw`SELECT id FROM process_plans WHERE id = ANY(${plans}::int[]) AND job_id = ${jobId} ORDER BY id FOR UPDATE`;
 }
 
 /** The earlier item a SOFT override skipped, closest first (SequenceOverride.predecessorTargetId). */
@@ -110,6 +127,8 @@ function nearest(open: FloorItem[]): FloorItem {
 export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<RecordWorkResult> {
   const { requestId, jobId, action, items, override, lateReason, ...rest } = recordWorkSchema.parse(input);
   assertNotClientUser(actor);
+  // Floor-write allowlist; a planner is further limited to processes 1–11 per item (applyItem).
+  requireRole(actor, ...FLOOR_ROLES, ROLES.PLANNER);
   const reportedAt = rest.reportedAt ? new Date(rest.reportedAt) : null;
 
   return withJob(
@@ -127,7 +146,7 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
 
       // After the lock: a concurrent duplicate of this request has committed by now.
       if (requestId) {
-        const prior = await tx.workRequest.findFirst({ where: { requestId } });
+        const prior = await tx.workRequest.findFirst({ where: { tenantId: actor.tenantId, requestId } });
         if (prior) {
           if (prior.actorId !== actor.userId || prior.jobId !== job.id) {
             throw new AppError(ERROR_CODES.VALIDATION_FAILED, { requestId }, "This request id was already used for another request.");
@@ -143,7 +162,7 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
         if (!category) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "DelayCategoryRef", categoryId: lateReason.categoryId });
       }
 
-      await lockItemRows(tx, items);
+      await lockItemRows(tx, job.id, items, unitOf);
 
       const factsByUnit = new Map<number | null, FloorFacts>();
       for (const unitId of new Set(unitOf.values())) factsByUnit.set(unitId, await loadFloorFacts(tx, job, unitId));
@@ -248,6 +267,10 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
   if (row.departmentId == null) {
     throw new AppError(ERROR_CODES.GATING_BLOCKED, { reason: "operation has no defaultDepartmentId configured" });
   }
+  const office = item.kind === "PROCESS_PLAN" && item.processSeq != null && item.processSeq <= OFFICE_PROCESS_MAX_SEQ;
+  if (!hasRole(actor, ...FLOOR_ROLES) && !office) {
+    throw new AppError(ERROR_CODES.FORBIDDEN, { reason: "a planner records processes 1–11 only", kind: item.kind, id: item.id });
+  }
   requireDepartmentScope(actor, row.departmentId);
   if (row.stepKind === "INSPECTION") throw new AppError(ERROR_CODES.INSPECT_REQUIRED, { assemblyStepId: item.id });
   if (row.derived) throw new AppError(ERROR_CODES.DERIVED_STATUS, { processPlanId: item.id });
@@ -290,6 +313,12 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
       throw new AppError(check.code, check.meta, operator ? SEQUENCE_OVERRIDE_OPERATOR_MESSAGE : undefined);
     }
     overridden = check.overridden;
+    // Parity with startComponentOperation (B7): the component's BOM line must not be short.
+    if (item.kind === "COMPONENT_OP") await assertKitReady(tx, row.componentId!, actor.tenantId);
+  } else {
+    // Review fix: Done of a started item re-runs H5/H6 (rework finished after the final PWHT / hydro).
+    const hard = evaluateHard(item, facts.facts, "DONE");
+    if (hard) throw new AppError(hard.code, hard.meta);
   }
 
   // Invariant 7 as revised: a late Done carries its reason in the same action.
@@ -349,6 +378,16 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     await assertNoOpenHoldPoint(tx, args);
     await assertNoOpenNcr(tx, args);
     await assertEvidenceSatisfied(tx, args);
+  }
+  // Same for a step or operation (review fix): its own H point, NCR and DFT evidence. The plan it
+  // feeds is gated by rollupProcessPlan.
+  if (item.kind !== "PROCESS_PLAN" && to === "COMPLETE") {
+    const ref = { kind: item.kind, id: item.id };
+    if (item.openBlockingHold) throw new AppError(ERROR_CODES.HOLD_POINT_OPEN, { ...ref, unitId: row.unitId });
+    const ncrIds = await findOpenItemNcrIds(tx, item.kind, item.id);
+    if (ncrIds.length) throw new AppError(ERROR_CODES.NCR_OPEN, { ...ref, ncrIds });
+    const dft = row.requiresDftGate ? await findDftShortfall(tx, item.id) : null;
+    if (dft) throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, { componentOperationId: item.id, ...dft });
   }
 
   // ── Writes ──
@@ -518,5 +557,117 @@ async function notifyQc(
         payload: { jobId: job.id, unitId, items: list },
       })),
     ),
+  );
+}
+
+// ── inspect ──────────────────────────────────────────────────────────────
+
+export interface InspectResult {
+  kind: WorkKind;
+  targetId: number;
+  result: "ACCEPT" | "REJECT";
+  from: string;
+  to: string;
+  rolledUp: RollupChange[];
+}
+
+/** The rejection category a QC reject files under: the given one, else the tenant's REWORK_QUALITY, else OTHER. */
+async function rejectionCategoryId(tx: Tx, tenantId: number, categoryId?: number): Promise<number> {
+  if (categoryId != null) {
+    const c = await tx.delayCategoryRef.findFirst({ where: { id: categoryId, tenantId, active: true }, select: { id: true } });
+    if (!c) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "DelayCategoryRef", categoryId });
+    return c.id;
+  }
+  const defaults = await tx.delayCategoryRef.findMany({
+    where: { tenantId, active: true, code: { in: ["REWORK_QUALITY", "OTHER"] } },
+    select: { id: true, code: true },
+  });
+  const c = defaults.find((d) => d.code === "REWORK_QUALITY") ?? defaults[0];
+  if (!c) {
+    throw new AppError(
+      ERROR_CODES.VALIDATION_FAILED,
+      { field: "categoryId" },
+      "Choose a rejection category; none is set up as the default.",
+    );
+  }
+  return c.id;
+}
+
+/**
+ * Lean Core L1.2e: QC's one write — accept or reject an item. Wraps the
+ * existing verify/reject bodies (maker–checker, hold-point and NCR handling,
+ * QCP execution sync with its AUD-004 external-party guard) and then rolls up
+ * the plan the item feeds, all in one transaction under the unit's floor lock.
+ *
+ * - ASSEMBLY_STEP: SUBMITTED, or an INSPECTION-kind step QC records directly.
+ * - COMPONENT_OP: SUBMITTED only.
+ * - PROCESS_PLAN: a SUBMITTED non-derived plan only (derived plans are never
+ *   submitted: DERIVED_STATUS). // ponytail: delegates to verifyProcess /
+ *   rejectProcess, which own a RepeatableRead transaction, so this path takes
+ *   no unit lock; a non-derived plan has no mapped items for a batch to race.
+ *
+ * Not flag-gated (services are called directly by tests); the Server Action is.
+ */
+export async function inspect(actor: Actor, input: InspectInput): Promise<InspectResult> {
+  const { kind, targetId, result, reason, categoryId, testTypeId } = inspectSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.QC);
+  const done = (from: string, to: string, rolledUp: RollupChange[] = []): InspectResult => ({
+    kind,
+    targetId,
+    result,
+    from,
+    to,
+    rolledUp,
+  });
+
+  if (kind === "PROCESS_PLAN") {
+    const plan = await withTenant(actor.tenantId, async (tx) => {
+      const p = await lockProcessPlanForUpdate(tx, targetId, actor.tenantId);
+      const mapped = await loadMappedOps(tx, { jobProcessId: p.jobProcessId, unitId: p.unitId, jobId: p.jobId });
+      if (mapped.length > 0) throw new AppError(ERROR_CODES.DERIVED_STATUS, { processPlanId: p.id });
+      return p;
+    });
+    const updated =
+      result === "ACCEPT"
+        ? await verifyProcess(actor, { processPlanId: targetId })
+        : await rejectProcess(actor, { processPlanId: targetId, reason: reason! });
+    return done(plan.status, updated.status);
+  }
+
+  const target = await withTenant(actor.tenantId, async (tx) =>
+    kind === "ASSEMBLY_STEP"
+      ? tx.assemblyStep.findFirst({
+          where: { id: targetId, unit: { equipment: { job: { tenantId: actor.tenantId } } } },
+          select: { jobId: true, unitId: true },
+        })
+      : tx.componentOperation
+          .findFirst({
+            where: { id: targetId, component: { equipment: { job: { tenantId: actor.tenantId } } } },
+            select: { jobId: true, component: { select: { unitId: true } } },
+          })
+          .then((o) => (o ? { jobId: o.jobId, unitId: o.component.unitId } : null)),
+  );
+  if (!target) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: ENTITY[kind], id: targetId });
+
+  return withJob(
+    actor.tenantId,
+    target.jobId,
+    async (tx) => {
+      await lockFloorUnits(tx, target.jobId, [target.unitId]);
+      const category = result === "REJECT" ? await rejectionCategoryId(tx, actor.tenantId, categoryId) : 0;
+      if (kind === "ASSEMBLY_STEP") {
+        const r = await inspectAssemblyStepTx(tx, actor, { assemblyStepId: targetId, result, reason, categoryId: category, testTypeId });
+        const change = await rollupForAssemblyStep(tx, actor, targetId);
+        return done(r.from, r.step.status, change ? [change] : []);
+      }
+      const updated =
+        result === "ACCEPT"
+          ? await verifyComponentOperationTx(tx, actor, targetId)
+          : await rejectComponentOperationTx(tx, actor, { componentOperationId: targetId, categoryId: category, detail: reason });
+      const change = await rollupForComponentOperation(tx, actor, targetId);
+      return done("SUBMITTED", updated.status, change ? [change] : []);
+    },
+    { timeoutMs: 30_000 },
   );
 }

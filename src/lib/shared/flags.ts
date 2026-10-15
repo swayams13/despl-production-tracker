@@ -13,4 +13,14 @@ export const FEATURES = {
   cpmReplanUi: false,        // feasibility / replan / duration-override screens
   analytics: false,          // the five unbuilt analytics screens stay unbuilt
   agents: false,             // planner agent / MOS layer
+  /**
+   * Lean Core L1.2e: the floor runs on recordWork/inspect. Not a freeze: OFF is
+   * today's behaviour. When on, legacy process start/submit/verify/hold refuse
+   * DERIVED_STATUS on a plan with mapped steps/operations, and legacy step/op
+   * start/verify/reject roll the plan up. A getter so it reads the environment
+   * at call time (tests and a restart-free flip both see the same value).
+   */
+  get leanFloor(): boolean {
+    return process.env.LEAN_FLOOR === "on";
+  },
 } as const;

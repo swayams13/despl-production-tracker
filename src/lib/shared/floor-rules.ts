@@ -98,7 +98,7 @@ export const PWHT_PROCESS_SEQ = 21;
 export const HYDRO_PROCESS_SEQ = 27;
 const PAINT_PROCESS_SEQS = [29, 30];
 /** D2: processes 1–11 are planning/procurement order, job grain, SOFT. */
-const OFFICE_PROCESS_MAX_SEQ = 11;
+export const OFFICE_PROCESS_MAX_SEQ = 11;
 
 /** H1 default (14 Oct): a predecessor counts as done once submitted; real holds come through D12. */
 const isDone = (i: FloorItem) => i.status === "SUBMITTED" || i.status === "COMPLETE";
@@ -106,7 +106,9 @@ const steps = (f: UnitFacts) => f.items.filter((i): i is StepItem => i.kind === 
 const ops = (f: UnitFacts) => f.items.filter((i): i is OpItem => i.kind === "COMPONENT_OP");
 const ref = (i: FloorItem) => ({ kind: i.kind, id: i.id });
 
-const joints = (s: StepItem) => (s.jointRef ?? "").split(",").map((j) => j.trim()).filter(Boolean);
+/** The joints a jointRef names: one, or several separated by commas. */
+export const jointRefs = (ref: string | null) => (ref ?? "").split(",").map((j) => j.trim()).filter(Boolean);
+const joints = (s: StepItem) => jointRefs(s.jointRef);
 const shareJoint = (a: StepItem, b: StepItem) => joints(a).some((j) => joints(b).includes(j));
 
 const H1_RANK: Partial<Record<AssemblyRole, number>> = { FIT_UP: 0, WELD: 1, NDT: 2 };
@@ -239,8 +241,20 @@ export const HARD_RULES: HardRule[] = [
   },
 ];
 
-export function evaluateHard(item: FloorItem, facts: UnitFacts): (RuleRefusal & { rule: HardRule["id"] }) | null {
+/**
+ * At DONE of an item already started only H5/H6 run again (review fix): rework
+ * reopened after a QC reject and finished after the final PWHT or hydro is
+ * welding after it. The other rules are about when work may begin.
+ */
+const DONE_RULES: ReadonlySet<HardRule["id"]> = new Set(["H5", "H6"]);
+
+export function evaluateHard(
+  item: FloorItem,
+  facts: UnitFacts,
+  phase: "START" | "DONE" = "START",
+): (RuleRefusal & { rule: HardRule["id"] }) | null {
   for (const rule of HARD_RULES) {
+    if (phase === "DONE" && !DONE_RULES.has(rule.id)) continue;
     const r = rule.check(item, facts);
     if (r) return { ...r, rule: rule.id };
   }
@@ -270,15 +284,9 @@ export function evaluateSoft(item: FloorItem, facts: UnitFacts): FloorItem[] {
   return earlier.filter((e) => !isDone(e) && !linked.has(e));
 }
 
-/** D2 override authority: Supervisor and Production Head; Planner for processes 1–11. Never Admin alone, never Operator. */
-export function canOverride(roles: readonly string[], item: FloorItem): boolean {
-  if (roles.includes("SUPERVISOR") || roles.includes("PRODUCTION_HEAD")) return true;
-  return (
-    roles.includes("PLANNER") &&
-    item.kind === "PROCESS_PLAN" &&
-    item.processSeq !== null &&
-    item.processSeq <= OFFICE_PROCESS_MAX_SEQ
-  );
+/** D2 override authority: "Supervisor and above" — Supervisor and Production Head. Never Admin alone, Operator or Planner. */
+export function canOverride(roles: readonly string[]): boolean {
+  return roles.includes("SUPERVISOR") || roles.includes("PRODUCTION_HEAD");
 }
 
 export type StartCheck =
@@ -295,7 +303,7 @@ export function checkStart(
   if (hard) return { ok: false, code: hard.code, meta: hard.meta };
   const open = evaluateSoft(item, facts);
   if (!open.length) return { ok: true, overridden: [] };
-  const allowed = canOverride(actor.roles, item);
+  const allowed = canOverride(actor.roles);
   if (!allowed || !actor.hasOverride) {
     return { ok: false, code: "SEQUENCE_OVERRIDE_REQUIRED", meta: { canOverride: allowed, open: open.map(ref) } };
   }
@@ -313,21 +321,32 @@ export function h3DataGaps(facts: UnitFacts): OpItem[] {
 
 export const BACKDATE_WINDOW_HOURS = 72;
 const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
 
 /**
  * Hours in [from, to) that fall on a working day of `calendar`, every IST day
  * counting all 24 h. calendar.ts works on UTC-midnight date markers, so each
  * IST day is converted to that marker before asking isWorkingDay.
+ *
+ * Bounded (`from` can be client input): walks back from `to` and stops once
+ * more than `stopAfterHours` are counted, or after MAX_WALK_DAYS days, which
+ * returns Infinity (further back than any window this is asked about).
  */
-export function workingHoursBetween(from: Date, to: Date, calendar: WorkCalendarInput = DEFAULT_CALENDAR): number {
+const MAX_WALK_DAYS = 400;
+export function workingHoursBetween(
+  from: Date,
+  to: Date,
+  calendar: WorkCalendarInput = DEFAULT_CALENDAR,
+  stopAfterHours = Infinity,
+): number {
   let ms = 0;
-  let cursor = from.getTime();
-  while (cursor < to.getTime()) {
-    const day = istCalendarDayMarker(new Date(cursor));
-    const end = Math.min(day.getTime() + DAY_MS - IST_OFFSET_MS, to.getTime());
-    if (isWorkingDay(day, calendar)) ms += end - cursor;
-    cursor = end;
+  let cursor = to.getTime();
+  for (let days = 0; cursor > from.getTime(); days++) {
+    if (days === MAX_WALK_DAYS) return Infinity;
+    if (ms > stopAfterHours * HOUR_MS) break;
+    const day = istCalendarDayMarker(new Date(cursor - 1));
+    const start = Math.max(day.getTime() - IST_OFFSET_MS, from.getTime());
+    if (isWorkingDay(day, calendar)) ms += cursor - start;
+    cursor = start;
   }
   return ms / HOUR_MS;
 }
@@ -354,7 +373,7 @@ export function checkReportedAt(input: {
   const floor = input.releaseDate ?? input.orderDate;
   if (floor && istCalendarDayMarker(reportedAt) < istCalendarDayMarker(floor)) return "BEFORE_RELEASE";
   if (input.action === "DONE" && input.startedAt && reportedAt < input.startedAt) return "DONE_BEFORE_START";
-  if (workingHoursBetween(reportedAt, now, input.calendar) > BACKDATE_WINDOW_HOURS) return "TOO_OLD";
+  if (workingHoursBetween(reportedAt, now, input.calendar, BACKDATE_WINDOW_HOURS) > BACKDATE_WINDOW_HOURS) return "TOO_OLD";
   return null;
 }
 

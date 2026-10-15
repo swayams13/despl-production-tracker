@@ -143,6 +143,8 @@ export const ERROR_CODES = {
   LATE_REASON_REQUIRED: "LATE_REASON_REQUIRED",
   /** L1.2: an INSPECTION step is recorded by QC through inspect, not by recordWork. */
   INSPECT_REQUIRED: "INSPECT_REQUIRED",
+  /** L1.2 review: QC accepted an inspection whose preceding work steps (same group, same joint) are not done. */
+  INSPECT_PRECONDITION: "INSPECT_PRECONDITION",
   /** D2 H1: fit-up → weld → NDT on the same joint, out of order. */
   JOINT_SEQUENCE_BLOCKED: "JOINT_SEQUENCE_BLOCKED",
   /** D2 H2: pressure-part cutting before the material is issued. */
@@ -265,6 +267,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This work is past its planned finish. Choose a late reason to mark it done.",
   INSPECT_REQUIRED:
     "This is an inspection step. QC records it by accepting or rejecting the inspection.",
+  INSPECT_PRECONDITION:
+    "The work this inspection checks is not done yet. Record the earlier work steps first, then inspect.",
   JOINT_SEQUENCE_BLOCKED:
     "An earlier step on this joint is not done yet. Fit-up comes before welding, and welding before NDT. Record the earlier step first.",
   MATERIAL_NOT_ISSUED:

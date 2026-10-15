@@ -12,7 +12,9 @@ import {
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { deriveRequiresQc } from "@/lib/shared/floor-rules";
-import { assertKitReady, assertDrawingReleased } from "./_shared";
+import { assertKitReady, assertDrawingReleased, lockFloorUnits, rollupForComponentOperation } from "./_shared";
+import { assertFloorHard } from "./work.facts";
+import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
 import { closeNcr } from "./ncr.service";
@@ -136,6 +138,7 @@ async function lockComponentOperationForUpdate(
   tx: Tx,
   componentOperationId: number,
   tenantId: number,
+  opts: { unitLock?: boolean } = {},
 ): Promise<{
   op: ComponentOperation;
   departmentId: number | null;
@@ -145,6 +148,14 @@ async function lockComponentOperationForUpdate(
   requiresDftGate: boolean;
   previousOp: { seq: number; status: OperationStatus } | null;
 }> {
+  if (opts.unitLock) {
+    // L1.2e: the unit's floor lock goes BEFORE the row lock, as in recordWork.
+    const pre = await tx.componentOperation.findFirst({
+      where: { id: componentOperationId, component: { equipment: { job: { tenantId } } } },
+      select: { jobId: true, component: { select: { unitId: true } } },
+    });
+    if (pre) await lockFloorUnits(tx, pre.jobId, [pre.component.unitId]);
+  }
   await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ${componentOperationId} FOR UPDATE`;
 
   const op = await tx.componentOperation.findFirst({
@@ -198,13 +209,17 @@ export async function startComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
+    const lean = FEATURES.leanFloor;
     const { op, departmentId, operationCode, previousOp } = await lockComponentOperationForUpdate(
       tx,
       componentOperationId,
       actor.tenantId,
+      { unitLock: lean },
     );
     requireOperationDepartment(actor, departmentId);
     const to = assertComponentOpTransition("start", op.status);
+    // Review fix: with the lean floor on, the D2 HARD rules (H2 etc.) hold on this path too.
+    if (lean) await assertFloorHard(tx, "COMPONENT_OP", op.id, "START");
 
     if (previousOp && previousOp.status !== "COMPLETE") {
       throw new AppError(ERROR_CODES.GATING_BLOCKED, {
@@ -241,7 +256,7 @@ export async function startComponentOperation(
       },
     });
 
-    return audited(tx, actor, async () => {
+    const started = await audited(tx, actor, async () => {
       const updated = await tx.componentOperation.update({
         where: { id: op.id },
         data: { status: to, startedAt: new Date() },
@@ -271,6 +286,9 @@ export async function startComponentOperation(
         },
       };
     });
+    // L1.2e: starting the first mapped operation moves a derived plan to IN_PROGRESS.
+    if (FEATURES.leanFloor) await rollupForComponentOperation(tx, actor, started.id);
+    return started;
   });
 }
 
@@ -292,9 +310,13 @@ export async function submitComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+    const lean = FEATURES.leanFloor;
+    const { op, departmentId } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId, {
+      unitLock: lean,
+    });
     requireOperationDepartment(actor, departmentId);
     const to = assertComponentOpTransition("submit", op.status);
+    if (lean) await assertFloorHard(tx, "COMPONENT_OP", op.id, "DONE");
     await assertPerformedByValid(tx, actor, performedByWelderId, performedByUserId);
 
     // F3/F4 fields are all optional (schema) — `undefined` here (rather than
@@ -357,82 +379,102 @@ export async function verifyComponentOperation(
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op, requiresDftGate } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
-    assertMakerChecker(actor, op.submittedBy);
-    const to = assertComponentOpTransition("verify", op.status);
+    const updated = await verifyComponentOperationTx(tx, actor, componentOperationId);
+    // L1.2e: with the lean floor on, a mapped plan takes its status from its operations.
+    if (FEATURES.leanFloor) await rollupForComponentOperation(tx, actor, updated.id);
+    return updated;
+  });
+}
 
-    // P1 (Phase 5): an op flagged OperationRef.requiresDftGate (B6 — was a
-    // hardcoded `operationCode === "PAINTING"` check) cannot verify without a
-    // recorded coating system and enough accepted DFT readings. "Accepted" is
-    // self-attested by whoever recorded the reading; there is no spec'd
-    // min/max micron range to check against (open question noted in the
-    // schema comment and the task report — not silently resolved here).
-    if (requiresDftGate) {
-      const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId: op.id } });
-      // Coverage is per DISTINCT coat, not a raw accepted-row count — three
-      // accepted readings all against the same coatNumber (or all with it
-      // omitted) must not satisfy coatsPlanned: 3 (task review Important #1).
-      // groupBy folds duplicate coatNumbers together, including a null
-      // coatNumber as its own single group (the "untagged" case the
-      // coatsPlanned-unset/DEFAULT_COATS_REQUIRED=1 path relies on).
-      const acceptedCoatGroups = await tx.dftReading.groupBy({
-        by: ["coatNumber"],
-        where: { componentOperationId: op.id, accepted: true },
-      });
-      const distinctAcceptedCoats = acceptedCoatGroups.length;
-      const requiredCoats = paintRecord?.coatsPlanned ?? DEFAULT_COATS_REQUIRED;
-      if (!paintRecord || distinctAcceptedCoats < requiredCoats) {
-        throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, {
-          componentOperationId: op.id,
-          hasPaintRecord: !!paintRecord,
-          acceptedCoats: distinctAcceptedCoats,
-          requiredCoats,
-        });
-      }
+/**
+ * P1 (Phase 5), non-throwing: null when an op flagged OperationRef.requiresDftGate
+ * has a recorded coating system and enough accepted DFT readings; else what is
+ * missing. "Accepted" is self-attested by whoever recorded the reading; there
+ * is no spec'd min/max micron range to check against. Shared by
+ * verifyComponentOperationTx and recordWork's QC-free Done (L1.2 review).
+ */
+export async function findDftShortfall(
+  tx: Tx,
+  componentOperationId: number,
+): Promise<{ hasPaintRecord: boolean; acceptedCoats: number; requiredCoats: number } | null> {
+  const paintRecord = await tx.paintRecord.findUnique({ where: { componentOperationId } });
+  // Coverage is per DISTINCT coat, not a raw accepted-row count — three
+  // accepted readings all against the same coatNumber (or all with it
+  // omitted) must not satisfy coatsPlanned: 3 (task review Important #1).
+  // groupBy folds duplicate coatNumbers together, including a null
+  // coatNumber as its own single group (the "untagged" case the
+  // coatsPlanned-unset/DEFAULT_COATS_REQUIRED=1 path relies on).
+  const acceptedCoatGroups = await tx.dftReading.groupBy({
+    by: ["coatNumber"],
+    where: { componentOperationId, accepted: true },
+  });
+  const acceptedCoats = acceptedCoatGroups.length;
+  const requiredCoats = paintRecord?.coatsPlanned ?? DEFAULT_COATS_REQUIRED;
+  return !paintRecord || acceptedCoats < requiredCoats ? { hasPaintRecord: !!paintRecord, acceptedCoats, requiredCoats } : null;
+}
+
+/** verifyComponentOperation's body for a caller that already holds the transaction (inspect). */
+export async function verifyComponentOperationTx(
+  tx: Tx,
+  actor: Actor,
+  componentOperationId: number,
+): Promise<ComponentOperation> {
+  const { op, requiresDftGate } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
+  assertMakerChecker(actor, op.submittedBy);
+  const to = assertComponentOpTransition("verify", op.status);
+
+  // P1 (Phase 5): an op flagged OperationRef.requiresDftGate (B6 — was a
+  // hardcoded `operationCode === "PAINTING"` check) cannot verify without a
+  // recorded coating system and enough accepted DFT readings. "Accepted" is
+  // self-attested by whoever recorded the reading; there is no spec'd
+  // min/max micron range to check against (open question noted in the
+  // schema comment and the task report — not silently resolved here).
+  if (requiresDftGate) {
+    const shortfall = await findDftShortfall(tx, op.id);
+    if (shortfall) throw new AppError(ERROR_CODES.DFT_NOT_ACCEPTED, { componentOperationId: op.id, ...shortfall });
+  }
+
+  // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr(s)
+  // and records the elapsed rework time (closeNcr stamps reworkFinishedAt).
+  // findMany, not findFirst: repeated reject→resubmit→reject cycles without
+  // an intervening dispositionNcr each open a NEW Ncr (one per rejection,
+  // by design), so more than one can be open at once — closing only one
+  // would strand the rest permanently non-CLOSED (task review Critical #1).
+  //
+  // AUD-026: an Ncr still OPEN was never dispositioned — closing it here
+  // would skip dispositionNcr entirely and record no engineering decision.
+  // Refuse before touching anything if any linked Ncr is still OPEN; only
+  // DISPOSITIONED/REWORK_IN_PROGRESS ones are eligible to close.
+  const undispositioned = await tx.ncr.count({
+    where: { status: "OPEN", componentOperationRejection: { componentOperationId: op.id } },
+  });
+  if (undispositioned > 0) {
+    throw new AppError(ERROR_CODES.NCR_NOT_DISPOSITIONED, { componentOperationId: op.id, undispositioned });
+  }
+  const openNcrs = await tx.ncr.findMany({
+    where: { status: { in: ["DISPOSITIONED", "REWORK_IN_PROGRESS"] }, componentOperationRejection: { componentOperationId: op.id } },
+  });
+
+  return audited(tx, actor, async () => {
+    const updated = await tx.componentOperation.update({
+      where: { id: op.id },
+      data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
+    });
+    for (const ncr of openNcrs) {
+      await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
     }
-
-    // N1 (Phase 5): re-verifying a reworked operation closes its open Ncr(s)
-    // and records the elapsed rework time (closeNcr stamps reworkFinishedAt).
-    // findMany, not findFirst: repeated reject→resubmit→reject cycles without
-    // an intervening dispositionNcr each open a NEW Ncr (one per rejection,
-    // by design), so more than one can be open at once — closing only one
-    // would strand the rest permanently non-CLOSED (task review Critical #1).
-    //
-    // AUD-026: an Ncr still OPEN was never dispositioned — closing it here
-    // would skip dispositionNcr entirely and record no engineering decision.
-    // Refuse before touching anything if any linked Ncr is still OPEN; only
-    // DISPOSITIONED/REWORK_IN_PROGRESS ones are eligible to close.
-    const undispositioned = await tx.ncr.count({
-      where: { status: "OPEN", componentOperationRejection: { componentOperationId: op.id } },
-    });
-    if (undispositioned > 0) {
-      throw new AppError(ERROR_CODES.NCR_NOT_DISPOSITIONED, { componentOperationId: op.id, undispositioned });
-    }
-    const openNcrs = await tx.ncr.findMany({
-      where: { status: { in: ["DISPOSITIONED", "REWORK_IN_PROGRESS"] }, componentOperationRejection: { componentOperationId: op.id } },
-    });
-
-    return audited(tx, actor, async () => {
-      const updated = await tx.componentOperation.update({
-        where: { id: op.id },
-        data: { status: to, finishedAt: new Date(), verifiedBy: actor.userId },
-      });
-      for (const ncr of openNcrs) {
-        await closeNcr(tx, actor, { ncrId: ncr.id, jobId: ncr.jobId });
-      }
-      return {
-        result: updated,
-        audit: {
-          action: "componentOperation.verify",
-          entityType: "ComponentOperation",
-          entityId: op.id,
-          before: { status: op.status, verifiedBy: op.verifiedBy },
-          after: { status: updated.status, verifiedBy: updated.verifiedBy, finishedAt: updated.finishedAt },
-          eventType: "ComponentOperationVerified",
-          eventPayload: { componentOperationId: op.id, submittedBy: op.submittedBy, verifiedBy: actor.userId },
-        },
-      };
-    });
+    return {
+      result: updated,
+      audit: {
+        action: "componentOperation.verify",
+        entityType: "ComponentOperation",
+        entityId: op.id,
+        before: { status: op.status, verifiedBy: op.verifiedBy },
+        after: { status: updated.status, verifiedBy: updated.verifiedBy, finishedAt: updated.finishedAt },
+        eventType: "ComponentOperationVerified",
+        eventPayload: { componentOperationId: op.id, submittedBy: op.submittedBy, verifiedBy: actor.userId },
+      },
+    };
   });
 }
 
@@ -448,80 +490,96 @@ export async function rejectComponentOperation(
   actor: Actor,
   input: RejectComponentOperationInput,
 ): Promise<ComponentOperation> {
-  const { componentOperationId, categoryId, detail } = rejectComponentOperationSchema.parse(input);
+  const parsed = rejectComponentOperationSchema.parse(input);
   assertNotClientUser(actor);
 
   return withTenant(actor.tenantId, async (tx) => {
-    const { op } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId);
-    assertMakerChecker(actor, op.submittedBy);
-    const to = assertComponentOpTransition("reject", op.status);
+    const updated = await rejectComponentOperationTx(tx, actor, parsed);
+    if (FEATURES.leanFloor) await rollupForComponentOperation(tx, actor, updated.id);
+    return updated;
+  });
+}
 
-    return audited(tx, actor, async () => {
-      const updated = await tx.componentOperation.update({
+/**
+ * rejectComponentOperation's body for a caller that already holds the
+ * transaction. L1.2e: takes the unit's floor lock before the row lock
+ * (recordWork's order), so a reject and a concurrent Start/Done batch serialise.
+ */
+export async function rejectComponentOperationTx(
+  tx: Tx,
+  actor: Actor,
+  input: RejectComponentOperationInput,
+): Promise<ComponentOperation> {
+  const { componentOperationId, categoryId, detail } = input;
+  const { op } = await lockComponentOperationForUpdate(tx, componentOperationId, actor.tenantId, { unitLock: true });
+  assertMakerChecker(actor, op.submittedBy);
+  const to = assertComponentOpTransition("reject", op.status);
+
+  return audited(tx, actor, async () => {
+    const updated = await tx.componentOperation.update({
+      where: { id: op.id },
+      data: { status: to, submittedBy: null },
+    });
+    const rejection = await tx.componentOperationRejection.create({
+      data: { componentOperationId: op.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId, jobId: op.jobId },
+    });
+    // N1 (Phase 5): every rejection opens exactly one Ncr for QC to
+    // disposition — the rework/QA workflow layered on top of the
+    // immutable rejection record.
+    await tx.ncr.create({ data: { componentOperationRejectionId: rejection.id, jobId: op.jobId } });
+
+    // S14 — was silent. QC is who dispositions an Ncr (S11's disposition
+    // UI), so QC is who needs to know one opened, same transaction as the
+    // ncr.create above (a failed notify rolls back the whole reject).
+    const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
+    if (qcIds.length > 0) {
+      const ctx = await tx.componentOperation.findUniqueOrThrow({
         where: { id: op.id },
-        data: { status: to, submittedBy: null },
-      });
-      const rejection = await tx.componentOperationRejection.create({
-        data: { componentOperationId: op.id, categoryId, detail: detail ?? null, rejectedBy: actor.userId, jobId: op.jobId },
-      });
-      // N1 (Phase 5): every rejection opens exactly one Ncr for QC to
-      // disposition — the rework/QA workflow layered on top of the
-      // immutable rejection record.
-      await tx.ncr.create({ data: { componentOperationRejectionId: rejection.id, jobId: op.jobId } });
-
-      // S14 — was silent. QC is who dispositions an Ncr (S11's disposition
-      // UI), so QC is who needs to know one opened, same transaction as the
-      // ncr.create above (a failed notify rolls back the whole reject).
-      const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
-      if (qcIds.length > 0) {
-        const ctx = await tx.componentOperation.findUniqueOrThrow({
-          where: { id: op.id },
-          select: {
-            operation: { select: { name: true } },
-            component: {
-              select: {
-                tag: true,
-                unitId: true,
-                unit: { select: { serialNo: true } },
-                equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } },
-              },
+        select: {
+          operation: { select: { name: true } },
+          component: {
+            select: {
+              tag: true,
+              unitId: true,
+              unit: { select: { serialNo: true } },
+              equipment: { select: { jobId: true, job: { select: { jobNumber: true } } } },
             },
           },
-        });
-        await notify(
-          tx,
-          actor.tenantId,
-          qcIds.map((recipientId) => ({
-            recipientId,
-            type: "NCR_OPENED",
-            entityType: "ComponentOperation",
-            entityId: op.id,
-            title: `NCR opened: ${ctx.component.tag} · ${ctx.operation.name}`,
-            body: `${ctx.component.equipment.job.jobNumber}${ctx.component.unit ? ` · Unit ${ctx.component.unit.serialNo}` : ""}`,
-            payload: { jobId: ctx.component.equipment.jobId, unitId: ctx.component.unitId },
-          })),
-        );
-      }
-
-      return {
-        result: updated,
-        audit: {
-          action: "componentOperation.reject",
+        },
+      });
+      await notify(
+        tx,
+        actor.tenantId,
+        qcIds.map((recipientId) => ({
+          recipientId,
+          type: "NCR_OPENED",
           entityType: "ComponentOperation",
           entityId: op.id,
-          before: { status: op.status, submittedBy: op.submittedBy },
-          after: { status: updated.status, submittedBy: updated.submittedBy, categoryId, detail },
-          eventType: "ComponentOperationRejected",
-          eventPayload: {
-            componentOperationId: op.id,
-            submittedBy: op.submittedBy,
-            rejectedBy: actor.userId,
-            categoryId,
-            detail,
-          },
+          title: `NCR opened: ${ctx.component.tag} · ${ctx.operation.name}`,
+          body: `${ctx.component.equipment.job.jobNumber}${ctx.component.unit ? ` · Unit ${ctx.component.unit.serialNo}` : ""}`,
+          payload: { jobId: ctx.component.equipment.jobId, unitId: ctx.component.unitId },
+        })),
+      );
+    }
+
+    return {
+      result: updated,
+      audit: {
+        action: "componentOperation.reject",
+        entityType: "ComponentOperation",
+        entityId: op.id,
+        before: { status: op.status, submittedBy: op.submittedBy },
+        after: { status: updated.status, submittedBy: updated.submittedBy, categoryId, detail },
+        eventType: "ComponentOperationRejected",
+        eventPayload: {
+          componentOperationId: op.id,
+          submittedBy: op.submittedBy,
+          rejectedBy: actor.userId,
+          categoryId,
+          detail,
         },
-      };
-    });
+      },
+    };
   });
 }
 
