@@ -40,6 +40,10 @@ export interface ProcessSpec {
   included?: boolean;
   requiresQc?: boolean;
   plannedFinish?: Date | null;
+  /** JobProcess.workOrderStages: the board stages this process backs. */
+  stages?: number[];
+  /** ProcessPlan.status for every unit's plan (default NOT_STARTED). */
+  status?: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "COMPLETE" | "ON_HOLD";
 }
 
 export interface JobSpec {
@@ -156,11 +160,20 @@ export async function makeWorkOrg(owner: PrismaClient, label: string) {
           // A duration so the schedule engine (CPM, used by Today's ranking) accepts the process.
           durationMinDays: 1,
           durationMaxDays: 2,
+          workOrderStages: p.stages ?? [],
         },
       });
       processes.set(p.code, jp.id);
       if (p.included === false) continue;
-      const base = { scheduleRunId: run.id, jobProcessId: jp.id, ownerDepartmentId: fab.id, jobId: j.id, plannedFinish: p.plannedFinish ?? null };
+      const base = {
+        scheduleRunId: run.id,
+        jobProcessId: jp.id,
+        ownerDepartmentId: fab.id,
+        jobId: j.id,
+        plannedFinish: p.plannedFinish ?? null,
+        status: p.status ?? ("NOT_STARTED" as const),
+        ...(p.status === "COMPLETE" ? { actualFinish: new Date() } : {}),
+      };
       if (p.grain === "JOB") {
         plans.set(p.code, (await owner.processPlan.create({ data: { ...base, unitId: null } })).id);
       } else {
