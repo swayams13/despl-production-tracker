@@ -620,6 +620,10 @@ body {
 
 /* workspace (§4.4) — ported 1:1 from the mockup */
 .theme-industrial table { width: 100%; border-collapse: collapse; }
+/* The rule above outranks Tailwind's .sr-only width:1px, and a table ignores
+   overflow:hidden, so the dashboard's screen-reader tables spread 36px past a
+   phone's viewport (L2.0 staging check). Keep them 1px and clipped. */
+.theme-industrial table.sr-only { display: block; width: 1px; }
 .theme-industrial th { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 600; text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .theme-industrial td { padding: 0 12px; height: 36px; border-bottom: 1px solid var(--border); vertical-align: middle; font-size: 13px; }
 .theme-industrial tbody tr:last-child td { border-bottom: none; }
