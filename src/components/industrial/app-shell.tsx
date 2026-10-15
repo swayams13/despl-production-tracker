@@ -105,15 +105,6 @@ const icons = {
       <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6" />
     </svg>
   ),
-  /* Outdoor has no glyph of its own in the reference's <symbol> set — the sun
-     inside a heavy ring reads as "sun, turned up", which is what it is. */
-  themeOutdoor: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.1} strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="12" r="6.6" />
-      <path d="M12 1.8v2.2M12 20v2.2M1.8 12h2.2M20 12h2.2" />
-    </svg>
-  ),
 };
 
 // Destinations shared by the tablet icon rail and phone bottom nav
@@ -247,18 +238,17 @@ export function AppShell({
 
   // ── Theme control (D27/D28) ───────────────────────────────────────────
   // One control, three positions (desktop topbar, tablet rail, phone topbar),
-  // one click = one step: System → Light → Dark → Outdoor → System.
-  // "System" has no glyph of its own, so it borrows sun/moon from whatever the
-  // OS resolved to — read from ThemeRoot's context, which owns the app's single
-  // matchMedia listener, rather than opening a second one for the same fact.
-  const { themePreference, outdoorMode, systemLight } = useTheme();
+  // one click = one step: Automatic → Floor → Control room → Automatic.
+  // "Automatic" has no glyph of its own, so it borrows sun/moon from whatever
+  // the pointer type resolved to — read from ThemeRoot's context, which owns
+  // the app's single matchMedia listener, rather than opening a second one.
+  const { themePreference, outdoorMode, autoFloor } = useTheme();
   const themeState = { themePreference, outdoorMode };
   const [themePending, startThemeTransition] = useTransition();
 
   const themeText = themeLabel(themeState);
-  const themeIcon = outdoorMode
-    ? icons.themeOutdoor
-    : themePreference === "LIGHT" || (themePreference === "SYSTEM" && systemLight)
+  const themeIcon =
+    outdoorMode || themePreference === "LIGHT" || (themePreference === "SYSTEM" && autoFloor)
       ? icons.themeSun
       : icons.themeMoon;
 

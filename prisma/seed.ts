@@ -978,7 +978,7 @@ async function seedDemo(
             name,
             passwordHash,
             mustChangePassword: false,
-            themePreference: "DARK",
+            themePreference: "SYSTEM",
           },
         });
         await tx.userRole.createMany({

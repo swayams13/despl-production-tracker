@@ -1,16 +1,22 @@
 /**
- * Theme resolution (D27/D28, session R1 task 6).
+ * Theme resolution (D27/D28, session R1 task 6; reworked L2.0, frame 00).
  *
- * Two class names combine on the SAME element: `theme-industrial` is always
- * present (it is the base palette, i.e. dark), and `theme-light` /
- * `theme-outdoor` are modifiers that redefine the tokens (globals.css §
- * INDUSTRIAL THEME). No modifier = dark.
+ * Two palettes: **Floor** (light, high-contrast, bay tablets and phones) and
+ * **Control room** (dark, desktops and management). Two class names combine on
+ * the SAME element: `theme-industrial` is always present (the base palette,
+ * i.e. Control room) and `theme-light` is the modifier that redefines the
+ * tokens for Floor (globals.css § INDUSTRIAL THEME). No modifier = Control room.
  *
- * Every user who existed when the theme system shipped was back-filled to an
- * explicit DARK (migration 20260818120000_theme_preference_dark_backfill), so
- * they resolve to dark unconditionally, whatever their OS prefers. SYSTEM is
- * only the column default for accounts created AFTER that release — for those,
- * an OS on its factory light setting really does resolve to the light palette.
+ * "Automatic" (SYSTEM) is decided by the pointer type, not the OS colour
+ * scheme: a coarse primary pointer (phone, shop tablet) gets Floor, anything
+ * else gets Control room. An explicit choice always wins. Users who predate the
+ * theme system were back-filled to an explicit DARK (migration
+ * 20260818120000_theme_preference_dark_backfill) and stay on Control room until
+ * they pick another; accounts created since keep the SYSTEM default.
+ *
+ * The retired black "Outdoor" palette is gone. The stored `outdoorMode` column
+ * is left alone and READ as Floor, so nobody's saved choice breaks and the
+ * change reverts in one commit.
  *
  * The class deliberately lives on a <div>, not <html>: legacy warm-paper
  * pages outside the (app) route group keep a different theme entirely, so the
@@ -26,51 +32,40 @@ export interface ThemeState {
 }
 
 /**
- * Server-side class resolution. `SYSTEM` always guesses DARK here — the
- * server cannot know the browser's OS preference synchronously, and dark is
- * this app's base palette. That bounds the possible flash to exactly one case
- * (SYSTEM + an OS that actually prefers light), which <ThemeRoot />'s inline
- * script fixes before the browser paints anything below it. Note the guess is
- * genuinely a guess, not a certainty: for a SYSTEM user on a light-preferring
- * OS the client corrects it to light. Users who predate the theme system are
- * not in that set — they were back-filled to an explicit DARK.
+ * Server-side class resolution. `SYSTEM` always guesses Control room here: the
+ * server cannot know the pointer type synchronously. That bounds the possible
+ * flash to exactly one case (SYSTEM on a coarse pointer), which <ThemeRoot />'s
+ * inline script fixes before the browser paints anything below it.
  *
- * Outdoor wins over light/dark when on: it is a palette in its own right,
- * not a modifier of one (D25).
+ * A stored `outdoorMode` resolves to Floor, whatever the preference says.
  */
 export function themeClassName(pref: ThemePreference, outdoor: boolean): string {
-  if (outdoor) return "theme-industrial theme-outdoor";
-  return pref === "LIGHT" ? "theme-industrial theme-light" : "theme-industrial";
+  return outdoor || pref === "LIGHT" ? "theme-industrial theme-light" : "theme-industrial";
 }
 
 /**
- * One control, one click = one step: System → Light → Dark → Outdoor → System.
- *
- * The two DB columns stay independent (a later session can split this back
- * into two controls with no data migration); this function is only the
- * single control's presentation of them. Leaving Outdoor returns to System
- * rather than restoring the prior explicit choice — a disclosed
- * simplification, not an accident.
+ * One control, one click = one step: Automatic → Floor → Control room →
+ * Automatic. The two DB columns stay independent; the control only ever writes
+ * `outdoorMode=false`, so a legacy Outdoor user steps to Automatic.
  */
 export function nextThemeState({ themePreference, outdoorMode }: ThemeState): ThemeState {
-  if (outdoorMode) return { themePreference: "SYSTEM", outdoorMode: false };
+  if (outdoorMode || themePreference === "DARK") return { themePreference: "SYSTEM", outdoorMode: false };
   if (themePreference === "SYSTEM") return { themePreference: "LIGHT", outdoorMode: false };
-  if (themePreference === "LIGHT") return { themePreference: "DARK", outdoorMode: false };
-  return { themePreference: "SYSTEM", outdoorMode: true };
+  return { themePreference: "DARK", outdoorMode: false };
 }
 
 /**
  * sonner's <Toaster> paints itself outside our token scope, so it needs the
- * choice restated in its own vocabulary. Outdoor is a dark-ground palette, so
- * it maps to "dark".
+ * choice restated in its own vocabulary. Automatic follows sonner's own
+ * "system" (frame 00 draws toasts as an inverse surface either way).
  */
 export function toasterTheme({ themePreference, outdoorMode }: ThemeState): "light" | "dark" | "system" {
-  if (outdoorMode || themePreference === "DARK") return "dark";
-  return themePreference === "LIGHT" ? "light" : "system";
+  if (outdoorMode || themePreference === "LIGHT") return "light";
+  return themePreference === "DARK" ? "dark" : "system";
 }
 
 /** Label for the theme control — names the state you are IN, not the next one. */
 export function themeLabel({ themePreference, outdoorMode }: ThemeState): string {
-  if (outdoorMode) return "Outdoor";
-  return themePreference === "SYSTEM" ? "System" : themePreference === "LIGHT" ? "Light" : "Dark";
+  if (outdoorMode) return "Floor";
+  return themePreference === "SYSTEM" ? "Automatic" : themePreference === "LIGHT" ? "Floor" : "Control room";
 }
