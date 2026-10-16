@@ -2,7 +2,8 @@
 
 // Client components on purpose: server-rendered, keyed list rows are streamed as many separate outlined Flight
 // rows, and a client-side navigation to a page with dozens of them never commits in the browser (found in the
-// L2.7-L2.9 integration run, 16 Oct 2026). As props they travel in one row.
+// L2.7-L2.9 integration run, 16 Oct 2026). As props they travel in one row. Links that stay on /dashboard are plain
+// anchors (a full load): a second same-route client navigation still stalled intermittently on a slow runner.
 import Link from "next/link";
 import { HealthChip } from "@/components/industrial/health-chip";
 import { StageSpine } from "@/components/industrial/stage-spine";
@@ -32,7 +33,7 @@ export function Tiles({ tiles }: { tiles: PortfolioTile[] }) {
   return (
     <nav className="pf-tiles" aria-label="Portfolio numbers">
       {tiles.map((t) => (
-        <Link prefetch={false}
+        <a
           key={t.id}
           href={t.href}
           className={`kpi clicky${t.selected ? " selected" : ""}${t.alert ? " alert" : ""}`}
@@ -40,7 +41,7 @@ export function Tiles({ tiles }: { tiles: PortfolioTile[] }) {
         >
           <h6>{t.label}</h6>
           <div className="v mono">{t.value}</div>
-        </Link>
+        </a>
       ))}
     </nav>
   );
@@ -72,9 +73,9 @@ function Dates({ r }: { r: PortfolioRow }) {
 function Focus({ r, health, focused }: { r: PortfolioRow; health: JobHealth | null; focused: boolean }) {
   if (focused) return null;
   return (
-    <Link prefetch={false} href={portfolioHref({ health, jobId: r.id })} className="pf-focus" aria-label={`Show only ${r.jobNumber}`}>
+    <a href={portfolioHref({ health, jobId: r.id })} className="pf-focus" aria-label={`Show only ${r.jobNumber}`}>
       Focus
-    </Link>
+    </a>
   );
 }
 

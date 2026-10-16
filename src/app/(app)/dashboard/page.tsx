@@ -84,7 +84,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {focus && (
         <p className="pf-focusbar">
           Showing <b className="mono">{focus.jobNumber}</b> only.{" "}
-          <Link prefetch={false} href={portfolioHref({ health })}>Show all jobs</Link>
+          <a href={portfolioHref({ health })}>Show all jobs</a>
         </p>
       )}
 
@@ -92,17 +92,17 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <div className="hd">
           <h3 id="pf-projects">Project health</h3>
           {health ? (
-            <Link prefetch={false} href={portfolioHref({ jobId })} className="chip pf-clear">
+            <a href={portfolioHref({ jobId })} className="chip pf-clear">
               <i />
               {HEALTH_LABEL[health]} · clear
-            </Link>
+            </a>
           ) : (
             <span className="sub pf-hint">Worst first</span>
           )}
         </div>
         {shown.length === 0 ? (
           <p className="note">
-            No projects match. <Link prefetch={false} href={portfolioHref({})}>Show all</Link>
+            No projects match. <a href={portfolioHref({})}>Show all</a>
           </p>
         ) : (
           <HealthTable rows={shown} topBlocker={topBlockerByJob(ranked)} health={health} jobId={jobId} />
