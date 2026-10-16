@@ -16,7 +16,7 @@ const CHIP: Record<string, string> = {
   "Pending waiver": "c-hold",
 };
 
-export function QcpGrid({ jobId, data, canApproveWaiver }: { jobId: number; data: QcpGridData; canApproveWaiver: boolean }) {
+export function QcpGrid({ jobId, data, canApproveWaiver, tabHref }: { jobId: number; data: QcpGridData; canApproveWaiver: boolean; tabHref?: string }) {
   const router = useRouter();
   const [recordingId, setRecordingId] = useState<number | null>(null);
   const [pending, start] = useTransition();
@@ -69,7 +69,7 @@ export function QcpGrid({ jobId, data, canApproveWaiver }: { jobId: number; data
           className="btn"
           style={{ marginLeft: 8 }}
           value={data.unitId}
-          onChange={(e) => router.push(`/jobs/${jobId}?tab=qcp&unit=${e.target.value}`)}
+          onChange={(e) => router.push(`${tabHref ?? `/jobs/${jobId}?tab=qcp`}&unit=${e.target.value}`)}
           aria-label="Unit"
         >
           {data.units.map((u) => <option key={u.id} value={u.id}>Unit {u.serialNo}</option>)}

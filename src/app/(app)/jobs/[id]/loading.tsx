@@ -1,8 +1,12 @@
 // Route-level Suspense fallback while the server component awaits its
 // Promise.all of tab data. Mirrors the final header + tabs + card layout
-// rather than a full-page spinner — DESIGN_SPEC's loading-state rule.
-// Applies to every tab (overview/gantt/bom/assembly/qcp/packing/activity/
-// client), not just packing — this page had no loading.tsx at all before.
+// (L2.8: the tab labels follow `leanFloor`, like the strip), rather than a full-page spinner — DESIGN_SPEC's loading-state rule.
+// Applies to every tab, not just packing — this page had no loading.tsx at all before.
+import { FEATURES } from "@/lib/shared/flags";
+
+const LEAN_LABELS = ["Overview", "Board", "Schedule", "Materials", "QC", "Dispatch", "History"];
+const LEGACY_LABELS = ["Overview", "Timeline", "BOM & Components", "Assembly", "QCP", "Packing", "Dispatch", "Activity"];
+
 export default function JobDetailLoading() {
   return (
     <>
@@ -11,7 +15,7 @@ export default function JobDetailLoading() {
         <span className="skel" style={{ width: 220, height: 12, marginLeft: 10 }} />
       </div>
       <div className="tabs">
-        {["Overview", "Timeline", "BOM & Components", "Assembly", "QCP", "Packing", "Dispatch", "Activity"].map((label) => (
+        {(FEATURES.leanFloor ? LEAN_LABELS : LEGACY_LABELS).map((label) => (
           <span key={label} className="tab" style={{ opacity: 0.5 }}>
             {label}
           </span>
