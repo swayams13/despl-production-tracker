@@ -5,6 +5,7 @@ import { AppShell } from "@/components/industrial/app-shell";
 import { ThemeRoot } from "@/components/industrial/theme-root";
 import { getActor } from "@/lib/authz";
 import { loadOverdueCounts } from "@/lib/services/workspace.read";
+import { loadQcReadyCount } from "@/lib/services/qc-queue.read";
 import { loadJobs, type JobListItem } from "@/lib/services/jobs.read";
 import { loadNotifications } from "@/lib/services/notifications.read";
 import { toasterTheme } from "@/lib/theme";
@@ -46,6 +47,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
 
   let overdueCount = 0;
   let teamOverdueCount = 0;
+  let qcWaitingCount = 0;
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };
   let jobs: JobListItem[] = [];
   if (actor) {
@@ -55,6 +57,8 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
     teamOverdueCount = counts.dept;
     notifications = n;
     jobs = j;
+    // L2.6: QC's Queue badge is the same count the queue's first tab shows.
+    if (FEATURES.leanFloor && actor.roles.includes("QC")) qcWaitingCount = await loadQcReadyCount(actor);
   }
 
   const theme = {
@@ -69,6 +73,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
         userRoles={actor?.roles ?? []}
         overdueCount={overdueCount}
         teamOverdueCount={teamOverdueCount}
+        qcWaitingCount={qcWaitingCount}
         notifications={notifications}
         jobs={jobs}
         leanFloor={FEATURES.leanFloor}

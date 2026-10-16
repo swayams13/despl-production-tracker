@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
 import { recordQcpExecution, approveQcpWaiver } from "@/lib/services/qcp.service";
+import type { RecordQcpExecutionInput } from "@/lib/shared/schemas";
 import { toActionError, type ActionResult } from "./_action";
 
 export async function recordQcpAction(
@@ -23,6 +24,19 @@ export async function recordQcpAction(
 export async function approveQcpWaiverAction(qcpItemId: number, unitId: number): Promise<ActionResult> {
   try {
     await approveQcpWaiver(await requireActor(), { qcpItemId, unitId });
+    revalidatePath("/workspace");
+    revalidatePath("/qc");
+    return { ok: true };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** L2.6: record a point's result with its evidence (third-party inspector, report number, test record). */
+export async function recordQcpEvidenceAction(input: RecordQcpExecutionInput): Promise<ActionResult> {
+  try {
+    await recordQcpExecution(await requireActor(), input);
+    revalidatePath("/qc");
     revalidatePath("/workspace");
     return { ok: true };
   } catch (e) {

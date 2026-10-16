@@ -226,6 +226,19 @@ export const recordQcpExecutionSchema = z
     unitId: id,
     result: z.enum(["ACCEPTED", "REJECTED", "NA"]),
     remarks: z.string().trim().optional(),
+    /** L2.6: the third-party inspector's name, when QC clears a point on their behalf. */
+    partyInspector: z.string().trim().min(1).max(120).optional(),
+    /** L2.6: the third party's report / IRN / call number. */
+    reportRef: z.string().trim().min(1).max(120).optional(),
+    /** L2.6: a test point's record (hydro). */
+    testData: z
+      .object({
+        pressureBar: z.number().positive().max(10_000),
+        holdMinutes: z.number().positive().max(100_000),
+        gaugeIds: z.array(z.string().trim().min(1).max(60)).min(1).max(6),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type RecordQcpExecutionInput = z.infer<typeof recordQcpExecutionSchema>;

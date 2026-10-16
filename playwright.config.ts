@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const STORAGE_STATE = 'playwright/.auth/supervisor.json';
-const LEAN_SPECS = /(floor|today|team)\.spec\.ts$/;
+const LEAN_SPECS = /(floor|today|team|qc)\.spec\.ts$/;
 
 export default defineConfig({
   testDir: './e2e',

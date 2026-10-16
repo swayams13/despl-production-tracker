@@ -52,6 +52,10 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     }
   });
 
+  it("QC's Queue carries the waiting-for-QC badge", () => {
+    expect(navFor(["QC"], { leanFloor: true }).primary.find((i) => i.href === "/qc")?.badge).toBe("qc");
+  });
+
   it("is the union across roles with one entry per href", () => {
     const { primary, more } = navFor(["SUPERVISOR", "QC"]);
     expect(hrefs(primary)).toEqual(["/my-day", "/workspace", "/qc", "/jobs"]);

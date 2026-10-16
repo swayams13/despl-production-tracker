@@ -1360,3 +1360,35 @@ body {
   .theme-industrial .tab { display: inline-flex; align-items: center; min-height: 44px; }
   .theme-industrial .chip[role="button"] { min-height: 44px; }
 }
+
+/* QC queue (L2.6) */
+.theme-industrial .qq-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.theme-industrial .qq-tab { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font-size: 13px; text-decoration: none; }
+.theme-industrial .qq-tab b { font-size: 13px; }
+.theme-industrial .qq-tab.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, var(--surface)); }
+.theme-industrial .qq-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.theme-industrial .qq-filters select, .theme-industrial .qq-form input, .theme-industrial .qq-form select { min-height: 36px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0 8px; font: inherit; font-size: 12px; }
+.theme-industrial .qq-chip { display: inline-flex; gap: 6px; align-items: center; min-height: 32px; padding: 0 10px; border: 1px solid var(--accent); border-radius: 999px; color: var(--text); font-size: 12px; text-decoration: none; }
+.theme-industrial .qq-ro { color: var(--muted); font-size: 12px; }
+.theme-industrial .qq-job { margin-top: 16px; }
+.theme-industrial .qq-job h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 6px; }
+.theme-industrial .qq-n { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 8px; }
+.theme-industrial .qq-unit h3 { font-size: 12px; font-weight: 600; margin: 8px 0 4px; }
+.theme-industrial .qq-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.theme-industrial .qq-rows > li { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 12px; }
+.theme-industrial .qq-line { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; }
+.theme-industrial .qq-main { min-width: 0; flex: 1 1 280px; }
+.theme-industrial .qq-sub, .theme-industrial .qq-meta { color: var(--muted); }
+.theme-industrial .qq-meta { margin-top: 2px; font-size: 11px; }
+.theme-industrial .qq-sr { color: var(--muted); margin-right: 4px; }
+.theme-industrial .qq-main .hclass { display: inline-flex; vertical-align: middle; margin-right: 6px; }
+.theme-industrial .qq-main .qq-sr { margin-right: 8px; }
+.theme-industrial .qq-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.theme-industrial .qq-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.theme-industrial .qq-form input { flex: 1 1 200px; }
+.theme-industrial .qq-refusal { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.theme-industrial .qq-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; font-size: 12px; }
+@media (pointer: coarse) {
+  .theme-industrial .qq-tab, .theme-industrial .qq-acts .btn, .theme-industrial .qq-pager .btn { min-height: 48px; }
+  .theme-industrial .qq-filters select, .theme-industrial .qq-form input, .theme-industrial .qq-form select, .theme-industrial .qq-chip { min-height: 44px; }
+}
