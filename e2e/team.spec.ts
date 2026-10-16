@@ -30,6 +30,18 @@ test("a supervisor's Team is their own department, and the numbers add up", asyn
   await expect(page.getByRole("combobox", { name: "Department" })).toHaveCount(0);
 });
 
+test("a long list shows 25 rows, with Show all for the rest", async ({ page }) => {
+  await signIn(page, "sup.fabrication@despl.local");
+  await page.goto("/team/fabrication");
+  const more = page.getByRole("button", { name: /^Show all \d+$/ }).first();
+  test.skip((await more.count()) === 0, "this department has no list longer than 25 on this seed");
+  const section = page.locator("section", { has: more });
+  await expect(section.locator("ul.tm-items li")).toHaveCount(25);
+  await more.click();
+  await expect(section.locator("ul.tm-items li").nth(25)).toBeVisible();
+  await expect(section.getByRole("button", { name: "Show fewer" })).toBeVisible();
+});
+
 test("another department's supervisor gets not-found, not a forbidden page", async ({ page }) => {
   await signIn(page, "sup.stores@despl.local");
   await page.goto("/team/fabrication");

@@ -24,6 +24,23 @@ const PAGE = 25;
 const dueText = (r: TeamRow) =>
   r.overdue && r.daysLate ? `${r.daysLate} d late` : r.dueAt ? fmtDay(r.dueAt) : "not scheduled";
 
+/** The first 25 rows, with "Show all N" for the rest (a job with many units makes these long). */
+const CAP = 25;
+function Capped<T extends { planId?: number; id?: number }>({ rows, render }: { rows: T[]; render: (r: T) => React.ReactNode }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, CAP);
+  return (
+    <>
+      <ul className="tm-items">{shown.map(render)}</ul>
+      {rows.length > CAP && (
+        <button className="tm-link" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show all ${rows.length}`}
+        </button>
+      )}
+    </>
+  );
+}
+
 export function TeamClient({
   view,
   canAct,
@@ -319,8 +336,9 @@ export function TeamClient({
       {view.outOfSequence.length > 0 && (
         <section className="tm-sec" aria-labelledby="tm-oos">
           <h2 id="tm-oos">Out of sequence · last 7 days · {view.outOfSequence.length}</h2>
-          <ul className="tm-items">
-            {view.outOfSequence.map((o) => (
+          <Capped
+            rows={view.outOfSequence}
+            render={(o) => (
               <li key={o.id}>
                 <b>
                   <span className="mono">{o.serialNo}</span> · {o.title}
@@ -330,8 +348,8 @@ export function TeamClient({
                   {o.note ? ` · “${o.note}”` : ""} · {o.by} · {fmtDay(o.at)}
                 </small>
               </li>
-            ))}
-          </ul>
+            )}
+          />
         </section>
       )}
 
@@ -340,8 +358,9 @@ export function TeamClient({
         {view.overdueBlocked.length === 0 ? (
           <p className="note">Nothing is late or blocked.</p>
         ) : (
-          <ul className="tm-items">
-            {view.overdueBlocked.map((r) => (
+          <Capped
+            rows={view.overdueBlocked}
+            render={(r) => (
               <li key={r.planId}>
                 <b>
                   <span className="mono">{r.jobNumber} › {r.serialNo}</span> {r.processName}
@@ -352,8 +371,8 @@ export function TeamClient({
                   {r.reason.filed ? `Reason given: ${r.reason.category}` : "No reason yet"}
                 </small>
               </li>
-            ))}
-          </ul>
+            )}
+          />
         )}
       </section>
 
@@ -394,29 +413,31 @@ export function TeamClient({
           <div className="tm-two">
             <div>
               <h3>You&apos;re blocking · {view.blocking.length}</h3>
-              <ul className="tm-items">
-                {view.blocking.map((r) => (
+              <Capped
+                rows={view.blocking}
+                render={(r) => (
                   <li key={r.planId}>
                     <b>
                       <span className="mono">{r.jobNumber} › {r.serialNo}</span> {r.processName}
                     </b>
                     <small>{r.waitingOn}</small>
                   </li>
-                ))}
-              </ul>
+                )}
+              />
             </div>
             <div>
               <h3>Waiting on others · {view.waitingOnOthers.length}</h3>
-              <ul className="tm-items">
-                {view.waitingOnOthers.map((r) => (
+              <Capped
+                rows={view.waitingOnOthers}
+                render={(r) => (
                   <li key={r.planId}>
                     <b>
                       <span className="mono">{r.jobNumber} › {r.serialNo}</span> {r.processName}
                     </b>
                     <small>{r.waitingOn}</small>
                   </li>
-                ))}
-              </ul>
+                )}
+              />
             </div>
           </div>
         </section>
