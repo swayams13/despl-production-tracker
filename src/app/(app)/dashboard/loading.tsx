@@ -1,5 +1,5 @@
 // Route-level Suspense fallback while the server component awaits
-// loadPortfolio + loadJobKpis. This route had no loading.tsx at all before
+// loadPortfolio (+ the L2.7 facts, with the lean floor on). This route had no loading.tsx at all before
 // Phase 4 — per-panel skeletons matching UX_FINAL_REVIEW.md §9's
 // "MetricCard and table skeletons render immediately, each panel resolves
 // independently" rule (the panels themselves still load together server-side
@@ -11,8 +11,8 @@ export default function DashboardLoading() {
       <div className="page-h">
         <span className="skel" style={{ width: 100, height: 20 }} />
       </div>
-      <div className="kpis-portfolio" style={{ marginBottom: 12 }}>
-        {Array.from({ length: 7 }).map((_, i) => (
+      <div className="pf-tiles" style={{ marginBottom: 12 }}>
+        {Array.from({ length: 5 }).map((_, i) => (
           <div className="kpi" key={i}>
             <span className="skel" style={{ width: 70, height: 10.5 }} />
             <div style={{ marginTop: 8 }}><span className="skel" style={{ width: 40, height: 24 }} /></div>
@@ -26,14 +26,6 @@ export default function DashboardLoading() {
             <span key={i} className="skel" style={{ width: "100%", height: 24 }} />
           ))}
         </div>
-      </div>
-      <div className="kpis">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div className="kpi" key={i}>
-            <span className="skel" style={{ width: 80, height: 10.5 }} />
-            <div style={{ marginTop: 8 }}><span className="skel" style={{ width: 50, height: 24 }} /></div>
-          </div>
-        ))}
       </div>
     </>
   );

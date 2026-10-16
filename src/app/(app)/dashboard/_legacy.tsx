@@ -1,8 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
-import { landingFor } from "@/lib/shared/nav";
 import { FEATURES } from "@/lib/shared/flags";
-import { getActor, ROLES, hasRole } from "@/lib/authz";
+import type { Actor } from "@/lib/authz";
 import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
 import { loadQcCounts } from "@/lib/services/qc-queue.read";
 import { qcHref } from "@/lib/shared/qc-queue";
@@ -109,16 +107,18 @@ function PortfolioHealthCard({ data }: { data: SunburstNode[] }) {
   );
 }
 
-export default async function Dashboard({
+/**
+ * The pre-L2.7 dashboard, rendered while `leanFloor` is off (production, until the pilot). The page
+ * does the sign-in and role checks; delete this file, `_portfolio.tsx` and `_sunburst-data.ts`
+ * together once the flag is on for good.
+ */
+export async function LegacyDashboard({
+  actor,
   searchParams,
 }: {
+  actor: Actor;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const actor = await getActor();
-  if (!actor) redirect("/login");
-  if (actor.clientId !== null) redirect("/portal");
-  if (!hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect(landingFor(actor.roles, { leanFloor: FEATURES.leanFloor }));
-
   const sp = await searchParams;
   const portfolio = await loadPortfolio(actor);
   const sunburstData = portfolioToSunburst(portfolio);

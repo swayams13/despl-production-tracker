@@ -1392,3 +1392,60 @@ body {
   .theme-industrial .qq-tab, .theme-industrial .qq-acts .btn, .theme-industrial .qq-pager .btn { min-height: 48px; }
   .theme-industrial .qq-filters select, .theme-industrial .qq-form input, .theme-industrial .qq-form select, .theme-industrial .qq-chip { min-height: 44px; }
 }
+
+/* ── L2.7 Portfolio (/dashboard): everything here is .pf-* ─────────────────── */
+.theme-industrial .pf-line { margin: 0 0 12px; font-size: var(--fs-md); color: var(--text); }
+.theme-industrial .pf-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.theme-industrial .pf-tiles .kpi { display: block; color: var(--text); text-decoration: none; min-height: 44px; }
+.theme-industrial .pf-focusbar { margin: 0 0 12px; font-size: var(--fs-sm); color: var(--muted); }
+.theme-industrial .pf-sec { margin-bottom: 16px; }
+.theme-industrial .pf-sec > .note, .theme-industrial .pf-sec > .rt-table, .theme-industrial .pf-sec > .rt-cards,
+.theme-industrial .pf-sec > .pf-bn, .theme-industrial .pf-sec > .pf-queue { margin-left: 16px; margin-right: 16px; }
+.theme-industrial .pf-sec > .note { margin-top: 16px; margin-bottom: 16px; }
+.theme-industrial .pf-hint { margin-left: auto; color: var(--muted); font-size: var(--fs-xs); }
+.theme-industrial .pf-clear { margin-left: auto; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); }
+.theme-industrial .pf-muted { color: var(--muted); }
+.theme-industrial .pf-more { margin: 8px 16px 12px; color: var(--muted); font-size: var(--fs-xs); }
+.theme-industrial .pf-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.theme-industrial .pf-table th, .theme-industrial .pf-table td { padding: 10px 8px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--divider); }
+.theme-industrial .pf-table thead th { font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 600; }
+.theme-industrial .pf-job { font-weight: 500; min-width: 150px; }
+.theme-industrial .pf-job small { display: block; color: var(--muted); font-weight: 400; font-size: var(--fs-xs); margin: 2px 0 4px; }
+.theme-industrial .pf-job .spine-mini { display: flex; margin-top: 4px; max-width: 220px; }
+.theme-industrial .pf-focus { margin-left: 8px; font-size: var(--fs-xs); color: var(--accent); min-height: 24px; }
+.theme-industrial .pf-var { margin-left: 8px; font-weight: 600; }
+.theme-industrial .pf-blocker { color: var(--text); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+.theme-industrial .pf-cardjob { font-weight: 600; }
+.theme-industrial .pf-bn { list-style: none; padding: 0; margin-top: 12px; margin-bottom: 4px; display: grid; gap: 8px; }
+.theme-industrial .pf-bn-row { display: grid; grid-template-columns: minmax(110px, 180px) minmax(0, 1fr) 32px; align-items: center; gap: 10px; font-size: var(--fs-sm); }
+.theme-industrial .pf-bn-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-industrial .pf-bn-bar { display: flex; gap: 2px; min-height: 28px; }
+.theme-industrial .pf-seg { flex-basis: 28px; display: flex; align-items: center; justify-content: center; min-height: 28px; border-radius: 3px; font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); text-decoration: none; border: 2px solid transparent; }
+.theme-industrial .pf-seg-blocked { background: color-mix(in oklab, var(--s-hold) 28%, var(--surface)); border-color: var(--s-hold); }
+.theme-industrial .pf-seg-overdue { background: color-mix(in oklab, var(--s-overdue) 28%, var(--surface)); border-color: var(--s-overdue); }
+.theme-industrial .pf-seg-rejected { background: transparent; border-color: var(--s-overdue); border-style: dashed; }
+.theme-industrial .pf-seg:hover { outline: 1px solid var(--text); }
+.theme-industrial .pf-bn-total { text-align: right; color: var(--muted); }
+.theme-industrial .pf-legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 16px 12px; font-size: var(--fs-xs); color: var(--muted); }
+.theme-industrial .pf-key { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.theme-industrial .pf-queue { list-style: none; padding: 0; margin-top: 4px; margin-bottom: 4px; }
+.theme-industrial .pf-q { display: grid; grid-template-columns: 96px minmax(0, 1fr) 130px 130px 56px auto; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--divider); font-size: var(--fs-sm); }
+.theme-industrial .pf-q-dept, .theme-industrial .pf-q-owner { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-industrial .pf-q-age { text-align: right; }
+@media (max-width: 1023px) {
+  .theme-industrial .pf-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .theme-industrial .pf-q { grid-template-columns: minmax(0, 1fr) auto; row-gap: 4px; }
+  .theme-industrial .pf-q-what { grid-column: 1 / -1; grid-row: 2; }
+  .theme-industrial .pf-q-dept, .theme-industrial .pf-q-owner { grid-column: 1 / -1; white-space: normal; }
+  .theme-industrial .pf-q-age { text-align: left; }
+  .theme-industrial .pf-bn-row { grid-template-columns: minmax(0, 1fr) 32px; }
+  .theme-industrial .pf-bn-name { grid-column: 1 / -1; }
+}
+@media (max-width: 599px) {
+  .theme-industrial .pf-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (pointer: coarse) {
+  .theme-industrial .pf-seg, .theme-industrial .pf-q-act { min-height: 44px; }
+  .theme-industrial .pf-focus { min-height: 44px; display: inline-flex; align-items: center; }
+}
+/* ── end L2.7 ─────────────────────────────────────────────────────────────── */

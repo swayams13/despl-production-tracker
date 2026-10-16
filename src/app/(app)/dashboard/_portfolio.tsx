@@ -19,21 +19,9 @@ function fmtRelative(iso: string | null): string {
   return `${days}d ago`;
 }
 
-/** URL slug per health, so a tile click survives refresh and the back button. */
-export const SLUG: Record<JobHealth, string> = {
-  ON_TRACK: "on-track",
-  AT_RISK: "at-risk",
-  DELAYED: "delayed",
-  ON_HOLD: "on-hold",
-  COMPLETED: "completed",
-  NOT_PLANNED: "not-planned",
-};
-
-export function healthFromSlug(slug: string | undefined): JobHealth | null {
-  if (!slug) return null;
-  const hit = HEALTH_ORDER.find((h) => SLUG[h] === slug);
-  return hit ?? null;
-}
+// The slug map moved to shared/portfolio.ts with L2.7; this legacy band keeps its old names for it.
+import { HEALTH_SLUG as SLUG, healthFromSlug } from "@/lib/shared/portfolio";
+export { SLUG, healthFromSlug };
 
 export function PortfolioBand({
   portfolio,
