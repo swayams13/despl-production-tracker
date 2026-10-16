@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { landingFor } from "@/lib/shared/nav";
+import { FEATURES } from "@/lib/shared/flags";
 import { getActor, ROLES, hasRole } from "@/lib/authz";
 import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
 import { loadPortfolio, type PortfolioRow } from "@/lib/services/portfolio.read";
@@ -114,7 +115,7 @@ export default async function Dashboard({
   const actor = await getActor();
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
-  if (!hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect(landingFor(actor.roles));
+  if (!hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect(landingFor(actor.roles, { leanFloor: FEATURES.leanFloor }));
 
   const sp = await searchParams;
   const portfolio = await loadPortfolio(actor);

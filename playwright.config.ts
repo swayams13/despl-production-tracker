@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const STORAGE_STATE = 'playwright/.auth/supervisor.json';
+const LEAN_SPECS = /(floor|today)\.spec\.ts$/;
 
 export default defineConfig({
   testDir: './e2e',
@@ -14,7 +15,13 @@ export default defineConfig({
     // Unrestricted testMatch, unchanged: e2e/auth.spec.ts (RBAC/client-scoping
     // violation tests) keeps running here, on this one project, exactly as
     // before this task.
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'chromium', testIgnore: LEAN_SPECS, use: { ...devices['Desktop Chrome'] } },
+
+    // L2.2 / L2.3: the Floor screen, Scan and Today exist only while LEAN_FLOOR is
+    // on, which production keeps off until the pilot. The legacy suite above runs
+    // against the server as production runs it (switch off); these specs run
+    // against a second server (port 3001) with the switch on, same build, same DB.
+    { name: 'lean', testMatch: LEAN_SPECS, use: { ...devices['Desktop Chrome'], baseURL: 'http://localhost:3001' } },
 
     // Standard Playwright "setup project" auth pattern (their own "Projects
     // dependencies" idiom): logs in once through the real /login form and
@@ -51,22 +58,30 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, storageState: STORAGE_STATE },
     },
   ],
-  webServer: {
-    // Production build, not `pnpm dev` — a 3x project matrix under dev-mode
-    // Turbopack is flaky at this scale (SPEC §8).
-    command: 'pnpm build && pnpm start',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    // ci.yml already runs `pnpm build` as its own step before `pnpm e2e`, but
-    // this command rebuilds again (reuseExistingServer is false in CI) — a
-    // real, known redundancy, not addressed here. On a loaded shared runner
-    // that second build-then-start occasionally doesn't land inside the
-    // 60000ms default (confirmed live: PR #42 hit `Timed out waiting 60000ms
-    // from config.webServer` twice across three CI attempts, 8 Sep 2026).
-    // 3 minutes comfortably covers a cold rebuild + server start with room
-    // to spare, without masking a genuinely hung server.
-    timeout: 180_000,
-    // L2.2: the Floor screen and Scan are behind the switch; production stays off.
-    env: { LEAN_FLOOR: "on" },
-  },
+  webServer: [
+    {
+      // Production build, not `pnpm dev` — a 3x project matrix under dev-mode
+      // Turbopack is flaky at this scale (SPEC §8).
+      command: 'pnpm build && pnpm start',
+      url: 'http://localhost:3000',
+      reuseExistingServer: !process.env.CI,
+      // ci.yml already runs `pnpm build` as its own step before `pnpm e2e`, but
+      // this command rebuilds again (reuseExistingServer is false in CI) — a
+      // real, known redundancy, not addressed here. On a loaded shared runner
+      // that second build-then-start occasionally doesn't land inside the
+      // 60000ms default (confirmed live: PR #42 hit `Timed out waiting 60000ms
+      // from config.webServer` twice across three CI attempts, 8 Sep 2026).
+      // 3 minutes comfortably covers a cold rebuild + server start with room
+      // to spare, without masking a genuinely hung server.
+      timeout: 180_000,
+    },
+    // Same build, LEAN_FLOOR on. Starts once the first server is answering (its
+    // build is then finished), so the two never build into .next together.
+    {
+      command: "sh -c 'until curl -sf http://localhost:3000/api/health >/dev/null; do sleep 2; done; PORT=3001 LEAN_FLOOR=on pnpm start -p 3001'",
+      url: 'http://localhost:3001/api/health',
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+    },
+  ],
 });

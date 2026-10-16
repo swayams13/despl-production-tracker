@@ -153,6 +153,9 @@ export async function makeWorkOrg(owner: PrismaClient, label: string) {
           included: p.included ?? true,
           grain: p.grain ?? "UNIT",
           requiresQc: p.requiresQc ?? true,
+          // A duration so the schedule engine (CPM, used by Today's ranking) accepts the process.
+          durationMinDays: 1,
+          durationMaxDays: 2,
         },
       });
       processes.set(p.code, jp.id);

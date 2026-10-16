@@ -46,6 +46,11 @@ export interface FloorRow {
   state: FloorRowState;
   /** ISO of the reported (else recorded) start, for an in-progress row. */
   startedAt: string | null;
+  /** The process plan this item rolls up into (unit plan, else the job's), and its seq. */
+  planId: number | null;
+  processSeq: number | null;
+  /** ISO of the plan's planned finish; null = not scheduled. */
+  dueAt: string | null;
   /** Done now would be late and no reason is on file for its plan. */
   lateReasonNeeded: boolean;
   refusal: FloorRefusal | null;
@@ -70,6 +75,8 @@ export interface FloorUnitView {
   overrideCategories: readonly string[];
   /** Items hidden because they are COMPLETE, for the "n done" line. */
   doneCount: number;
+  /** Process plans (this unit's and the job's) whose status is derived from mapped steps / ops: never recorded directly. */
+  derivedPlanIds: number[];
 }
 
 const FLOOR_RECORD_ROLES = [ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN] as const;
@@ -122,11 +129,18 @@ export function refusalFor(
   };
 }
 
-export async function loadFloorUnit(actor: Actor, publicId: string): Promise<FloorUnitView | null> {
+/** A unit by its QR id (the Floor screen) or by row id (Today, which already holds ids). */
+export type FloorUnitRef = string | { unitId: number };
+
+export async function loadFloorUnit(
+  actor: Actor,
+  ref: FloorUnitRef,
+  opts: { spine?: boolean } = {},
+): Promise<FloorUnitView | null> {
   assertNotClientUser(actor);
   const seen = await withTenant(actor.tenantId, async (tx) => {
     const unit = await tx.unit.findUnique({
-      where: { publicId },
+      where: typeof ref === "string" ? { publicId: ref } : { id: ref.unitId },
       select: {
         id: true,
         publicId: true,
@@ -246,6 +260,9 @@ export async function loadFloorUnit(actor: Actor, publicId: string): Promise<Flo
         group: lab.group,
         state,
         startedAt: item.status === "IN_PROGRESS" ? (row.startedAt?.toISOString() ?? null) : null,
+        planId: plan?.item.id ?? null,
+        processSeq: item.processSeq,
+        dueAt: plan?.plannedFinish?.toISOString() ?? null,
         lateReasonNeeded: late && !plan?.hasDelayReason,
         refusal,
         canOverride: overridable,
@@ -316,12 +333,15 @@ export async function loadFloorUnit(actor: Actor, publicId: string): Promise<Flo
       }
     }
 
-    return { unit, shown, doneCount, departments: departments.map((d) => d.name), categories, welders };
+    const derivedPlanIds = [...factRows.values()].filter((r) => r.item.kind === "PROCESS_PLAN" && r.derived).map((r) => r.item.id);
+    return { unit, shown, doneCount, derivedPlanIds, departments: departments.map((d) => d.name), categories, welders };
   });
   if (!seen) return null;
 
-  const spines = await loadUnitSpinesBatch(actor, [seen.unit.jobId]);
-  const spine = spines.get(seen.unit.jobId)?.find((s) => s.unitId === seen.unit.id)?.segments ?? [];
+  const spine =
+    opts.spine === false
+      ? []
+      : ((await loadUnitSpinesBatch(actor, [seen.unit.jobId])).get(seen.unit.jobId)?.find((s) => s.unitId === seen.unit.id)?.segments ?? []);
 
   return {
     unit: {
@@ -341,5 +361,6 @@ export async function loadFloorUnit(actor: Actor, publicId: string): Promise<Flo
     welders: seen.welders,
     overrideCategories: OVERRIDE_CATEGORIES,
     doneCount: seen.doneCount,
+    derivedPlanIds: seen.derivedPlanIds,
   };
 }

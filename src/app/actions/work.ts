@@ -22,7 +22,7 @@ async function run<T>(fn: () => Promise<T>): Promise<WithResult<T>> {
   try {
     if (!FEATURES.leanFloor) throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "leanFloor" });
     const result = await fn();
-    for (const path of ["/workspace", "/dashboard", "/my-day", "/qc"]) revalidatePath(path);
+    for (const path of ["/workspace", "/dashboard", "/my-day", "/today", "/qc"]) revalidatePath(path);
     return { ok: true, result };
   } catch (e) {
     return toActionError(e) as Exclude<ActionResult, { ok: true }>;

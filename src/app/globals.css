@@ -891,6 +891,15 @@ body {
 .theme-industrial .fl-units { display: grid; gap: 4px; }
 .theme-industrial .fl-unit { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
 .theme-industrial .fl-unit small { margin-left: auto; color: var(--muted); }
+.theme-industrial .fl-first { border-left-width: 5px; }
+.theme-industrial details.fl-group > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; list-style: none; }
+.theme-industrial details.fl-group > summary::-webkit-details-marker { display: none; }
+.theme-industrial details.fl-group > summary h2 { margin: 0; }
+.theme-industrial details.fl-group[open] > summary { margin-bottom: 6px; }
+.theme-industrial .fl-pool { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.theme-industrial .fl-reason { border: 0; padding: 8px 0 0; margin: 0; display: grid; gap: 8px; }
+.theme-industrial .fl-reason legend { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0; }
+.theme-industrial .fl-checkin { max-width: none; }
 .theme-industrial .fl-sheet-foot { justify-content: flex-end; position: sticky; bottom: 0; background: var(--surface); padding-top: 8px; }
 @media (pointer: coarse) {
   .theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-undo .btn, .theme-industrial .fl-more { min-height: 48px; min-width: 48px; }
