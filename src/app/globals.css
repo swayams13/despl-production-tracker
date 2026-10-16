@@ -1393,6 +1393,43 @@ body {
   .theme-industrial .qq-filters select, .theme-industrial .qq-form input, .theme-industrial .qq-form select, .theme-industrial .qq-chip { min-height: 44px; }
 }
 
+/* ===== L2.9 travellers (/jobs/[id]/travellers) — `.tv-` prefix, black only ===== */
+@page tv-a5 { size: 148mm 210mm; margin: 0; }
+.tv-sheet { width: 148mm; height: 210mm; box-sizing: border-box; padding: 8mm 8mm 6mm; margin: 0 0 16px; background: #fff; color: #000; display: flex; flex-direction: column; font-family: Inter, Arial, sans-serif; border: 1px solid #000; overflow: hidden; }
+.tv-mono { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.tv-top { display: grid; grid-template-columns: minmax(0, 1fr) 44mm; column-gap: 6mm; align-items: start; }
+.tv-kicker { font-size: 7.5pt; font-weight: 700; }
+.tv-serial { margin-top: 1mm; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 30pt; font-weight: 700; line-height: 1; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.tv-of { margin-top: 1.5mm; font-size: 9pt; }
+.tv-facts { margin: 4mm 0 0; padding-top: 2.5mm; border-top: 0.75pt solid #000; display: grid; grid-template-columns: 13mm minmax(0, 1fr); row-gap: 1.8mm; column-gap: 2mm; font-size: 9pt; line-height: 1.25; }
+.tv-facts dt { font-size: 6.5pt; font-weight: 700; padding-top: 0.7mm; }
+.tv-facts dd { margin: 0; font-weight: 600; }
+.tv-qrbox { display: flex; flex-direction: column; align-items: center; gap: 2mm; }
+.tv-qr { width: 44mm; height: 44mm; box-sizing: border-box; padding: 2mm; border: 0.75pt solid #000; background: #fff; }
+.tv-qr svg { display: block; width: 100%; height: 100%; shape-rendering: crispEdges; }
+.tv-url { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 7pt; font-weight: 600; color: #000; text-decoration: none; text-align: center; overflow-wrap: anywhere; max-width: 44mm; }
+.tv-backup { margin: 5mm 0 0; padding: 2.2mm 0; border-top: 1.5pt solid #000; border-bottom: 0.75pt solid #000; font-size: 8pt; line-height: 1.35; }
+.tv-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 5mm; margin-top: 3mm; }
+.tv-col { display: grid; grid-auto-rows: minmax(0, 1fr); grid-template-rows: auto; min-height: 0; }
+.tv-row { display: grid; grid-template-columns: 4.5mm 5.5mm minmax(0, 1fr) 22mm; column-gap: 1.6mm; align-items: center; border-bottom: 0.35pt solid #000; }
+.tv-head { align-items: end; padding-bottom: 1mm; border-bottom: 0.75pt solid #000; font-size: 6.5pt; font-weight: 700; }
+.tv-box { width: 4.5mm; height: 4.5mm; box-sizing: border-box; border: 0.75pt solid #000; }
+.tv-no { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 8pt; font-weight: 600; text-align: right; }
+.tv-name { font-size: 8.5pt; line-height: 1.15; font-weight: 500; }
+.tv-sign { align-self: stretch; position: relative; }
+.tv-sign::after { content: ""; position: absolute; left: 50%; bottom: 0; height: 2.6mm; border-left: 0.35pt solid #000; }
+.tv-fallback { margin: 2mm 0 0; font-size: 8pt; font-weight: 600; }
+.tv-foot { display: flex; justify-content: space-between; align-items: baseline; gap: 4mm; margin-top: 2mm; font-size: 6.5pt; }
+.tv-foot-serial { font-size: 8pt; font-weight: 700; }
+@media print {
+  /* Hide the app shell (sidebar, rails, topbar, toasts) and the on-screen header; the traveller is the only thing printed. */
+  body:has(.tv-root) .sidebar, body:has(.tv-root) .icon-rail, body:has(.tv-root) .bottom-nav, body:has(.tv-root) .topbar,
+  body:has(.tv-root) [data-sonner-toaster], .tv-screen { display: none !important; }
+  body:has(.tv-root), body:has(.tv-root) .theme-industrial, body:has(.tv-root) .app, body:has(.tv-root) .main, body:has(.tv-root) .content { display: block; background: #fff !important; color: #000; padding: 0; margin: 0; min-height: 0; height: auto; animation: none; }
+  .tv-sheet { page: tv-a5; margin: 0; border: 0; break-after: page; page-break-after: always; }
+  .tv-sheet:last-child { break-after: auto; page-break-after: auto; }
+}
+/* ===== end L2.9 ===== */
 /* ===== L2.8 job overview tabs (.jt-) ===== */
 .theme-industrial .jt-sub { display: flex; gap: 8px; margin-bottom: 12px; }
 .theme-industrial .jt-sub .btn { text-decoration: none; display: inline-flex; align-items: center; min-height: 36px; }
