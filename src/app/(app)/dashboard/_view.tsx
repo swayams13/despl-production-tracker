@@ -27,7 +27,7 @@ export function Tiles({ tiles }: { tiles: PortfolioTile[] }) {
   return (
     <nav className="pf-tiles" aria-label="Portfolio numbers">
       {tiles.map((t) => (
-        <Link
+        <Link prefetch={false}
           key={t.id}
           href={t.href}
           className={`kpi clicky${t.selected ? " selected" : ""}${t.alert ? " alert" : ""}`}
@@ -44,7 +44,7 @@ export function Tiles({ tiles }: { tiles: PortfolioTile[] }) {
 function Blocker({ e }: { e: PortfolioException | undefined }) {
   if (!e) return <span className="pf-muted">None</span>;
   return (
-    <Link href={e.href} className="pf-blocker">
+    <Link prefetch={false} href={e.href} className="pf-blocker">
       {e.what}
     </Link>
   );
@@ -67,7 +67,7 @@ function Dates({ r }: { r: PortfolioRow }) {
 function Focus({ r, health, focused }: { r: PortfolioRow; health: JobHealth | null; focused: boolean }) {
   if (focused) return null;
   return (
-    <Link href={portfolioHref({ health, jobId: r.id }, "projects")} className="pf-focus" aria-label={`Show only ${r.jobNumber}`}>
+    <Link prefetch={false} href={portfolioHref({ health, jobId: r.id }, "projects")} className="pf-focus" aria-label={`Show only ${r.jobNumber}`}>
       Focus
     </Link>
   );
@@ -103,7 +103,7 @@ export function HealthTable({
             {rows.map((r) => (
               <tr key={r.id}>
                 <th scope="row" className="pf-job">
-                  <Link href={`/jobs/${r.id}`} className="mono">{r.jobNumber}</Link>
+                  <Link prefetch={false} href={`/jobs/${r.id}`} className="mono">{r.jobNumber}</Link>
                   <Focus r={r} health={health} focused={jobId === r.id} />
                   {r.projectName && <small>{r.projectName}</small>}
                   {r.unitRollup.length > 0 && <StageSpine variant="mini" segments={r.unitRollup} />}
@@ -126,7 +126,7 @@ export function HealthTable({
       cards={rows.map((r) => (
         <div className="rt-card" key={r.id}>
           <div className="rt-card-top">
-            <Link href={`/jobs/${r.id}`} className="mono pf-cardjob">{r.jobNumber}</Link>
+            <Link prefetch={false} href={`/jobs/${r.id}`} className="mono pf-cardjob">{r.jobNumber}</Link>
             <HealthChip health={r.health} />
           </div>
           <div className="rt-card-meta">{r.clientName}{r.projectName ? ` · ${r.projectName}` : ""}</div>
@@ -165,7 +165,7 @@ export function Bottlenecks({ bars }: { bars: DeptBottleneck[] }) {
             <span className="pf-bn-bar" style={{ width: `${Math.max(12, (b.total / max) * 100)}%` }}>
               {SEGMENTS.map((s) =>
                 b[s.key] > 0 ? (
-                  <Link
+                  <Link prefetch={false}
                     key={s.key}
                     href={b[s.href]}
                     className={`pf-seg pf-seg-${s.key}`}
@@ -203,7 +203,7 @@ export function Attention({ items, total }: { items: PortfolioException[]; total
             <span className="pf-q-dept">{e.deptName}</span>
             <span className="pf-q-owner">{e.owner ?? <span className="pf-muted">—</span>}</span>
             <span className="mono pf-q-age">{fmtAge(e.ageDays)}</span>
-            <Link href={e.href} className="btn btn-ghost pf-q-act">{e.action}</Link>
+            <Link prefetch={false} href={e.href} className="btn btn-ghost pf-q-act">{e.action}</Link>
           </li>
         ))}
       </ul>

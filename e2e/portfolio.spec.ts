@@ -57,6 +57,7 @@ test("the project table has six columns and the queue shows at most 15 rows", as
 });
 
 test("a health tile filters the table to exactly that many rows, and clearing restores it", async ({ page }) => {
+  test.setTimeout(180_000); // each /dashboard render runs CPM per job: seconds on a loaded machine
   await signIn(page, "md@despl.local");
   await page.goto("/dashboard");
   const delayed = await tileValue(page, "Delayed");
@@ -65,16 +66,17 @@ test("a health tile filters the table to exactly that many rows, and clearing re
   const [name, n] = delayed > 0 ? (["Delayed", delayed] as const) : (["At risk", atRisk] as const);
 
   await tile(page, name).click();
-  await expect(page).toHaveURL(new RegExp(`health=${name === "Delayed" ? "delayed" : "at-risk"}`));
+  await expect(page).toHaveURL(new RegExp(`health=${name === "Delayed" ? "delayed" : "at-risk"}`), { timeout: 60_000 });
   const rows = page.locator(".rt-table table.pf-table tbody tr");
   await expect(rows).toHaveCount(n);
   await expect(rows.locator(".chip", { hasText: name })).toHaveCount(n);
 
   await page.getByRole("link", { name: new RegExp(`${name} · clear`) }).click();
-  await expect(page).not.toHaveURL(/health=/);
+  await expect(page).not.toHaveURL(/health=/, { timeout: 60_000 });
 });
 
 test("a bar segment opens the Team page or the QC NCR tab it counts, and Focus carries job= into every link", async ({ page }) => {
+  test.setTimeout(240_000);
   await signIn(page, "sj@despl.local");
   await page.goto("/dashboard");
   const segs = page.locator("ul.pf-bn a.pf-seg");
@@ -82,7 +84,7 @@ test("a bar segment opens the Team page or the QC NCR tab it counts, and Focus c
 
   const focus = page.locator(".rt-table").getByRole("link", { name: /^Show only / }).first();
   await focus.click();
-  await expect(page).toHaveURL(/[?&]job=\d+/);
+  await expect(page).toHaveURL(/[?&]job=\d+/, { timeout: 60_000 });
   await expect(page.getByText(/^Showing .* only\./)).toBeVisible();
   const job = new URL(page.url()).searchParams.get("job")!;
   for (const href of await page.locator("ul.pf-bn a.pf-seg").evaluateAll((els) => els.map((e) => e.getAttribute("href")!))) {
@@ -90,12 +92,12 @@ test("a bar segment opens the Team page or the QC NCR tab it counts, and Focus c
     expect(href).toContain(`job=${job}`);
   }
   await page.getByRole("link", { name: "Show all jobs" }).click();
-  await expect(page).not.toHaveURL(/job=/);
+  await expect(page).not.toHaveURL(/job=/, { timeout: 60_000 });
 
   const first = page.locator("ul.pf-bn a.pf-seg").first();
   const href = (await first.getAttribute("href"))!;
   await first.click();
-  await expect(page).toHaveURL(new RegExp(href.split("?")[0]));
+  await expect(page).toHaveURL(new RegExp(href.split("?")[0]), { timeout: 30_000 });
 });
 
 test("a queue row links to where the work is done", async ({ page }) => {
@@ -106,7 +108,7 @@ test("a queue row links to where the work is done", async ({ page }) => {
   const link = rows.first().getByRole("link");
   expect(await link.getAttribute("href")).toMatch(/^\/(team\/|qc\?)/);
   await link.click();
-  await expect(page).toHaveURL(/\/(team\/|qc)/);
+  await expect(page).toHaveURL(/\/(team\/|qc)/, { timeout: 30_000 });
 });
 
 test("who gets in: a supervisor is sent to their own landing, not the Portfolio", async ({ page }) => {

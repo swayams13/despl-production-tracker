@@ -50,7 +50,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       <>
         <PageHeader title="Portfolio" />
         <p className="note">
-          No projects yet. Create a job to start tracking it here. <Link href="/jobs" className="btn btn-ghost">Go to jobs</Link>
+          No projects yet. Create a job to start tracking it here. <Link prefetch={false} href="/jobs" className="btn btn-ghost">Go to jobs</Link>
         </p>
       </>
     );
@@ -84,7 +84,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       {focus && (
         <p className="pf-focusbar">
           Showing <b className="mono">{focus.jobNumber}</b> only.{" "}
-          <Link href={portfolioHref({ health })}>Show all jobs</Link>
+          <Link prefetch={false} href={portfolioHref({ health })}>Show all jobs</Link>
         </p>
       )}
 
@@ -92,7 +92,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <div className="hd">
           <h3 id="pf-projects">Project health</h3>
           {health ? (
-            <Link href={portfolioHref({ jobId }, "projects")} className="chip pf-clear">
+            <Link prefetch={false} href={portfolioHref({ jobId }, "projects")} className="chip pf-clear">
               <i />
               {HEALTH_LABEL[health]} · clear
             </Link>
@@ -102,7 +102,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </div>
         {shown.length === 0 ? (
           <p className="note">
-            No projects match. <Link href={portfolioHref({})}>Show all</Link>
+            No projects match. <Link prefetch={false} href={portfolioHref({})}>Show all</Link>
           </p>
         ) : (
           <HealthTable rows={shown} topBlocker={topBlockerByJob(ranked)} health={health} jobId={jobId} />
