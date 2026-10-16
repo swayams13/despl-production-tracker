@@ -1,6 +1,8 @@
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
+import { AppError, ERROR_MESSAGES, type ErrorCode } from "@/lib/shared/errors";
 import { deriveDispatchBatchStatus, type DispatchBatchStatus } from "./dispatch.service";
+import { assertUnitHasNoOpenHoldPoint, assertUnitHasNoOpenNcr, assertUnitProductionComplete } from "./_shared";
 
 /**
  * S9 — Dispatch tab on /jobs/[id]. Status is ALWAYS derived through
@@ -76,5 +78,56 @@ export async function loadDispatchPanel(actor: Actor, jobId: number): Promise<Di
       })),
       packedUnits,
     };
+  });
+}
+
+/**
+ * Lean Core L2.8: why a unit cannot ship yet, before anyone tries. Runs the
+ * same three gates `addUnitToBatch` / `approveDispatchRelease` / `recordDispatch`
+ * run (invariant 2: open NCR, open hold point, incomplete production), so the
+ * Dispatch tab and the refusal a click would get always agree. Read-only: the
+ * gates only select. Codes and messages are the service's own.
+ * ponytail: three small queries per unit, sequential; fine at a job's 9-40 units.
+ */
+export interface UnitDispatchBlock {
+  code: ErrorCode;
+  message: string;
+}
+export interface UnitDispatchReadiness {
+  unitId: number;
+  serialNo: string;
+  packed: boolean;
+  /** In a dispatch batch already. */
+  batched: boolean;
+  blocks: UnitDispatchBlock[];
+}
+
+export async function loadDispatchReadiness(actor: Actor, jobId: number): Promise<UnitDispatchReadiness[] | null> {
+  return withTenant(actor.tenantId, async (tx) => {
+    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true } });
+    if (!job) return null;
+    assertClientScope(actor, job.clientId);
+
+    const units = await tx.unit.findMany({
+      where: { equipment: { jobId } },
+      select: { id: true, serialNo: true, packageId: true, _count: { select: { dispatchBatchUnits: true } } },
+      orderBy: { serialNo: "asc" },
+    });
+
+    const gates = [assertUnitHasNoOpenNcr, assertUnitHasNoOpenHoldPoint, assertUnitProductionComplete];
+    const out: UnitDispatchReadiness[] = [];
+    for (const u of units) {
+      const blocks: UnitDispatchBlock[] = [];
+      for (const gate of gates) {
+        try {
+          await gate(tx, u.id, jobId);
+        } catch (e) {
+          if (!(e instanceof AppError)) throw e;
+          blocks.push({ code: e.code, message: ERROR_MESSAGES[e.code] });
+        }
+      }
+      out.push({ unitId: u.id, serialNo: u.serialNo, packed: u.packageId != null, batched: u._count.dispatchBatchUnits > 0, blocks });
+    }
+    return out;
   });
 }
