@@ -17,6 +17,7 @@ import { ClientPortalView } from "@/components/industrial/client-portal-view";
 import { ClientReviewBanner } from "@/components/industrial/client-review-banner";
 import { JobDateEditor } from "@/components/industrial/job-date-editor";
 import { JobDetailsEditor } from "@/components/industrial/job-details-editor";
+import { TravellersLink } from "./travellers-link";
 import type { JobHeader } from "@/lib/services/job-detail.read";
 import type { UnitSpine } from "@/lib/services/spine.read";
 import type { ActivityEvent } from "@/lib/services/events.read";
@@ -107,6 +108,7 @@ export function JobDetailClient({
           {header.equipmentName ?? "—"} · {header.familyName} · {header.unitCount} units
         </span>
         <StatusChip status={header.displayStatus} />
+        <TravellersLink jobId={jobId} />
         {canEditJobDates && (
           <JobDetailsEditor
             jobId={jobId}
