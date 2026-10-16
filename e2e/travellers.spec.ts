@@ -56,6 +56,7 @@ test("print media hides the app shell", async ({ page }) => {
 
 test("an unknown job is a 404", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
-  const res = await page.goto("/jobs/99999999/travellers");
-  expect(res?.status()).toBe(404);
+  await page.goto("/jobs/99999999/travellers");
+  // The route streams behind loading.tsx, so the status is already 200: assert the page, as floor/team specs do.
+  await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
 });
