@@ -299,7 +299,7 @@ export function ActivityDetailClient({
       </Modal>
 
       <p className="note" style={{ marginTop: 20 }}>
-        <Link href={`/jobs/${detail.jobId}?tab=gantt`} className="sub">← Back to project schedule</Link>
+        <Link href={`/jobs/${detail.jobId}?tab=schedule`} className="sub">← Back to project schedule</Link>
       </p>
     </>
   );

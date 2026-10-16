@@ -46,8 +46,10 @@ function procurementChipClass(status: BomItemRow["procurement"]["status"]): stri
   return "c-progress";
 }
 
-export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
+export function BomPanel({ jobId, bom, tabHref }: { jobId: number; bom: BomTree; tabHref?: string }) {
   const router = useRouter();
+  /** The URL the equipment / unit selectors extend; L2.8 points it at Materials > Parts and stock. */
+  const base = tabHref ?? `/jobs/${jobId}?tab=bom`;
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(bom.groups[0] ? [bom.groups[0].name] : []));
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [addingItem, setAddingItem] = useState(false);
@@ -83,7 +85,7 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
               className="btn"
               style={{ marginLeft: 8 }}
               value={bom.equipmentId}
-              onChange={(e) => router.push(`/jobs/${jobId}?tab=bom&equipment=${e.target.value}`)}
+              onChange={(e) => router.push(`${base}&equipment=${e.target.value}`)}
               aria-label="Equipment"
             >
               {bom.equipments.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
@@ -176,7 +178,7 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
       </div>
 
       {bom.subAssemblyComponents.length > 0 && (
-        <SubAssemblyComponents jobId={jobId} bom={bom} />
+        <SubAssemblyComponents jobId={jobId} bom={bom} base={base} />
       )}
     </div>
   );
@@ -190,7 +192,7 @@ export function BomPanel({ jobId, bom }: { jobId: number; bom: BomTree }) {
  * different id space than `BomItem.id`, and keeping them in a visually
  * separate section with its own toggle state avoids any risk of collision.
  */
-function SubAssemblyComponents({ jobId, bom }: { jobId: number; bom: BomTree }) {
+function SubAssemblyComponents({ jobId, bom, base }: { jobId: number; bom: BomTree; base: string }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const router = useRouter();
   const components = bom.subAssemblyComponents;
@@ -205,7 +207,7 @@ function SubAssemblyComponents({ jobId, bom }: { jobId: number; bom: BomTree }) 
             className="btn"
             style={{ marginLeft: 8 }}
             value={bom.unitId ?? ""}
-            onChange={(e) => router.push(`/jobs/${jobId}?tab=bom&equipment=${bom.equipmentId}&unit=${e.target.value}`)}
+            onChange={(e) => router.push(`${base}&equipment=${bom.equipmentId}&unit=${e.target.value}`)}
             aria-label="Unit"
           >
             {bom.units.map((u) => <option key={u.id} value={u.id}>{u.serialNo}</option>)}

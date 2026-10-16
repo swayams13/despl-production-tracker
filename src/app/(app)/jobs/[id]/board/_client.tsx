@@ -120,6 +120,10 @@ export function BoardClient({
             ? ` · forecast ${h.forecastVarianceDays > 0 ? "+" : "−"}${Math.abs(h.forecastVarianceDays)} d`
             : ""}
         </span>
+        {/* L2.8: Assembly is not on the job tab strip; it is reached from here. */}
+        <Link className="btn" style={{ marginLeft: "auto" }} href={`/jobs/${jobId}?tab=assembly`}>
+          Assembly
+        </Link>
       </div>
 
       <div className="bd-filters">

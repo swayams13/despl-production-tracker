@@ -1392,3 +1392,67 @@ body {
   .theme-industrial .qq-tab, .theme-industrial .qq-acts .btn, .theme-industrial .qq-pager .btn { min-height: 48px; }
   .theme-industrial .qq-filters select, .theme-industrial .qq-form input, .theme-industrial .qq-form select, .theme-industrial .qq-chip { min-height: 44px; }
 }
+
+/* ===== L2.8 job overview tabs (.jt-) ===== */
+.theme-industrial .jt-sub { display: flex; gap: 8px; margin-bottom: 12px; }
+.theme-industrial .jt-sub .btn { text-decoration: none; display: inline-flex; align-items: center; min-height: 36px; }
+.theme-industrial .jt-on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, var(--surface)); }
+.theme-industrial .jt-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.theme-industrial .jt-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--text); font-size: 12px; text-decoration: none; }
+.theme-industrial .jt-chip.jt-on { font-weight: 600; }
+.theme-industrial .jt-hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+.theme-industrial .jt-gap { margin-top: 16px; }
+.theme-industrial .jt-gap-b { margin-bottom: 14px; }
+.theme-industrial .jt-stack { display: grid; gap: 14px; }
+.theme-industrial .jt-pad { padding: 12px 16px; margin: 0; }
+.theme-industrial .jt-more-link { margin-left: auto; font-size: 12px; }
+
+/* health / QC count tiles: every one a link */
+.theme-industrial .jt-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.theme-industrial .jt-tile { display: grid; gap: 2px; padding: 10px 14px; min-height: 44px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); text-decoration: none; }
+.theme-industrial .jt-tile:hover { border-color: var(--hover-border); }
+.theme-industrial .jt-tile > span { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; }
+.theme-industrial .jt-tile > b { font-size: 24px; font-weight: 600; }
+.theme-industrial .jt-tile > small { color: var(--muted); font-size: 12px; }
+
+/* short lists on the QC and Dispatch tabs */
+.theme-industrial .jt-list { list-style: none; margin: 0; padding: 0; }
+.theme-industrial .jt-list > li { display: grid; gap: 3px; padding: 9px 16px; border-bottom: 1px solid var(--divider, var(--border)); font-size: 13px; }
+.theme-industrial .jt-list > li:last-child { border-bottom: 0; }
+.theme-industrial .jt-list small { color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.theme-industrial .jt-more-row { color: var(--muted); font-size: 12px; }
+
+/* Materials pipeline (07B): a row per BOM line, details open in place */
+.theme-industrial .jt-table { overflow: hidden; }
+.theme-industrial .jt-lines { list-style: none; margin: 0; padding: 0; }
+.theme-industrial .jt-lines > li { border-top: 1px solid var(--divider, var(--border)); }
+.theme-industrial .jt-row { display: grid; grid-template-columns: minmax(130px, 1.2fr) minmax(110px, 1fr) 70px minmax(300px, 3fr) 80px minmax(150px, 1.3fr); gap: 12px; align-items: center; padding: 10px 16px; font-size: 13px; }
+.theme-industrial .jt-head { color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; }
+.theme-industrial .jt-line > summary { list-style: none; cursor: pointer; min-height: 44px; }
+.theme-industrial .jt-line > summary::-webkit-details-marker { display: none; }
+.theme-industrial .jt-line > summary:hover { background: var(--surface-2); }
+.theme-industrial .jt-line[open] > summary { background: var(--surface-2); }
+.theme-industrial .jt-part { display: grid; }
+.theme-industrial .jt-part small, .theme-industrial .jt-mat-name { color: var(--muted); font-size: 12px; }
+.theme-industrial .jt-pipe { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.theme-industrial .jt-step { display: grid; gap: 2px; min-width: 0; font-size: 12px; color: var(--muted); }
+.theme-industrial .jt-bar { height: 6px; border-radius: 3px; background: var(--s-idle); }
+.theme-industrial .jt-step.done .jt-bar { background: var(--s-complete); }
+.theme-industrial .jt-step.current .jt-bar { background: var(--accent); }
+.theme-industrial .jt-step.current.late .jt-bar { background: var(--s-overdue); }
+.theme-industrial .jt-step.current .jt-lab { color: var(--text); font-weight: 700; }
+.theme-industrial .jt-step.current.late .jt-lab, .theme-industrial .jt-step.current.late .jt-det { color: var(--s-overdue); }
+.theme-industrial .jt-step.done .jt-lab { color: var(--text); }
+.theme-industrial .jt-det { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-industrial .jt-more { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; padding: 12px 16px 14px; background: var(--surface-2); font-size: 13px; }
+.theme-industrial .jt-more h4 { margin: 0 0 4px; color: var(--muted); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; }
+.theme-industrial .jt-more p, .theme-industrial .jt-more ul { margin: 0; padding: 0; list-style: none; }
+@media (max-width: 900px) {
+  .theme-industrial .jt-head { display: none; }
+  .theme-industrial .jt-row { grid-template-columns: 1fr 1fr; }
+  .theme-industrial .jt-row .jt-pipe { grid-column: 1 / -1; order: 5; }
+}
+@media (pointer: coarse) {
+  .theme-industrial .jt-sub .btn, .theme-industrial .jt-chip { min-height: 44px; }
+  .theme-industrial .jt-line > summary { min-height: 48px; }
+}
