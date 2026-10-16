@@ -32,10 +32,12 @@ test("a supervisor's Team is their own department, and the numbers add up", asyn
 
 test("a long list shows 25 rows, with Show all for the rest", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
+  await expect(page).toHaveURL(/\/today$/); // let the post-login redirect finish before navigating away
   await page.goto("/team/fabrication");
-  const more = page.getByRole("button", { name: /^Show all \d+$/ }).first();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Fabrication");
+  const section = page.locator("section[aria-labelledby=tm-od]"); // Overdue and blocked: one list
+  const more = section.getByRole("button", { name: /^Show all \d+$/ });
   test.skip((await more.count()) === 0, "this department has no list longer than 25 on this seed");
-  const section = page.locator("section", { has: more });
   await expect(section.locator("ul.tm-items li")).toHaveCount(25);
   await more.click();
   await expect(section.locator("ul.tm-items li").nth(25)).toBeVisible();
