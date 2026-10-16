@@ -495,6 +495,11 @@ test("/dashboard and /admin redirect this supervisor to /my-day, not a dead end"
 // display:none, matching <ResponsiveTable>'s own established pattern).
 test("/my-day: queue-first view below 640px, tabbed view at and above", async ({ page }, testInfo) => {
   await gotoReady(page, "/my-day");
+  // CI flake (identical failure on three unrelated PRs, Oct 2026): while the page streams in, a
+  // hidden streamed copy of the tree can briefly coexist with the final one, and a strict locator
+  // that matches both throws. Wait for the swap to finish (exactly one of each), then read visibility.
+  await expect(page.locator(".day-queue")).toHaveCount(1);
+  await expect(page.locator(".day-standard")).toHaveCount(1);
   const queueVisible = await page.locator(".day-queue").isVisible();
   const standardVisible = await page.locator(".day-standard").isVisible();
   if (testInfo.project.name === "phone") {
