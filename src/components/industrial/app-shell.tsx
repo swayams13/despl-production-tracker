@@ -102,8 +102,9 @@ const icons: Record<NavIcon | "themeMoon" | "themeSun", ReactNode> = {
 };
 
 /** Count shown on a nav item, from the two real counts AppShell receives. */
-function badgeCount(badge: NavItem["badge"], overdueCount: number, unreadCount: number): number {
+function badgeCount(badge: NavItem["badge"], overdueCount: number, unreadCount: number, teamOverdue: number): number {
   if (badge === "overdue") return overdueCount;
+  if (badge === "team") return teamOverdue;
   if (badge === "unread") return unreadCount;
   return 0;
 }
@@ -126,6 +127,7 @@ export function AppShell({
   userName,
   userRoles,
   overdueCount,
+  teamOverdueCount,
   notifications,
   jobs,
   leanFloor,
@@ -134,6 +136,8 @@ export function AppShell({
   userName: string;
   userRoles: string[];
   overdueCount: number;
+  /** Department overdue count: Team's badge. */
+  teamOverdueCount: number;
   notifications: { unreadCount: number; recent: NotificationRow[] };
   jobs: JobListItem[];
   /** FEATURES.leanFloor, read on the server: Scan and its target exist only while it is on. */
@@ -265,8 +269,8 @@ export function AppShell({
             >
               {icons[it.icon]}
               {it.label}
-              {badgeCount(it.badge, overdueCount, notifications.unreadCount) > 0 ? (
-                <span className="badge">{badgeCount(it.badge, overdueCount, notifications.unreadCount)}</span>
+              {badgeCount(it.badge, overdueCount, notifications.unreadCount, teamOverdueCount) > 0 ? (
+                <span className="badge">{badgeCount(it.badge, overdueCount, notifications.unreadCount, teamOverdueCount)}</span>
               ) : null}
             </Link>
           ))}
@@ -317,7 +321,7 @@ export function AppShell({
       <nav className="icon-rail" aria-label="Primary">
         <div className="rail-avatar">{initials}</div>
         {primary.map((it) => {
-          const count = badgeCount(it.badge, overdueCount, notifications.unreadCount);
+          const count = badgeCount(it.badge, overdueCount, notifications.unreadCount, teamOverdueCount);
           return (
             <Link
               key={it.href}
@@ -326,7 +330,7 @@ export function AppShell({
             >
               {icons[it.icon]}
               <span>{it.label}</span>
-              {count > 0 && it.badge === "overdue" && <span className="badge">{count}</span>}
+              {count > 0 && (it.badge === "overdue" || it.badge === "team") && <span className="badge">{count}</span>}
               {count > 0 && it.badge === "unread" && <span className="badge-alert">{count}</span>}
             </Link>
           );
@@ -337,7 +341,7 @@ export function AppShell({
       {/* A multi-role union can exceed what a phone bar holds: first five in registry order. */}
       <nav className="bottom-nav" aria-label="Primary">
         {primary.slice(0, 5).map((it) => {
-          const count = badgeCount(it.badge, overdueCount, notifications.unreadCount);
+          const count = badgeCount(it.badge, overdueCount, notifications.unreadCount, teamOverdueCount);
           return (
             <Link
               key={it.href}

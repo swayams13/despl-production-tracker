@@ -1000,3 +1000,23 @@ export async function loadMyOverdueCount(actor: Actor): Promise<number> {
     });
   });
 }
+
+/**
+ * L2.5: the two overdue counts the shell badges (audit/05 §8). `mine` is plans
+ * assigned to me (Today); `dept` is the department-scoped count
+ * loadMyOverdueCount has always returned (Team).
+ */
+export async function loadOverdueCounts(actor: Actor): Promise<{ mine: number; dept: number }> {
+  const dept = await loadMyOverdueCount(actor);
+  const mine = await withTenant(actor.tenantId, (tx) =>
+    tx.processPlan.count({
+      where: {
+        assigneeUserId: actor.userId,
+        status: { not: "COMPLETE" },
+        plannedFinish: { lt: istCalendarDayMarker() },
+        scheduleRun: { isCurrent: true },
+      },
+    }),
+  );
+  return { mine, dept };
+}

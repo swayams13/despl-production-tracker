@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
+import { FEATURES } from "@/lib/shared/flags";
 import { withTenant } from "@/lib/db";
 import { loadCommandCenter, classifyDeptCode, resolveCommandCenterAccess } from "@/lib/services/command-center.read";
 import { PageHeader } from "@/components/industrial/page-header";
@@ -23,6 +24,8 @@ export default async function CommandCenter({ params }: { params: Promise<{ dept
   if (actor.clientId !== null) redirect("/portal");
 
   const { dept } = await params;
+  // L2.5: Team is the department cockpit, for office and floor departments alike.
+  if (FEATURES.leanFloor) redirect(`/team/${dept.toLowerCase()}`);
   const deptCode = dept.toUpperCase();
   const department = await withTenant(actor.tenantId, (tx) =>
     tx.department.findFirst({ where: { tenantId: actor.tenantId, code: deptCode }, select: { id: true, name: true, isOfficeDept: true } }),

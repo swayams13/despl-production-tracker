@@ -1,0 +1,106 @@
+/**
+ * Lean Core L2.5: the pure parts of Team. `summarizeTeam` builds the workload
+ * table and the header numbers (which add up: open = assigned + unassigned);
+ * `sameDayRate` is the pilot's headline metric. No React, no database.
+ */
+
+export type TeamPlanState = "BLOCKED" | "READY" | "IN_PROGRESS" | "SUBMITTED" | "ON_HOLD" | "DONE";
+
+export interface TeamPlanFact {
+  planId: number;
+  assigneeId: number | null;
+  state: TeamPlanState;
+  overdue: boolean;
+  /** ISO planned finish; null = not scheduled. */
+  dueAt: string | null;
+}
+
+export interface TeamMember {
+  userId: number;
+  name: string;
+}
+
+export interface PersonLoad {
+  userId: number;
+  name: string;
+  assigned: number;
+  overdue: number;
+  dueToday: number;
+  blocked: number;
+  /** "2 d" past its date, "today", or "—" (nothing late or due). */
+  oldest: string;
+  idle: boolean;
+}
+
+export interface TeamSummary {
+  people: PersonLoad[];
+  open: number;
+  assigned: number;
+  unassigned: number;
+  overdue: number;
+  blocked: number;
+}
+
+const IST_MS = 5.5 * 3600 * 1000;
+const DAY = 24 * 3600 * 1000;
+const istDayNo = (ms: number) => Math.floor((ms + IST_MS) / DAY);
+
+/** "2 d" for an item that many IST days past its date, "today" if due today, else "—". */
+export function oldestLabel(dueAts: Array<string | null>, now: Date): string {
+  const today = istDayNo(now.getTime());
+  const days = dueAts.filter((d): d is string => !!d).map((d) => today - istDayNo(new Date(d).getTime()));
+  if (days.length === 0) return "—";
+  const worst = Math.max(...days);
+  if (worst >= 1) return `${worst} d`;
+  return worst === 0 ? "today" : "—";
+}
+
+export function summarizeTeam(plans: TeamPlanFact[], members: TeamMember[], now: Date): TeamSummary {
+  const today = istDayNo(now.getTime());
+  const open = plans.filter((p) => p.state !== "DONE");
+  const people: PersonLoad[] = members.map((m) => {
+    const mine = open.filter((p) => p.assigneeId === m.userId);
+    return {
+      userId: m.userId,
+      name: m.name,
+      assigned: mine.length,
+      overdue: mine.filter((p) => p.overdue).length,
+      dueToday: mine.filter((p) => !p.overdue && p.dueAt != null && istDayNo(new Date(p.dueAt).getTime()) === today).length,
+      blocked: mine.filter((p) => p.state === "BLOCKED").length,
+      oldest: oldestLabel(mine.map((p) => p.dueAt), now),
+      idle: mine.length === 0,
+    };
+  });
+  people.sort((a, b) => b.overdue - a.overdue || b.assigned - a.assigned || a.name.localeCompare(b.name));
+
+  // Held by someone who is not (or no longer) a member still counts as assigned.
+  const assigned = open.filter((p) => p.assigneeId != null).length;
+  return {
+    people,
+    open: open.length,
+    assigned,
+    unassigned: open.length - assigned,
+    overdue: open.filter((p) => p.overdue).length,
+    blocked: open.filter((p) => p.state === "BLOCKED").length,
+  };
+}
+
+/** Least-loaded first, for the Assign to… list (ties by name). */
+export function leastLoadedFirst<T extends { name: string; assigned: number }>(people: T[]): T[] {
+  return [...people].sort((a, b) => a.assigned - b.assigned || a.name.localeCompare(b.name));
+}
+
+export interface UpdateEvent {
+  recordedAt: Date;
+  /** The client-reported time; null = entered when it happened. */
+  reportedAt: Date | null;
+}
+
+/**
+ * Pilot metric (D4 refinement 3): an update is same-day when its IST calendar
+ * day is the day it happened. null = no events in the window.
+ */
+export function sameDayRate(events: UpdateEvent[]): { rate: number | null; same: number; total: number } {
+  const same = events.filter((e) => !e.reportedAt || istDayNo(e.recordedAt.getTime()) === istDayNo(e.reportedAt.getTime())).length;
+  return { rate: events.length ? Math.round((same / events.length) * 100) : null, same, total: events.length };
+}

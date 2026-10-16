@@ -4,7 +4,7 @@ import { Toaster } from "sonner";
 import { AppShell } from "@/components/industrial/app-shell";
 import { ThemeRoot } from "@/components/industrial/theme-root";
 import { getActor } from "@/lib/authz";
-import { loadMyOverdueCount } from "@/lib/services/workspace.read";
+import { loadOverdueCounts } from "@/lib/services/workspace.read";
 import { loadJobs, type JobListItem } from "@/lib/services/jobs.read";
 import { loadNotifications } from "@/lib/services/notifications.read";
 import { toasterTheme } from "@/lib/theme";
@@ -45,14 +45,16 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
   if (actor?.clientId != null) redirect("/portal");
 
   let overdueCount = 0;
+  let teamOverdueCount = 0;
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };
   let jobs: JobListItem[] = [];
   if (actor) {
-    [overdueCount, notifications, jobs] = await Promise.all([
-      loadMyOverdueCount(actor),
-      loadNotifications(actor),
-      loadJobs(actor),
-    ]);
+    const [counts, n, j] = await Promise.all([loadOverdueCounts(actor), loadNotifications(actor), loadJobs(actor)]);
+    // Today's badge is mine once the lean floor is on (L2.5); until then it is the department count it always was.
+    overdueCount = FEATURES.leanFloor ? counts.mine : counts.dept;
+    teamOverdueCount = counts.dept;
+    notifications = n;
+    jobs = j;
   }
 
   const theme = {
@@ -66,6 +68,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
         userName={actor?.name ?? "—"}
         userRoles={actor?.roles ?? []}
         overdueCount={overdueCount}
+        teamOverdueCount={teamOverdueCount}
         notifications={notifications}
         jobs={jobs}
         leanFloor={FEATURES.leanFloor}
