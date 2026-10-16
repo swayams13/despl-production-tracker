@@ -72,7 +72,7 @@ function Dates({ r }: { r: PortfolioRow }) {
 function Focus({ r, health, focused }: { r: PortfolioRow; health: JobHealth | null; focused: boolean }) {
   if (focused) return null;
   return (
-    <Link prefetch={false} href={portfolioHref({ health, jobId: r.id }, "projects")} className="pf-focus" aria-label={`Show only ${r.jobNumber}`}>
+    <Link prefetch={false} href={portfolioHref({ health, jobId: r.id })} className="pf-focus" aria-label={`Show only ${r.jobNumber}`}>
       Focus
     </Link>
   );

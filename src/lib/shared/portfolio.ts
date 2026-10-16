@@ -63,9 +63,9 @@ export function buildTiles(args: {
   jobId: number | null;
 }): PortfolioTile[] {
   const { counts, actionsDue, health, jobId } = args;
-  const filter = (h: JobHealth): PortfolioTile["href"] => portfolioHref({ health: health === h ? null : h, jobId }, "projects");
+  const filter = (h: JobHealth): PortfolioTile["href"] => portfolioHref({ health: health === h ? null : h, jobId });
   return [
-    { id: "active", label: "Active", value: counts.active, href: portfolioHref({ jobId }, "projects"), alert: false, selected: false },
+    { id: "active", label: "Active", value: counts.active, href: portfolioHref({ jobId }), alert: false, selected: false },
     { id: "delayed", label: "Delayed", value: counts.DELAYED, href: filter("DELAYED"), alert: counts.DELAYED > 0, selected: health === "DELAYED" },
     { id: "at-risk", label: "At risk", value: counts.AT_RISK, href: filter("AT_RISK"), alert: false, selected: health === "AT_RISK" },
     { id: "on-hold", label: "On hold", value: counts.ON_HOLD, href: filter("ON_HOLD"), alert: false, selected: health === "ON_HOLD" },

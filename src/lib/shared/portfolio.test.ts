@@ -93,10 +93,10 @@ describe("buildTiles", () => {
     const t = buildTiles({ counts, actionsDue: 9, health: null, jobId: null });
     expect(t.map((x) => [x.label, x.value])).toEqual([["Active", 5], ["Delayed", 1], ["At risk", 2], ["On hold", 0], ["Actions due", 9]]);
     expect(t.map((x) => x.href)).toEqual([
-      "/dashboard#projects",
-      "/dashboard?health=delayed#projects",
-      "/dashboard?health=at-risk#projects",
-      "/dashboard?health=on-hold#projects",
+      "/dashboard",
+      "/dashboard?health=delayed",
+      "/dashboard?health=at-risk",
+      "/dashboard?health=on-hold",
       "/dashboard#needs-attention",
     ]);
   });
@@ -104,7 +104,7 @@ describe("buildTiles", () => {
     const t = buildTiles({ counts, actionsDue: 0, health: "AT_RISK", jobId: 3 });
     const atRisk = t.find((x) => x.id === "at-risk")!;
     expect(atRisk.selected).toBe(true);
-    expect(atRisk.href).toBe("/dashboard?job=3#projects");
+    expect(atRisk.href).toBe("/dashboard?job=3");
     expect(t.every((x) => x.href.includes("job=3"))).toBe(true);
     expect(t.filter((x) => x.selected)).toHaveLength(1);
   });

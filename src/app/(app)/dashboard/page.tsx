@@ -92,7 +92,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         <div className="hd">
           <h3 id="pf-projects">Project health</h3>
           {health ? (
-            <Link prefetch={false} href={portfolioHref({ jobId }, "projects")} className="chip pf-clear">
+            <Link prefetch={false} href={portfolioHref({ jobId })} className="chip pf-clear">
               <i />
               {HEALTH_LABEL[health]} · clear
             </Link>
