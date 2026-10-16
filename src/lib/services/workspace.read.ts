@@ -6,6 +6,17 @@ import { prioritize, type PlanState, type RankedPlan } from "./prioritizer";
 import type { Department, DelayCategoryRef, ProcessPlan } from "@/generated/prisma/client";
 import { isOnTime, istCalendarDayMarker } from "@/lib/shared/business-day";
 import { pctOf } from "@/lib/shared/metrics";
+import { FEATURES } from "@/lib/shared/flags";
+import { ageDaysOf, holdIsReached, resolveHoldPointStatus, type HoldStatus, type LatestAttempt } from "@/lib/shared/qc-queue";
+
+/** The status words the job-level hold lists have always shown, for the one shared ladder's statuses. */
+const LEGACY_HOLD_LABEL: Record<HoldStatus, string> = {
+  AWAITING_TPI: "Awaiting TPI",
+  PENDING: "Pending",
+  QC_REVIEW: "QC review",
+  REINSPECT: "Reinspect",
+  WAIVER_PENDING: "Waiver pending",
+};
 
 /**
  * The current run's per-department prioritized view — the shared read behind
@@ -114,14 +125,14 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
     const execs = await tx.qcpExecution.findMany({
       where: { unitId: { in: unitIds }, qcpItemId: { in: itemIds } },
       orderBy: { attemptNo: "desc" },
-      select: { qcpItemId: true, unitId: true, result: true, recordedAt: true },
+      select: { qcpItemId: true, unitId: true, result: true, waiverApprovedBy: true, recordedAt: true },
     });
 
     // Latest attempt per (item, unit) — mirrors assertNoOpenHoldPoint's per-item map.
-    const latestByKey = new Map<string, { result: string; recordedAt: Date }>();
+    const latestByKey = new Map<string, LatestAttempt>();
     for (const e of execs) {
       const k = `${e.qcpItemId}:${e.unitId}`;
-      if (!latestByKey.has(k)) latestByKey.set(k, { result: e.result, recordedAt: e.recordedAt });
+      if (!latestByKey.has(k)) latestByKey.set(k, e);
     }
 
     // Reference plannedStart per (item, unit) — from the item's earliest-linked
@@ -129,9 +140,9 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
     const linkedProcessId = new Map(blockingItems.map((i) => [i.id, i.processLinks[0]?.jobProcess.id ?? null]));
     const plans = await tx.processPlan.findMany({
       where: { unitId: { in: unitIds }, jobProcessId: { in: [...linkedProcessId.values()].filter((x): x is number => x != null) }, scheduleRun: { isCurrent: true } },
-      select: { jobProcessId: true, unitId: true, plannedStart: true },
+      select: { jobProcessId: true, unitId: true, plannedStart: true, status: true },
     });
-    const plannedStartByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p.plannedStart]));
+    const planByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p]));
 
     const itemById = new Map(blockingItems.map((i) => [i.id, i]));
     const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
@@ -146,23 +157,14 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
       const jpId = linkedProcessId.get(itemId);
 
       for (const unitId of unitIds) {
-        const attempt = latestByKey.get(`${itemId}:${unitId}`);
-        const r = attempt?.result;
-        if (r === "ACCEPTED" || r === "NA") continue; // cleared
-
-        let status: string;
-        let ageRef: Date | null;
-        if (!attempt) {
-          status = requiresCall ? "Awaiting TPI" : "Pending";
-          ageRef = jpId != null ? (plannedStartByKey.get(`${jpId}:${unitId}`) ?? null) : null;
-        } else if (r === "REJECTED") {
-          status = "Reinspect";
-          ageRef = attempt.recordedAt;
-        } else {
-          status = "QC review"; // PENDING attempt already recorded, awaiting decision
-          ageRef = attempt.recordedAt;
-        }
-        const ageDays = ageRef ? Math.max(0, Math.floor((now.getTime() - ageRef.getTime()) / 864e5)) : 0;
+        const attempt = latestByKey.get(`${itemId}:${unitId}`) ?? null;
+        const resolved = resolveHoldPointStatus(attempt, requiresCall);
+        if (resolved == null) continue; // cleared, by the gate's rule: an NA clears only once its waiver is approved
+        const plan = jpId != null ? planByKey.get(`${jpId}:${unitId}`) : undefined;
+        // Lean floor: the same scope as /qc (a point nobody has reached is upcoming, not open).
+        if (FEATURES.leanFloor && !holdIsReached(attempt, plan, now)) continue;
+        const status = LEGACY_HOLD_LABEL[resolved];
+        const ageDays = ageDaysOf(attempt ? attempt.recordedAt : (plan?.plannedStart ?? null), now);
 
         open.push({
           qcpItemId: itemId,
@@ -242,20 +244,20 @@ export async function loadOpenHoldPointsBatch(actor: Actor, jobIds: number[]): P
     const execs = await tx.qcpExecution.findMany({
       where: { unitId: { in: unitIds }, qcpItemId: { in: itemIds } },
       orderBy: { attemptNo: "desc" },
-      select: { qcpItemId: true, unitId: true, result: true, recordedAt: true },
+      select: { qcpItemId: true, unitId: true, result: true, waiverApprovedBy: true, recordedAt: true },
     });
-    const latestByKey = new Map<string, { result: string; recordedAt: Date }>();
+    const latestByKey = new Map<string, LatestAttempt>();
     for (const e of execs) {
       const k = `${e.qcpItemId}:${e.unitId}`;
-      if (!latestByKey.has(k)) latestByKey.set(k, { result: e.result, recordedAt: e.recordedAt });
+      if (!latestByKey.has(k)) latestByKey.set(k, e);
     }
 
     const allLinkedProcessIds = [...new Set([...linkedProcessByItemJob.values()])];
     const plans = await tx.processPlan.findMany({
       where: { unitId: { in: unitIds }, jobProcessId: { in: allLinkedProcessIds }, scheduleRun: { isCurrent: true } },
-      select: { jobProcessId: true, unitId: true, plannedStart: true },
+      select: { jobProcessId: true, unitId: true, plannedStart: true, status: true },
     });
-    const plannedStartByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p.plannedStart]));
+    const planByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p]));
 
     const itemById = new Map(blockingItems.map((i) => [i.id, i]));
     const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
@@ -286,23 +288,14 @@ export async function loadOpenHoldPointsBatch(actor: Actor, jobIds: number[]): P
         const requiresCall = blockingCode?.requiresCall ?? false;
 
         for (const unitId of jobUnitIds) {
-          const attempt = latestByKey.get(`${itemId}:${unitId}`);
-          const r = attempt?.result;
-          if (r === "ACCEPTED" || r === "NA") continue;
-
-          let status: string;
-          let ageRef: Date | null;
-          if (!attempt) {
-            status = requiresCall ? "Awaiting TPI" : "Pending";
-            ageRef = plannedStartByKey.get(`${jpId}:${unitId}`) ?? null;
-          } else if (r === "REJECTED") {
-            status = "Reinspect";
-            ageRef = attempt.recordedAt;
-          } else {
-            status = "QC review";
-            ageRef = attempt.recordedAt;
-          }
-          const ageDays = ageRef ? Math.max(0, Math.floor((now.getTime() - ageRef.getTime()) / 864e5)) : 0;
+          const attempt = latestByKey.get(`${itemId}:${unitId}`) ?? null;
+          const resolved = resolveHoldPointStatus(attempt, requiresCall);
+          if (resolved == null) continue; // cleared, by the gate's rule: an NA clears only once its waiver is approved
+          const plan = jpId != null ? planByKey.get(`${jpId}:${unitId}`) : undefined;
+          // Lean floor: the same scope as /qc (a point nobody has reached is upcoming, not open).
+          if (FEATURES.leanFloor && !holdIsReached(attempt, plan, now)) continue;
+          const status = LEGACY_HOLD_LABEL[resolved];
+          const ageDays = ageDaysOf(attempt ? attempt.recordedAt : (plan?.plannedStart ?? null), now);
 
           open.push({
             qcpItemId: itemId,

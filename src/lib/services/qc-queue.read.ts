@@ -6,6 +6,7 @@ import {
   classRank,
   compareHolds,
   groupByJobUnit,
+  holdIsReached,
   isTestPoint,
   pageOf,
   resolveHoldPointStatus,
@@ -373,8 +374,7 @@ async function buildHolds(tx: Tx, s: Scope, now: Date): Promise<HoldRow[]> {
       const status = resolveHoldPointStatus(attempt, requiresCall);
       if (status == null) continue; // cleared
       const plan = planByKey.get(`${jp.id}:${u.id}`);
-      const reached = attempt != null || (plan != null && plan.status !== "NOT_STARTED") || (plan?.plannedStart != null && plan.plannedStart <= now);
-      if (!reached) continue; // upcoming, not a hold
+      if (!holdIsReached(attempt, plan, now)) continue; // upcoming, not a hold
       rows.push({
         key: `${item.id}:${u.id}`,
         qcpItemId: item.id,

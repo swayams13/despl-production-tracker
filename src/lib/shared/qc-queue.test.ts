@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   ageDaysOf,
   compareHolds,
+  evidenceMessage,
   evidenceNeeded,
   groupByJobUnit,
+  holdIsReached,
   pageOf,
   parseQcQuery,
   qcHref,
@@ -107,5 +109,32 @@ describe("parseQcQuery / qcHref", () => {
     const q = { tab: "holds" as const, jobId: 4, unitId: 9, page: 2 };
     expect(parseQcQuery(Object.fromEntries(new URLSearchParams(qcHref(q).split("?")[1])))).toEqual(q);
     expect(qcHref({ tab: "ready" })).toBe("/qc");
+  });
+});
+
+describe("holdIsReached: when a blocking point stops being upcoming", () => {
+  const now = new Date("2026-10-16T12:00:00Z");
+  const past = new Date("2026-10-01T00:00:00Z");
+  const future = new Date("2026-11-01T00:00:00Z");
+  it.each<[string, LatestAttempt | null, { status: string; plannedStart: Date | null } | undefined, boolean]>([
+    ["an attempt exists, whatever the plan", att("PENDING"), { status: "NOT_STARTED", plannedStart: future }, true],
+    ["its unit's plan has started", null, { status: "IN_PROGRESS", plannedStart: future }, true],
+    ["its planned start has passed", null, { status: "NOT_STARTED", plannedStart: past }, true],
+    ["planned for later and not started", null, { status: "NOT_STARTED", plannedStart: future }, false],
+    ["no plan and no attempt", null, undefined, false],
+    ["unscheduled and not started", null, { status: "NOT_STARTED", plannedStart: null }, false],
+  ])("%s", (_name, attempt, plan, expected) => {
+    expect(holdIsReached(attempt, plan, now)).toBe(expected);
+  });
+});
+
+describe("evidenceMessage", () => {
+  it("names what is missing, from the refusal's detail", () => {
+    expect(evidenceMessage(["the inspector's name", "the report or IRN number"])).toBe(
+      "Before this can be cleared, record: the inspector's name, the report or IRN number.",
+    );
+  });
+  it.each([[undefined], [null], [[]], ["x"], [[1, 2]]])("is null for %j (not an evidence refusal)", (v) => {
+    expect(evidenceMessage(v)).toBeNull();
   });
 });

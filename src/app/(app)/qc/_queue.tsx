@@ -12,6 +12,7 @@ import type { ActionResult } from "@/app/actions/_action";
 import type { QcQueueView } from "@/lib/services/qc-queue.read";
 import {
   HOLD_STATUS_LABEL,
+  evidenceMessage,
   qcHref,
   type HoldRow,
   type JobGroup,
@@ -48,7 +49,7 @@ export function QcQueueClient({ view, viewerId }: { view: QcQueueView; viewerId:
     start(async () => {
       const r = (await fn()) as ActionResult;
       if (!r.ok) {
-        setRefusal({ key, code: r.code, message: r.message });
+        setRefusal({ key, code: r.code, message: evidenceMessage(r.detail?.missing) ?? r.message });
         return;
       }
       setRefusal(null);

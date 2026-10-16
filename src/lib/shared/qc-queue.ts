@@ -54,6 +54,19 @@ export function resolveHoldPointStatus(latest: LatestAttempt | null, requiresCal
   }
 }
 
+/**
+ * A blocking point is one QC can act on once it has an attempt, its unit's plan
+ * has started, or its planned start has passed; a point nobody has reached is
+ * upcoming. One predicate for /qc and every count that links to it.
+ */
+export function holdIsReached(
+  attempt: LatestAttempt | null,
+  plan: { status: string; plannedStart: Date | null } | undefined,
+  now: Date,
+): boolean {
+  return attempt != null || (plan != null && plan.status !== "NOT_STARTED") || (plan?.plannedStart != null && plan.plannedStart <= now);
+}
+
 const CLASS_RANK: Record<string, number> = { H: 0, "R&A": 1, RW: 2, W: 3 };
 export const classRank = (code: string): number => CLASS_RANK[code] ?? 4;
 
@@ -100,6 +113,15 @@ export function evidenceNeeded(args: {
   }
   if (isTestPoint(args.activity) && !args.given.testData) missing.push("test pressure, hold time and gauge IDs");
   return missing;
+}
+
+/**
+ * The refusal text for missing evidence. Server Actions return the code's generic message, not the
+ * service's own, so the UI rebuilds it from the refusal's `detail.missing`. null = not an evidence refusal.
+ */
+export function evidenceMessage(missing: unknown): string | null {
+  if (!Array.isArray(missing) || missing.length === 0 || !missing.every((m) => typeof m === "string")) return null;
+  return `Before this can be cleared, record: ${missing.join(", ")}.`;
 }
 
 // ── Rows ─────────────────────────────────────────────────────────────────────

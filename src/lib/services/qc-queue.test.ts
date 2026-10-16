@@ -14,6 +14,7 @@ describe.skipIf(!RUN_DB)("L2.6 QC queue (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { loadQcQueue, loadQcCounts, loadQcReadyCount, resolveQcAccess } = await import("./qc-queue.read");
   const { recordQcpExecution, approveQcpWaiver } = await import("./qcp.service");
+  const { loadOpenHoldPoints, loadOpenHoldPointsBatch } = await import("./workspace.read");
   const { makeWorkOrg } = await import("./work.test-util");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -191,6 +192,41 @@ describe.skipIf(!RUN_DB)("L2.6 QC queue (DB)", async () => {
       await approveQcpWaiver(head, { qcpItemId: item, unitId });
       expect(await holds(j.job.id)).toEqual([]);
       await owner.qcpCodeRef.update({ where: { id: o.holdCode.id }, data: { waivable: false } });
+    });
+
+    it("the job-level hold list and counts agree with /qc (one ladder, one scope), and an unapproved NA is open in both", async () => {
+      const j = await holdJob();
+      const item = j.stepQcp.get(j.step(1))!;
+      const unitId = j.units[0].id;
+      const agree = async () => {
+        const queue = (await loadQcQueue(qc, q({ tab: "holds", jobId: j.job.id }))).counts.holds;
+        const single = await loadOpenHoldPoints(qc, j.job.id);
+        const batch = (await loadOpenHoldPointsBatch(qc, [j.job.id])).get(j.job.id) ?? [];
+        expect([single.length, batch.length]).toEqual([queue, queue]);
+        return single;
+      };
+      expect((await agree()).map((h) => h.status)).toEqual(["Pending"]);
+      await owner.qcpCodeRef.update({ where: { id: o.holdCode.id }, data: { waivable: true } });
+      try {
+        await recordQcpExecution(qc, { qcpItemId: item, unitId, result: "NA", remarks: "client waived" });
+        expect((await agree()).map((h) => h.status)).toEqual(["Waiver pending"]); // the old ladders called this cleared
+        await approveQcpWaiver(head, { qcpItemId: item, unitId });
+        expect(await agree()).toEqual([]);
+      } finally {
+        await owner.qcpCodeRef.update({ where: { id: o.holdCode.id }, data: { waivable: false } });
+      }
+    });
+
+    it("an unreached point is upcoming in the lean floor's counts everywhere; with the switch off the job lists keep their old scope", async () => {
+      const j = await holdJob({ status: "NOT_STARTED" });
+      expect(await loadOpenHoldPoints(qc, j.job.id)).toEqual([]);
+      expect((await loadOpenHoldPointsBatch(qc, [j.job.id])).get(j.job.id) ?? []).toEqual([]);
+      process.env.LEAN_FLOOR = "off";
+      try {
+        expect((await loadOpenHoldPoints(qc, j.job.id)).map((h) => h.status)).toEqual(["Pending"]); // today's behaviour
+      } finally {
+        process.env.LEAN_FLOOR = "on";
+      }
     });
 
     it("sorts H before W whatever the age, and counts match the list", async () => {
