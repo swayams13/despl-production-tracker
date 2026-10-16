@@ -88,7 +88,7 @@ export function HealthTable({
   return (
     <ResponsiveTable
       table={
-        <table className="matrix pf-table">
+        <table className="pf-table">
           <thead>
             <tr>
               <th scope="col">Job</th>
