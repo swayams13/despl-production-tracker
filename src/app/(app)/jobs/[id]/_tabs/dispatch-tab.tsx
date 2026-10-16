@@ -1,3 +1,8 @@
+"use client";
+
+// Client components on purpose: server-rendered, keyed list rows are streamed as many separate outlined Flight
+// rows, and a client-side navigation to a page with dozens of them never commits in the browser (found in the
+// L2.7-L2.9 integration run, 16 Oct 2026). As props they travel in one row.
 import { PackingPanel } from "@/components/industrial/packing-panel";
 import { DispatchPanel } from "@/components/industrial/dispatch-panel";
 import type { PackingPanel as PackingPanelData } from "@/lib/services/packing.read";
