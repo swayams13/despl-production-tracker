@@ -948,6 +948,43 @@ body {
   .theme-industrial .bd-expand { min-height: 44px; }
 }
 
+/* Team (L2.5) */
+.theme-industrial .tm-kpis { display: flex; flex-wrap: wrap; gap: 8px; }
+.theme-industrial .tm-kpi { display: grid; gap: 2px; min-width: 112px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.theme-industrial .tm-kpi.static { cursor: default; }
+.theme-industrial .tm-kpi b { font-size: 22px; font-weight: 600; }
+.theme-industrial .tm-kpi span { font-size: 12px; color: var(--muted); }
+.theme-industrial .tm-kpi.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 12%, var(--surface)); }
+.theme-industrial .tm-sec { margin-top: 20px; }
+.theme-industrial .tm-sec h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 0 0 8px; }
+.theme-industrial .tm-sec h3 { font-size: 12px; font-weight: 600; margin: 0 0 6px; }
+.theme-industrial .tm-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.theme-industrial .tm-table th, .theme-industrial .tm-table td { padding: 10px 12px; border-bottom: 1px solid var(--divider); text-align: left; }
+.theme-industrial .tm-table thead th { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); font-weight: 600; }
+.theme-industrial .tm-table tbody th { font-weight: 500; }
+.theme-industrial .tm-idle { background: color-mix(in oklab, var(--accent) 6%, transparent); }
+.theme-industrial .tm-bad { color: var(--s-overdue); font-weight: 600; }
+.theme-industrial .tm-flag th { color: var(--s-hold); }
+.theme-industrial .tm-link { margin-left: 10px; background: none; border: 0; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; min-height: 32px; }
+.theme-industrial .tm-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.theme-industrial .tm-filters select { min-height: 36px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0 8px; font: inherit; font-size: 12px; }
+.theme-industrial .tm-check { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; min-height: 36px; }
+.theme-industrial .tm-pager { display: flex; align-items: center; gap: 12px; margin-top: 8px; font-size: 12px; }
+.theme-industrial .tm-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.theme-industrial .tm-items li { display: grid; gap: 2px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 12px; }
+.theme-industrial .tm-items small { color: var(--muted); font-size: 11px; }
+.theme-industrial .tm-items li label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-height: 36px; cursor: pointer; }
+.theme-industrial .tm-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.theme-industrial .tm-switch { font: inherit; font-size: inherit; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; }
+.theme-industrial .tm-assign { position: sticky; bottom: 12px; z-index: 20; margin-top: 12px; padding: 12px; border: 1px solid var(--accent); border-radius: 8px; background: var(--surface); display: grid; gap: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); }
+.theme-industrial .tm-assign ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.theme-industrial .tm-assign .btn small { color: var(--muted); margin-left: 6px; }
+@media (pointer: coarse) {
+  .theme-industrial .tm-kpi, .theme-industrial .tm-assign .btn, .theme-industrial .tm-pager .btn { min-height: 48px; }
+  .theme-industrial .tm-link { min-height: 44px; min-width: 44px; }
+  .theme-industrial .tm-filters select, .theme-industrial .tm-check { min-height: 44px; }
+}
+
 /* dashboard (§4.2) — ported 1:1 from the mockup */
 .theme-industrial .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 10px; }
 .theme-industrial .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; overflow: hidden; transition: border-color .15s; }

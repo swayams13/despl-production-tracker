@@ -27,7 +27,7 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
       expect(hrefs(navFor([role]).primary), role).not.toContain("/scan");
     }
     expect(hrefs(navFor(["OPERATOR"], { leanFloor: true }).primary)).toEqual(["/today", "/scan", "/alerts"]);
-    expect(hrefs(navFor(["SUPERVISOR"], { leanFloor: true }).primary)).toEqual(["/today", "/workspace", "/scan", "/jobs"]);
+    expect(hrefs(navFor(["SUPERVISOR"], { leanFloor: true }).primary)).toEqual(["/today", "/team", "/scan", "/jobs"]);
     expect(hrefs(navFor(["QC"], { leanFloor: true }).primary)).toEqual(["/qc", "/scan", "/jobs"]);
     expect(hrefs(navFor(["PLANNER"], { leanFloor: true }).primary)).not.toContain("/scan");
   });
@@ -40,6 +40,16 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     expect(navFor(["SUPERVISOR"], { leanFloor: true }).primary.find((i) => i.href === "/today")?.badge).toBe("overdue");
     // a role without Today is untouched by the switch
     expect(hrefs(navFor(["QC"], { leanFloor: true }).primary)).not.toContain("/today");
+  });
+
+  it("Team is /workspace until leanFloor is on, then /team, with the department overdue badge", () => {
+    for (const role of ["SUPERVISOR", "PRODUCTION_HEAD"]) {
+      expect(hrefs(navFor([role]).primary)).toContain("/workspace");
+      const lean = navFor([role], { leanFloor: true }).primary;
+      expect(hrefs(lean)).toContain("/team");
+      expect(hrefs(lean)).not.toContain("/workspace");
+      expect(lean.find((i) => i.href === "/team")?.badge).toBe("team");
+    }
   });
 
   it("is the union across roles with one entry per href", () => {
@@ -99,7 +109,8 @@ describe("landingFor", () => {
     [["SUPERVISOR", "QC"], "/today"],
     [["QC"], "/qc"],
     [["PLANNER"], "/jobs"],
-    [["PRODUCTION_HEAD"], "/dashboard"],
+    [["PRODUCTION_HEAD"], "/team"],
+    [["MANAGEMENT"], "/dashboard"],
     [[], "/workspace"],
   ])("with leanFloor on: %j -> %s", (roles, href) => {
     expect(landingFor(roles, { leanFloor: true })).toBe(href);

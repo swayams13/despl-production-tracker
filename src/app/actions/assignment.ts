@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
-import { claimPlan, assignPlan, releasePlan } from "@/lib/services/assignment.service";
+import { claimPlan, assignPlan, assignPlans, releasePlan, type AssignBulkResult } from "@/lib/services/assignment.service";
 import { claimNext } from "@/lib/services/today.service";
 import { toActionError, type ActionResult } from "./_action";
 
@@ -51,5 +51,19 @@ export async function claimNextAction(): Promise<ActionResult> {
     return { ok: true };
   } catch (e) {
     return toActionError(e);
+  }
+}
+
+/** L2.5: assign several pool items to one person. Partial success is reported, never hidden. */
+export async function assignPlansAction(
+  processPlanIds: number[],
+  userId: number,
+): Promise<{ ok: true; result: AssignBulkResult } | Exclude<ActionResult, { ok: true }>> {
+  try {
+    const result = await assignPlans(await requireActor(), { processPlanIds, userId });
+    for (const p of ["/team", "/today", "/my-day", "/workspace"]) revalidatePath(p);
+    return { ok: true, result };
+  } catch (e) {
+    return toActionError(e) as Exclude<ActionResult, { ok: true }>;
   }
 }

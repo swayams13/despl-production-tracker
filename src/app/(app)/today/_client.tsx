@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -14,7 +15,7 @@ import {
 } from "@/components/industrial/floor-actions";
 import { recordWorkAction } from "@/app/actions/work";
 import { fileDelayAction } from "@/app/actions/delay";
-import { assignPlanAction, claimNextAction, claimPlanAction } from "@/app/actions/assignment";
+import { claimNextAction } from "@/app/actions/assignment";
 import { buildCheckIn, type CheckInChoice, type CheckInRow } from "@/lib/shared/today";
 import type { TodayRow, TodayView } from "@/lib/services/today.read";
 
@@ -177,12 +178,12 @@ export function TodayClient({
       )}
 
       {view.canAssign && view.pool.length > 0 && (
-        <details className="fl-group" data-testid="pool">
-          <summary>
-            <h2 style={{ display: "inline" }}>Unassigned in my department · {view.pool.length}</h2>
-          </summary>
-          <PoolList view={view} />
-        </details>
+        <p className="fl-sub" data-testid="pool">
+          {view.pool.length} unassigned in your department.{" "}
+          <Link href="/team" className="tm-link">
+            Assign from Team
+          </Link>
+        </p>
       )}
 
       <details className="fl-group">
@@ -268,61 +269,6 @@ function RowCard({ row, first, onAct }: { row: TodayRow; first?: boolean; onAct:
         </div>
       )}
     </li>
-  );
-}
-
-function PoolList({ view }: { view: TodayView }) {
-  const router = useRouter();
-  const [busy, startBusy] = useTransition();
-  const run = (fn: () => Promise<{ ok: boolean; message?: string }>, ok: string) =>
-    startBusy(async () => {
-      const r = await fn();
-      if (!r.ok) toast.error(r.message ?? "That did not work.");
-      else {
-        toast.success(ok);
-        router.refresh();
-      }
-    });
-  return (
-    <ul className="fl-pool">
-      {view.pool.map((p) => (
-        <li key={p.planId} className="fl-row">
-          <div className="fl-line">
-            <div className="fl-main">
-              <b>
-                <span className="mono">{p.serialNo}</span> · {p.processName}
-              </b>
-              <span>
-                {p.jobNumber} · {p.deptName} · due {fmtDue(p.dueAt)}
-                {p.overdue ? " · overdue" : ""}
-              </span>
-            </div>
-            <div className="fl-actions">
-              <select
-                className="ws-detail"
-                aria-label={`Assign ${p.processName} on ${p.serialNo} to`}
-                defaultValue=""
-                disabled={busy}
-                onChange={(e) => {
-                  const userId = Number(e.target.value);
-                  if (userId) run(() => assignPlanAction(p.planId, userId), "Assigned.");
-                }}
-              >
-                <option value="">Assign to…</option>
-                {(view.deptMembers[p.departmentId] ?? []).map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-              <button className="btn" disabled={busy} onClick={() => run(() => claimPlanAction(p.planId), "Claimed.")}>
-                Take it
-              </button>
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
   );
 }
 

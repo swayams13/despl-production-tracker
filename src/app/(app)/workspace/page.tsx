@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
+import { withTenant } from "@/lib/db";
+import { FEATURES } from "@/lib/shared/flags";
 import { loadWorkspaceView } from "@/lib/services/workspace.read";
 import { loadJobs } from "@/lib/services/jobs.read";
 import { UnitRow, UnitCardView, CardBulkActions, QcRow, QcCardView, HoldRow, HoldCardView, FilterChip, SortSelect } from "./_client";
@@ -20,6 +22,22 @@ export default async function Workspace({
   if (actor.clientId !== null) redirect("/portal");
 
   const sp = await searchParams;
+  // L2.5: with the lean floor on, Team replaces this page. Deep links keep their
+  // meaning: ?dept= (an id) becomes the department code, ?job= and ?status= carry over.
+  if (FEATURES.leanFloor) {
+    const deptId = Number(first(sp.dept));
+    const dept =
+      Number.isInteger(deptId) && deptId > 0
+        ? await withTenant(actor.tenantId, (tx) => tx.department.findFirst({ where: { id: deptId, tenantId: actor.tenantId }, select: { code: true } }))
+        : null;
+    const q = new URLSearchParams();
+    const job = first(sp.job);
+    const status = first(sp.status);
+    if (job) q.set("job", job);
+    if (status === "overdue" || status === "blocked") q.set("status", status);
+    const qs = q.toString();
+    redirect(`/team${dept ? `/${dept.code.toLowerCase()}` : ""}${qs ? `?${qs}` : ""}`);
+  }
   const jobParam = Number(first(sp.job));
   const jobId = Number.isInteger(jobParam) && jobParam > 0 ? jobParam : null;
 

@@ -209,3 +209,43 @@ export async function releasePlan(actor: Actor, input: ReleasePlanInput): Promis
     });
   });
 }
+
+export interface AssignBulkResult {
+  assigned: number[];
+  failed: Array<{ processPlanId: number; code: string; message: string }>;
+}
+
+/**
+ * Lean Core L2.5: assign many plans to one person from Team's pool. Each plan
+ * goes through assignPlan unchanged (its own transaction, department scope,
+ * audit row and "you were assigned" notice), so a plan the actor may not
+ * assign, or a person outside its department, fails alone and is reported;
+ * the rest land. One person, at most 100 plans.
+ */
+export async function assignPlans(
+  actor: Actor,
+  input: { processPlanIds: number[]; userId: number },
+): Promise<AssignBulkResult> {
+  // Refuse the caller up front: per-plan refusals below are caught and reported, which would
+  // otherwise turn "a client / an operator may not assign" into an empty success.
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  const ids = [...new Set(input.processPlanIds)];
+  if (ids.length === 0 || ids.length > 100) {
+    throw new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "processPlanIds" }, "Pick between 1 and 100 items.");
+  }
+  const out: AssignBulkResult = { assigned: [], failed: [] };
+  for (const processPlanId of ids) {
+    try {
+      await assignPlan(actor, { processPlanId, userId: input.userId });
+      out.assigned.push(processPlanId);
+    } catch (e) {
+      if (e instanceof AppError) {
+        out.failed.push({ processPlanId, code: e.code, message: e.message });
+      } else {
+        throw e; // a SQL error is not a refusal: stop and surface it
+      }
+    }
+  }
+  return out;
+}
