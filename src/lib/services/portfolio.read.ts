@@ -2,6 +2,22 @@ import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { loadJobs, type JobListItem } from "./jobs.read";
 import { classifyJobHealth, HEALTH_ORDER, type JobHealth } from "./job-health";
+import { computeCpmSafe, getCurrentScheduleRunsBatch, loadJobSpinesBatch } from "./_shared";
+import { prioritize } from "./prioritizer";
+import { loadQcLists } from "./qc-queue.read";
+import { ncrTenantScope } from "./ncr.service";
+import {
+  bottlenecks,
+  buildExceptions,
+  rankExceptions,
+  type DeptBottleneck,
+  type HoldFact,
+  type NcrFact,
+  type PlanFact,
+  type PortfolioException,
+  type PortfolioFacts,
+} from "@/lib/shared/portfolio";
+import { HOLD_STATUS_LABEL } from "@/lib/shared/qc-queue";
 
 /**
  * Portfolio view for the management dashboard (§4.2) — every project's health
@@ -150,4 +166,150 @@ export async function loadPortfolio(actor: Actor): Promise<Portfolio> {
   });
 
   return { counts, rows, cancelledCount };
+}
+
+// ── L2.7: what the Portfolio's bars and queue are made of ─────────────────────
+
+/**
+ * One pass over the tenant's ACTIVE jobs for the Portfolio's operational half.
+ * Plans come through the same spine -> CPM -> `prioritize()` pipeline the Team
+ * page uses, so "blocked" and "overdue" mean on the tiles exactly what they
+ * mean one click away. Holds and NCRs are the QC queue's own builders. The
+ * department of an NCR is the department that did the rejected work.
+ *
+ * Tenant scoping: job ids come from `loadPortfolio` (tenant RLS); the child
+ * tables (process plans, units) are only ever reached through those ids, and
+ * the NCR scan goes through `ncrTenantScope`.
+ *
+ * ponytail: CPM + prioritize per active job, as myday / command-center do. Fine
+ * at DESPL's 3-40 active jobs; batch if a tenant ever has hundreds.
+ */
+export async function loadPortfolioFacts(actor: Actor, rows: Pick<PortfolioRow, "id" | "jobNumber" | "status">[]): Promise<PortfolioFacts> {
+  const active = rows.filter((r) => r.status === "ACTIVE");
+  const jobIds = active.map((j) => j.id);
+  const now = new Date();
+
+  const [qc, base] = await Promise.all([
+    loadQcLists(actor),
+    withTenant(actor.tenantId, async (tx) => {
+      const [depts, runs, spines, units, ncrDepts] = await Promise.all([
+        tx.department.findMany({ where: { tenantId: actor.tenantId }, select: { id: true, code: true, name: true } }),
+        getCurrentScheduleRunsBatch(tx, jobIds),
+        loadJobSpinesBatch(tx, jobIds),
+        jobIds.length
+          ? tx.unit.findMany({ where: { equipment: { jobId: { in: jobIds } } }, select: { id: true, serialNo: true } })
+          : Promise.resolve([]),
+        tx.ncr.findMany({
+          where: { status: { not: "CLOSED" }, ...ncrTenantScope(actor.tenantId) },
+          select: {
+            id: true,
+            componentOperationRejection: { select: { componentOperation: { select: { operation: { select: { defaultDepartmentId: true } } } } } },
+            assemblyStepRejection: { select: { assemblyStep: { select: { templateStep: { select: { defaultDepartmentId: true } } } } } },
+            targetComponentOperation: { select: { operation: { select: { defaultDepartmentId: true } } } },
+            targetAssemblyStep: { select: { templateStep: { select: { defaultDepartmentId: true } } } },
+          },
+        }),
+      ]);
+      const serialByUnit = new Map(units.map((u) => [u.id, u.serialNo]));
+
+      const plans: PlanFact[] = [];
+      const assigneeByPlan = new Map<number, number>();
+      for (const job of active) {
+        const run = runs.get(job.id);
+        const spine = spines.get(job.id);
+        if (!run || !spine) continue;
+        // A malformed spine on one job must not take the whole Portfolio down.
+        const cpm = computeCpmSafe(spine.processes, spine.edges);
+        if (!cpm) continue;
+        const ranked = prioritize({
+          plans: run.processPlans,
+          edges: spine.edges,
+          floatByProcessId: new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }])),
+          processNameById: new Map(spine.rawProcesses.map((p) => [p.id, p.name])),
+          today: now,
+        });
+        const nameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
+        for (const list of ranked.values()) {
+          for (const r of list) {
+            if (r.state === "DONE") continue;
+            const p = r.plan;
+            if (p.assigneeUserId != null) assigneeByPlan.set(p.id, p.assigneeUserId);
+            plans.push({
+              planId: p.id,
+              jobId: job.id,
+              jobNumber: job.jobNumber,
+              deptId: p.ownerDepartmentId,
+              processName: nameById.get(p.jobProcessId) ?? `#${p.jobProcessId}`,
+              serialNo: p.unitId != null ? (serialByUnit.get(p.unitId) ?? `#${p.unitId}`) : null,
+              state: r.state,
+              overdue: r.overdue,
+              daysLate: r.overdue && p.plannedFinish ? Math.max(1, Math.ceil((now.getTime() - p.plannedFinish.getTime()) / 864e5)) : null,
+              assigneeName: null,
+            });
+          }
+        }
+      }
+
+      // Names only for the people on overdue plans: those are the rows that show an owner.
+      const ids = [...new Set(plans.filter((p) => p.overdue).map((p) => assigneeByPlan.get(p.planId)).filter((x): x is number => x != null))];
+      const users = ids.length ? await tx.user.findMany({ where: { tenantId: actor.tenantId, id: { in: ids } }, select: { id: true, name: true } }) : [];
+      const userName = new Map(users.map((u) => [u.id, u.name]));
+      for (const p of plans) {
+        const uid = assigneeByPlan.get(p.planId);
+        if (p.overdue && uid != null) p.assigneeName = userName.get(uid) ?? null;
+      }
+
+      const deptOfNcr = new Map(
+        ncrDepts.map((n) => [
+          n.id,
+          n.componentOperationRejection?.componentOperation.operation.defaultDepartmentId ??
+            n.assemblyStepRejection?.assemblyStep.templateStep.defaultDepartmentId ??
+            n.targetComponentOperation?.operation.defaultDepartmentId ??
+            n.targetAssemblyStep?.templateStep.defaultDepartmentId ??
+            null,
+        ]),
+      );
+      return { depts, plans, deptOfNcr };
+    }),
+  ]);
+
+  // Holds and NCRs also count on a job that is ON_HOLD: paused work still has open quality items.
+  const activeIds = new Set(rows.map((r) => r.id));
+  const ncrs: NcrFact[] = qc.ncrs
+    .filter((n) => activeIds.has(n.jobId))
+    .map((n) => ({
+      ncrId: n.ncrId,
+      jobId: n.jobId,
+      jobNumber: n.jobNumber,
+      deptId: base.deptOfNcr.get(n.ncrId) ?? null,
+      serialNo: n.serialNo,
+      label: n.entityLabel,
+      ageDays: n.ageDays,
+    }));
+  const holds: HoldFact[] = qc.holds
+    .filter((h) => activeIds.has(h.jobId))
+    .map((h) => ({
+      key: h.key,
+      jobId: h.jobId,
+      jobNumber: h.jobNumber,
+      serialNo: h.serialNo,
+      label: h.activity,
+      classCode: h.classCode,
+      statusLabel: HOLD_STATUS_LABEL[h.status],
+      ageDays: h.ageDays,
+    }));
+  return { depts: base.depts, plans: base.plans, ncrs, holds };
+}
+
+/** Department bars (blocked / overdue / rejected), worst first. Optionally one job. */
+export async function loadPortfolioBottlenecks(actor: Actor, jobId: number | null = null): Promise<DeptBottleneck[]> {
+  const { rows } = await loadPortfolio(actor);
+  return bottlenecks(await loadPortfolioFacts(actor, rows), jobId);
+}
+
+/** The whole needs-attention queue, ranked worst job first (the page shows the top 15; the first per job is its top blocker). */
+export async function loadPortfolioExceptions(actor: Actor, jobId: number | null = null): Promise<PortfolioException[]> {
+  const { rows } = await loadPortfolio(actor);
+  const facts = await loadPortfolioFacts(actor, rows);
+  return rankExceptions(buildExceptions(facts, jobId), rows.map((r) => r.id));
 }

@@ -549,6 +549,20 @@ export async function loadQcCounts(actor: Actor, scope: { jobId?: number | null;
   });
 }
 
+/**
+ * The open holds and NCRs themselves, whole and unpaged, from the same builders as the tabs and
+ * `loadQcCounts` (so a count built from them equals the tab's). For the Portfolio's exceptions.
+ */
+export async function loadQcLists(actor: Actor): Promise<{ holds: HoldRow[]; ncrs: NcrQueueRow[] }> {
+  if (!resolveQcAccess(actor).view) return { holds: [], ncrs: [] };
+  const s: Scope = { tenantId: actor.tenantId, jobId: null, unitId: null };
+  return withTenant(actor.tenantId, async (tx) => {
+    const now = new Date();
+    const [holds, ncrs] = await Promise.all([buildHolds(tx, s, now), buildNcrs(tx, s, now)]);
+    return { holds, ncrs };
+  });
+}
+
 export async function loadQcQueue(actor: Actor, query: QcQuery): Promise<QcQueueView> {
   const access = resolveQcAccess(actor);
   const empty: QcQueueView = {
