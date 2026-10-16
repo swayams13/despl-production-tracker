@@ -907,6 +907,47 @@ body {
 }
 @media (prefers-reduced-motion: reduce) { .theme-industrial .fl-undo i { animation: none; } }
 
+/* Job board (L2.4). Cells are 52 x 44 buttons, 48 high on coarse pointers; the value is always printed. */
+.theme-industrial .bd-filters { display: grid; gap: 8px; margin-bottom: 12px; }
+.theme-industrial .bd-counts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.theme-industrial .bd-chip { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; min-height: 36px; padding: 0 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none; border-radius: 18px; display: inline-flex; align-items: center; gap: 6px; }
+.theme-industrial .bd-chip.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, var(--surface)); font-weight: 600; }
+.theme-industrial .bd-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.theme-industrial .bd-grid { border-collapse: separate; border-spacing: 0; width: max-content; min-width: 100%; }
+.theme-industrial .bd-grid th, .theme-industrial .bd-grid td { padding: 3px; border-bottom: 1px solid var(--divider); text-align: center; vertical-align: middle; }
+.theme-industrial .bd-grid .bd-unit { position: sticky; left: 0; z-index: 2; background: var(--surface); text-align: left; padding: 6px 10px; min-width: 150px; border-right: 1px solid var(--border); font-weight: 500; }
+.theme-industrial .bd-unit small, .theme-industrial .bd-stage small { display: block; color: var(--muted); font-size: 11px; font-weight: 400; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-industrial .bd-stage { min-width: 58px; font-weight: 600; font-size: 12px; }
+.theme-industrial .bd-stage small { max-width: 58px; margin: 0 auto; }
+.theme-industrial .bd-band { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); padding: 4px; white-space: nowrap; background: var(--surface-2); max-width: 70px; overflow: hidden; text-overflow: ellipsis; }
+.theme-industrial .bd-expand { min-height: 36px; padding: 0 8px; background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.theme-industrial .bd-cell { position: relative; width: 52px; min-height: 44px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text); font: inherit; font-family: var(--font-jbmono), ui-monospace, monospace; font-size: 12px; font-weight: 600; cursor: pointer; padding: 0 2px; }
+.theme-industrial .bd-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.theme-industrial .bd-s-complete { background: color-mix(in oklab, var(--s-complete) 16%, var(--surface)); border-color: color-mix(in oklab, var(--s-complete) 45%, transparent); }
+.theme-industrial .bd-s-progress { background: color-mix(in oklab, var(--s-progress) 16%, var(--surface)); border-color: color-mix(in oklab, var(--s-progress) 45%, transparent); }
+.theme-industrial .bd-s-submitted { background: color-mix(in oklab, var(--s-submitted) 16%, var(--surface)); border-color: color-mix(in oklab, var(--s-submitted) 45%, transparent); }
+.theme-industrial .bd-s-hold { background: color-mix(in oklab, var(--s-hold) 18%, var(--surface)); border-color: color-mix(in oklab, var(--s-hold) 55%, transparent); }
+.theme-industrial .bd-s-overdue { background: color-mix(in oklab, var(--s-overdue) 18%, var(--surface)); border-color: color-mix(in oklab, var(--s-overdue) 55%, transparent); }
+.theme-industrial .bd-s-idle { color: var(--muted); font-weight: 500; border-color: var(--border); }
+.theme-industrial .bd-oos { box-shadow: inset 0 0 0 2px var(--accent); }
+.theme-industrial .bd-rej::after { content: ""; position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; border-radius: 50%; background: var(--s-overdue); }
+.theme-industrial .bd-total { color: var(--muted); font-size: 12px; padding: 6px 3px; }
+.theme-industrial .bd-legend { list-style: none; display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0; margin: 12px 0 0; font-size: 12px; color: var(--muted); }
+.theme-industrial .bd-legend li { display: inline-flex; align-items: center; gap: 8px; }
+.theme-industrial .bd-key { width: auto; min-width: 56px; white-space: nowrap; min-height: 28px; display: inline-flex; align-items: center; justify-content: center; cursor: default; }
+.theme-industrial .bd-h { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 14px 0 6px; }
+.theme-industrial .bd-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.theme-industrial .bd-item { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font-size: 12px; }
+.theme-industrial .bd-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.theme-industrial .bd-item b { font-size: 13px; font-weight: 600; }
+.theme-industrial .bd-oos-note { color: var(--accent); }
+.theme-industrial .bd-reject { display: grid; gap: 8px; margin-top: 6px; }
+@media (pointer: coarse) {
+  .theme-industrial .bd-cell { min-height: 48px; }
+  .theme-industrial .bd-chip { min-height: 44px; }
+  .theme-industrial .bd-expand { min-height: 44px; }
+}
+
 /* dashboard (§4.2) — ported 1:1 from the mockup */
 .theme-industrial .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 10px; }
 .theme-industrial .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; position: relative; overflow: hidden; transition: border-color .15s; }

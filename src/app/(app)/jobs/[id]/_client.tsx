@@ -155,6 +155,7 @@ export function JobDetailClient({
 
       <div className="tabs">
         <Link href={`/jobs/${jobId}?tab=overview`} className={`tab${tab === "overview" ? " on" : ""}`}>Overview</Link>
+        <Link href={`/jobs/${jobId}/board`} className="tab">Board</Link>
         <Link href={`/jobs/${jobId}?tab=gantt`} className={`tab${tab === "gantt" ? " on" : ""}`}>Timeline (Gantt)</Link>
         <Link href={`/jobs/${jobId}?tab=bom`} className={`tab${tab === "bom" ? " on" : ""}`}>BOM &amp; Components</Link>
         <Link href={`/jobs/${jobId}?tab=assembly`} className={`tab${tab === "assembly" ? " on" : ""}`}>Assembly</Link>
