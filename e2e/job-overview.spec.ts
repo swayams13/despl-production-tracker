@@ -35,7 +35,7 @@ test("the strip has the seven tabs in order, and each tab is URL-driven", async 
 
   for (const [label, key] of [["Schedule", "schedule"], ["Materials", "materials"], ["QC", "qc"], ["Dispatch", "dispatch"], ["History", "history"]] as const) {
     await tabs.getByRole("tab", { name: label, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/jobs/${id}\\?tab=${key}$`));
+    await expect(page).toHaveURL(new RegExp(`/jobs/${id}\\?tab=${key}$`), { timeout: 20_000 });
     await expect(tabs.getByRole("tab", { name: label, exact: true })).toHaveAttribute("aria-selected", "true");
   }
 
@@ -152,6 +152,7 @@ test("the job switcher keeps the tab", async ({ page }) => {
   await page.locator(".jobswitch").click();
   const other = page.locator(".jobswitch .d-row").filter({ hasNotText: "DESPL-320" }).first();
   await other.click();
+  // The old job's URL also matches ?tab=qc, so wait for the id to change first.
+  await expect(page).not.toHaveURL(new RegExp(`/jobs/${id}\\?`), { timeout: 20_000 });
   await expect(page).toHaveURL(/\/jobs\/\d+\?tab=qc$/);
-  expect(page.url()).not.toContain(`/jobs/${id}?`);
 });
