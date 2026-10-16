@@ -14,6 +14,7 @@ import type { NotificationRow } from "@/lib/services/notifications.read";
 import { fmtWhen, notificationHref } from "@/lib/notifications-ui";
 import type { JobListItem } from "@/lib/services/jobs.read";
 import { activeItem, navFor, sidebarJobs, type NavIcon, type NavItem } from "@/lib/shared/nav";
+import { jobSwitchHref } from "@/lib/shared/job-tabs";
 
 // Icons inlined from the mockup (lucide-react is pinned at an atypical 1.x here;
 // the approved SVGs are the pixel reference anyway).
@@ -159,9 +160,9 @@ export function AppShell({
   const active = activeItem([...primary, ...more], pathname);
   const sidebarJobList = primary.some((i) => i.href === "/jobs") ? sidebarJobs(jobs) : [];
 
-  // Job switcher (12C): shown only inside a job (/jobs/:id). Switching goes to
-  // the job's page: there are no job tabs before L2.8 (sub-routes are
-  // job-specific), so "keep the current tab" has nothing to keep yet.
+  // Job switcher (12C): shown only inside a job (/jobs/:id). Switching keeps the
+  // current tab (L2.8, `jobSwitchHref`); a stage's own page has no equivalent on
+  // another job, so it lands on the job page.
   const jobIdMatch = pathname.match(/^\/jobs\/(\d+)(?:\/.*)?$/);
   const currentJob = jobIdMatch ? jobs.find((j) => j.id === Number(jobIdMatch[1])) : undefined;
 
@@ -394,7 +395,7 @@ export function AppShell({
                       key={j.id}
                       onClick={() => {
                         setJobOpen(false);
-                        router.push(`/jobs/${j.id}`);
+                        router.push(jobSwitchHref(pathname, window.location.search, j.id));
                       }}
                     >
                       <span className="mono">{j.jobNumber}</span> · {j.projectName ?? j.familyName}

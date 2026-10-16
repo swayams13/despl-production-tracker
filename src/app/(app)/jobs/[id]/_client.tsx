@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import Link from "next/link";
 import { StageSpine } from "@/components/industrial/stage-spine";
 import { StatusChip } from "@/components/industrial/status-chip";
@@ -13,6 +13,8 @@ import { PackingPanel } from "@/components/industrial/packing-panel";
 import { DispatchPanel } from "@/components/industrial/dispatch-panel";
 import { useStageSheetLauncher, StageSheetLauncher } from "@/components/industrial/stage-sheet-launcher";
 import { clickableRowProps } from "@/components/industrial/data-table";
+import { JobTabStrip } from "./_tabs/job-tab-strip";
+import { OverviewTiles } from "./_tabs/overview-tiles";
 import { ClientPortalView } from "@/components/industrial/client-portal-view";
 import { ClientReviewBanner } from "@/components/industrial/client-review-banner";
 import { JobDateEditor } from "@/components/industrial/job-date-editor";
@@ -60,6 +62,9 @@ export function JobDetailClient({
   canManageDispatch,
   canApproveQcpWaiver,
   tab,
+  lean = false,
+  slot = null,
+  openHolds = null,
   openUnit,
   openStage: openStageParam,
 }: {
@@ -80,7 +85,14 @@ export function JobDetailClient({
   canManagePacking: boolean;
   canManageDispatch: boolean;
   canApproveQcpWaiver: boolean;
-  tab: "overview" | "gantt" | "bom" | "assembly" | "qcp" | "packing" | "dispatch" | "activity" | "client";
+  /** Legacy names (`gantt`, `bom`, `qcp`, `packing`, `dispatch`, `activity`) while `leanFloor` is off, L2.8's (`schedule`, `materials`, `qc`, `dispatch`, `history`) while on. */
+  tab: string;
+  /** Lean Core L2.8: `leanFloor` is on, so the new tab strip and overview tiles show. */
+  lean?: boolean;
+  /** The server-rendered body of the Materials, QC and Dispatch tabs (lean only). */
+  slot?: ReactNode;
+  /** Open hold points on this job; null when the viewer cannot open the QC queue. */
+  openHolds?: number | null;
   /** Deep-link from a notification (`?openUnit=&openStage=`) — auto-opens the StageSheet once on mount. */
   openUnit?: number;
   openStage?: number;
@@ -98,6 +110,8 @@ export function JobDetailClient({
   }, [openUnit, openStageParam]);
 
   const forecastVariance = header.forecastVarianceDays;
+  // The lean names for the schedule and history tabs render the same bodies as the legacy ones.
+  const view = tab === "schedule" ? "gantt" : tab === "history" ? "activity" : tab;
 
   return (
     <>
@@ -153,42 +167,55 @@ export function JobDetailClient({
         </span>
       </div>
 
-      <div className="tabs">
-        <Link href={`/jobs/${jobId}?tab=overview`} className={`tab${tab === "overview" ? " on" : ""}`}>Overview</Link>
-        <Link href={`/jobs/${jobId}/board`} className="tab">Board</Link>
-        <Link href={`/jobs/${jobId}?tab=gantt`} className={`tab${tab === "gantt" ? " on" : ""}`}>Timeline (Gantt)</Link>
-        <Link href={`/jobs/${jobId}?tab=bom`} className={`tab${tab === "bom" ? " on" : ""}`}>BOM &amp; Components</Link>
-        <Link href={`/jobs/${jobId}?tab=assembly`} className={`tab${tab === "assembly" ? " on" : ""}`}>Assembly</Link>
-        <Link href={`/jobs/${jobId}?tab=qcp`} className={`tab${tab === "qcp" ? " on" : ""}`}>QCP / Hold points</Link>
-        <Link href={`/jobs/${jobId}?tab=packing`} className={`tab${tab === "packing" ? " on" : ""}`}>Packing</Link>
-        <Link href={`/jobs/${jobId}?tab=dispatch`} className={`tab${tab === "dispatch" ? " on" : ""}`}>Dispatch</Link>
-        <Link href={`/jobs/${jobId}?tab=activity`} className={`tab${tab === "activity" ? " on" : ""}`}>Activity</Link>
-        {canReviewClientUpdates && (
-          <Link href={`/jobs/${jobId}?tab=client`} className={`tab${tab === "client" ? " on" : ""}`}>Client View</Link>
-        )}
-      </div>
+      {lean ? (
+        <JobTabStrip jobId={jobId} tab={tab} showClient={canReviewClientUpdates} />
+      ) : (
+        <div className="tabs">
+          <Link href={`/jobs/${jobId}?tab=overview`} className={`tab${tab === "overview" ? " on" : ""}`}>Overview</Link>
+          <Link href={`/jobs/${jobId}/board`} className="tab">Board</Link>
+          <Link href={`/jobs/${jobId}?tab=gantt`} className={`tab${tab === "gantt" ? " on" : ""}`}>Timeline (Gantt)</Link>
+          <Link href={`/jobs/${jobId}?tab=bom`} className={`tab${tab === "bom" ? " on" : ""}`}>BOM &amp; Components</Link>
+          <Link href={`/jobs/${jobId}?tab=assembly`} className={`tab${tab === "assembly" ? " on" : ""}`}>Assembly</Link>
+          <Link href={`/jobs/${jobId}?tab=qcp`} className={`tab${tab === "qcp" ? " on" : ""}`}>QCP / Hold points</Link>
+          <Link href={`/jobs/${jobId}?tab=packing`} className={`tab${tab === "packing" ? " on" : ""}`}>Packing</Link>
+          <Link href={`/jobs/${jobId}?tab=dispatch`} className={`tab${tab === "dispatch" ? " on" : ""}`}>Dispatch</Link>
+          <Link href={`/jobs/${jobId}?tab=activity`} className={`tab${tab === "activity" ? " on" : ""}`}>Activity</Link>
+          {canReviewClientUpdates && (
+            <Link href={`/jobs/${jobId}?tab=client`} className={`tab${tab === "client" ? " on" : ""}`}>Client View</Link>
+          )}
+        </div>
+      )}
 
-      {tab === "gantt" ? (
+      {lean && tab === "overview" && <OverviewTiles jobId={jobId} header={header} openHolds={openHolds} />}
+      {lean && tab === "assembly" && (
+        <p className="sub" style={{ margin: "0 0 12px" }}>
+          <Link href={`/jobs/${jobId}/board`}>← Back to the Board</Link>
+        </p>
+      )}
+
+      {slot ? (
+        slot
+      ) : view === "gantt" ? (
         gantt ? <JobGantt data={gantt} onOpenStage={openStageInJob} /> : <p className="note" style={{ margin: "16px 0" }}>No current schedule for this job.</p>
-      ) : tab === "bom" ? (
+      ) : view === "bom" ? (
         bom ? <BomPanel jobId={jobId} bom={bom} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
-      ) : tab === "assembly" ? (
+      ) : view === "assembly" ? (
         assembly ? <AssemblyPanel jobId={jobId} data={assembly} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
-      ) : tab === "qcp" ? (
+      ) : view === "qcp" ? (
         qcp ? <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveQcpWaiver} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
-      ) : tab === "packing" ? (
+      ) : view === "packing" ? (
         packing ? (
           <PackingPanel jobId={jobId} data={packing} canManagePacking={canManagePacking} />
         ) : (
           <p className="note" style={{ margin: "16px 0" }}>No packing data for this job.</p>
         )
-      ) : tab === "dispatch" ? (
+      ) : view === "dispatch" ? (
         dispatch ? (
           <DispatchPanel jobId={jobId} data={dispatch} canManageDispatch={canManageDispatch} />
         ) : (
           <p className="note" style={{ margin: "16px 0" }}>No dispatch data for this job.</p>
         )
-      ) : tab === "client" ? (
+      ) : view === "client" ? (
         clientPreview ? (
           <ClientPortalView
             jobs={[clientPreview]}
@@ -197,7 +224,7 @@ export function JobDetailClient({
         ) : (
           <p className="note" style={{ margin: "16px 0" }}>You don&apos;t have permission to review client updates for this job.</p>
         )
-      ) : tab === "overview" ? (
+      ) : view === "overview" ? (
         <>
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="hd">
