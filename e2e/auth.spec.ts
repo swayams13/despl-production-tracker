@@ -77,7 +77,7 @@ test("D13: username alone (no email match) signs in, same as email", async ({ pa
   // pre-existing "internal user signs in" test above no longer accounts for.
   await signIn(page, "sup.fabrication");
   await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(page.locator(".person-btn:visible")).toBeVisible();
 });
 
 test("client user lands in the portal and cannot reach the internal app", async ({ page }) => {
@@ -107,17 +107,15 @@ test("client user gets 403 from internal read APIs, not internal data (audit H3)
   expect(body.error.code).toBe("FORBIDDEN");
 });
 
-// AUD-025: `/board` and `/profile` were missing the `clientId !== null`
-// redirect every other (app) page has, and the (app) layout itself loaded
+// AUD-025: some (app) pages were missing the `clientId !== null` redirect
+// every other (app) page has, and the (app) layout itself loaded
 // internal job telemetry (percentComplete, forecastVarianceDays,
 // overduePlans, openHoldPoints) for any actor before any page guard ran.
 // Fix: the redirect now also lives in `src/app/(app)/layout.tsx`, ahead of
-// that load, plus the per-page copies on board/profile for defence in depth.
+// that load. (The `/board` and `/profile` stubs were deleted in L2.1.)
 // This loops every route in the (app) group, per the audit's own note that
 // the previous suite "only exercises `/` and `/api/jobs`".
 const APP_GROUP_ROUTES = [
-  "/board",
-  "/profile",
   "/workspace",
   "/admin",
   "/departments",
@@ -157,36 +155,46 @@ test("client user navigating to /portal itself renders normally (no redirect loo
   expect(res?.status()).toBe(404);
 });
 
-test("internal staff user is unaffected: /board and /profile render normally", async ({
-  page,
-}) => {
+// L2.1: the deleted stubs are plain 404s inside the shell, and the landing
+// page follows the role (nav registry, src/lib/shared/nav.ts).
+test("deleted /board and /profile stubs are 404s for signed-in staff", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
-  // same race as above — wait for the post-login redirect to land first.
   await expect(page).toHaveURL(/\/my-day$/);
-
-  await page.goto("/board");
-  await expect(page).toHaveURL("/board");
-  await expect(page.getByRole("heading", { name: "Board" })).toBeVisible();
-
-  await page.goto("/profile");
-  await expect(page).toHaveURL("/profile");
-  await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
+  for (const path of ["/board", "/profile"]) {
+    const res = await page.goto(path);
+    expect(res?.status(), path).toBe(404);
+  }
 });
 
-test("unauthenticated request to /board or /profile still redirects to /login", async ({
-  page,
-}) => {
+test("unauthenticated request to a deleted stub still redirects to /login", async ({ page }) => {
   await page.goto("/board");
   await expect(page).toHaveURL(/\/login/);
+});
 
-  await page.goto("/profile");
+for (const [email, landing] of [
+  ["planner@despl.local", /\/jobs$/],
+  ["qc@despl.local", /\/qc$/],
+] as const) {
+  test(`${email} lands on its role page`, async ({ page }) => {
+    await signIn(page, email);
+    await expect(page).toHaveURL(landing);
+  });
+}
+
+test("person menu holds theme and sign out; sign out re-protects the app", async ({ page }) => {
+  await signIn(page, "sup.fabrication@despl.local");
+  await expect(page).toHaveURL(/\/my-day$/);
+  await page.locator(".person-btn:visible").click();
+  await expect(page.getByRole("menuitem", { name: /Switch theme/ })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/login/);
 });
 
 test("signing out clears the session and re-protects the app", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
   await expect(page).toHaveURL("/");
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.locator(".person-btn:visible").click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/login/);
 
   await page.goto("/");

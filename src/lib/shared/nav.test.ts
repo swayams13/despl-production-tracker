@@ -1,0 +1,112 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { ROLES } from "@/lib/authz";
+import { NAV_ITEMS, activeItem, landingFor, navFor, sidebarJobs } from "./nav";
+
+const hrefs = (items: { href: string }[]) => items.map((i) => i.href);
+
+describe("navFor: primary items per role (build prompt §8.2 item 21, interim routes)", () => {
+  const table: [string, string[]][] = [
+    ["OPERATOR", ["/my-day", "/alerts"]],
+    ["SUPERVISOR", ["/my-day", "/workspace", "/jobs"]],
+    ["QC", ["/qc", "/jobs"]],
+    ["PLANNER", ["/jobs", "/jobs/new"]],
+    ["PRODUCTION_HEAD", ["/workspace", "/dashboard", "/jobs", "/admin/templates"]],
+    ["MANAGEMENT", ["/dashboard", "/jobs", "/admin"]],
+    ["ADMIN", ["/dashboard", "/jobs", "/admin", "/admin/templates"]],
+    ["ENGINEERING", ["/jobs"]],
+    ["STORES", ["/jobs"]],
+  ];
+  it.each(table)("%s", (role, expected) => {
+    expect(hrefs(navFor([role]).primary)).toEqual(expected);
+  });
+
+  it("is the union across roles with one entry per href", () => {
+    const { primary, more } = navFor(["SUPERVISOR", "QC"]);
+    expect(hrefs(primary)).toEqual(["/my-day", "/workspace", "/qc", "/jobs"]);
+    const all = [...hrefs(primary), ...hrefs(more)];
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("a role's primary label wins over the more-group label for the same href", () => {
+    const qc = navFor(["QC"]);
+    expect(qc.primary.find((i) => i.href === "/qc")?.label).toBe("Queue");
+    expect(hrefs(qc.more)).not.toContain("/qc");
+    expect(navFor(["MANAGEMENT"]).more.find((i) => i.href === "/qc")?.label).toBe("QC & hold points");
+  });
+
+  it("keeps every pre-L2.1 page reachable for the roles that could see it", () => {
+    for (const role of ["SUPERVISOR", "QC", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"]) {
+      const all = hrefs([...navFor([role]).primary, ...navFor([role]).more]);
+      for (const h of ["/departments", "/welding", "/reports", "/qc"]) expect(all, `${role} ${h}`).toContain(h);
+    }
+  });
+
+  it("every role gets a non-empty nav; unknown shape gets none", () => {
+    for (const role of Object.values(ROLES)) {
+      if (role === "CLIENT_VIEWER") continue; // portal user, never in the shell
+      expect(navFor([role]).primary.length, role).toBeGreaterThan(0);
+    }
+    expect(navFor([]).primary).toEqual([]);
+  });
+});
+
+describe("landingFor", () => {
+  const table: [string[], string][] = [
+    [["OPERATOR"], "/my-day"],
+    [["SUPERVISOR"], "/my-day"],
+    [["QC"], "/qc"],
+    [["PLANNER"], "/jobs"],
+    [["PRODUCTION_HEAD"], "/dashboard"],
+    [["MANAGEMENT"], "/dashboard"],
+    [["ADMIN"], "/dashboard"],
+    [["ENGINEERING"], "/jobs"],
+    [["STORES"], "/jobs"],
+    // precedence as before L2.1: management tier, then supervisor over QC
+    [["SUPERVISOR", "QC"], "/my-day"],
+    [["QC", "PRODUCTION_HEAD"], "/dashboard"],
+    [["CLIENT_VIEWER"], "/workspace"],
+    [[], "/workspace"],
+  ];
+  it.each(table)("%j -> %s", (roles, href) => {
+    expect(landingFor(roles)).toBe(href);
+  });
+});
+
+describe("no dead controls: every registry href is a real page", () => {
+  it.each(NAV_ITEMS.map((i) => [i.id, i.href] as const))("%s -> %s", (_id, href) => {
+    expect(existsSync(join(process.cwd(), "src/app/(app)", href, "page.tsx"))).toBe(true);
+  });
+  it("landing targets are real pages", () => {
+    for (const roles of [["OPERATOR"], ["QC"], ["PLANNER"], ["MANAGEMENT"], ["STORES"], []]) {
+      expect(existsSync(join(process.cwd(), "src/app/(app)", landingFor(roles), "page.tsx"))).toBe(true);
+    }
+  });
+});
+
+describe("activeItem: longest segment-boundary prefix", () => {
+  const { primary } = navFor(["PLANNER"]);
+  it("distinguishes /jobs from /jobs/new", () => {
+    expect(activeItem(primary, "/jobs")?.id).toBe("jobs");
+    expect(activeItem(primary, "/jobs/new")?.id).toBe("new-job");
+    expect(activeItem(primary, "/jobs/12/activity")?.id).toBe("jobs");
+  });
+  it("does not match a shared string prefix", () => {
+    expect(activeItem(primary, "/jobsearch")).toBeUndefined();
+    expect(activeItem(primary, "/elsewhere")).toBeUndefined();
+  });
+});
+
+describe("sidebarJobs", () => {
+  const j = (id: number, status: string, v: number | null, o = 0) => ({
+    id, jobNumber: `J${id}`, status, forecastVarianceDays: v, overduePlans: o,
+  });
+  it("active only, worst first, nulls last, ties by overdue, capped", () => {
+    const out = sidebarJobs(
+      [j(1, "ACTIVE", 2), j(2, "COMPLETE", 40), j(3, "ACTIVE", null), j(4, "ACTIVE", 9), j(5, "ACTIVE", 2, 3), j(6, "ON_HOLD", 5)],
+      4,
+    );
+    expect(out.map((x) => x.id)).toEqual([4, 5, 1, 3]);
+  });
+});
