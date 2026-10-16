@@ -1,3 +1,8 @@
+"use client";
+
+// Client components on purpose: server-rendered, keyed list rows are streamed as many separate outlined Flight
+// rows, and a client-side navigation to a page with dozens of them never commits in the browser (found in the
+// L2.7-L2.9 integration run, 16 Oct 2026). As props they travel in one row.
 import Link from "next/link";
 import { HealthChip } from "@/components/industrial/health-chip";
 import { StageSpine } from "@/components/industrial/stage-spine";
@@ -12,11 +17,11 @@ import {
 } from "@/lib/shared/portfolio";
 import type { JobHealth } from "@/lib/services/job-health";
 
-/** Lean Core L2.7: the Portfolio's four blocks. Server components, links only: every control is a real destination. */
+/** Lean Core L2.7: the Portfolio's four blocks. Links only: every control is a real destination. */
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
 }
 
 function fmtAge(days: number): string {
