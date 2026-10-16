@@ -8,6 +8,7 @@ import { loadMyOverdueCount } from "@/lib/services/workspace.read";
 import { loadJobs, type JobListItem } from "@/lib/services/jobs.read";
 import { loadNotifications } from "@/lib/services/notifications.read";
 import { toasterTheme } from "@/lib/theme";
+import { FEATURES } from "@/lib/shared/flags";
 
 /**
  * Route-group layout for the industrial UI. Everything under (app) renders in
@@ -67,6 +68,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
         overdueCount={overdueCount}
         notifications={notifications}
         jobs={jobs}
+        leanFloor={FEATURES.leanFloor}
       >
         {children}
       </AppShell>

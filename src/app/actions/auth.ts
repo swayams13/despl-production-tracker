@@ -6,6 +6,7 @@ import { verifyPassword } from "@/lib/auth/password";
 import { createSession, destroySession } from "@/lib/auth/session";
 import { resolveTenantForLogin } from "@/lib/auth/tenant-resolution";
 import { loginSchema } from "@/lib/shared/schemas";
+import { safeNext } from "@/lib/shared/safe-next";
 
 export interface LoginState {
   error?: string;
@@ -90,7 +91,9 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   if (!session) return invalid;
 
   await createSession(session);
-  redirect(session.clientId === null ? "/" : "/portal");
+  // L2.2: a QR scanned while signed out comes back to the unit. Client users
+  // keep their own landing; `/` still applies the forced password change.
+  redirect(session.clientId === null ? (safeNext(formData.get("next")) ?? "/") : "/portal");
 }
 
 export async function logout(): Promise<void> {

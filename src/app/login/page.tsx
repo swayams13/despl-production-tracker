@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { login, type LoginState } from "@/app/actions/auth";
 import { ThemeRoot } from "@/components/industrial/theme-root";
 
@@ -8,6 +8,11 @@ const initial: LoginState = {};
 
 export default function LoginPage() {
   const [state, formAction, pending] = useActionState(login, initial);
+  // The middleware's `?next=` (L2.2). Read after mount: this page is prerendered, and the server re-validates it.
+  const [next, setNext] = useState("");
+  useEffect(() => {
+    setNext(new URLSearchParams(window.location.search).get("next") ?? "");
+  }, []);
 
   // Pre-authentication: there is no user row to read a preference from, so
   // /login always resolves as SYSTEM (+ no outdoor) and leans entirely on
@@ -24,6 +29,7 @@ export default function LoginPage() {
           </div>
 
           <form action={formAction} className="card p-5">
+            <input type="hidden" name="next" value={next} />
             <label className="block text-xs font-medium text-[var(--muted)]" htmlFor="identifier">
               Username or email
             </label>
