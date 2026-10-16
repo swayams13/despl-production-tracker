@@ -2,6 +2,15 @@ import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { pctOf } from "@/lib/shared/metrics";
 import { ncrTenantScope } from "./ncr.service";
+import { ageDaysOf, resolveHoldPointStatus, type HoldStatus, type LatestAttempt } from "@/lib/shared/qc-queue";
+
+const LEGACY_HOLD_LABEL: Record<HoldStatus, string> = {
+  AWAITING_TPI: "Awaiting TPI",
+  PENDING: "Pending",
+  QC_REVIEW: "QC review",
+  REINSPECT: "Reinspect",
+  WAIVER_PENDING: "Waiver pending",
+};
 
 /**
  * `/qc` — cross-job QC cockpit (§4.8): the QC user's home surface. Everything
@@ -152,12 +161,12 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
       const execs = await tx.qcpExecution.findMany({
         where: { qcpItemId: { in: itemIds } },
         orderBy: { attemptNo: "desc" },
-        select: { qcpItemId: true, unitId: true, result: true, recordedAt: true },
+        select: { qcpItemId: true, unitId: true, result: true, waiverApprovedBy: true, recordedAt: true },
       });
-      const latestByKey = new Map<string, { result: string; recordedAt: Date }>();
+      const latestByKey = new Map<string, LatestAttempt>();
       for (const e of execs) {
         const k = `${e.qcpItemId}:${e.unitId}`;
-        if (!latestByKey.has(k)) latestByKey.set(k, { result: e.result, recordedAt: e.recordedAt });
+        if (!latestByKey.has(k)) latestByKey.set(k, e);
       }
 
       const linkedJp = new Map(blockingItems.map((i) => [i.id, i.processLinks[0]?.jobProcess]));
@@ -180,23 +189,11 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
 
         for (const p of unitPlans) {
           if (p.unitId == null) continue;
-          const attempt = latestByKey.get(`${item.id}:${p.unitId}`);
-          const r = attempt?.result;
-          if (r === "ACCEPTED" || r === "NA") continue; // cleared
-
-          let status: string;
-          let ageRef: Date | null;
-          if (!attempt) {
-            status = requiresCall ? "Awaiting TPI" : "Pending";
-            ageRef = p.plannedStart;
-          } else if (r === "REJECTED") {
-            status = "Reinspect";
-            ageRef = attempt.recordedAt;
-          } else {
-            status = "QC review";
-            ageRef = attempt.recordedAt;
-          }
-          const ageDays = ageRef ? Math.max(0, Math.floor((now.getTime() - ageRef.getTime()) / 864e5)) : 0;
+          const attempt = latestByKey.get(`${item.id}:${p.unitId}`) ?? null;
+          const resolved = resolveHoldPointStatus(attempt, requiresCall);
+          if (resolved == null) continue; // cleared, by the gate's rule: an NA clears only once its waiver is approved
+          const status = LEGACY_HOLD_LABEL[resolved];
+          const ageDays = ageDaysOf(attempt ? attempt.recordedAt : p.plannedStart, now);
 
           holdPoints.push({
             qcpItemId: item.id,

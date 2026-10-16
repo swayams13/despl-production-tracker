@@ -23,7 +23,7 @@ export interface NavItem {
   roles: readonly RoleCode[];
   /** `primary` renders everywhere (rail, phone bar); `more` in the sidebar only. */
   group: "primary" | "more";
-  badge?: "overdue" | "unread" | "team";
+  badge?: "overdue" | "unread" | "team" | "qc";
   /** Hidden until the named switch is on (a route that 404s while it is off is a dead control). */
   needs?: "leanFloor";
   /** The href while a switch is on (Today: /my-day until leanFloor, then /today). */
@@ -43,7 +43,7 @@ const FLOOR_AND_OFFICE: readonly RoleCode[] = [
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: "today", href: "/my-day", hrefWhen: { leanFloor: "/today" }, label: "Today", icon: "navToday", roles: ["OPERATOR", "SUPERVISOR"], group: "primary", badge: "overdue" },
   { id: "team", href: "/workspace", hrefWhen: { leanFloor: "/team" }, label: "Team", icon: "workspace", roles: ["SUPERVISOR", "PRODUCTION_HEAD"], group: "primary", badge: "team" },
-  { id: "qc-queue", href: "/qc", label: "Queue", icon: "qc", roles: ["QC"], group: "primary" },
+  { id: "qc-queue", href: "/qc", label: "Queue", icon: "qc", roles: ["QC"], group: "primary", badge: "qc" },
   // L2.7: Portfolio gets its own page; /dashboard until then
   { id: "scan", href: "/scan", label: "Scan", icon: "scan", roles: ["OPERATOR", "SUPERVISOR", "QC"], group: "primary", needs: "leanFloor" },
   { id: "portfolio", href: "/dashboard", label: "Portfolio", icon: "dashboard", roles: ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"], group: "primary" },

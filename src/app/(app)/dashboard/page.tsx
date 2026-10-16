@@ -4,6 +4,8 @@ import { landingFor } from "@/lib/shared/nav";
 import { FEATURES } from "@/lib/shared/flags";
 import { getActor, ROLES, hasRole } from "@/lib/authz";
 import { loadJobKpis, type JobKpis } from "@/lib/services/workspace.read";
+import { loadQcCounts } from "@/lib/services/qc-queue.read";
+import { qcHref } from "@/lib/shared/qc-queue";
 import { loadPortfolio, type PortfolioRow } from "@/lib/services/portfolio.read";
 import { PortfolioBand, healthFromSlug } from "./_portfolio";
 import { PageHeader } from "@/components/industrial/page-header";
@@ -159,6 +161,9 @@ export default async function Dashboard({
     );
   }
 
+  // L2.6: with the lean floor on, QC's lists live on /qc; this page shows its counts and links there.
+  const qc = FEATURES.leanFloor ? await loadQcCounts(actor, { jobId }) : null;
+
   const completeCount = k.byState.DONE ?? 0;
   const onTrack = k.totalPlans - k.overdue;
   const maxThroughput = Math.max(1, ...k.throughputByWeek.map((w) => w.count), k.throughputTargetPerWeek ?? 0);
@@ -215,9 +220,12 @@ export default async function Dashboard({
 
         <MetricCard
           label="Open hold points"
-          value={k.openHoldPoints}
+          value={qc ? qc.holds : k.openHoldPoints}
+          href={qc ? qcHref({ tab: "holds", jobId }) : undefined}
           sub={
-            k.oldestHoldAgeDays !== null
+            qc
+              ? `${qc.ready} waiting for QC · ${qc.ncrs} open NCR${qc.ncrs === 1 ? "" : "s"}`
+              : k.oldestHoldAgeDays !== null
               ? <>oldest open <b className="mono" style={{ color: "var(--s-hold)" }}>{k.oldestHoldAgeDays}d</b> · {k.awaitingTpiCount} await TPI</>
               : "No open hold points"
           }
@@ -413,6 +421,20 @@ export default async function Dashboard({
           )}
         </div>
 
+        {qc && (
+          <div className="card">
+            <div className="hd">
+              <h3>QC queue</h3>
+            </div>
+            <p className="note" style={{ margin: "16px 0" }}>
+              <Link href={qcHref({ tab: "ready", jobId })}>{qc.ready} waiting for QC</Link> ·{" "}
+              <Link href={qcHref({ tab: "holds", jobId })}>{qc.holds} open hold points</Link> ·{" "}
+              <Link href={qcHref({ tab: "ncrs", jobId })}>{qc.ncrs} open NCRs</Link>
+            </p>
+          </div>
+        )}
+
+        {!qc && (
         <div className="card">
           <div className="hd">
             <h3>Open hold points — QCP / ITP</h3>
@@ -434,6 +456,7 @@ export default async function Dashboard({
             </div>
           )}
         </div>
+        )}
       </div>
     </>
   );

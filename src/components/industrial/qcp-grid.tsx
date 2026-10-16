@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { recordQcpAction, approveQcpWaiverAction } from "@/app/actions/qcp";
+import { evidenceMessage, qcHref } from "@/lib/shared/qc-queue";
 import type { QcpGrid as QcpGridData, QcpGridRow } from "@/lib/services/qcp-grid.read";
 
 const CHIP: Record<string, string> = {
@@ -27,8 +28,16 @@ export function QcpGrid({ jobId, data, canApproveWaiver }: { jobId: number; data
   const record = (qcpItemId: number, result: "ACCEPTED" | "REJECTED" | "NA") => {
     start(async () => {
       const r = await recordQcpAction(qcpItemId, data.unitId, result);
-      if (!r.ok) toast.error(r.message);
-      else {
+      if (!r.ok) {
+        // L2.6: a third party's point or a hydro test needs evidence this grid has no fields for;
+        // the QC queue does, so hand the user over to it rather than leave a dead end.
+        const need = evidenceMessage(r.detail?.missing);
+        if (need) {
+          toast.error(need, {
+            action: { label: "Open in QC queue", onClick: () => router.push(qcHref({ tab: "holds", jobId, unitId: data.unitId })) },
+          });
+        } else toast.error(r.message);
+      } else {
         toast.success(result === "ACCEPTED" ? "Cleared." : result === "REJECTED" ? "Rejected — flagged for reinspection." : "Marked not applicable.");
         setRecordingId(null);
         router.refresh();

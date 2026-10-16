@@ -2763,9 +2763,14 @@ model QcpExecution {
   /// SERVER CLOCK ONLY (invariant #1)
   callAttendedOn    DateTime?          @map("call_attended_on")
   clearedBy         Int?               @map("cleared_by")
+  /// L2.6: the third-party inspector's name when QC clears a point on their behalf.
   clearedByPartyRef String?            @map("cleared_by_party_ref")
   waiverApprovedBy  Int?               @map("waiver_approved_by")
   remarks           String?
+  /// L2.6: the third party's report / IRN / call number.
+  reportRef         String?            @map("report_ref")
+  /// L2.6: { pressureBar, holdMinutes, gaugeIds[] } for a test point (hydro).
+  testData          Json?              @map("test_data")
   /// SERVER CLOCK ONLY (invariant #1)
   recordedAt        DateTime           @default(now()) @map("recorded_at")
   /// H1 job-level RLS backstop: denormalized from unit.equipment.jobId

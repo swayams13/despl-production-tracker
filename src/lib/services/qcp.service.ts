@@ -14,7 +14,8 @@ import {
   type CreateQcpTemplateLibraryInput,
   type AddQcpItemToLibraryTemplateInput,
 } from "@/lib/shared/schemas";
-import type { QcpExecution, QcpExecutionResult, QcpItem, QcpTemplate } from "@/generated/prisma/client";
+import type { Prisma, QcpExecution, QcpExecutionResult, QcpItem, QcpTemplate } from "@/generated/prisma/client";
+import { evidenceNeeded } from "@/lib/shared/qc-queue";
 
 /**
  * Bare tx-level create, no audit of its own — same discipline as
@@ -26,7 +27,17 @@ import type { QcpExecution, QcpExecutionResult, QcpItem, QcpTemplate } from "@/g
 export async function recordQcpExecutionTx(
   tx: Tx,
   actor: Actor,
-  args: { qcpItemId: number; unitId: number; result: QcpExecutionResult; remarks?: string | null; jobId: number },
+  args: {
+    qcpItemId: number;
+    unitId: number;
+    result: QcpExecutionResult;
+    remarks?: string | null;
+    jobId: number;
+    /** L2.6 evidence (third-party inspector, report ref, test record); null/absent for DESPL's own checks. */
+    partyInspector?: string | null;
+    reportRef?: string | null;
+    testData?: Prisma.InputJsonValue | null;
+  },
 ): Promise<QcpExecution> {
   // Next attempt number for this (item, unit) — re-inspection after rejection.
   const prior = await tx.qcpExecution.aggregate({
@@ -42,6 +53,9 @@ export async function recordQcpExecutionTx(
       attemptNo,
       result: args.result,
       clearedBy: actor.userId,
+      clearedByPartyRef: args.partyInspector ?? null,
+      reportRef: args.reportRef ?? null,
+      ...(args.testData != null ? { testData: args.testData } : {}),
       remarks: args.remarks ?? null,
       jobId: args.jobId,
       // recordedAt: DB default now() (invariant #1).
@@ -72,7 +86,7 @@ export async function recordQcpExecution(
   actor: Actor,
   input: RecordQcpExecutionInput,
 ): Promise<QcpExecution> {
-  const { qcpItemId, unitId, result, remarks } = recordQcpExecutionSchema.parse(input);
+  const { qcpItemId, unitId, result, remarks, partyInspector, reportRef, testData } = recordQcpExecutionSchema.parse(input);
   assertNotClientUser(actor);
   requireRole(actor, ROLES.QC);
 
@@ -98,7 +112,7 @@ export async function recordQcpExecution(
     // — null there means a genuine library item (never linked into any job's
     // processes), which can never legitimately match a real unit.jobId.
     // Same pattern as dispatch.service.ts's addUnitToBatch.
-    const qcpItem = await tx.qcpItem.findFirst({ where: { id: qcpItemId }, select: { jobId: true } });
+    const qcpItem = await tx.qcpItem.findFirst({ where: { id: qcpItemId }, select: { jobId: true, activity: true } });
     if (!qcpItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "QcpItem", qcpItemId });
     if (qcpItem.jobId !== unit.jobId) {
       throw new AppError(ERROR_CODES.CROSS_JOB_ASSIGNMENT, {
@@ -107,6 +121,29 @@ export async function recordQcpExecution(
         unitId,
         unitJobId: unit.jobId,
       });
+    }
+
+    // L2.6 (§8.2 item 18): clearing a point on a third party's behalf needs their inspector and
+    // report number; a test point needs its record. Behind the lean switch so the legacy cockpit,
+    // which sends neither, keeps working while it is off.
+    if (FEATURES.leanFloor && result === "ACCEPTED") {
+      const parties = await tx.qcpItemPartyCode.findMany({
+        where: { qcpItemId },
+        select: { qcpCode: { select: { blocksCompletion: true } }, inspectionParty: { select: { code: true } } },
+      });
+      const org = await tx.organization.findUnique({ where: { id: actor.tenantId }, select: { code: true } });
+      const missing = evidenceNeeded({
+        activity: qcpItem.activity,
+        externalBlocking: parties.some((p) => p.qcpCode.blocksCompletion && p.inspectionParty.code !== org?.code),
+        given: { partyInspector, reportRef, testData: testData != null },
+      });
+      if (missing.length > 0) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { qcpItemId, unitId, missing },
+          `Before this can be cleared, record: ${missing.join(", ")}.`,
+        );
+      }
     }
 
     if (result === "NA") {
@@ -121,14 +158,14 @@ export async function recordQcpExecution(
     }
 
     const recorded = await audited(tx, actor, async () => {
-      const exec = await recordQcpExecutionTx(tx, actor, { qcpItemId, unitId, result, remarks, jobId: unit.jobId });
+      const exec = await recordQcpExecutionTx(tx, actor, { qcpItemId, unitId, result, remarks, jobId: unit.jobId, partyInspector, reportRef, testData });
       return {
         result: exec,
         audit: {
           action: "qcp.record",
           entityType: "QcpExecution",
           entityId: exec.id,
-          after: { qcpItemId, unitId, attemptNo: exec.attemptNo, result },
+          after: { qcpItemId, unitId, attemptNo: exec.attemptNo, result, partyInspector: partyInspector ?? null, reportRef: reportRef ?? null, testData: testData ?? null },
           eventType: "QcpExecutionRecorded",
           eventPayload: { qcpItemId, unitId, attemptNo: exec.attemptNo, result },
         },

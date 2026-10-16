@@ -45,9 +45,10 @@ export default async function MyDay() {
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
   // L2.3: with the lean floor on, Today replaces this page for the roles that have it.
-  // QC keeps this page (its "With QC" tab) until the QC queue (L2.6) takes that over.
-  if (FEATURES.leanFloor && hasRole(actor, ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) {
-    redirect("/today");
+  // L2.6: QC's "With QC" list is the QC queue now, so QC lands there instead.
+  if (FEATURES.leanFloor) {
+    if (hasRole(actor, ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect("/today");
+    if (hasRole(actor, ROLES.QC)) redirect("/qc");
   }
 
   const [view, depts] = await Promise.all([loadMyDay(actor), myDepartments(actor.tenantId, actor.departmentIds)]);

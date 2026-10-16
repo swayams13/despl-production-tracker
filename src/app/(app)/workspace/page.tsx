@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getActor } from "@/lib/authz";
+import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { FEATURES } from "@/lib/shared/flags";
 import { loadWorkspaceView } from "@/lib/services/workspace.read";
@@ -25,6 +25,8 @@ export default async function Workspace({
   // L2.5: with the lean floor on, Team replaces this page. Deep links keep their
   // meaning: ?dept= (an id) becomes the department code, ?job= and ?status= carry over.
   if (FEATURES.leanFloor) {
+    // L2.6: the QC lists left this page; a QC-only user's version of it is the queue.
+    if (hasRole(actor, ROLES.QC) && !hasRole(actor, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN)) redirect("/qc");
     const deptId = Number(first(sp.dept));
     const dept =
       Number.isInteger(deptId) && deptId > 0
