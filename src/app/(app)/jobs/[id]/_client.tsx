@@ -7,6 +7,7 @@ import { StatusChip } from "@/components/industrial/status-chip";
 import { STAGE_STATUS, showsOverduePip, showsRejectedMarker, type StageSegment, type StageDisplayStatus } from "@/components/industrial/stage-status";
 import { JobGantt } from "@/components/industrial/job-gantt";
 import { BomPanel } from "@/components/industrial/bom-panel";
+import type { StoresAccess } from "@/lib/shared/stores-access";
 import { AssemblyPanel } from "@/components/industrial/assembly-panel";
 import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { PackingPanel } from "@/components/industrial/packing-panel";
@@ -62,6 +63,7 @@ export function JobDetailClient({
   canManagePacking,
   canManageDispatch,
   canApproveQcpWaiver,
+  storesAccess,
   tab,
   lean = false,
   slot = null,
@@ -86,6 +88,8 @@ export function JobDetailClient({
   canManagePacking: boolean;
   canManageDispatch: boolean;
   canApproveQcpWaiver: boolean;
+  /** What the viewer's role may do to stock (L2.14). */
+  storesAccess?: StoresAccess;
   /** Legacy names (`gantt`, `bom`, `qcp`, `packing`, `dispatch`, `activity`) while `leanFloor` is off, L2.8's (`schedule`, `materials`, `qc`, `dispatch`, `history`) while on. */
   tab: string;
   /** Lean Core L2.8: `leanFloor` is on, so the new tab strip and overview tiles show. */
@@ -200,7 +204,7 @@ export function JobDetailClient({
       ) : view === "gantt" ? (
         gantt ? <JobGantt data={gantt} onOpenStage={openStageInJob} /> : <p className="note" style={{ margin: "16px 0" }}>No current schedule for this job.</p>
       ) : view === "bom" ? (
-        bom ? <BomPanel jobId={jobId} bom={bom} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
+        bom ? <BomPanel jobId={jobId} bom={bom} access={storesAccess} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
       ) : view === "assembly" ? (
         assembly ? <AssemblyPanel jobId={jobId} data={assembly} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
       ) : view === "qcp" ? (

@@ -45,6 +45,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "team", href: "/workspace", hrefWhen: { leanFloor: "/team" }, label: "Team", icon: "workspace", roles: ["SUPERVISOR", "PRODUCTION_HEAD"], group: "primary", badge: "team" },
   { id: "qc-queue", href: "/qc", label: "Queue", icon: "qc", roles: ["QC"], group: "primary", badge: "qc" },
   { id: "scan", href: "/scan", label: "Scan", icon: "scan", roles: ["OPERATOR", "SUPERVISOR", "QC"], group: "primary", needs: "leanFloor" },
+  { id: "materials", href: "/materials", label: "Materials", icon: "jobs", roles: ["STORES"], group: "primary" },
   { id: "portfolio", href: "/dashboard", label: "Portfolio", icon: "dashboard", roles: ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"], group: "primary" },
   { id: "jobs", href: "/jobs", label: "Jobs", icon: "jobs", roles: ["SUPERVISOR", "QC", "PLANNER", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN", "ENGINEERING", "STORES"], group: "primary" },
   { id: "new-job", href: "/jobs/new", label: "New job", icon: "newJob", roles: ["PLANNER"], group: "primary" },
@@ -53,6 +54,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { id: "admin-templates", href: "/admin/templates", label: "Templates", icon: "admin", roles: ["ADMIN", "PRODUCTION_HEAD"], group: "primary" },
 
   // More: pages that exist but are not in a role's spec list. Sidebar only.
+  { id: "materials-more", href: "/materials", label: "Materials", icon: "jobs", roles: ["ADMIN", "PRODUCTION_HEAD", "PLANNER"], group: "more" },
   { id: "qc-holds", href: "/qc", label: "QC & hold points", icon: "qc", roles: ["SUPERVISOR", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN", "PLANNER"], group: "more" },
   { id: "departments", href: "/departments", label: "Departments", icon: "departments", roles: FLOOR_AND_OFFICE, group: "more" },
   { id: "welding", href: "/welding", label: "Welding", icon: "welding", roles: FLOOR_AND_OFFICE, group: "more" },
@@ -78,7 +80,7 @@ const LANDING: readonly (readonly [RoleCode, string, string?])[] = [
   ["QC", "/qc"],
   ["OPERATOR", "/my-day", "/today"],
   ["ENGINEERING", "/jobs"],
-  ["STORES", "/jobs"],
+  ["STORES", "/materials"],
 ];
 
 /** A shape none of the roles cover still gets a real page, as before. */

@@ -3,6 +3,7 @@ import { BomPanel } from "@/components/industrial/bom-panel";
 import type { BomTree } from "@/lib/services/bom.read";
 import type { JobMaterials } from "@/lib/services/job-materials.read";
 import { MaterialLines } from "./materials-lines";
+import type { StoresAccess } from "@/lib/shared/stores-access";
 
 /**
  * Lean Core L2.8 (frame 07B). Pipeline view: read-only, one row per BOM line.
@@ -17,6 +18,8 @@ export function MaterialsTab({
   parts,
   canImport = false,
   canSwitchOver = false,
+  access,
+  itemId = null,
 }: {
   jobId: number;
   view: "pipeline" | "parts";
@@ -27,6 +30,10 @@ export function MaterialsTab({
   canImport?: boolean;
   /** Production Head and Admin, lean floor on: tick work Excel shows as done (L2.10 part B). */
   canSwitchOver?: boolean;
+  /** What the viewer's role may do to stock (L2.14); drives which Parts and stock controls show. */
+  access?: StoresAccess;
+  /** Parts and stock opens on this BOM item (from the pipeline row or the Stores queue). */
+  itemId?: number | null;
 }) {
   const sub = (
     <div className="jt-sub" role="group" aria-label="Materials view">
@@ -53,7 +60,7 @@ export function MaterialsTab({
     return (
       <>
         {sub}
-        {parts ? <BomPanel jobId={jobId} bom={parts} tabHref={`/jobs/${jobId}?tab=materials&view=parts`} /> : <p className="note">No BOM loaded for this job.</p>}
+        {parts ? <BomPanel jobId={jobId} bom={parts} tabHref={`/jobs/${jobId}?tab=materials&view=parts`} access={access} initialItemId={itemId} /> : <p className="note">No BOM loaded for this job.</p>}
       </>
     );
   }
@@ -91,7 +98,7 @@ export function MaterialsTab({
             <span>Needed by</span>
             <span>Status</span>
           </div>
-          <MaterialLines lines={lines} multi={materials.multipleEquipment} />
+          <MaterialLines lines={lines} multi={materials.multipleEquipment} jobId={jobId} canAct={!!access && (access.receive || access.issue || access.identify || access.receiptEvent)} />
         </div>
       )}
     </>

@@ -16,7 +16,7 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     ["MANAGEMENT", ["/dashboard", "/jobs", "/admin"]],
     ["ADMIN", ["/dashboard", "/jobs", "/admin", "/admin/templates"]],
     ["ENGINEERING", ["/jobs"]],
-    ["STORES", ["/jobs"]],
+    ["STORES", ["/materials", "/jobs"]],
   ];
   it.each(table)("%s", (role, expected) => {
     expect(hrefs(navFor([role]).primary)).toEqual(expected);
@@ -96,7 +96,7 @@ describe("landingFor", () => {
     [["MANAGEMENT"], "/dashboard"],
     [["ADMIN"], "/dashboard"],
     [["ENGINEERING"], "/jobs"],
-    [["STORES"], "/jobs"],
+    [["STORES"], "/materials"],
     // precedence as before L2.1: management tier, then supervisor over QC
     [["SUPERVISOR", "QC"], "/my-day"],
     [["QC", "PRODUCTION_HEAD"], "/dashboard"],
@@ -158,5 +158,19 @@ describe("sidebarJobs", () => {
       4,
     );
     expect(out.map((x) => x.id)).toEqual([4, 5, 1, 3]);
+  });
+});
+
+describe("L2.14 Materials queue entry", () => {
+  it("Stores has it as a primary item; Planning, the Production Head and Admin as a more item; nobody else", () => {
+    expect(navFor(["STORES"]).primary.map((i) => i.href)).toContain("/materials");
+    for (const r of ["PLANNER", "PRODUCTION_HEAD", "ADMIN"]) {
+      expect(navFor([r]).more.map((i) => i.href), r).toContain("/materials");
+      expect(navFor([r]).primary.map((i) => i.href), r).not.toContain("/materials");
+    }
+    for (const r of ["OPERATOR", "SUPERVISOR", "QC", "MANAGEMENT", "ENGINEERING"]) {
+      const all = navFor([r]);
+      expect([...all.primary, ...all.more].map((i) => i.href), r).not.toContain("/materials");
+    }
   });
 });

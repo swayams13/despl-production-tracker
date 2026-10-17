@@ -3,6 +3,7 @@
 // Rendered on the client on purpose: as server-rendered <li> children, a long list is streamed as dozens of
 // separate outlined Flight rows, and the browser then never commits a client-side navigation to this tab.
 // As props they travel in one row. (L2.8 integration, 16 Oct 2026.)
+import Link from "next/link";
 import type { MaterialLine } from "@/lib/services/job-materials.read";
 
 const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" });
@@ -26,7 +27,7 @@ function Pipeline({ line }: { line: MaterialLine }) {
   );
 }
 
-function Line({ line, multi }: { line: MaterialLine; multi: boolean }) {
+function Line({ line, multi, actHref }: { line: MaterialLine; multi: boolean; actHref: string | null }) {
   const chip = line.status === "short" ? "c-overdue" : line.status === "issued" ? "c-complete" : line.status === "ready_to_issue" ? "c-progress" : line.status === "on_track" ? "c-progress" : "c-idle";
   return (
     <li>
@@ -81,6 +82,11 @@ function Line({ line, multi }: { line: MaterialLine; multi: boolean }) {
               <b className="mono">{line.issuedQty}</b>
               {line.heats.length > 0 && <> · heat <span className="mono">{line.heats.join(", ")}</span></>}
             </p>
+            {actHref && (
+              <p>
+                <Link className="btn" href={actHref}>Receive, identify or issue</Link>
+              </p>
+            )}
           </div>
         </div>
       </details>
@@ -89,11 +95,11 @@ function Line({ line, multi }: { line: MaterialLine; multi: boolean }) {
 }
 
 
-export function MaterialLines({ lines, multi }: { lines: MaterialLine[]; multi: boolean }) {
+export function MaterialLines({ lines, multi, jobId, canAct }: { lines: MaterialLine[]; multi: boolean; jobId: number; canAct: boolean }) {
   return (
     <ul className="jt-lines">
       {lines.map((l) => (
-        <Line key={l.id} line={l} multi={multi} />
+        <Line key={l.id} line={l} multi={multi} actHref={canAct ? `/jobs/${jobId}?tab=materials&view=parts&item=${l.id}` : null} />
       ))}
     </ul>
   );

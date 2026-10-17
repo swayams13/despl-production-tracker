@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { audited } from "@/lib/audit";
-import { assertClientScope, requireRole, assertNotClientUser, ROLES, type Actor } from "@/lib/authz";
+import { assertClientScope, requireRole, assertNotClientUser, type Actor } from "@/lib/authz";
+import { IDENTIFY_ROLES, PMI_DECIDE_ROLES } from "@/lib/shared/stores-access";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { recordMtcSchema, type RecordMtcInput } from "@/lib/shared/schemas";
 import type { MaterialIdentification } from "@/generated/prisma/client";
@@ -10,7 +11,7 @@ import type { MaterialIdentification } from "@/generated/prisma/client";
  * status editable by QC"). The live seed has zero `MaterialIdentification`
  * rows (the source CSVs never carried heat traceability — see the schema
  * comment on the model) — every recorded row here is a first, real entry,
- * not an update to fabricated data. QC-role-gated like `recordQcpExecution`;
+ * not an update to fabricated data. Gated by role (L2.14): QC, Stores, the Production Head and Admin record a heat number and MTC reference, only QC accepts or rejects PMI;
  * no maker-checker (this isn't a process transition, invariant #3 doesn't
  * apply) and no correction/versioning flow (invariant #6 governs workflow
  * state, not a traceability field with no such requirement in the spec).
@@ -18,7 +19,9 @@ import type { MaterialIdentification } from "@/generated/prisma/client";
 export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<MaterialIdentification> {
   const { bomItemId, componentId, heatNumber, mtcRef, pmiResult, qtyIssued } = recordMtcSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.QC);
+  requireRole(actor, ...IDENTIFY_ROLES);
+  // Stores and the Production Head record the heat and MTC reference; only QC decides PMI.
+  if (pmiResult === "ACCEPT" || pmiResult === "REJECT") requireRole(actor, ...PMI_DECIDE_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     // `bom_items` carries no tenant_id (audit C3): `assertClientScope` below
