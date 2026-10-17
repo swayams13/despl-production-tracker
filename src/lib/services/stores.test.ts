@@ -82,7 +82,9 @@ describe.skipIf(!RUN_DB)("L2.14 Stores actions (DB)", async () => {
     switch (action) {
       case "receive": return receiveStock(a, { bomItemId: f.item.id, location: "Y2", qty: 3 });
       case "issue": return issueStock(a, { stockLotId: lot.id, qty: 1 });
-      case "return": return returnStock(a, { stockLotId: lot.id, qty: 1 });
+      case "return":
+        await owner.stockTxn.create({ data: { jobId: f.j.job.id, stockLotId: lot.id, type: "ISSUE", qty: "2", by: a.userId } }); // something is out to return
+        return returnStock(a, { stockLotId: lot.id, qty: 1 });
       case "scrap": return scrapStock(a, { stockLotId: lot.id, qty: 1 });
       case "receipt": return recordProcurementEvent(a, { bomItemId: f.item.id, type: "RECEIPT", qty: 3 });
       case "indent": return recordProcurementEvent(a, { bomItemId: f.item.id, type: "INDENT_RAISED", refNo: "I1" });
@@ -191,5 +193,41 @@ describe.skipIf(!RUN_DB)("L2.14 Stores actions (DB)", async () => {
     const theirsQ = await loadStoresQueue(bStores);
     expect(theirsQ.lines.map((l) => l.id)).toContain(theirs.item.id);
     expect(theirsQ.lines.map((l) => l.id)).not.toContain(mine.item.id);
+  });
+
+  it("a return cannot exceed what is out on issue, from the lot or from the named part", async () => {
+    const f = await fixture();
+    const lot = await f.lot("H-1", "10");
+    const stores = actors.get("STORES")!;
+    const ret = (qty: number, componentId?: number) => returnStock(stores, { stockLotId: lot.id, qty, componentId });
+    const available = async () => (await owner.stockTxn.findMany({ where: { stockLotId: lot.id } })).reduce((n, t) => n + (t.type === "RETURN" ? -Number(t.qty) : Number(t.qty)), 0);
+
+    await expect(ret(1)).rejects.toMatchObject({ detail: { reason: expect.stringMatching(/Nothing is out on issue/) } });
+    await issueStock(stores, { stockLotId: lot.id, qty: 4, componentId: f.comp });
+    await expect(ret(5)).rejects.toMatchObject({ detail: { reason: expect.stringMatching(/Only 4 is out on issue/) } });
+    // 4 went to the part; a different part, and the part beyond what it got, are refused
+    const other = (await owner.component.create({ data: { jobId: f.j.job.id, equipmentId: f.j.equipment.id, tag: "OTHER", componentTypeId: (await owner.component.findUniqueOrThrow({ where: { id: f.comp } })).componentTypeId } })).id;
+    await expect(ret(1, other)).rejects.toMatchObject({ detail: { reason: expect.stringMatching(/Nothing is out on issue to this part|Only 0|Nothing/) } });
+    await expect(ret(5, f.comp)).rejects.toMatchObject({ detail: { reason: expect.stringMatching(/Only 4 is out on issue to this part/) } });
+    await ret(3, f.comp);
+    await expect(ret(2, f.comp)).rejects.toMatchObject({ detail: { reason: expect.stringMatching(/Only 1 is out/) } });
+    await ret(1, f.comp);
+    expect(await available()).toBe(0); // issued 4, returned 4: nothing out
+    await expect(ret(1)).rejects.toMatchObject({ detail: { reason: expect.stringMatching(/Nothing is out on issue/) } });
+  });
+
+  it("a lot's missing heat number cannot be added once its material has been cut into a part", async () => {
+    const f = await fixture();
+    const lot = await f.lot(null, "10");
+    const stores = actors.get("STORES")!;
+    await issueStock(stores, { stockLotId: lot.id, qty: 2, componentId: f.comp });
+    await owner.componentOperation.update({ where: { id: f.j.op("SH-1", "CUTTING", 0) }, data: { status: "SUBMITTED" } });
+    await expect(recordLotHeat(stores, { stockLotId: lot.id, heatNumber: "H-LATE" })).rejects.toMatchObject({
+      detail: { reason: expect.stringMatching(/already been cut into a part/) },
+    });
+    expect((await owner.stockLot.findUniqueOrThrow({ where: { id: lot.id } })).heatNumber).toBeNull();
+    // before the cutting is recorded it is fine
+    await owner.componentOperation.update({ where: { id: f.j.op("SH-1", "CUTTING", 0) }, data: { status: "NOT_STARTED" } });
+    await expect(recordLotHeat(stores, { stockLotId: lot.id, heatNumber: "H-OK" })).resolves.toMatchObject({ heatNumber: "H-OK" });
   });
 });

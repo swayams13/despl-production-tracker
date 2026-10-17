@@ -88,6 +88,18 @@ export async function recordLotHeat(actor: Actor, input: RecordLotHeatInput): Pr
     if (lot.heatNumber) {
       throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: `This lot already has heat number ${lot.heatNumber}. QC corrects a recorded heat number.` });
     }
+    // Not after the material has been cut into a part: that would rewrite the trace of finished work
+    // (it is QC's to correct once the cutting is recorded, as for a picked heat number).
+    const issuedTo = await tx.stockTxn.findMany({ where: { stockLotId, type: "ISSUE", componentId: { not: null } }, select: { componentId: true } });
+    const partIds = [...new Set(issuedTo.map((t) => t.componentId!))];
+    if (partIds.length) {
+      const cut = await tx.componentOperation.count({
+        where: { componentId: { in: partIds }, operation: { code: "CUTTING" }, status: { notIn: ["NOT_STARTED", "IN_PROGRESS"] } },
+      });
+      if (cut > 0) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "Material from this lot has already been cut into a part. QC corrects a heat number after that." });
+      }
+    }
     return audited(tx, actor, async () => {
       await tx.stockLot.update({ where: { id: stockLotId }, data: { heatNumber } });
       return {
@@ -192,6 +204,24 @@ async function stockTxnTx(
   const { available, jobId } = await loadLotForMutation(tx, actor, stockLotId);
   if (guardOverIssue && qty > available) {
     throw new AppError(ERROR_CODES.INSUFFICIENT_STOCK, { stockLotId, requested: qty, available });
+  }
+
+  // A return puts issued material back: it cannot exceed what is out on issue from this lot (and, when
+  // it names a part, from that part). Without this a return conjures stock that was never received, and
+  // hides a shortage. (L2.14: Stores may now return, so the ledger enforces it, not the screen.)
+  if (type === "RETURN") {
+    const moves = await tx.stockTxn.findMany({ where: { stockLotId, type: { in: ["ISSUE", "RETURN"] } }, select: { type: true, qty: true, componentId: true } });
+    const out = (only?: number) =>
+      moves.filter((m) => only == null || m.componentId === only).reduce((n, m) => n + (m.type === "ISSUE" ? m.qty.toNumber() : -m.qty.toNumber()), 0);
+    const outLot = out();
+    const outPart = componentId != null ? out(componentId) : outLot;
+    const cap = Math.min(outLot, outPart);
+    if (qty > cap) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { reason: cap > 0 ? `Only ${cap} is out on issue${componentId != null ? " to this part" : ""} from this lot, so that is the most that can be returned.` : "Nothing is out on issue from this lot to return." },
+      );
+    }
   }
 
   if (componentId != null) {
