@@ -762,6 +762,11 @@ body {
     z-index: 20;
   }
 }
+/* L2.10: the switch-over screen's sticky action bar; on a phone it sits above the bottom nav, as the floor's undo bars do. */
+.theme-industrial .so-bar { position: sticky; bottom: 0; z-index: 30; background: var(--bg); padding: 10px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+@media (max-width: 639px) {
+  .theme-industrial .so-bar { bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
 @media (max-width: 639px) {
   .theme-industrial .sidebar { display: none; }
   .theme-industrial .icon-rail { display: none; }
