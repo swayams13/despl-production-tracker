@@ -514,7 +514,9 @@ function ComponentDetail({
   delayCategories: DelayCategoryOption[];
   access: StoresAccess;
 }) {
-  const comp = item.components[0];
+  // One component per unit when a BOM line feeds a multi-unit job: act on the serial chosen here, not always the first.
+  const [compId, setCompId] = useState<number | null>(null);
+  const comp = item.components.find((c) => c.id === compId) ?? item.components[0];
   const [recording, setRecording] = useState(false);
   const [heatNumber, setHeatNumber] = useState("");
   const [mtcRef, setMtcRef] = useState("");
@@ -541,6 +543,11 @@ function ComponentDetail({
 
   return (
     <div style={{ padding: "14px 16px" }}>
+      {item.components.length > 1 && (
+        <select className="btn" style={{ marginBottom: 12 }} aria-label="Serial" value={comp?.id} onChange={(e) => setCompId(Number(e.target.value))}>
+          {item.components.map((c) => <option key={c.id} value={c.id}>{c.serialNo ? `${c.serialNo} · ${c.tag}` : c.tag}</option>)}
+        </select>
+      )}
       <div className="sh-kv">
         <dt>Material</dt><dd>{item.material ?? "—"}</dd>
         <dt>Qty</dt><dd>{formatBomQty(item)}</dd>

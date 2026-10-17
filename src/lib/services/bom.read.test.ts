@@ -188,6 +188,20 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     expect(tree1!.units.map((u) => u.serialNo)).toEqual(["UNIT-1", "UNIT-2"]);
   });
 
+  it("a BOM line feeding one component per unit lists each component with its unit's serial, in a stable order", async () => {
+    const equipment = await owner.equipment.findFirstOrThrow({ where: { jobId } });
+    const componentType = await owner.componentTypeRef.findFirstOrThrow({ where: { tenantId, code: "PLATE" } });
+    const item = await owner.bomItem.create({
+      data: { tenantId, jobId, equipmentId: equipment.id, itemNo: 9001, partName: "Per-unit plate", sourceQty: "1", qtyPer: 1 },
+    });
+    for (const [tag, unitId] of [["PLATE-U", unit1Id], ["PLATE-U", unit2Id]] as const) {
+      await owner.component.create({ data: { jobId, equipmentId: equipment.id, unitId, bomItemId: item.id, tag, componentTypeId: componentType.id } });
+    }
+    const tree = await loadBomTree(actor, jobId);
+    const row = tree!.groups.flatMap((g) => g.items).find((i) => i.id === item.id)!;
+    expect(row.components.map((c) => c.serialNo)).toEqual(["UNIT-1", "UNIT-2"]);
+  });
+
   it("defaults to the first unit (by serialNo) when no unitId is given", async () => {
     const tree = await loadBomTree(actor, jobId);
     expect(tree!.unitId).toBe(unit1Id);
