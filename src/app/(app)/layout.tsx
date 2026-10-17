@@ -77,6 +77,7 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
         notifications={notifications}
         jobs={jobs}
         leanFloor={FEATURES.leanFloor}
+        locale={actor?.locale ?? "en"}
       >
         {children}
       </AppShell>

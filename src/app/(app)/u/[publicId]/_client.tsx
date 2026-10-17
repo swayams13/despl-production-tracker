@@ -7,10 +7,11 @@ import {
   FloorOutcomes,
   FloorUndoStack,
   NotifyBlockerButton,
-  STATE_LABEL,
+  stateLabel,
   useFloorWrites,
 } from "@/components/industrial/floor-actions";
 import type { FloorRow, FloorUnitView } from "@/lib/services/floor.read";
+import { useDict } from "@/lib/i18n/provider";
 
 /**
  * Lean Core L2.2: the Floor screen. One decision per row: Done (or Start), a
@@ -29,6 +30,7 @@ const VISIBLE = 5;
 export function FloorClient({ view }: { view: FloorUnitView }) {
   const [sheet, setSheet] = useState<{ row: FloorRow; action: "DONE" | "START" } | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const d = useDict();
 
   const titleOf = useMemo(
     () =>
@@ -61,8 +63,8 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
         </p>
         {view.spine.length > 0 && <StageSpine variant="mini" segments={view.spine} />}
         <p className="fl-dept">
-          {view.departments.length ? `Next for ${view.departments.join(" / ")}` : "Next steps, all departments"}
-          {view.doneCount > 0 ? ` · ${view.doneCount} done` : ""}
+          {view.departments.length ? d.floor.nextFor(view.departments.join(" / ")) : d.floor.nextAll}
+          {view.doneCount > 0 ? d.floor.doneCount(view.doneCount) : ""}
         </p>
       </header>
 
@@ -70,8 +72,8 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
 
       {view.rows.length === 0 ? (
         <div className="fl-empty">
-          <b>Nothing waiting for you on this unit.</b>
-          <span>{view.doneCount > 0 ? "Everything for your department here is done." : "No steps are assigned to your department."}</span>
+          <b>{d.floor.nothingWaiting}</b>
+          <span>{view.doneCount > 0 ? d.floor.allDone : d.floor.noneAssigned}</span>
         </div>
       ) : (
         groups.map((g) => (
@@ -94,7 +96,7 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
 
       {hidden > 0 && (
         <button className="btn fl-more" onClick={() => setShowAll(true)}>
-          Show {hidden} more
+          {d.floor.showMore(hidden)}
         </button>
       )}
 
@@ -134,6 +136,7 @@ function FloorRowView({
   unitPublicId: string;
   onAct: (action: "DONE" | "START") => void;
 }) {
+  const d = useDict();
   const others = row.siblings.length;
   // An out-of-order row is a normal choice, not a stop: one line, no card (a card is for HARD stops).
   const openEarlier = row.refusal ? row.refusal.missing.length + row.refusal.moreMissing : 0;
@@ -145,28 +148,28 @@ function FloorRowView({
         <div className="fl-main">
           <b>{row.title}</b>
           <span>
-            {STATE_LABEL[row.state]}
+            {stateLabel(d, row.state)}
             {row.state === "NEEDS_OVERRIDE" && openEarlier > 0 ? ` · ${openEarlier} earlier step${openEarlier === 1 ? "" : "s"} still open` : ""}
             {row.state === "NEEDS_OVERRIDE" && !row.canOverride ? " · ask your supervisor to start it early" : ""}
-            {row.startedAt ? ` · started ${new Date(row.startedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}` : ""}
-            {others > 0 && (row.state === "READY" || row.state === "IN_PROGRESS") ? ` · also on ${others} other unit${others === 1 ? "" : "s"}` : ""}
+            {row.startedAt ? d.floor.startedAt(new Date(row.startedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })) : ""}
+            {others > 0 && (row.state === "READY" || row.state === "IN_PROGRESS") ? d.floor.alsoOnOthers(others) : ""}
           </span>
         </div>
         {canRecord && (row.state === "READY" || row.state === "IN_PROGRESS") && (
           <div className="fl-actions">
             {row.state === "READY" && (
               <button className="btn" onClick={() => onAct("START")}>
-                Start
+                {d.common.start}
               </button>
             )}
             <button className="btn btn-accent fl-done" onClick={() => onAct("DONE")}>
-              Done
+              {d.common.done}
             </button>
           </div>
         )}
         {canRecord && row.state === "NEEDS_OVERRIDE" && row.canOverride && (
           <button className="btn" onClick={() => onAct("START")}>
-            Start early…
+            {d.common.startEarly}
           </button>
         )}
       </div>
