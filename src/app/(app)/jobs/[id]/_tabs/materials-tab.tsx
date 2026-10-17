@@ -15,12 +15,18 @@ export function MaterialsTab({
   onlyShort,
   materials,
   parts,
+  canImport = false,
+  canSwitchOver = false,
 }: {
   jobId: number;
   view: "pipeline" | "parts";
   onlyShort: boolean;
   materials: JobMaterials | null;
   parts: BomTree | null;
+  /** Planning, Production Head and Admin: the tracker-sheet import (L2.10). */
+  canImport?: boolean;
+  /** Production Head and Admin, lean floor on: tick work Excel shows as done (L2.10 part B). */
+  canSwitchOver?: boolean;
 }) {
   const sub = (
     <div className="jt-sub" role="group" aria-label="Materials view">
@@ -30,6 +36,16 @@ export function MaterialsTab({
       <Link className={`btn${view === "parts" ? " jt-on" : ""}`} href={`/jobs/${jobId}?tab=materials&view=parts`} aria-current={view === "parts" ? "page" : undefined}>
         Parts and stock
       </Link>
+      {canImport && (
+        <Link className="btn" href={`/jobs/${jobId}/import`}>
+          Load tracker sheet
+        </Link>
+      )}
+      {canSwitchOver && (
+        <Link className="btn" href={`/jobs/${jobId}/switch-over`}>
+          Switch over from Excel
+        </Link>
+      )}
     </div>
   );
 

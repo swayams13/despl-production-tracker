@@ -17,6 +17,8 @@ import { FEATURES } from "@/lib/shared/flags";
 import { jobTabUrl, parseMaterialsView, resolveJobTab } from "@/lib/shared/job-tabs";
 import type { QcQuery } from "@/lib/shared/qc-queue";
 import { JobDetailClient } from "./_client";
+import { IMPORT_ROLES } from "@/lib/services/job-import.service";
+import { SWITCH_OVER_ROLES } from "@/lib/services/switch-over.read";
 import { MaterialsTab } from "./_tabs/materials-tab";
 import { QcTab } from "./_tabs/qc-tab";
 import { DispatchTab } from "./_tabs/dispatch-tab";
@@ -106,7 +108,7 @@ export default async function JobDetail({
 
   let slot: ReactNode = null;
   if (leanMaterials) {
-    slot = <MaterialsTab jobId={jobId} view={matView} onlyShort={first(sp.short) === "1"} materials={materials} parts={bom} />;
+    slot = <MaterialsTab jobId={jobId} view={matView} onlyShort={first(sp.short) === "1"} materials={materials} parts={bom} canImport={hasRole(actor, ...IMPORT_ROLES)} canSwitchOver={FEATURES.leanFloor && hasRole(actor, ...SWITCH_OVER_ROLES)} />;
   } else if (leanQc) {
     slot = (
       <QcTab
