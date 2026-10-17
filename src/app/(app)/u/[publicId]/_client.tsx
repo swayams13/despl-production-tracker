@@ -6,6 +6,7 @@ import {
   ActionSheet,
   FloorOutcomes,
   FloorUndoStack,
+  HeatPickButton,
   NotifyBlockerButton,
   stateLabel,
   useFloorWrites,
@@ -183,6 +184,7 @@ function FloorRowView({
             </span>
           )}
           {refusal.clearedBy && <span>Can clear it: {refusal.clearedBy.label}</span>}
+          {canRecord && row.heatComponentId != null && <HeatPickButton componentId={row.heatComponentId} />}
           {canRecord && <NotifyBlockerButton unitPublicId={unitPublicId} row={row} />}
         </div>
       )}

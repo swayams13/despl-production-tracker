@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ensureJointAction, notifyBlockerAction, recordWorkAction } from "@/app/actions/work";
+import { loadHeatChoicesAction, pickHeatNumberAction } from "@/app/actions/heat";
+import type { HeatChoices } from "@/lib/services/heat.service";
 import type { FloorRow, FloorUnitView } from "@/lib/services/floor.read";
 import type { Dict } from "@/lib/i18n";
 import { useDict } from "@/lib/i18n/provider";
@@ -233,6 +235,83 @@ export function NotifyBlockerButton({
     <button className="btn" disabled={busy || nudge != null} onClick={notify}>
       {nudge ?? `Notify ${who.label}`}
     </button>
+  );
+}
+
+/**
+ * L2.13: "Pick heat number" on a pressure-part cutting item refused only for a missing
+ * heat number. The choices are the heat numbers of lots Stores received for this part;
+ * nothing can be typed. English like the refusal card it sits in (not translated until a
+ * DESPL speaker reviews refusal copy, L2.12).
+ */
+export function HeatPickButton({ componentId }: { componentId: number }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [choices, setChoices] = useState<HeatChoices | null>(null);
+  const [lot, setLot] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const why = (r: { ok: false; message: string; detail?: Record<string, unknown> }) => (typeof r.detail?.reason === "string" ? r.detail.reason : r.message);
+
+  const openSheet = async () => {
+    setOpen(true);
+    setError(null);
+    setChoices(null);
+    setLot(null);
+    const r = await loadHeatChoicesAction(componentId);
+    if (r.ok && r.choices) setChoices(r.choices);
+    else setError(r.ok ? "Could not load the heat numbers." : why(r));
+  };
+  const confirm = async () => {
+    if (lot == null || busy) return;
+    setBusy(true);
+    const r = await pickHeatNumberAction({ componentId, stockLotId: lot });
+    setBusy(false);
+    if (!r.ok) return setError(why(r));
+    setOpen(false);
+    router.refresh();
+  };
+
+  return (
+    <>
+      <button className="btn" onClick={openSheet}>
+        Pick heat number
+      </button>
+      {open && (
+        <div className="fl-sheet-ov" onClick={() => !busy && setOpen(false)}>
+          <div className="fl-sheet" role="dialog" aria-label="Pick heat number" onClick={(e) => e.stopPropagation()}>
+            <h2>Heat number{choices ? ` · ${choices.partName}` : ""}</h2>
+            {!choices && !error && <p className="fl-sub">Loading…</p>}
+            {choices?.picked && <p className="fl-sub">This part already has heat number {choices.picked}.</p>}
+            {choices && !choices.picked && (
+              <fieldset>
+                <legend>Which heat is this part cut from?</legend>
+                {choices.lots.length === 0 ? (
+                  <p className="fl-sub">No heat number was recorded when this material was received. Ask Stores to record it.</p>
+                ) : (
+                  <div className="fl-chips">
+                    {choices.lots.map((l) => (
+                      <button key={l.id} type="button" className={`fl-chip${lot === l.id ? " on" : ""}`} onClick={() => setLot(l.id)}>
+                        <span className="mono">{l.heatNumber}</span> · {l.available} left · {l.location}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </fieldset>
+            )}
+            {error && <p role="alert" className="fl-sub" style={{ color: "var(--s-overdue)" }}>{error}</p>}
+            <div className="fl-actions fl-sheet-foot">
+              <button className="btn" onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-accent fl-done" disabled={lot == null || busy} onClick={confirm}>
+                {busy ? "Saving…" : "Use this heat number"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError, type ErrorCode } from "@/lib/shared/errors";
 import type { WorkKind } from "@/lib/shared/floor-rules";
 import { recordWork } from "./work.service";
+import { ensureJointForStep } from "./floor.service";
 import { loadSwitchOver, SWITCH_OVER_ROLES, type SwitchRow } from "./switch-over.read";
 
 /**
@@ -29,6 +30,8 @@ export interface SwitchOverInput {
   /** Filed once per late plan, as recordWork's lateReason. Optional; LATE_REASON_REQUIRED comes back per item without it. */
   lateCategoryId?: number;
   items: Array<{ kind: WorkKind; id: number }>;
+  /** A weld step's welder, by `${kind}:${id}`. Needed for a weld step whose joint is not logged yet; the joint is logged for it. */
+  welders?: Record<string, number>;
 }
 
 export interface SwitchOverRefusal {
@@ -38,6 +41,8 @@ export interface SwitchOverRefusal {
   unit: string;
   code: ErrorCode;
   message: string;
+  /** The part, for a pressure-part cutting item refused for material or heat number (the screen offers the fix). */
+  componentId: number | null;
 }
 
 export interface SwitchOverResult {
@@ -81,17 +86,42 @@ export async function applySwitchOver(actor: Actor, input: SwitchOverInput): Pro
   }
 
   const refuse = (p: (typeof open)[number], code: ErrorCode, message: string) =>
-    result.refused.push({ kind: p.row.kind, id: p.row.id, title: p.row.title, unit: p.unit, code, message });
+    result.refused.push({ kind: p.row.kind, id: p.row.id, title: p.row.title, unit: p.unit, code, message, componentId: p.row.componentId });
 
   for (const chunk of chunks) {
     result.chunks++;
     try {
+      // A weld step carries its joint and welder; the joint is logged first, the same way the Floor does it.
+      const sendable: Array<{ p: (typeof open)[number]; detail?: { weldJointId: number; performedByWelderId?: number } }> = [];
+      for (const p of chunk) {
+        const weld = p.row.weld;
+        if (!weld) {
+          sendable.push({ p });
+          continue;
+        }
+        const welderId = input.welders?.[p.row.key];
+        if (weld.existingJointId == null && welderId == null) {
+          refuse(p, ERROR_CODES.VALIDATION_FAILED, `Pick the welder who did joint ${weld.jointRef}.`);
+          continue;
+        }
+        try {
+          const joint =
+            weld.existingJointId != null
+              ? { weldJointId: weld.existingJointId }
+              : await ensureJointForStep(actor, { assemblyStepId: p.row.id, welderIds: [welderId!] });
+          sendable.push({ p, detail: { weldJointId: joint.weldJointId, ...(welderId != null ? { performedByWelderId: welderId } : {}) } });
+        } catch (e) {
+          if (!isAppError(e)) throw e;
+          refuse(p, e.code, typeof e.detail?.reason === "string" ? e.detail.reason : e.message);
+        }
+      }
+      if (!sendable.length) continue;
       const r = await recordWork(actor, {
         requestId: randomUUID(),
         jobId: input.jobId,
         action: "DONE",
         reportedAt: input.doneAt,
-        items: chunk.map((p) => ({ kind: p.row.kind, id: p.row.id })),
+        items: sendable.map(({ p, detail }) => ({ kind: p.row.kind, id: p.row.id, ...(detail ? { detail } : {}) })),
         ...(input.lateCategoryId != null ? { lateReason: { categoryId: input.lateCategoryId, note: "Switch-over from Excel" } } : {}),
       });
       const byKey = new Map(chunk.map((p) => [p.row.key, p]));

@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { Modal, ModalConfirmFooter } from "@/components/industrial/modal";
 import { PageHeader } from "@/components/industrial/page-header";
 import { applySwitchOverAction } from "@/app/actions/switch-over";
+import { issueAndPickHeatAction, loadHeatChoicesAction } from "@/app/actions/heat";
+import type { HeatChoices } from "@/lib/services/heat.service";
 import { localInput } from "@/components/industrial/floor-actions";
 import type { SwitchOverView, SwitchRow } from "@/lib/services/switch-over.read";
 import type { SwitchOverResult } from "@/lib/services/switch-over.service";
@@ -22,6 +24,69 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 const isOpen = (r: SwitchRow) => r.status === "NOT_STARTED" || r.status === "IN_PROGRESS";
 const STATE: Record<string, string> = { NOT_STARTED: "Not started", IN_PROGRESS: "In progress", SUBMITTED: "With QC", COMPLETE: "Done" };
 
+/**
+ * A pressure-part cutting item refused for material or heat number: pick the lot, issue
+ * it to the part and record its heat number, then tick the item again.
+ */
+function IssuePickFix({ componentId, onDone }: { componentId: number; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [choices, setChoices] = useState<HeatChoices | null>(null);
+  const [lot, setLot] = useState<number | null>(null);
+  const [qty, setQty] = useState("1");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const why = (r: { ok: false; message: string; detail?: Record<string, unknown> }) => (typeof r.detail?.reason === "string" ? r.detail.reason : r.message);
+
+  const show = async () => {
+    setOpen(true);
+    setError(null);
+    const r = await loadHeatChoicesAction(componentId);
+    if (r.ok && r.choices) {
+      setChoices(r.choices);
+      setQty(String(r.choices.need ?? 1));
+    } else setError(r.ok ? "Could not load the lots." : why(r));
+  };
+  const go = async () => {
+    const n = Number(qty);
+    if (lot == null || !(n > 0) || busy) return;
+    setBusy(true);
+    const r = await issueAndPickHeatAction({ componentId, stockLotId: lot, qty: n });
+    setBusy(false);
+    if (!r.ok) return setError(why(r));
+    toast.success("Issued, and the heat number is recorded. Tick it again.");
+    onDone();
+  };
+
+  if (!open) return <button type="button" className="btn" onClick={show}>Issue and pick heat number</button>;
+  return (
+    <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+      {!choices && !error && <span style={{ color: "var(--muted)" }}>Loading…</span>}
+      {choices?.picked && <span style={{ color: "var(--muted)" }}>This part already has heat number {choices.picked}.</span>}
+      {choices && choices.lots.length === 0 && <span style={{ color: "var(--muted)" }}>No lot with a heat number was received for this part. Record it in Parts and stock first.</span>}
+      {choices && choices.lots.length > 0 && (
+        <>
+          <div className="fl-chips">
+            {choices.lots.map((l) => (
+              <button key={l.id} type="button" className={`fl-chip${lot === l.id ? " on" : ""}`} onClick={() => setLot(l.id)}>
+                <span className="mono">{l.heatNumber}</span> · {l.available} left · {l.location}
+              </button>
+            ))}
+          </div>
+          <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            Quantity to issue
+            <input className="ws-detail" type="number" min="0" step="any" value={qty} onChange={(e) => setQty(e.target.value)} style={{ width: 100 }} />
+          </label>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="btn btn-accent" disabled={lot == null || busy} onClick={go}>{busy ? "Saving…" : "Issue and record"}</button>
+            <button type="button" className="btn" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </>
+      )}
+      {error && <span role="alert" style={{ color: "var(--s-overdue)" }}>{error}</span>}
+    </div>
+  );
+}
+
 export function SwitchOverClient({ view }: { view: SwitchOverView }) {
   const router = useRouter();
   const nowLocal = localInput(new Date());
@@ -29,6 +94,7 @@ export function SwitchOverClient({ view }: { view: SwitchOverView }) {
   const other = view.lateCategories.find((c) => c.code === "OTHER") ?? view.lateCategories[0];
   const [late, setLate] = useState<number | "">(other?.id ?? "");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [welders, setWelders] = useState<Record<string, number | "">>({});
   const [confirm, setConfirm] = useState(false);
   const [result, setResult] = useState<SwitchOverResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +133,7 @@ export function SwitchOverClient({ view }: { view: SwitchOverView }) {
         jobId: view.job.id,
         doneAt: new Date(doneAt).toISOString(),
         ...(late !== "" ? { lateCategoryId: late } : {}),
+        welders: Object.fromEntries([...picked].flatMap((k) => (welders[k] ? [[k, Number(welders[k])] as const] : []))),
         items: [...picked].map((k) => ({ kind: all.get(k)!.row.kind, id: all.get(k)!.row.id })),
       });
       setConfirm(false);
@@ -82,6 +149,11 @@ export function SwitchOverClient({ view }: { view: SwitchOverView }) {
     });
 
   const n = picked.size;
+  // A ticked weld step with no joint logged yet needs its welder before it can be sent.
+  const needsWelder = [...picked].filter((k) => {
+    const w = all.get(k)?.row.weld;
+    return w && w.existingJointId == null && !welders[k];
+  }).length;
   const when = new Date(doneAt).toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
 
   return (
@@ -130,6 +202,15 @@ export function SwitchOverClient({ view }: { view: SwitchOverView }) {
                 {result.refused.map((x) => (
                   <li key={`${x.kind}:${x.id}`}>
                     <span className="mono" style={{ color: "var(--muted)" }}>{x.unit}</span> <b>{x.title}</b>: {x.message}
+                    {x.componentId != null && (x.code === "MATERIAL_NOT_ISSUED" || x.code === "HEAT_NUMBER_NOT_PICKED") && (
+                      <IssuePickFix
+                        componentId={x.componentId}
+                        onDone={() => {
+                          setPicked((cur) => new Set(cur).add(`${x.kind}:${x.id}`));
+                          setResult((cur) => (cur ? { ...cur, refused: cur.refused.filter((y) => !(y.kind === x.kind && y.id === x.id)) } : cur));
+                        }}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -174,6 +255,24 @@ export function SwitchOverClient({ view }: { view: SwitchOverView }) {
                       <span style={{ flex: 1, minWidth: 0 }}>
                         {r.title}
                         <small style={{ display: "block", color: "var(--muted)" }}>{r.group}</small>
+                        {r.weld && picked.has(r.key) && (
+                          r.weld.existingJointId != null ? (
+                            <small style={{ display: "block", color: "var(--muted)" }}>Joint {r.weld.jointRef} is already logged.</small>
+                          ) : (
+                            <select
+                              className="ws-detail"
+                              aria-label={`Welder for joint ${r.weld.jointRef}, ${u.label}`}
+                              value={welders[r.key] ?? ""}
+                              onChange={(e) => setWelders((cur) => ({ ...cur, [r.key]: e.target.value === "" ? "" : Number(e.target.value) }))}
+                              style={{ marginTop: 4 }}
+                            >
+                              <option value="">Who welded joint {r.weld.jointRef}?</option>
+                              {view.welders.map((w) => (
+                                <option key={w.id} value={w.id}>{w.name} · {w.employeeCode}</option>
+                              ))}
+                            </select>
+                          )
+                        )}
                       </span>
                       <span style={{ fontSize: "var(--fs-sm, 12px)", color: "var(--muted)" }}>{STATE[r.status] ?? r.status}</span>
                       {o && (
@@ -191,9 +290,10 @@ export function SwitchOverClient({ view }: { view: SwitchOverView }) {
       )}
 
       <div className="so-bar">
-        <button type="button" className="btn btn-accent" disabled={n === 0 || pending || !doneAt} onClick={() => setConfirm(true)}>
+        <button type="button" className="btn btn-accent" disabled={n === 0 || pending || !doneAt || needsWelder > 0} onClick={() => setConfirm(true)}>
           Record {plural(n, "item")} as done
         </button>
+        {needsWelder > 0 && <span style={{ fontSize: "var(--fs-sm, 12px)", color: "var(--muted)" }}>Pick the welder for {plural(needsWelder, "weld step")}.</span>}
         {n > 0 && <button type="button" className="btn" onClick={() => setPicked(new Set())}>Clear all</button>}
       </div>
 

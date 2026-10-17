@@ -16,6 +16,7 @@ const schema = z
     jobId: z.number().int().positive(),
     doneAt: z.iso.datetime({ offset: true }),
     lateCategoryId: z.number().int().positive().optional(),
+    welders: z.record(z.string().regex(/^(COMPONENT_OP|ASSEMBLY_STEP|PROCESS_PLAN):\d+$/), z.number().int().positive()).optional(),
     items: z.array(z.object({ kind: z.enum(["COMPONENT_OP", "ASSEMBLY_STEP", "PROCESS_PLAN"]), id: z.number().int().positive() }).strict()).min(1).max(5000),
   })
   .strict();
