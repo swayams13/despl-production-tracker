@@ -158,6 +158,12 @@ describe.skipIf(!RUN_DB)("Lean Core L1.1 additive migration (DB)", async () => {
       const user = await owner.user.findUniqueOrThrow({ where: { id: a.userId } });
       expect(user.locale).toBe("en");
     });
+
+    it("setOwnLocale (L2.12) writes the caller's own locale as the app role", async () => {
+      const { setOwnLocale } = await import("@/lib/auth/preferences");
+      await setOwnLocale({ userId: a.userId, tenantId: a.tenantId } as Parameters<typeof setOwnLocale>[0], "hi");
+      expect((await owner.user.findUniqueOrThrow({ where: { id: a.userId } })).locale).toBe("hi");
+    });
   });
 
   describe("units.public_id", () => {

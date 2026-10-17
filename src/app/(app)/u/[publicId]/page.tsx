@@ -3,6 +3,7 @@ import { getActor } from "@/lib/authz";
 import { FEATURES } from "@/lib/shared/flags";
 import { loadFloorUnit } from "@/lib/services/floor.read";
 import { FloorClient } from "./_client";
+import { LocaleProvider } from "@/lib/i18n/provider";
 
 /**
  * Lean Core L2.2: the Floor screen, the target of the traveller QR
@@ -19,5 +20,9 @@ export default async function FloorPage({ params }: { params: Promise<{ publicId
   const { publicId } = await params;
   const view = await loadFloorUnit(actor, publicId);
   if (!view) notFound();
-  return <FloorClient view={view} />;
+  return (
+    <LocaleProvider locale={actor.locale ?? "en"}>
+      <FloorClient view={view} />
+    </LocaleProvider>
+  );
 }

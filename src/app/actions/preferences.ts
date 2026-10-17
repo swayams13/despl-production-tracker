@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
-import { setOwnThemePreference } from "@/lib/auth/preferences";
+import { setOwnLocale, setOwnThemePreference } from "@/lib/auth/preferences";
 import { ERROR_CODES, ERROR_MESSAGES } from "@/lib/shared/errors";
 import { toActionError, type ActionResult } from "./_action";
 
@@ -27,6 +27,21 @@ export async function setThemeAction(input: z.input<typeof themeStateSchema>): P
   }
   try {
     await setOwnThemePreference(await requireActor(), parsed.data);
+    revalidatePath("/", "layout");
+    return { ok: true };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** Save the caller's own Floor/Today language; the client follows with router.refresh(). */
+export async function setLocaleAction(locale: "en" | "hi" | "gu"): Promise<ActionResult> {
+  const parsed = z.enum(["en", "hi", "gu"]).safeParse(locale);
+  if (!parsed.success) {
+    return { ok: false, code: ERROR_CODES.VALIDATION_FAILED, message: ERROR_MESSAGES.VALIDATION_FAILED };
+  }
+  try {
+    await setOwnLocale(await requireActor(), parsed.data);
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (e) {

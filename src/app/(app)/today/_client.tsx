@@ -9,7 +9,7 @@ import {
   FloorOutcomes,
   FloorUndoStack,
   NotifyBlockerButton,
-  STATE_LABEL,
+  stateLabel,
   useFloorWrites,
   type SendResult,
 } from "@/components/industrial/floor-actions";
@@ -18,6 +18,8 @@ import { fileDelayAction } from "@/app/actions/delay";
 import { claimNextAction } from "@/app/actions/assignment";
 import { buildCheckIn, type CheckInChoice, type CheckInRow } from "@/lib/shared/today";
 import type { TodayRow, TodayView } from "@/lib/services/today.read";
+import type { Dict } from "@/lib/i18n";
+import { useDict } from "@/lib/i18n/provider";
 
 /**
  * Lean Core L2.3: Today. Sections are the server's (sectionize): Do this first,
@@ -29,8 +31,8 @@ import type { TodayRow, TodayView } from "@/lib/services/today.read";
 const SHOWN = 7;
 /** A job-level plan has no unit: name the job instead of a dash. */
 const where = (r: { unitId: number | null; serialNo: string; jobNumber: string }) => (r.unitId != null ? r.serialNo : r.jobNumber);
-const fmtDue = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) : "not scheduled";
+const fmtDue = (d: Dict, iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString(d.intl, { weekday: "short", day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) : d.today.notScheduled;
 
 export function TodayClient({
   view,
@@ -44,6 +46,7 @@ export function TodayClient({
   dateLabel: string;
 }) {
   const router = useRouter();
+  const d = useDict();
   const [sheet, setSheet] = useState<{ row: TodayRow; action: "DONE" | "START" } | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [checkIn, setCheckIn] = useState(false);
@@ -71,7 +74,7 @@ export function TodayClient({
       const r = await claimNextAction();
       if (!r.ok) toast.error(r.message);
       else {
-        toast.success("Claimed. It is on your list.");
+        toast.success(d.today.claimed);
         router.refresh();
       }
     });
@@ -81,12 +84,12 @@ export function TodayClient({
   return (
     <div className="fl-wrap">
       <header className="fl-head">
-        <h1>Today</h1>
+        <h1>{d.today.title}</h1>
         <p>
           {dateLabel} · {name}
         </p>
         <p className="fl-dept">
-          {total} assigned · {s.summary.needsAttention} needs attention · {s.summary.dueToday} due today · {s.summary.blocked} blocked
+          {d.today.summary(total, s.summary.needsAttention, s.summary.dueToday, s.summary.blocked)}
         </p>
       </header>
 
@@ -104,29 +107,29 @@ export function TodayClient({
       )}
       {!showCheckIn && view.checkIn.open.length + view.checkIn.doneToday.length > 0 && (
         <button className="btn fl-more" onClick={() => setCheckIn(true)}>
-          End-of-shift check-in
+          {d.today.checkInButton}
         </button>
       )}
 
       {total === 0 ? (
         <div className="fl-empty">
-          <b>Nothing is assigned to you.</b>
+          <b>{d.today.nothingAssigned}</b>
           {view.canClaimNext ? (
             <>
-              <span>Take the next job waiting in your department.</span>
+              <span>{d.today.takeNext}</span>
               <button className="btn btn-accent" disabled={claiming} onClick={claim}>
-                Claim next
+                {d.today.claimNext}
               </button>
             </>
           ) : (
-            <span>{view.canAssign ? "Work assigned to you appears here. Unassigned work is in the section below." : "Ask your supervisor to assign you work."}</span>
+            <span>{view.canAssign ? d.today.assignedHere : d.today.askSupervisorAssign}</span>
           )}
         </div>
       ) : (
         <>
           {s.doFirst && (
             <section className="fl-group">
-              <h2>Do this first</h2>
+              <h2>{d.today.doFirst}</h2>
               <ul>
                 <RowCard row={s.doFirst} first onAct={act} />
               </ul>
@@ -134,7 +137,7 @@ export function TodayClient({
           )}
           {s.today.length > 0 && (
             <section className="fl-group">
-              <h2>Today · {s.today.length}</h2>
+              <h2>{d.today.todaySection(s.today.length)}</h2>
               <ul>
                 {todayRows.map((r) => (
                   <RowCard key={r.key} row={r} onAct={act} />
@@ -142,14 +145,14 @@ export function TodayClient({
               </ul>
               {s.today.length > SHOWN && !showAll && (
                 <button className="btn fl-more" onClick={() => setShowAll(true)}>
-                  Show all {s.today.length}
+                  {d.today.showAll(s.today.length)}
                 </button>
               )}
             </section>
           )}
           {s.blocked.length > 0 && (
             <section className="fl-group">
-              <h2>Blocked · {s.blocked.length}</h2>
+              <h2>{d.today.blockedSection(s.blocked.length)}</h2>
               <ul>
                 {s.blocked.map((r) => (
                   <RowCard key={r.key} row={r} onAct={act} />
@@ -160,7 +163,7 @@ export function TodayClient({
           {s.upcoming.length > 0 && (
             <details className="fl-group">
               <summary>
-                <h2 style={{ display: "inline" }}>Upcoming · {s.upcoming.length}</h2>
+                <h2 style={{ display: "inline" }}>{d.today.upcomingSection(s.upcoming.length)}</h2>
               </summary>
               <ul>
                 {s.upcoming.map((r) => (
@@ -171,7 +174,7 @@ export function TodayClient({
           )}
           {view.canClaimNext && (
             <button className="btn fl-more" disabled={claiming} onClick={claim}>
-              Claim next
+              {d.today.claimNext}
             </button>
           )}
         </>
@@ -179,21 +182,21 @@ export function TodayClient({
 
       {view.canAssign && view.pool.length > 0 && (
         <p className="fl-sub" data-testid="pool">
-          {view.pool.length} unassigned in your department.{" "}
+          {d.today.unassigned(view.pool.length)}{" "}
           <Link href="/team" className="tm-link">
-            Assign from Team
+            {d.today.assignFromTeam}
           </Link>
         </p>
       )}
 
       <details className="fl-group">
         <summary>
-          <h2 style={{ display: "inline" }}>My progress</h2>
+          <h2 style={{ display: "inline" }}>{d.today.myProgress}</h2>
         </summary>
         <p className="fl-sub">
-          On time, last 30 days:{" "}
-          <b>{view.scoreboard.onTimePct30d == null ? "no data yet" : `${Math.round(view.scoreboard.onTimePct30d)}%`}</b> · Done this week:{" "}
-          <b>{view.scoreboard.doneThisWeek}</b> · Cleared today: <b>{view.clearedToday}</b>
+          {d.today.onTime30}{" "}
+          <b>{view.scoreboard.onTimePct30d == null ? d.today.noData : `${Math.round(view.scoreboard.onTimePct30d)}%`}</b> · {d.today.doneThisWeek}{" "}
+          <b>{view.scoreboard.doneThisWeek}</b> · {d.today.clearedToday} <b>{view.clearedToday}</b>
         </p>
       </details>
 
@@ -217,6 +220,7 @@ export function TodayClient({
 }
 
 function RowCard({ row, first, onAct }: { row: TodayRow; first?: boolean; onAct: (row: TodayRow, a: "DONE" | "START") => void }) {
+  const d = useDict();
   const stopped = row.state === "BLOCKED" || (row.state === "NEEDS_OVERRIDE" && !row.canOverride);
   const waiting = row.refusal ? row.refusal.missing.length + row.refusal.moreMissing : 0;
   return (
@@ -227,26 +231,26 @@ function RowCard({ row, first, onAct }: { row: TodayRow; first?: boolean; onAct:
             <span className="mono">{where(row)}</span> · {row.title}
           </b>
           <span>
-            {row.lateReasonNeeded ? "Overdue · reason needed · " : ""}
-            {STATE_LABEL[row.state]}
-            {row.stage !== row.title ? ` · ${row.stage}` : ""} · due {fmtDue(row.dueAt)}
+            {row.lateReasonNeeded ? d.today.overdueReason : ""}
+            {stateLabel(d, row.state)}
+            {row.stage !== row.title ? ` · ${row.stage}` : ""} · {d.today.due} {fmtDue(d, row.dueAt)}
           </span>
         </div>
         {!stopped && (
           <div className="fl-actions">
             {row.state === "READY" && (
               <button className="btn" onClick={() => onAct(row, "START")}>
-                Start
+                {d.common.start}
               </button>
             )}
             {row.state === "NEEDS_OVERRIDE" && row.canOverride && (
               <button className="btn" onClick={() => onAct(row, "START")}>
-                Start early…
+                {d.common.startEarly}
               </button>
             )}
             {(row.state === "READY" || row.state === "IN_PROGRESS" || row.state === "NEEDS_OVERRIDE") && (
               <button className="btn btn-accent fl-done" onClick={() => onAct(row, "DONE")}>
-                Mark done
+                {d.common.markDone}
               </button>
             )}
           </div>
@@ -281,6 +285,7 @@ function CheckIn({
   onClose: () => void;
   onSend: (label: string, send: () => Promise<SendResult>) => void;
 }) {
+  const d = useDict();
   const open = view.checkIn.open;
   const [choice, setChoice] = useState<Record<string, CheckInChoice | undefined>>({});
   const [reason, setReason] = useState<Record<string, number | undefined>>({});
@@ -330,24 +335,24 @@ function CheckIn({
     };
     const doneN = plan.done.reduce((n, d) => n + d.items.length, 0);
     const notN = notDoneRows.length;
-    onSend(`${doneN} marked done${notN ? ` · ${notN} held up, reason filed` : ""}`, doRun);
+    onSend(d.checkIn.label(doneN, notN), doRun);
   };
 
   return (
-    <section className="fl-sheet fl-checkin" aria-label="End-of-shift check-in" style={{ position: "static", borderRadius: 8, marginTop: 14 }}>
-      <h2>Before you leave — today&apos;s plan</h2>
+    <section className="fl-sheet fl-checkin" aria-label={d.checkIn.aria} style={{ position: "static", borderRadius: 8, marginTop: 14 }}>
+      <h2>{d.checkIn.heading}</h2>
       <p className="fl-sub">
-        {open.length + view.checkIn.doneToday.length} items · work you already marked is filled in
+        {d.checkIn.items(open.length + view.checkIn.doneToday.length)}
       </p>
       <ul className="fl-pool">
-        {view.checkIn.doneToday.map((d) => (
-          <li key={d.key} className="fl-row fl-s-ready">
+        {view.checkIn.doneToday.map((x) => (
+          <li key={x.key} className="fl-row fl-s-ready">
             <div className="fl-line">
               <div className="fl-main">
                 <b>
-                  <span className="mono">{d.serialNo}</span> · {d.title}
+                  <span className="mono">{x.serialNo}</span> · {x.title}
                 </b>
-                <span>Done today</span>
+                <span>{d.checkIn.doneToday}</span>
               </div>
             </div>
           </li>
@@ -359,7 +364,7 @@ function CheckIn({
                 <b>
                   <span className="mono">{where(r)}</span> · {r.title}
                 </b>
-                <span>{STATE_LABEL[r.state]}</span>
+                <span>{stateLabel(d, r.state)}</span>
               </div>
               <div className="fl-chips">
                 <button
@@ -367,20 +372,20 @@ function CheckIn({
                   className={`fl-chip${choice[r.key] === "DONE" ? " on" : ""}`}
                   onClick={() => setChoice((c) => ({ ...c, [r.key]: c[r.key] === "DONE" ? undefined : "DONE" }))}
                 >
-                  Done
+                  {d.common.done}
                 </button>
                 <button
                   type="button"
                   className={`fl-chip${choice[r.key] === "NOT_DONE" ? " on" : ""}`}
                   onClick={() => setChoice((c) => ({ ...c, [r.key]: c[r.key] === "NOT_DONE" ? undefined : "NOT_DONE" }))}
                 >
-                  Not done
+                  {d.common.notDone}
                 </button>
               </div>
             </div>
             {(choice[r.key] === "NOT_DONE" || (choice[r.key] === "DONE" && r.lateReasonNeeded)) && (
               <fieldset className="fl-reason">
-                <legend>What held it up?</legend>
+                <legend>{d.checkIn.heldUp}</legend>
                 <div className="fl-chips">
                   {view.delayCategories.map((c) => (
                     <button
@@ -396,7 +401,7 @@ function CheckIn({
                 {choice[r.key] === "NOT_DONE" && (
                   <input
                     className="ws-detail"
-                    placeholder="Add a note (optional)"
+                    placeholder={d.common.optionalNote}
                     maxLength={500}
                     value={note[r.key] ?? ""}
                     onChange={(e) => setNote((n) => ({ ...n, [r.key]: e.target.value }))}
@@ -408,14 +413,14 @@ function CheckIn({
         ))}
       </ul>
       {plan.notDoneWithoutPlan.length > 0 && (
-        <p className="fl-sub">Some items have no process to file a reason on: they stay as they are.</p>
+        <p className="fl-sub">{d.checkIn.noProcess}</p>
       )}
       <div className="fl-actions fl-sheet-foot">
         <button className="btn" onClick={onClose}>
-          Not now
+          {d.common.notNow}
         </button>
         <button className="btn btn-accent fl-done" disabled={changed === 0 || missing} onClick={send}>
-          {changed === 0 ? "Nothing changed" : missing ? "Pick what held it up" : `Send ${changed} update${changed === 1 ? "" : "s"}`}
+          {changed === 0 ? d.checkIn.nothingChanged : missing ? d.sheet.pickHeldUp : d.checkIn.send(changed)}
         </button>
       </div>
     </section>
