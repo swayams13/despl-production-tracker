@@ -129,50 +129,58 @@ async function createStockTxn(
   eventType: string,
   guardOverIssue: boolean,
 ): Promise<StockTxn> {
-  const { stockLotId, qty, componentId, note } = issueStockSchema.parse(input);
+  const parsed = issueStockSchema.parse(input);
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  return withTenant(actor.tenantId, (tx) => stockTxnTx(tx, actor, parsed, type, action, eventType, guardOverIssue));
+}
 
-  return withTenant(actor.tenantId, async (tx) => {
-    const { available, jobId } = await loadLotForMutation(tx, actor, stockLotId);
-    if (guardOverIssue && qty > available) {
-      throw new AppError(ERROR_CODES.INSUFFICIENT_STOCK, { stockLotId, requested: qty, available });
+/** The ledger write itself, inside the caller's transaction (L2.13: issue-and-pick is one transaction). Caller has checked the role. */
+async function stockTxnTx(
+  tx: Tx,
+  actor: Actor,
+  input: IssueStockInput,
+  type: StockTxnType,
+  action: string,
+  eventType: string,
+  guardOverIssue: boolean,
+): Promise<StockTxn> {
+  const { stockLotId, qty, componentId, note } = input;
+  const { available, jobId } = await loadLotForMutation(tx, actor, stockLotId);
+  if (guardOverIssue && qty > available) {
+    throw new AppError(ERROR_CODES.INSUFFICIENT_STOCK, { stockLotId, requested: qty, available });
+  }
+
+  if (componentId != null) {
+    // H1: componentId must belong to the SAME job as the stockLotId being
+    // mutated, not merely the same tenant — the gap named in the research
+    // ("an issue against Job A's stock lot could be logged against a
+    // component belonging to Job B").
+    const component = await tx.component.findFirst({ where: { id: componentId, jobId }, select: { id: true } });
+    if (!component) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { entity: "Component", componentId, stockLotId },
+        "Component does not belong to this stock lot's job.",
+      );
     }
+  }
 
-    if (componentId != null) {
-      // H1: componentId must belong to the SAME job as the stockLotId being
-      // mutated, not merely the same tenant — the gap named in the research
-      // ("an issue against Job A's stock lot could be logged against a
-      // component belonging to Job B").
-      const component = await tx.component.findFirst({
-        where: { id: componentId, jobId },
-        select: { id: true },
-      });
-      if (!component) {
-        throw new AppError(
-          ERROR_CODES.VALIDATION_FAILED,
-          { entity: "Component", componentId, stockLotId },
-          "Component does not belong to this stock lot's job.",
-        );
-      }
-    }
-
-    return audited(tx, actor, async () => {
-      const txn = await tx.stockTxn.create({
-        data: { stockLotId, type, qty, by: actor.userId, componentId: componentId ?? null, note: note ?? null, jobId },
-      });
-      return {
-        result: txn,
-        audit: {
-          action,
-          entityType: "StockTxn",
-          entityId: txn.id,
-          after: { stockLotId, type, qty, componentId: componentId ?? null, note: note ?? null },
-          eventType,
-          eventPayload: { stockLotId, type, qty },
-        },
-      };
+  return audited(tx, actor, async () => {
+    const txn = await tx.stockTxn.create({
+      data: { stockLotId, type, qty, by: actor.userId, componentId: componentId ?? null, note: note ?? null, jobId },
     });
+    return {
+      result: txn,
+      audit: {
+        action,
+        entityType: "StockTxn",
+        entityId: txn.id,
+        after: { stockLotId, type, qty, componentId: componentId ?? null, note: note ?? null },
+        eventType,
+        eventPayload: { stockLotId, type, qty },
+      },
+    };
   });
 }
 
@@ -181,6 +189,13 @@ async function createStockTxn(
  * available amount succeeds, one more fails). */
 export function issueStock(actor: Actor, input: IssueStockInput): Promise<StockTxn> {
   return createStockTxn(actor, input, "ISSUE", "stock.issue", "StockIssued", true);
+}
+
+/** `issueStock` inside the caller's transaction, for a caller that must make the issue and another write atomic. Same role gate. */
+export function issueStockTx(tx: Tx, actor: Actor, input: IssueStockInput): Promise<StockTxn> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  return stockTxnTx(tx, actor, issueStockSchema.parse(input), "ISSUE", "stock.issue", "StockIssued", true);
 }
 
 /** Return previously-issued stock back to a lot. No over-issue guard — this

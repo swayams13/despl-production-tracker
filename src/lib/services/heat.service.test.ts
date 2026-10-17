@@ -147,6 +147,73 @@ describe.skipIf(!RUN_DB)("L2.13 heat number at cutting (DB)", async () => {
     await expect(pick(operator)).resolves.toMatchObject({ created: true });
   });
 
+  it("a part with no cutting operation has no department to scope to: only the Production Head and Admin may pick", async () => {
+    const j = await o.job({ components: [{ tag: "NC-1", pressure: true, ops: [{ code: "ROLLING" }] }] });
+    const comp = j.components.get("NC-1:0")!;
+    const item = await owner.bomItem.create({ data: { jobId: j.job.id, equipmentId: j.equipment.id, itemNo: 1, partName: "PLATE", sourceQty: "1" } });
+    await owner.component.update({ where: { id: comp }, data: { bomItemId: item.id } });
+    const lot = await owner.stockLot.create({ data: { jobId: j.job.id, bomItemId: item.id, heatNumber: "H-3001", location: "Y1", qty: "5" } });
+    for (const who of [operator, sup]) {
+      await expect(pickHeatNumber(who, { componentId: comp, stockLotId: lot.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(loadHeatChoices(who, comp)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    }
+    expect(await owner.materialIdentification.count({ where: { componentId: comp } })).toBe(0);
+    await expect(pickHeatNumber(head, { componentId: comp, stockLotId: lot.id })).resolves.toMatchObject({ created: true });
+  });
+
+  it("once the cutting is recorded the floor can no longer add a heat number, not even the Production Head", async () => {
+    const s = await setup();
+    await owner.componentOperation.update({ where: { id: s.j.op("SH-1", "CUTTING", 0) }, data: { status: "SUBMITTED" } });
+    const reason = { detail: { reason: expect.stringMatching(/already recorded/) } };
+    await expect(pickHeatNumber(sup, { componentId: s.comp, stockLotId: s.shell.lots[0].id })).rejects.toMatchObject(reason);
+    await expect(pickHeatNumber(head, { componentId: s.comp, stockLotId: s.shell.lots[0].id })).rejects.toMatchObject(reason);
+    await expect(issueAndPickHeat(head, { componentId: s.comp, stockLotId: s.shell.lots[0].id, qty: 1 })).rejects.toMatchObject(reason);
+    await expect(loadHeatChoices(sup, s.comp)).rejects.toMatchObject(reason);
+    expect(await owner.materialIdentification.count({ where: { componentId: s.comp } })).toBe(0);
+    expect(await owner.stockTxn.count({ where: { componentId: s.comp } })).toBe(0);
+  });
+
+  it("the pick has to agree with the material already issued to the part", async () => {
+    const s = await setup();
+    await owner.stockTxn.create({ data: { jobId: s.j.job.id, stockLotId: s.shell.lots[0].id, type: "ISSUE", qty: "2", by: head.userId, componentId: s.comp } });
+    const c = await loadHeatChoices(sup, s.comp);
+    expect(c.lots.map((l) => l.heatNumber)).toEqual(["H-1001"]); // only the issued heat is offered
+    await expect(pickHeatNumber(sup, { componentId: s.comp, stockLotId: s.shell.lots[1].id })).rejects.toMatchObject({
+      detail: { reason: expect.stringMatching(/Material from heat H-1001 was issued/) },
+    });
+    await expect(issueAndPickHeat(head, { componentId: s.comp, stockLotId: s.shell.lots[1].id, qty: 1 })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    expect(await owner.stockTxn.count({ where: { componentId: s.comp } })).toBe(1);
+    await expect(pickHeatNumber(sup, { componentId: s.comp, stockLotId: s.shell.lots[0].id })).resolves.toMatchObject({ heatNumber: "H-1001" });
+  });
+
+  it("two people picking different heats at once record exactly one", async () => {
+    const s = await setup();
+    const results = await Promise.allSettled([
+      pickHeatNumber(sup, { componentId: s.comp, stockLotId: s.shell.lots[0].id }),
+      pickHeatNumber(operator, { componentId: s.comp, stockLotId: s.shell.lots[1].id }),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const lost = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(lost.reason).toMatchObject({ detail: { reason: expect.stringMatching(/already has heat number/) } });
+    expect(await owner.materialIdentification.count({ where: { componentId: s.comp } })).toBe(1);
+  });
+
+  it("two issue-and-picks at once issue once and pick once", async () => {
+    const s = await setup();
+    const go = (a: Actor) => issueAndPickHeat(a, { componentId: s.comp, stockLotId: s.shell.lots[0].id, qty: 2 });
+    const results = await Promise.all([go(head), go(admin), go(head)]);
+    expect(results.filter((r) => r.issued)).toHaveLength(1);
+    expect(await owner.stockTxn.count({ where: { componentId: s.comp, type: "ISSUE" } })).toBe(1);
+    expect(await owner.materialIdentification.count({ where: { componentId: s.comp } })).toBe(1);
+  });
+
+  it("issue-and-pick is all or nothing: an over-issue leaves no heat number behind", async () => {
+    const s = await setup();
+    await expect(issueAndPickHeat(head, { componentId: s.comp, stockLotId: s.shell.lots[1].id, qty: 99 })).rejects.toMatchObject({ code: "INSUFFICIENT_STOCK" });
+    expect(await owner.materialIdentification.count({ where: { componentId: s.comp } })).toBe(0);
+    expect(await owner.stockTxn.count({ where: { componentId: s.comp } })).toBe(0);
+  });
+
   it("issue and pick: Production Head and Admin only; issues once, picks, and a repeat does not issue twice", async () => {
     const s = await setup();
     const run = (a: Actor, lot = s.shell.lots[0].id, qty = 2) => issueAndPickHeat(a, { componentId: s.comp, stockLotId: lot, qty });
