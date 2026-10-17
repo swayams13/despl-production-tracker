@@ -14,6 +14,10 @@
 // (actor null, script). The published template rows are never touched
 // (invariant 9). It prints the requiresQc list that D3's rule derives, for the
 // QC head to review; it does not write requiresQc.
+//
+// Mapping status: DRAFT_NEEDS_SIGNOFF (--apply refuses), REVIEWED_PROVISIONAL (17 Oct
+// 2026: recorded by Swayam for SJ and the QC head, ratification pending, like D2; applies,
+// and every audit row carries the status) and REVIEWED (both ratified).
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -24,7 +28,7 @@ import { deriveRequiresQc, type AssemblyRole } from "../src/lib/shared/floor-rul
 const ROLE = z.enum(["FIT_UP", "WELD", "NDT", "HEAT_TREATMENT", "FINAL_PWHT", "HYDRO"]);
 
 export const mappingSchema = z.object({
-  reviewStatus: z.enum(["DRAFT_NEEDS_SIGNOFF", "REVIEWED"]),
+  reviewStatus: z.enum(["DRAFT_NEEDS_SIGNOFF", "REVIEWED_PROVISIONAL", "REVIEWED"]),
   template: z.object({ family: z.string().min(1), assemblyTemplateVersion: z.number().int().positive() }),
   components: z.object({
     appliesToJobNumbers: z.array(z.string().min(1)),
@@ -101,9 +105,9 @@ export async function backfillFloorFacts(
   opts: { mapping: Mapping; apply: boolean; allowDraft?: boolean; jobIds?: number[] },
 ): Promise<BackfillReport> {
   const { mapping, apply } = opts;
-  if (apply && mapping.reviewStatus !== "REVIEWED" && !opts.allowDraft) {
+  if (apply && mapping.reviewStatus === "DRAFT_NEEDS_SIGNOFF" && !opts.allowDraft) {
     throw new Error(
-      `Refusing --apply: the mapping is ${mapping.reviewStatus}. SJ and the QC head must sign it off (reviewStatus REVIEWED) first.`,
+      `Refusing --apply: the mapping is ${mapping.reviewStatus}. SJ and the QC head must sign it off (reviewStatus REVIEWED, or REVIEWED_PROVISIONAL on the Production Head's authority) first.`,
     );
   }
   const byseq = new Map(mapping.steps.map((s) => [s.seq, s]));
@@ -186,7 +190,7 @@ export async function backfillFloorFacts(
             entityId: String(entityId),
             before: before as never,
             after: after as never,
-            userAgent: "scripts/lean-backfill-floor-facts.ts",
+            userAgent: `scripts/lean-backfill-floor-facts.ts (mapping ${mapping.reviewStatus})`,
           });
           await tx.auditLog.createMany({
             data: [
@@ -299,7 +303,7 @@ async function main() {
       allowDraft: argv.includes("--allow-draft"),
     });
     printReport(report);
-    if (!apply) console.log("\nRe-run with --apply to write (needs a REVIEWED mapping).");
+    if (!apply) console.log("\nRe-run with --apply to write (needs a REVIEWED or REVIEWED_PROVISIONAL mapping).");
   } finally {
     await prisma.$disconnect();
   }

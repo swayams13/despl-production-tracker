@@ -18,11 +18,12 @@ const template = JSON.parse(
 ) as { steps: { seq: number; kind: "WORK" | "INSPECTION"; activity: string; groupCode: string; groupName: string; srNo: string; jointRef?: string }[] };
 const bySeq = new Map(mapping.steps.map((s) => [s.seq, s]));
 
-describe("seed/assembly-step-roles-pv-v1.json (draft mapping of the 54 DESPL-320 steps)", () => {
-  it("is marked DRAFT_NEEDS_SIGNOFF and unsigned: SJ and the QC head have not reviewed it", () => {
+describe("seed/assembly-step-roles-pv-v1.json (mapping of the 54 DESPL-320 steps, provisionally signed off)", () => {
+  it("is REVIEWED_PROVISIONAL: signed off by Swayam for SJ and the QC head, not yet ratified by them", () => {
     const raw = JSON.parse(readFileSync(path.join(__dirname, "..", "seed", "assembly-step-roles-pv-v1.json"), "utf-8"));
-    expect(raw.reviewStatus).toBe("DRAFT_NEEDS_SIGNOFF");
-    expect(raw.signoff.signedOffBy).toBeNull();
+    expect(raw.reviewStatus).toBe("REVIEWED_PROVISIONAL");
+    expect(raw.signoff.signedOffBy).toMatch(/provisional/);
+    expect(raw.signoff.signedOffAt).toBe("2026-10-17");
     expect(raw.signoff.requiredFrom).toEqual(["SJ (Production Head)", "QC head"]);
   });
 
@@ -121,7 +122,7 @@ const RUN_DB = !!process.env.RUN_DB_TESTS && !!process.env.DIRECT_URL;
 describe.skipIf(!RUN_DB)("lean-backfill-floor-facts (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
-  const draft: Mapping = mapping;
+  const draft: Mapping = { ...mapping, reviewStatus: "DRAFT_NEEDS_SIGNOFF" };
   const reviewed: Mapping = { ...mapping, reviewStatus: "REVIEWED" };
 
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -329,6 +330,15 @@ describe.skipIf(!RUN_DB)("lean-backfill-floor-facts (DB)", async () => {
     expect((await owner.assemblyStep.findUniqueOrThrow({ where: { id } })).role).toBe("WELD");
     expect(report.jobs.find((j) => j.jobId === other.jobId)!.stepsKept).toBeGreaterThanOrEqual(1);
     expect(report.totals.stepChanges).toBe(0);
+  });
+
+  it("a REVIEWED_PROVISIONAL mapping applies without --allow-draft and its audit rows carry the status", async () => {
+    const id = main.stepIds[14]; // seq 15
+    await owner.assemblyStep.update({ where: { id }, data: { role: null, jointRef: null, pressurePart: false } });
+    const report = await run({ ...mapping, reviewStatus: "REVIEWED_PROVISIONAL" }, true);
+    expect(report.totals.stepChanges).toBe(1);
+    const row = await owner.auditLog.findFirst({ where: { entityType: "AssemblyStep", entityId: String(id), action: "backfill.floorFacts" }, orderBy: { id: "desc" } });
+    expect(row?.userAgent).toMatch(/REVIEWED_PROVISIONAL/);
   });
 
   it("a REVIEWED mapping applies without --allow-draft", async () => {

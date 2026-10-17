@@ -1,16 +1,16 @@
 {
   "$schema": "despl.assemblyStepRoles.v1",
-  "reviewStatus": "DRAFT_NEEDS_SIGNOFF",
+  "reviewStatus": "REVIEWED_PROVISIONAL",
   "signoff": {
     "requiredFrom": [
       "SJ (Production Head)",
       "QC head"
     ],
-    "signedOffBy": null,
-    "signedOffAt": null,
-    "howToApprove": "Change reviewStatus to REVIEWED only after both have signed off the roles, joint labels and pressure flags below. scripts/lean-backfill-floor-facts.ts --apply refuses a DRAFT file unless --allow-draft is given (tests and throwaway databases only)."
+    "signedOffBy": "Swayam, provisional, for SJ (Production Head) and the QC head",
+    "signedOffAt": "2026-10-17",
+    "howToApprove": "REVIEWED_PROVISIONAL (17 Oct 2026): recorded by Swayam acting for SJ and the QC head, as for D2/D3/D12 on 14 Oct; they ratify later. When both have ratified the roles, joint labels and pressure flags below, change reviewStatus to REVIEWED and fill signedOffBy. scripts/lean-backfill-floor-facts.ts --apply accepts REVIEWED and REVIEWED_PROVISIONAL, refuses DRAFT_NEEDS_SIGNOFF unless --allow-draft (tests and throwaway databases only); every audit row it writes carries the status."
   },
-  "source": "seed/assembly-template-pressure-vessel-v1.json (54 steps, A to Q). Drafted 14 Oct 2026 for Lean Core L1.2c from CLAUDE.md D2 (H1 to H6), D3 and D12. Nothing here is applied to any shared database.",
+  "source": "seed/assembly-template-pressure-vessel-v1.json (54 steps, A to Q). Drafted 14 Oct 2026 for Lean Core L1.2c from CLAUDE.md D2 (H1 to H6), D3 and D12. Not applied to any shared database until 17 Oct 2026 (provisional sign-off, see signoff).",
   "template": {
     "family": "PRESSURE_VESSEL",
     "assemblyTemplateVersion": 1
