@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import type { ThemeState } from "@/lib/theme";
+import type { Locale } from "@/lib/i18n";
 
 /**
  * Save the caller's own appearance preference (D27/D28).
@@ -23,4 +24,9 @@ export async function setOwnThemePreference(actor: Actor, state: ThemeState): Pr
       data: { themePreference: state.themePreference, outdoorMode: state.outdoorMode },
     }),
   );
+}
+
+/** Save the caller's own Floor/Today language (L2.12). Same category and scoping as the theme above. */
+export async function setOwnLocale(actor: Actor, locale: Locale): Promise<void> {
+  await withTenant(actor.tenantId, (tx) => tx.user.update({ where: { id: actor.userId }, data: { locale } }));
 }

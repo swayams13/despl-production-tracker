@@ -2,6 +2,7 @@ import { withTenant } from "@/lib/db";
 import { readSession } from "@/lib/auth/session";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { ThemePreference } from "@/lib/theme";
+import type { Locale } from "@/lib/i18n";
 
 export const ROLES = {
   ADMIN: "ADMIN",
@@ -38,6 +39,8 @@ export interface Actor {
   themePreference: ThemePreference;
   /** Outdoor (high-contrast) palette on/off (D25). */
   outdoorMode: boolean;
+  /** Floor/Today language (L2.12). Optional so test actors need not set it; absent means "en". */
+  locale?: Locale;
 }
 
 /**
@@ -75,6 +78,7 @@ export async function getActor(): Promise<Actor | null> {
       mustChangePassword: user.mustChangePassword,
       themePreference: user.themePreference,
       outdoorMode: user.outdoorMode,
+      locale: user.locale,
     };
   });
 }

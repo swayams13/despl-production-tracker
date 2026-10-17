@@ -1,0 +1,132 @@
+/**
+ * Lean Core L2.12: the Floor screen and Today dictionary. English is the source
+ * of truth: `hi.ts` and `gu.ts` are typed `Dict`, so a missing or extra key fails typecheck.
+ *
+ * Deliberately NOT here (stays English until a DESPL speaker reviews it): refusal
+ * and safety copy, i.e. the server's refusal messages, the "Not done yet / Can
+ * clear it / Notify" lines, and the Can't-start-yet / Out-of-usual-order states.
+ * Template data (activity names, groups, late-reason categories) is also English.
+ * Codes, serials and numbers are never translated (frame 01G).
+ */
+export const en = {
+  /** Native name, shown in the person menu. */
+  langName: "English",
+  /** BCP 47 tag for dates; Western digits so they match the traveller. */
+  intl: "en-IN",
+  state: {
+    READY: "Ready",
+    IN_PROGRESS: "In progress",
+    WITH_QC: "With QC",
+    QC_STEP: "Waiting for QC",
+  },
+  common: {
+    start: "Start",
+    done: "Done",
+    markDone: "Mark done",
+    startEarly: "Start early…",
+    cancel: "Cancel",
+    dismiss: "Dismiss",
+    undo: "Undo",
+    tryAgain: "Try again",
+    now: "Now",
+    earlier: "Earlier",
+    notDone: "Not done",
+    notNow: "Not now",
+    optionalNote: "Add a note (optional)",
+  },
+  outcome: {
+    notSent: "Not sent",
+    noConnection: "No connection. Nothing was sent.",
+    otherUnitStep: "Another unit's step",
+    partial: (done: number, blocked: number) => `${done} done · ${blocked} blocked`,
+    recorded: (label: string) => `${label} — recorded`,
+    markedDone: (title: string, units: number) => `${title} marked done${units > 1 ? ` on ${units} units` : ""}`,
+    startedEarly: (title: string, units: number) => `${title} started early${units > 1 ? ` on ${units} units` : ""}`,
+    started: (title: string, units: number) => `${title} started${units > 1 ? ` on ${units} units` : ""}`,
+  },
+  override: {
+    MATERIAL_READY_EARLY: "Material or part ready early",
+    CREW_OR_MACHINE_FREE: "Crew or machine free, upstream not ready",
+    ACCESS_AVAILABLE_NOW: "Crane, access or space available now",
+    CLIENT_PRIORITY: "Client or delivery priority",
+    OTHER: "Other",
+  },
+  sheet: {
+    titleDone: "Mark done",
+    titleStartEarly: "Start early",
+    titleStart: "Start",
+    whyNow: "Why now?",
+    sayWhyRequired: "Say why (required)",
+    flagged: "This is flagged for the Production Head. Nothing waits for approval.",
+    doneAt: "Done at",
+    startedAt: "Started at",
+    upToThreeDays: "You can record up to 3 days back.",
+    welderFor: (joint: string) => `Welder for ${joint}`,
+    pickWelderOption: "Pick the welder…",
+    alsoFor: (serials: string, n: number) => `Also for ${serials}${n > 0 ? ` (${n})` : ""}`,
+    clearAll: "Clear all",
+    selectAll: "Select all",
+    inProgress: "in progress",
+    notStarted: "not started",
+    lateRequired: "This is late. What held it up?",
+    lateOptional: "If any of these are late, what held them up?",
+    markDoneFor: (units: number) => `Mark done for ${units} units`,
+    startAndFlag: "Start and flag for Production Head",
+    pickWelder: "Pick the welder",
+    pickHeldUp: "Pick what held it up",
+    pickWhyNow: "Pick why now",
+    sayWhy: "Say why",
+    pickTime: "Pick the time",
+  },
+  floor: {
+    nextFor: (depts: string) => `Next for ${depts}`,
+    nextAll: "Next steps, all departments",
+    doneCount: (n: number) => ` · ${n} done`,
+    nothingWaiting: "Nothing waiting for you on this unit.",
+    allDone: "Everything for your department here is done.",
+    noneAssigned: "No steps are assigned to your department.",
+    showMore: (n: number) => `Show ${n} more`,
+    startedAt: (time: string) => ` · started ${time}`,
+    alsoOnOthers: (n: number) => ` · also on ${n} other unit${n === 1 ? "" : "s"}`,
+  },
+  today: {
+    title: "Today",
+    summary: (assigned: number, attention: number, due: number, blocked: number) =>
+      `${assigned} assigned · ${attention} needs attention · ${due} due today · ${blocked} blocked`,
+    checkInButton: "End-of-shift check-in",
+    nothingAssigned: "Nothing is assigned to you.",
+    takeNext: "Take the next job waiting in your department.",
+    claimNext: "Claim next",
+    claimed: "Claimed. It is on your list.",
+    assignedHere: "Work assigned to you appears here. Unassigned work is in the section below.",
+    askSupervisorAssign: "Ask your supervisor to assign you work.",
+    doFirst: "Do this first",
+    todaySection: (n: number) => `Today · ${n}`,
+    blockedSection: (n: number) => `Blocked · ${n}`,
+    upcomingSection: (n: number) => `Upcoming · ${n}`,
+    showAll: (n: number) => `Show all ${n}`,
+    unassigned: (n: number) => `${n} unassigned in your department.`,
+    assignFromTeam: "Assign from Team",
+    myProgress: "My progress",
+    onTime30: "On time, last 30 days:",
+    noData: "no data yet",
+    doneThisWeek: "Done this week:",
+    clearedToday: "Cleared today:",
+    overdueReason: "Overdue · reason needed · ",
+    due: "due",
+    notScheduled: "not scheduled",
+  },
+  checkIn: {
+    aria: "End-of-shift check-in",
+    heading: "Before you leave — today's plan",
+    items: (n: number) => `${n} items · work you already marked is filled in`,
+    doneToday: "Done today",
+    heldUp: "What held it up?",
+    noProcess: "Some items have no process to file a reason on: they stay as they are.",
+    nothingChanged: "Nothing changed",
+    send: (n: number) => `Send ${n} update${n === 1 ? "" : "s"}`,
+    label: (done: number, held: number) => `${done} marked done${held ? ` · ${held} held up, reason filed` : ""}`,
+  },
+};
+
+export type Dict = typeof en;

@@ -886,8 +886,10 @@ body {
 .theme-industrial .fl-sheet fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
 .theme-industrial .fl-sheet legend { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0; margin-bottom: 6px; }
 .theme-industrial .fl-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.theme-industrial .fl-chip { min-height: 44px; padding: 0 14px; border: 1px solid var(--border); border-radius: 22px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.theme-industrial .fl-chip { min-height: 44px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 22px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
 .theme-industrial .fl-chip.on { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, var(--surface)); font-weight: 600; }
+/* L2.12: Devanagari and Gujarati need more line height; labels wrap inside buttons, never clip. */
+.theme-industrial :lang(hi) .fl-wrap, .theme-industrial :lang(gu) .fl-wrap { line-height: 1.5; }
 .theme-industrial .fl-units { display: grid; gap: 4px; }
 .theme-industrial .fl-unit { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
 .theme-industrial .fl-unit small { margin-left: auto; color: var(--muted); }

@@ -7,9 +7,10 @@ import { toast } from "sonner";
 import { StageSpine } from "./stage-spine";
 import { useTheme } from "./theme-root";
 import { markNotificationReadAction, markAllNotificationsReadAction } from "@/app/actions/notifications";
-import { setThemeAction } from "@/app/actions/preferences";
+import { setLocaleAction, setThemeAction } from "@/app/actions/preferences";
 import { logout } from "@/app/actions/auth";
 import { nextThemeState, themeLabel } from "@/lib/theme";
+import { dictFor, nextLocale, type Locale } from "@/lib/i18n";
 import type { NotificationRow } from "@/lib/services/notifications.read";
 import { fmtWhen, notificationHref } from "@/lib/notifications-ui";
 import type { JobListItem } from "@/lib/services/jobs.read";
@@ -134,6 +135,7 @@ export function AppShell({
   notifications,
   jobs,
   leanFloor,
+  locale,
 }: {
   children: ReactNode;
   userName: string;
@@ -147,6 +149,8 @@ export function AppShell({
   jobs: JobListItem[];
   /** FEATURES.leanFloor, read on the server: Scan and its target exist only while it is on. */
   leanFloor: boolean;
+  /** User.locale: the language of the Floor screen and Today (L2.12). */
+  locale: Locale;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -213,6 +217,21 @@ export function AppShell({
     });
   };
 
+  // Language: cycles English → हिन्दी → ગુજરાતી. Only while the lean floor is on, since only
+  // the Floor screen and Today read it (a control with no effect is a dead control).
+  const [langPending, startLangTransition] = useTransition();
+  const cycleLocale = () => {
+    if (langPending) return;
+    startLangTransition(async () => {
+      const r = await setLocaleAction(nextLocale(locale));
+      if (!r.ok) {
+        toast.error(r.message);
+        return;
+      }
+      router.refresh();
+    });
+  };
+
   // Person-block menu (12B): role, theme and sign out. One element, rendered
   // in the sidebar foot (desktop) and the topbar (tablet, phone) — CSS shows
   // whichever the breakpoint wants. The menu stays open while the theme cycles.
@@ -250,6 +269,20 @@ export function AppShell({
             {themeIcon}
             <span>Theme: {themeText}</span>
           </button>
+          {leanFloor && (
+            <button
+              type="button"
+              role="menuitem"
+              className="d-row person-item"
+              lang={locale}
+              aria-label={`Language: ${dictFor(locale).langName}. Switch language`}
+              aria-busy={langPending}
+              aria-disabled={langPending}
+              onClick={cycleLocale}
+            >
+              <span>Language: {dictFor(locale).langName}</span>
+            </button>
+          )}
           <button type="button" role="menuitem" className="d-row person-item" onClick={() => logout()}>
             Sign out
           </button>
