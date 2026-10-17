@@ -1,8 +1,16 @@
 import { withTenant, type Tx } from "@/lib/db";
 import { audited } from "@/lib/audit";
-import { assertClientScope, assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
+import { assertClientScope, assertNotClientUser, requireRole, type Actor } from "@/lib/authz";
+import { ISSUE_ROLES, LOT_HEAT_ROLES, RECEIVE_ROLES, SCRAP_ROLES } from "@/lib/shared/stores-access";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { receiveStockSchema, issueStockSchema, type ReceiveStockInput, type IssueStockInput } from "@/lib/shared/schemas";
+import {
+  receiveStockSchema,
+  issueStockSchema,
+  recordLotHeatSchema,
+  type ReceiveStockInput,
+  type IssueStockInput,
+  type RecordLotHeatInput,
+} from "@/lib/shared/schemas";
 import type { StockLot, StockTxn, StockTxnType } from "@/generated/prisma/client";
 
 /**
@@ -20,7 +28,7 @@ import type { StockLot, StockTxn, StockTxnType } from "@/generated/prisma/client
 export async function receiveStock(actor: Actor, input: ReceiveStockInput): Promise<StockLot> {
   const { bomItemId, heatNumber, location, qty, sourceProcurementEventId } = receiveStockSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...RECEIVE_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     const bomItem = await tx.bomItem.findFirst({
@@ -58,6 +66,52 @@ export async function receiveStock(actor: Actor, input: ReceiveStockInput): Prom
           after: { bomItemId, heatNumber: heatNumber ?? null, location, qty },
           eventType: "StockLotReceived",
           eventPayload: { bomItemId, qty },
+        },
+      };
+    });
+  });
+}
+
+/**
+ * L2.14: add the heat number to a lot that was received without one. The one
+ * update `stock_lots` allows (a column grant, with a trigger that lets it go from
+ * empty to a value exactly once); everything else stays append-only. The audit row
+ * keeps who set it and when. A lot that already has a heat number is QC's to correct.
+ */
+export async function recordLotHeat(actor: Actor, input: RecordLotHeatInput): Promise<{ stockLotId: number; heatNumber: string }> {
+  const { stockLotId, heatNumber } = recordLotHeatSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ...LOT_HEAT_ROLES);
+  return withTenant(actor.tenantId, async (tx) => {
+    await loadLotForMutation(tx, actor, stockLotId); // locks the lot, checks the tenant, scopes the job
+    const lot = await tx.stockLot.findUniqueOrThrow({ where: { id: stockLotId }, select: { heatNumber: true, bomItemId: true } });
+    if (lot.heatNumber) {
+      throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: `This lot already has heat number ${lot.heatNumber}. QC corrects a recorded heat number.` });
+    }
+    // Not after the material has been cut into a part: that would rewrite the trace of finished work
+    // (it is QC's to correct once the cutting is recorded, as for a picked heat number).
+    const issuedTo = await tx.stockTxn.findMany({ where: { stockLotId, type: "ISSUE", componentId: { not: null } }, select: { componentId: true } });
+    const partIds = [...new Set(issuedTo.map((t) => t.componentId!))];
+    if (partIds.length) {
+      const cut = await tx.componentOperation.count({
+        where: { componentId: { in: partIds }, operation: { code: "CUTTING" }, status: { notIn: ["NOT_STARTED", "IN_PROGRESS"] } },
+      });
+      if (cut > 0) {
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "Material from this lot has already been cut into a part. QC corrects a heat number after that." });
+      }
+    }
+    return audited(tx, actor, async () => {
+      await tx.stockLot.update({ where: { id: stockLotId }, data: { heatNumber } });
+      return {
+        result: { stockLotId, heatNumber },
+        audit: {
+          action: "stock.recordHeat",
+          entityType: "StockLot",
+          entityId: stockLotId,
+          before: { heatNumber: null },
+          after: { heatNumber, bomItemId: lot.bomItemId },
+          eventType: "StockLotHeatRecorded",
+          eventPayload: { stockLotId, heatNumber },
         },
       };
     });
@@ -128,10 +182,11 @@ async function createStockTxn(
   action: string,
   eventType: string,
   guardOverIssue: boolean,
+  roles: readonly (typeof ISSUE_ROLES)[number][] | readonly (typeof SCRAP_ROLES)[number][],
 ): Promise<StockTxn> {
   const parsed = issueStockSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...roles);
   return withTenant(actor.tenantId, (tx) => stockTxnTx(tx, actor, parsed, type, action, eventType, guardOverIssue));
 }
 
@@ -149,6 +204,24 @@ async function stockTxnTx(
   const { available, jobId } = await loadLotForMutation(tx, actor, stockLotId);
   if (guardOverIssue && qty > available) {
     throw new AppError(ERROR_CODES.INSUFFICIENT_STOCK, { stockLotId, requested: qty, available });
+  }
+
+  // A return puts issued material back: it cannot exceed what is out on issue from this lot (and, when
+  // it names a part, from that part). Without this a return conjures stock that was never received, and
+  // hides a shortage. (L2.14: Stores may now return, so the ledger enforces it, not the screen.)
+  if (type === "RETURN") {
+    const moves = await tx.stockTxn.findMany({ where: { stockLotId, type: { in: ["ISSUE", "RETURN"] } }, select: { type: true, qty: true, componentId: true } });
+    const out = (only?: number) =>
+      moves.filter((m) => only == null || m.componentId === only).reduce((n, m) => n + (m.type === "ISSUE" ? m.qty.toNumber() : -m.qty.toNumber()), 0);
+    const outLot = out();
+    const outPart = componentId != null ? out(componentId) : outLot;
+    const cap = Math.min(outLot, outPart);
+    if (qty > cap) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { reason: cap > 0 ? `Only ${cap} is out on issue${componentId != null ? " to this part" : ""} from this lot, so that is the most that can be returned.` : "Nothing is out on issue from this lot to return." },
+      );
+    }
   }
 
   if (componentId != null) {
@@ -188,23 +261,23 @@ async function stockTxnTx(
  * lot's available quantity below zero (exact boundary: issuing exactly the
  * available amount succeeds, one more fails). */
 export function issueStock(actor: Actor, input: IssueStockInput): Promise<StockTxn> {
-  return createStockTxn(actor, input, "ISSUE", "stock.issue", "StockIssued", true);
+  return createStockTxn(actor, input, "ISSUE", "stock.issue", "StockIssued", true, ISSUE_ROLES);
 }
 
 /** `issueStock` inside the caller's transaction, for a caller that must make the issue and another write atomic. Same role gate. */
 export function issueStockTx(tx: Tx, actor: Actor, input: IssueStockInput): Promise<StockTxn> {
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...ISSUE_ROLES);
   return stockTxnTx(tx, actor, issueStockSchema.parse(input), "ISSUE", "stock.issue", "StockIssued", true);
 }
 
 /** Return previously-issued stock back to a lot. No over-issue guard — this
  * is adding back, not taking away. */
 export function returnStock(actor: Actor, input: IssueStockInput): Promise<StockTxn> {
-  return createStockTxn(actor, input, "RETURN", "stock.return", "StockReturned", false);
+  return createStockTxn(actor, input, "RETURN", "stock.return", "StockReturned", false, ISSUE_ROLES);
 }
 
 /** Scrap stock from a lot. Same over-scrap guard as `issueStock`. */
 export function scrapStock(actor: Actor, input: IssueStockInput): Promise<StockTxn> {
-  return createStockTxn(actor, input, "SCRAP", "stock.scrap", "StockScrapped", true);
+  return createStockTxn(actor, input, "SCRAP", "stock.scrap", "StockScrapped", true, SCRAP_ROLES);
 }

@@ -342,6 +342,12 @@ export const receiveStockSchema = z
   .strict();
 export type ReceiveStockInput = z.infer<typeof receiveStockSchema>;
 
+/** L2.14: the heat number of a lot that was received without one. Set once; QC corrects it after that. */
+export const recordLotHeatSchema = z
+  .object({ stockLotId: id, heatNumber: z.string().trim().min(1, "Heat number is required").max(64) })
+  .strict();
+export type RecordLotHeatInput = z.infer<typeof recordLotHeatSchema>;
+
 /** Move stock against an existing `StockLot` — issue to a component, return, or scrap.
  * One shared shape for all three (same near-identical-mutation-family convention as
  * `recordProcurementEventSchema`); `type` is supplied by the thin service function, not the caller. */

@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { audited } from "@/lib/audit";
-import { assertClientScope, assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
+import { assertClientScope, assertNotClientUser, requireRole, type Actor } from "@/lib/authz";
+import { PROCUREMENT_ROLES, RECEIPT_EVENT_ROLES } from "@/lib/shared/stores-access";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { recordProcurementEventSchema, type RecordProcurementEventInput } from "@/lib/shared/schemas";
 import type { ProcurementEvent } from "@/generated/prisma/client";
@@ -22,7 +23,8 @@ export async function recordProcurementEvent(
 ): Promise<ProcurementEvent> {
   const { bomItemId, type, qty, refNo } = recordProcurementEventSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  // Indent and PO are Procurement's; Stores records the receipt (L2.14).
+  requireRole(actor, ...(type === "RECEIPT" ? RECEIPT_EVENT_ROLES : PROCUREMENT_ROLES));
 
   return withTenant(actor.tenantId, async (tx) => {
     const bomItem = await tx.bomItem.findFirst({

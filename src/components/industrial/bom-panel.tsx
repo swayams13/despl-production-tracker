@@ -13,7 +13,11 @@ import {
   importBomItemsAction,
 } from "@/app/actions/bom";
 import { createDrawingRevisionAction } from "@/app/actions/drawing";
-import { receiveStockAction, issueStockAction, returnStockAction, scrapStockAction } from "@/app/actions/stock";
+import { receiveStockAction, issueStockAction, returnStockAction, scrapStockAction, recordLotHeatAction } from "@/app/actions/stock";
+import { storesAccess, type StoresAccess } from "@/lib/shared/stores-access";
+
+/** Callers that pass no access (the old BOM tab) see every control and let the server refuse, as before. */
+const ALL_ACCESS: StoresAccess = storesAccess(["ADMIN", "PRODUCTION_HEAD", "QC", "STORES"]);
 import {
   startComponentOperationAction,
   submitComponentOperationAction,
@@ -46,12 +50,26 @@ function procurementChipClass(status: BomItemRow["procurement"]["status"]): stri
   return "c-progress";
 }
 
-export function BomPanel({ jobId, bom, tabHref }: { jobId: number; bom: BomTree; tabHref?: string }) {
+export function BomPanel({
+  jobId,
+  bom,
+  tabHref,
+  access = ALL_ACCESS,
+  initialItemId = null,
+}: {
+  jobId: number;
+  bom: BomTree;
+  tabHref?: string;
+  /** What the viewer's role may do (L2.14): controls it cannot use are not shown. */
+  access?: StoresAccess;
+  /** Open this BOM item first (a link from the Materials pipeline or the Stores queue). */
+  initialItemId?: number | null;
+}) {
   const router = useRouter();
   /** The URL the equipment / unit selectors extend; L2.8 points it at Materials > Parts and stock. */
   const base = tabHref ?? `/jobs/${jobId}?tab=bom`;
   const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(bom.groups[0] ? [bom.groups[0].name] : []));
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(initialItemId);
   const [addingItem, setAddingItem] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   // Derived from the current `bom` prop (not a stored snapshot) so a
@@ -172,7 +190,7 @@ export function BomPanel({ jobId, bom, tabHref }: { jobId: number; bom: BomTree;
           <h3>{selected ? `Component — ${selected.partName}` : "Select an item"}</h3>
           {selected?.components[0] && <StatusChip status={selected.components[0].displayStatus} />}
         </div>
-        {selected ? <ComponentDetail jobId={jobId} item={selected} welders={bom.welders} delayCategories={bom.delayCategories} /> : (
+        {selected ? <ComponentDetail jobId={jobId} item={selected} welders={bom.welders} delayCategories={bom.delayCategories} access={access} /> : (
           <p className="note" style={{ margin: "16px 0" }}>Click a BOM item on the left to view its component detail.</p>
         )}
       </div>
@@ -488,11 +506,13 @@ function ComponentDetail({
   item,
   welders,
   delayCategories,
+  access,
 }: {
   jobId: number;
   item: BomItemRow;
   welders: WelderOption[];
   delayCategories: DelayCategoryOption[];
+  access: StoresAccess;
 }) {
   const comp = item.components[0];
   const [recording, setRecording] = useState(false);
@@ -561,7 +581,7 @@ function ComponentDetail({
           )}
         </dd>
         <dt></dt>
-        <dd><ProcurementEventControl jobId={jobId} bomItemId={item.id} /></dd>
+        <dd>{access.receiptEvent ? <ProcurementEventControl jobId={jobId} bomItemId={item.id} access={access} /> : <span style={{ color: "var(--muted)" }}>—</span>}</dd>
         <dt>Heat no.</dt><dd className="mono">{mtc?.heatNumber ?? "—"}</dd>
         <dt>MTC</dt>
         <dd>
@@ -589,18 +609,18 @@ function ComponentDetail({
           <input className="ws-detail" placeholder="MTC ref (optional)" value={mtcRef} onChange={(e) => setMtcRef(e.target.value)} style={{ flex: 1, minWidth: 120 }} />
           <select className="btn" value={pmiResult} onChange={(e) => setPmiResult(e.target.value as typeof pmiResult)} aria-label="PMI result">
             <option value="PENDING">PMI pending</option>
-            <option value="ACCEPT">PMI accept</option>
-            <option value="REJECT">PMI reject</option>
+            {access.decidePmi && <option value="ACCEPT">PMI accept</option>}
+            {access.decidePmi && <option value="REJECT">PMI reject</option>}
             <option value="NA">PMI N/A</option>
           </select>
           <button className="btn btn-accent" disabled={pending} onClick={submitMtc}>Save</button>
           <button className="btn" disabled={pending} onClick={() => setRecording(false)}>Cancel</button>
         </div>
       ) : (
-        <button className="btn" style={{ marginBottom: 14 }} onClick={() => setRecording(true)}>Record MTC…</button>
+        access.identify && <button className="btn" style={{ marginBottom: 14 }} onClick={() => setRecording(true)}>Record MTC…</button>
       )}
 
-      <StockSection jobId={jobId} item={item} componentId={comp?.id} />
+      <StockSection jobId={jobId} item={item} componentId={comp?.id} access={access} />
 
       {/* B9, Phase 4 — SEAM: only rendered once a governingDrawingId is
           recorded on this component (not yet authorable from this screen,
@@ -638,10 +658,10 @@ function ComponentDetail({
  * (and is required) for RECEIPT, matching `recordProcurementEventSchema`'s cross-field
  * rule server-side; the client mirrors that rule so the form doesn't round-trip a refusal
  * for something it could refuse to submit in the first place. */
-function ProcurementEventControl({ jobId, bomItemId }: { jobId: number; bomItemId: number }) {
+function ProcurementEventControl({ jobId, bomItemId, access }: { jobId: number; bomItemId: number; access: StoresAccess }) {
   const router = useRouter();
   const [logging, setLogging] = useState(false);
-  const [type, setType] = useState<"INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT">("INDENT_RAISED");
+  const [type, setType] = useState<"INDENT_RAISED" | "INDENT_APPROVED" | "PO_PLACED" | "RECEIPT">(access.procurement ? "INDENT_RAISED" : "RECEIPT");
   const [qty, setQty] = useState("");
   const [refNo, setRefNo] = useState("");
   const [pending, start] = useTransition();
@@ -663,13 +683,13 @@ function ProcurementEventControl({ jobId, bomItemId }: { jobId: number; bomItemI
     });
   };
 
-  if (!logging) return <button className="btn" onClick={() => setLogging(true)}>Log procurement event…</button>;
+  if (!logging) return <button className="btn" onClick={() => setLogging(true)}>{access.procurement ? "Log procurement event…" : "Log a receipt…"}</button>;
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       <select className="btn" value={type} onChange={(e) => setType(e.target.value as typeof type)} aria-label="Event type">
-        <option value="INDENT_RAISED">Indent raised</option>
-        <option value="INDENT_APPROVED">Indent approved</option>
-        <option value="PO_PLACED">PO placed</option>
+        {access.procurement && <option value="INDENT_RAISED">Indent raised</option>}
+        {access.procurement && <option value="INDENT_APPROVED">Indent approved</option>}
+        {access.procurement && <option value="PO_PLACED">PO placed</option>}
         <option value="RECEIPT">Receipt</option>
       </select>
       {type === "RECEIPT" && (
@@ -691,10 +711,12 @@ function StockLotMoveControl({
   jobId,
   lotId,
   componentId,
+  access,
 }: {
   jobId: number;
   lotId: number;
   componentId: number | undefined;
+  access: StoresAccess;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<"idle" | "ISSUE" | "RETURN" | "SCRAP">("idle");
@@ -722,9 +744,9 @@ function StockLotMoveControl({
   if (mode === "idle") {
     return (
       <span style={{ display: "inline-flex", gap: 4 }}>
-        <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("ISSUE")}>Issue</button>
-        <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("RETURN")}>Return</button>
-        <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("SCRAP")}>Scrap</button>
+        {access.issue && <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("ISSUE")}>Issue</button>}
+        {access.issue && <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("RETURN")}>Return</button>}
+        {access.scrap && <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setMode("SCRAP")}>Scrap</button>}
       </span>
     );
   }
@@ -740,10 +762,39 @@ function StockLotMoveControl({
   );
 }
 
+/** L2.14: a lot received without a heat number can be given one, once. QC corrects it after that. */
+function LotHeatControl({ jobId, lotId }: { jobId: number; lotId: number }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [heat, setHeat] = useState("");
+  const [pending, start] = useTransition();
+  const save = () => {
+    if (!heat.trim()) return toast.error("Enter the heat number.");
+    start(async () => {
+      const r = await recordLotHeatAction(jobId, lotId, heat.trim());
+      if (!r.ok) {
+        toast.error(typeof r.detail?.reason === "string" ? r.detail.reason : r.message);
+        return;
+      }
+      toast.success("Heat number recorded.");
+      setOpen(false);
+      router.refresh();
+    });
+  };
+  if (!open) return <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setOpen(true)}>Add heat number</button>;
+  return (
+    <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+      <input className="ws-detail" placeholder="Heat number" value={heat} maxLength={64} onChange={(e) => setHeat(e.target.value)} style={{ width: 110 }} autoFocus />
+      <button className="btn btn-accent" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} disabled={pending} onClick={save}>Save</button>
+      <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} disabled={pending} onClick={() => setOpen(false)}>Cancel</button>
+    </span>
+  );
+}
+
 /** Receive stock against a BOM item, and the list of lots received so far with their
  * Issue/Return/Scrap controls. `availableQty`/`shortage` (rendered above, in the kv grid)
  * already reflect this data — this section is where that number is actually produced. */
-function StockSection({ jobId, item, componentId }: { jobId: number; item: BomItemRow; componentId: number | undefined }) {
+function StockSection({ jobId, item, componentId, access }: { jobId: number; item: BomItemRow; componentId: number | undefined; access: StoresAccess }) {
   const router = useRouter();
   const [receiving, setReceiving] = useState(false);
   const [heatNumber, setHeatNumber] = useState("");
@@ -775,12 +826,12 @@ function StockSection({ jobId, item, componentId }: { jobId: number; item: BomIt
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
           <input className="ws-detail" placeholder="Location" value={location} onChange={(e) => setLocation(e.target.value)} style={{ flex: 1, minWidth: 100 }} autoFocus />
           <input className="ws-detail" type="number" min="0" step="any" placeholder="Quantity" value={qty} onChange={(e) => setQty(e.target.value)} style={{ width: 100 }} />
-          <input className="ws-detail" placeholder="Heat number (optional)" value={heatNumber} onChange={(e) => setHeatNumber(e.target.value)} style={{ flex: 1, minWidth: 120 }} />
+          <input className="ws-detail" placeholder="Heat number (needed for pressure parts)" value={heatNumber} onChange={(e) => setHeatNumber(e.target.value)} style={{ flex: 1, minWidth: 120 }} />
           <button className="btn btn-accent" disabled={pending} onClick={submitReceive}>Save</button>
           <button className="btn" disabled={pending} onClick={() => setReceiving(false)}>Cancel</button>
         </div>
       ) : (
-        <button className="btn" onClick={() => setReceiving(true)}>Receive stock…</button>
+        access.receive && <button className="btn" onClick={() => setReceiving(true)}>Receive stock…</button>
       )}
 
       {item.stockLots.length > 0 && (
@@ -789,10 +840,13 @@ function StockSection({ jobId, item, componentId }: { jobId: number; item: BomIt
             <li key={lot.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
               <span>
                 <span className="mono">{lot.qty}</span> at {lot.location}
-                {lot.heatNumber ? ` · heat ${lot.heatNumber}` : ""}
+                {lot.heatNumber ? ` · heat ${lot.heatNumber}` : " · no heat number"}
                 <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}> · {new Date(lot.receivedAt).toLocaleDateString()}</span>
               </span>
-              <StockLotMoveControl jobId={jobId} lotId={lot.id} componentId={componentId} />
+              <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
+                {!lot.heatNumber && access.lotHeat && <LotHeatControl jobId={jobId} lotId={lot.id} />}
+                <StockLotMoveControl jobId={jobId} lotId={lot.id} componentId={componentId} access={access} />
+              </span>
             </li>
           ))}
         </ul>

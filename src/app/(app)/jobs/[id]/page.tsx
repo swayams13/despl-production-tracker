@@ -19,6 +19,7 @@ import type { QcQuery } from "@/lib/shared/qc-queue";
 import { JobDetailClient } from "./_client";
 import { IMPORT_ROLES } from "@/lib/services/job-import.service";
 import { SWITCH_OVER_ROLES } from "@/lib/services/switch-over.read";
+import { storesAccess } from "@/lib/shared/stores-access";
 import { MaterialsTab } from "./_tabs/materials-tab";
 import { QcTab } from "./_tabs/qc-tab";
 import { DispatchTab } from "./_tabs/dispatch-tab";
@@ -108,7 +109,7 @@ export default async function JobDetail({
 
   let slot: ReactNode = null;
   if (leanMaterials) {
-    slot = <MaterialsTab jobId={jobId} view={matView} onlyShort={first(sp.short) === "1"} materials={materials} parts={bom} canImport={hasRole(actor, ...IMPORT_ROLES)} canSwitchOver={FEATURES.leanFloor && hasRole(actor, ...SWITCH_OVER_ROLES)} />;
+    slot = <MaterialsTab jobId={jobId} view={matView} onlyShort={first(sp.short) === "1"} materials={materials} parts={bom} canImport={hasRole(actor, ...IMPORT_ROLES)} canSwitchOver={FEATURES.leanFloor && hasRole(actor, ...SWITCH_OVER_ROLES)} access={storesAccess(actor.roles)} itemId={toInt(sp.item) ?? null} />;
   } else if (leanQc) {
     slot = (
       <QcTab
@@ -149,6 +150,7 @@ export default async function JobDetail({
       canManagePacking={canManagePacking}
       canManageDispatch={canManageDispatch}
       canApproveQcpWaiver={canApproveQcpWaiver}
+      storesAccess={storesAccess(actor.roles)}
       tab={tab}
       lean={lean}
       slot={slot}
