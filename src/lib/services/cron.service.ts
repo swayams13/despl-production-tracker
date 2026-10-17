@@ -1,10 +1,11 @@
 import { prisma, withTenant } from "@/lib/db";
 import { ROLES, type Actor } from "@/lib/authz";
-import { isWorkingDay, DEFAULT_CALENDAR } from "@/lib/schedule";
+import { isWorkingDay, subtractWorkingDays, DEFAULT_CALENDAR } from "@/lib/schedule";
 import type { WorkCalendarInput } from "@/lib/schedule/types";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import { syncOverdueStageNotifications, syncHoldPointAgedNotifications } from "./notifications.service";
 import { publishDigest } from "./reports.service";
+import { sendMorningDigest, type DigestEmailResult } from "./digest-email.service";
 
 /**
  * Orchestrates the two Gate 4 scheduled jobs (`/api/cron/alerts`,
@@ -26,6 +27,8 @@ export interface TenantRunResult {
 export interface DigestRunResult extends TenantRunResult {
   skipped?: boolean;
   count?: number;
+  /** L2.11: the 08:30 email. Absent on a non-working day. A failure here never undoes the in-app publish. */
+  email?: DigestEmailResult & { error?: string };
 }
 
 export async function runAlertReconciliation(): Promise<TenantRunResult[]> {
@@ -85,7 +88,7 @@ export async function runDailyDigest(asOf: Date = new Date()): Promise<DigestRun
           themePreference: "SYSTEM",
           outdoorMode: false,
         };
-        return { skip: false as const, actor };
+        return { skip: false as const, actor, workDay: subtractWorkingDays(today, 1, calendarInput).toISOString().slice(0, 10) };
       });
 
       if (prep.skip) {
@@ -94,7 +97,14 @@ export async function runDailyDigest(asOf: Date = new Date()): Promise<DigestRun
       }
 
       const count = await publishDigest(prep.actor, dateStr, { auto: true });
-      results.push({ tenantId: org.id, ok: true, count });
+      let email: DigestRunResult["email"];
+      try {
+        email = await sendMorningDigest({ actor: prep.actor, date: dateStr, workDay: prep.workDay });
+      } catch (e) {
+        console.error("[cron] digest email failed", { tenantId: org.id, error: e });
+        email = { recipients: 0, sent: 0, skipped: 0, failed: 0, error: e instanceof Error ? e.message : String(e) };
+      }
+      results.push({ tenantId: org.id, ok: true, count, email });
     } catch (e) {
       console.error("[cron] digest failed", { tenantId: org.id, error: e });
       results.push({ tenantId: org.id, ok: false, error: e instanceof Error ? e.message : String(e) });

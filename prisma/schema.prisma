@@ -332,6 +332,7 @@ model Organization {
   calendars                    WorkCalendar[]
   snapshots                    ProgressSnapshot[]
   notifications                Notification[]
+  digestEmails                 DigestEmail[]
   welders                      Welder[]
   assemblyTemplates            AssemblyTemplate[]
   pendingPasswordResets        PendingPasswordReset[]
@@ -473,6 +474,7 @@ model User {
   clearedQcpExecutions           QcpExecution[]                @relation("QcpExecutionClearedBy")
   waiverApprovedQcpExecutions    QcpExecution[]                @relation("QcpExecutionWaiverApprovedBy")
   filedDelayReasons              DelayReason[]                 @relation("DelayReasonFiledBy")
+  digestEmails                   DigestEmail[]
   reviewedDelayReasons           DelayReason[]                 @relation("DelayReasonReviewedBy")
   publishedSnapshots             ProgressSnapshot[]            @relation("ProgressSnapshotPublishedBy")
   verifiedSnapshots              ProgressSnapshot[]            @relation("ProgressSnapshotVerifiedBy")
@@ -2990,6 +2992,26 @@ model Notification {
   @@index([tenantId])
   @@index([recipientId, readAt])
   @@map("notifications")
+}
+
+/// Lean Core L2.11: one row per recipient per digest day once the 08:30 email was
+/// accepted by the SMTP server. The cron's retry guard: a recipient with a row is
+/// skipped, so a retry or a manual re-run never mails anyone twice. Append-only
+/// for the app role (migration l211).
+model DigestEmail {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int      @map("tenant_id")
+  /// The IST calendar day the digest is for.
+  digestDate  DateTime @map("digest_date") @db.Date
+  recipientId Int      @map("recipient_id")
+  sentAt      DateTime @default(now()) @map("sent_at")
+
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  recipient User         @relation(fields: [recipientId], references: [id])
+
+  @@unique([tenantId, digestDate, recipientId])
+  @@index([recipientId])
+  @@map("digest_emails")
 }
 
 // ── Client portal ───────────────────────────────────────────────────────
