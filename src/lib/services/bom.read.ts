@@ -58,6 +58,8 @@ export interface BomGoverningDrawing {
 export interface BomComponentSummary {
   id: number;
   tag: string;
+  /** The unit this component belongs to; a BOM line feeding one component per unit needs it to pick the serial. */
+  serialNo?: string | null;
   /** Only populated for `BomTree.subAssemblyComponents` — real `ComponentTypeRef.name`, not a fabricated BOM category. */
   componentTypeName?: string;
   displayStatus: StageDisplayStatus;
@@ -232,6 +234,7 @@ export interface BomTree {
 interface RawComponentForSummary {
   id: number;
   tag: string;
+  unit?: { serialNo: string } | null;
   componentType?: { name: string } | null;
   governingDrawing: {
     id: number;
@@ -317,7 +320,7 @@ function buildComponentSummary(
           .map((r) => ({ id: r.id, revisionNo: r.revisionNo, status: r.status, releasedAt: r.releasedAt?.toISOString() ?? null })),
       }
     : null;
-  return { id: c.id, tag: c.tag, componentTypeName: c.componentType?.name, displayStatus, operations: ops, governingDrawing };
+  return { id: c.id, tag: c.tag, serialNo: c.unit?.serialNo ?? null, componentTypeName: c.componentType?.name, displayStatus, operations: ops, governingDrawing };
 }
 
 export async function loadBomTree(
@@ -400,9 +403,11 @@ export async function loadBomTree(
           select: { id: true, heatNumber: true, location: true, qty: true, receivedAt: true, txns: { select: { type: true, qty: true } } },
         },
         components: {
+          orderBy: { id: "asc" },
           select: {
             id: true,
             tag: true,
+            unit: { select: { serialNo: true } },
             componentType: { select: { name: true } },
             governingDrawing: {
               select: {
