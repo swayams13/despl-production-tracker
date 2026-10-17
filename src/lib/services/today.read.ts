@@ -147,6 +147,7 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
       refusal: null,
       canOverride: false,
       weld: null,
+      heatComponentId: null,
       siblings: [],
       jobId: m.jobId,
       jobNumber: m.jobNumber,

@@ -8,6 +8,7 @@ import {
   ActionSheet,
   FloorOutcomes,
   FloorUndoStack,
+  HeatPickButton,
   NotifyBlockerButton,
   stateLabel,
   useFloorWrites,
@@ -267,6 +268,7 @@ function RowCard({ row, first, onAct }: { row: TodayRow; first?: boolean; onAct:
           )}
           {row.state === "NEEDS_OVERRIDE" && waiting === 0 && <span>Ask your supervisor to start this early.</span>}
           {row.refusal?.clearedBy && <span>Can clear it: {row.refusal.clearedBy.label}</span>}
+          {row.heatComponentId != null && <HeatPickButton componentId={row.heatComponentId} />}
           {row.unitPublicId && row.kind !== "PROCESS_PLAN" && row.refusal?.clearedBy && (
             <NotifyBlockerButton unitPublicId={row.unitPublicId} row={{ kind: row.kind, id: row.id, refusal: row.refusal }} />
           )}

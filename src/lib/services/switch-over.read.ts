@@ -25,6 +25,10 @@ export interface SwitchRow {
   matchKey: string;
   /** Position in the order recordWork must receive them. */
   order: number;
+  /** A weld step that needs its joint bound before Done (recordWork's JOINT_REQUIRED): the joint, and the one already logged on this unit if any. */
+  weld: { jointRef: string; existingJointId: number | null } | null;
+  /** COMPONENT_OP: the part, for the heat-number fix on a refusal. */
+  componentId: number | null;
 }
 
 export interface SwitchUnit {
@@ -38,6 +42,8 @@ export interface SwitchOverView {
   job: { id: number; jobNumber: string; projectName: string | null };
   units: SwitchUnit[];
   lateCategories: Array<{ id: number; name: string; code: string }>;
+  /** Active welders, for the weld steps. */
+  welders: Array<{ id: number; name: string; employeeCode: string }>;
   /** Items still open / items in the job, for the header. */
   open: number;
   total: number;
@@ -52,11 +58,14 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
     const job = await tx.job.findFirst({ where: { id: jobId, tenantId: actor.tenantId }, select: { id: true, jobNumber: true, projectName: true } });
     if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
 
-    const [units, steps, ops, plans, categories] = await Promise.all([
+    const [units, steps, ops, plans, categories, welders] = await Promise.all([
       tx.unit.findMany({ where: { equipment: { jobId } }, select: { id: true, serialNo: true } }),
       tx.assemblyStep.findMany({
         where: { jobId, templateStep: { kind: "WORK" } },
-        select: { id: true, unitId: true, seq: true, status: true, templateStepId: true, templateStep: { select: { activity: true, groupName: true } } },
+        select: {
+          id: true, unitId: true, seq: true, status: true, templateStepId: true, weldJointId: true,
+          templateStep: { select: { activity: true, groupName: true, jointRef: true } },
+        },
       }),
       tx.componentOperation.findMany({
         where: { jobId },
@@ -67,12 +76,20 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
         select: { id: true, status: true, jobProcess: { select: { code: true, name: true } } },
       }),
       tx.delayCategoryRef.findMany({ where: { tenantId: actor.tenantId, active: true }, orderBy: { id: "asc" }, select: { id: true, name: true, code: true } }),
+      tx.welder.findMany({ where: { tenantId: actor.tenantId, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true, employeeCode: true } }),
     ]);
 
+    // Joints already logged on a unit, so a weld step that shares one needs no welder.
+    const jointNos = [...new Set(steps.flatMap((s) => (s.templateStep.jointRef && s.weldJointId == null ? [s.templateStep.jointRef.trim()] : [])))];
+    const joints = jointNos.length
+      ? await tx.weldJoint.findMany({ where: { jobId, jointNo: { in: jointNos } }, select: { id: true, unitId: true, jointNo: true } })
+      : [];
+    const jointOf = (unitId: number, jointNo: string) => joints.find((j) => j.unitId === unitId && j.jointNo === jointNo)?.id ?? null;
+
     const byUnit = new Map<number | null, SwitchRow[]>();
-    const add = (unitId: number | null, row: Omit<SwitchRow, "order">) => {
+    const add = (unitId: number | null, row: Omit<SwitchRow, "order" | "weld" | "componentId"> & Partial<Pick<SwitchRow, "weld" | "componentId">>) => {
       const list = byUnit.get(unitId) ?? [];
-      list.push({ ...row, order: 0 });
+      list.push({ weld: null, componentId: null, ...row, order: 0 });
       byUnit.set(unitId, list);
     };
 
@@ -86,12 +103,17 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
     for (const o of [...ops].sort((a, b) => a.component.id - b.component.id || a.seq - b.seq)) {
       add(o.component.unitId, {
         key: `COMPONENT_OP:${o.id}`, kind: "COMPONENT_OP", id: o.id, title: `${o.component.tag} · ${o.operation.name}`, group: "Parts", status: o.status,
-        matchKey: `O:${o.component.tag}:${o.operationId}`,
+        matchKey: `O:${o.component.tag}:${o.operationId}`, componentId: o.component.id,
       });
     }
     // 3. Assembly steps, in the unit's assembly sequence.
     for (const s of [...steps].sort((a, b) => a.seq - b.seq)) {
-      add(s.unitId, { key: `ASSEMBLY_STEP:${s.id}`, kind: "ASSEMBLY_STEP", id: s.id, title: s.templateStep.activity, group: s.templateStep.groupName, status: s.status, matchKey: `S:${s.templateStepId}` });
+      const jointRef = s.templateStep.jointRef?.trim() || null;
+      add(s.unitId, {
+        key: `ASSEMBLY_STEP:${s.id}`, kind: "ASSEMBLY_STEP", id: s.id, title: s.templateStep.activity, group: s.templateStep.groupName, status: s.status,
+        matchKey: `S:${s.templateStepId}`,
+        weld: jointRef && s.weldJointId == null ? { jointRef, existingJointId: jointOf(s.unitId, jointRef) } : null,
+      });
     }
 
     const out: SwitchUnit[] = [];
@@ -105,6 +127,6 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
       open += rows.filter((r) => r.status === "NOT_STARTED" || r.status === "IN_PROGRESS").length;
       out.push({ unitId, label: unitId === null ? "Job level" : (label.get(unitId) ?? `Unit ${unitId}`), rows });
     }
-    return { job, units: out, lateCategories: categories, open, total };
+    return { job, units: out, lateCategories: categories, welders, open, total };
   });
 }

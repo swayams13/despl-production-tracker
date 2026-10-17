@@ -274,7 +274,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   MATERIAL_NOT_ISSUED:
     "Material for this pressure part has not been issued. Stores must issue it before cutting.",
   HEAT_NUMBER_NOT_PICKED:
-    "No heat number is picked for this pressure part. Stores or QC must pick it before cutting.",
+    "No heat number is picked for this pressure part. Pick the heat it is cut from before cutting.",
   PWHT_NOT_COMPLETE:
     "Final PWHT on this unit is not complete. Hydro can start only after QC accepts the PWHT.",
   HYDRO_PREREQUISITES_INCOMPLETE:

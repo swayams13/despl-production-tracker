@@ -1,6 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { assertNotClientUser, hasRole, ROLES, type Actor, type RoleCode } from "@/lib/authz";
-import { ERROR_MESSAGES, SEQUENCE_OVERRIDE_OPERATOR_MESSAGE, type ErrorCode } from "@/lib/shared/errors";
+import { ERROR_CODES, ERROR_MESSAGES, SEQUENCE_OVERRIDE_OPERATOR_MESSAGE, type ErrorCode } from "@/lib/shared/errors";
 import { canOverride, checkStart, evaluateHard, type FloorItem } from "@/lib/shared/floor-rules";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import { OVERRIDE_CATEGORIES } from "@/lib/shared/schemas";
@@ -58,6 +58,8 @@ export interface FloorRow {
   canOverride: boolean;
   /** A step that needs a joint bound before Done (L1.2d JOINT_REQUIRED). */
   weld: { jointRef: string; existingJointId: number | null } | null;
+  /** A pressure-part cutting item refused only for a missing heat number: the part to pick it for (L2.13). */
+  heatComponentId: number | null;
   /** The same step on the unit's siblings, not yet done. Empty for weld steps (one joint per unit). */
   siblings: FloorSibling[];
 }
@@ -267,6 +269,7 @@ export async function loadFloorUnit(
         refusal,
         canOverride: overridable,
         weld: jointRef && row.weldJointId == null ? { jointRef, existingJointId: null } : null,
+        heatComponentId: refusal?.code === ERROR_CODES.HEAT_NUMBER_NOT_PICKED && item.kind === "COMPONENT_OP" ? (row.componentId ?? null) : null,
         siblings: [],
       });
     }
