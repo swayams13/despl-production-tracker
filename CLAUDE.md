@@ -20,7 +20,7 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | D2 | Which edges become SOFT (see build prompt §8.2 item 4: nozzle work precedes CS-1) | All HARD until built | **Decided, provisional** (Swayam for the Production Head, 14 Oct) — SJ to ratify; QC head to ratify H5/H6. See D2 section below |
 | D3 | Which items get `requiresQc = false` | All `true` | **Decided** (Swayam, 14 Oct) — derived by rule, see note D3 below |
 | D4 | Backdating window | 72 hours | **Decided** (Swayam, 14 Oct) — 72 h, three refinements, see note D4 below |
-| D5 | Pilot job + departments; JOB-grain process list | Planning/PPC, Fabrication, QC; processes 1–11 and 33 | Open |
+| D5 | Pilot job + departments; JOB-grain process list | Planning/PPC, Fabrication, QC; processes 1–11 and 33 | **Decided** (Swayam, 17 Oct) — see note D5 below |
 | D6 | Devices and floor Wi-Fi | Design for both | Open |
 | D7 | Department representatives; welder list | Placeholder accounts | Open |
 | D8 | On-prem server spec, admin, target month | Stay on Railway | Open |
@@ -37,7 +37,7 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 | D19 | HE types in v1; grommet tube joint as a standard variant (Q-02, D-02) | Fixed tubesheet / MED only | Open |
 | D20 | Heat treatment, PFHT, hydro: floor operations or QCP points (Q-05, PV-03) | QCP points on processes 21 and 27 | Open |
 | D21 | Serial or lot tracking for multi-quantity jobs | Serial | Open |
-| D22 | In-flight jobs to import; date Excel stops | Pilot job only | Open |
+| D22 | In-flight jobs to import; date Excel stops | Pilot job only | **Decided** (Swayam, 17 Oct) — see note D22 below |
 | D23 | Notifications: in-app + 08:30 email digest, recipients | In-app; email to MD, CEO, SJ | Open |
 | D24 | Photo evidence points; GPS required | Hold points and hydro test only | Open |
 | D25 | Weight calculation in v1 | After go-live | Open |
@@ -51,6 +51,11 @@ Record each decision here (date, who) as it arrives. Until then the default appl
 
 - **D3 — DECIDED.** `requiresQc` is derived by rule, not a hand list; the QC head reviews the derived list once. `true` when the step is linked to a QCP point of any party (H, W, R, RW, R&A); or is fit-up/welding on a pressure-retaining joint (shell long and circ seams, head-to-shell, nozzle-to-shell, nozzle-to-flange, skirt-to-head); or is heat-number transfer at cutting of a pressure part; or is a test/treatment record (PWHT/PFHT, hydro, final dimensional, painting DFT, name-plate stamping). Everything else is `false` (handling, non-pressure cutting and marking, rolling and edge prep, non-pressure attachments, office processes 1–11). QC's own Inspection operations are the checker of the preceding work step, recorded against the QCP point, and need no second QC verify; the same-inspector case is D11. **Record D12 (does an H point block the part or the whole unit; proposal: the part) together with this.**
 - **D4 — DECIDED.** `BACKDATE_WINDOW_HOURS` stays 72. Refinements: (1) lower bound is the job's BOM / floor release date, not the order date (replaces the order-date bound in invariant 1), and Done ≥ Start for the same item; (2) the window is counted in working hours from the D1 calendar — if that is too much for v1, keep 72 calendar hours and accept admin corrections around shutdowns; (3) the pilot's same-day metric (≥ 90 %) uses `recordedAt − reportedAt`, so a generous window does not hide late logging, while on-time KPIs keep `COALESCE(reportedAt, recordedAt)`. Beyond the window: the admin correction flow, no in-app confirm. Separate operator (24 h) and supervisor (72 h) windows: not in the pilot unless SJ asks. D1 is still provisional, so refinement (2) rests on it.
+
+**Decision notes (17 Oct 2026, Swayam):**
+
+- **D5 — DECIDED.** Pilot job is DESPL-320 if at least 4 weeks of fabrication remain on 16 Nov; otherwise the next job starting cutting (the DE0423 path, which needs J1–J5 first and moves the pilot to 30 Nov). The check on 16 Nov picks the path, so keep both open until then. Pilot departments: Planning/PPC, Fabrication Prep, Fabrication/Welding, QC; Fabrication Prep drops to wave 2 if DESPL-320 has no prep work left. JOB-grain: processes 1–11 and 33. Machine Shop steps on the pilot job: recorder still TBD (D7).
+- **D22 — DECIDED.** The pilot imports the pilot job only; Excel stops for it on pilot day 1 (at most 1 week parallel run). Other live jobs with more than 4 weeks left import in P6 wave 1 (week of 7 Dec), with done steps bulk-ticked at the switch-over date; shorter jobs finish in Excel. Excel retires per department by rollout wave. L2.10 therefore needs the bulk-tick at a switch-over date, designed around the real sheets (I16).
 
 ### D2 — Sequence gating (provisional, 14 Oct 2026)
 
