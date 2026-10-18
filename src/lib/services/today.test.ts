@@ -87,6 +87,13 @@ describe.skipIf(!RUN_DB)("L2.3 Today (DB)", async () => {
       expect([v.sections.doFirst, ...v.sections.today, ...v.sections.upcoming].some((r) => r?.id === j.step(2))).toBe(true);
     });
 
+    it("a repeated operation on a part is numbered in the check-in, so the second Forming is not a copy of the first", async () => {
+      const j = await o.job({ components: [{ tag: "HEAD", ops: [{ code: "FORMING", requiresQc: false }, { code: "FORMING", requiresQc: false }] }] });
+      await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: "COMPONENT_OP", id: j.op("HEAD", "FORMING") }] });
+      const v = await loadToday(sup);
+      expect(v.checkIn.doneToday.find((d) => d.id === j.op("HEAD", "FORMING"))).toMatchObject({ title: "FORMING (2 of 2)" });
+    });
+
     it("another tenant's work never appears", async () => {
       const j = await b.job({ processes: [{ code: "20" }], steps: [{ seq: 1, processSeq: 20 }] });
       await owner.processPlan.update({ where: { id: j.plan("20", 0) }, data: { assigneeUserId: bOperator.userId } });

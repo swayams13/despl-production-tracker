@@ -51,6 +51,7 @@ export default async function JobDetail({
   // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
   // cosmetic, the server is authoritative either way.
   const canManagePacking = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  const canVerify = hasRole(actor, ROLES.QC);
   // S6 gated all five dispatch mutations (create/add/approve/record) to the
   // same PRODUCTION_HEAD/ADMIN pair — one boolean covers all of them.
   const canManageDispatch = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
@@ -109,7 +110,7 @@ export default async function JobDetail({
 
   let slot: ReactNode = null;
   if (leanMaterials) {
-    slot = <MaterialsTab jobId={jobId} view={matView} onlyShort={first(sp.short) === "1"} materials={materials} parts={bom} canImport={hasRole(actor, ...IMPORT_ROLES)} canSwitchOver={FEATURES.leanFloor && hasRole(actor, ...SWITCH_OVER_ROLES)} access={storesAccess(actor.roles)} itemId={toInt(sp.item) ?? null} />;
+    slot = <MaterialsTab jobId={jobId} view={matView} onlyShort={first(sp.short) === "1"} materials={materials} parts={bom} canImport={hasRole(actor, ...IMPORT_ROLES)} canSwitchOver={FEATURES.leanFloor && hasRole(actor, ...SWITCH_OVER_ROLES)} access={storesAccess(actor.roles)} canVerify={canVerify} itemId={toInt(sp.item) ?? null} />;
   } else if (leanQc) {
     slot = (
       <QcTab
@@ -151,6 +152,7 @@ export default async function JobDetail({
       canManageDispatch={canManageDispatch}
       canApproveQcpWaiver={canApproveQcpWaiver}
       storesAccess={storesAccess(actor.roles)}
+      canVerify={canVerify}
       tab={tab}
       lean={lean}
       slot={slot}

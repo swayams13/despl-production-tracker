@@ -1,5 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { assertNotClientUser, hasRole, ROLES, type Actor } from "@/lib/authz";
+import { repeatedOpSuffixes } from "@/lib/shared/op-title";
 import { sectionize, endOfIstDay, type Sections } from "@/lib/shared/today";
 import { istDay, loadMyDay, type MyDayScoreboard } from "./myday.read";
 import { loadFloorUnit, type FloorRow, type FloorUnitView } from "./floor.read";
@@ -189,12 +190,21 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
             select: {
               id: true,
               jobId: true,
+              componentId: true,
               operation: { select: { name: true } },
               component: { select: { unit: { select: { serialNo: true } } } },
             },
           })
         : Promise.resolve([]),
     ]);
+    // A repeated operation on a route (a head's Forming twice) is numbered: that needs the part's other steps.
+    const siblings = ops.length
+      ? await tx.componentOperation.findMany({
+          where: { componentId: { in: [...new Set(ops.map((o) => o.componentId))] } },
+          select: { id: true, componentId: true, seq: true, operation: { select: { name: true } } },
+        })
+      : [];
+    const repeats = repeatedOpSuffixes(siblings.map((o) => ({ key: o.id, group: o.componentId, name: o.operation.name, seq: o.seq })));
     return [
       ...steps.map((s) => ({
         key: `ASSEMBLY_STEP:${s.id}`,
@@ -210,7 +220,7 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
         kind: "COMPONENT_OP" as const,
         id: o.id,
         jobId: o.jobId,
-        title: o.operation.name,
+        title: `${o.operation.name}${repeats.get(o.id) ?? ""}`,
         serialNo: o.component.unit?.serialNo ?? "—",
         planId: null,
       })),

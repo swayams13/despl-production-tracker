@@ -19,6 +19,7 @@ export function MaterialsTab({
   canImport = false,
   canSwitchOver = false,
   access,
+  canVerify,
   itemId = null,
 }: {
   jobId: number;
@@ -32,6 +33,8 @@ export function MaterialsTab({
   canSwitchOver?: boolean;
   /** What the viewer's role may do to stock (L2.14); drives which Parts and stock controls show. */
   access?: StoresAccess;
+  /** QC only: Verify and Reject on a submitted route step. */
+  canVerify?: boolean;
   /** Parts and stock opens on this BOM item (from the pipeline row or the Stores queue). */
   itemId?: number | null;
 }) {
@@ -60,7 +63,7 @@ export function MaterialsTab({
     return (
       <>
         {sub}
-        {parts ? <BomPanel jobId={jobId} bom={parts} tabHref={`/jobs/${jobId}?tab=materials&view=parts`} access={access} initialItemId={itemId} /> : <p className="note">No BOM loaded for this job.</p>}
+        {parts ? <BomPanel jobId={jobId} bom={parts} tabHref={`/jobs/${jobId}?tab=materials&view=parts`} access={access} canVerify={canVerify} initialItemId={itemId} /> : <p className="note">No BOM loaded for this job.</p>}
       </>
     );
   }

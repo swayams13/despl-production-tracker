@@ -64,6 +64,7 @@ export function JobDetailClient({
   canManageDispatch,
   canApproveQcpWaiver,
   storesAccess,
+  canVerify,
   tab,
   lean = false,
   slot = null,
@@ -90,6 +91,8 @@ export function JobDetailClient({
   canApproveQcpWaiver: boolean;
   /** What the viewer's role may do to stock (L2.14). */
   storesAccess?: StoresAccess;
+  /** QC only: Verify and Reject on a submitted route step in the BOM panel. */
+  canVerify?: boolean;
   /** Legacy names (`gantt`, `bom`, `qcp`, `packing`, `dispatch`, `activity`) while `leanFloor` is off, L2.8's (`schedule`, `materials`, `qc`, `dispatch`, `history`) while on. */
   tab: string;
   /** Lean Core L2.8: `leanFloor` is on, so the new tab strip and overview tiles show. */
@@ -204,7 +207,7 @@ export function JobDetailClient({
       ) : view === "gantt" ? (
         gantt ? <JobGantt data={gantt} onOpenStage={openStageInJob} /> : <p className="note" style={{ margin: "16px 0" }}>No current schedule for this job.</p>
       ) : view === "bom" ? (
-        bom ? <BomPanel jobId={jobId} bom={bom} access={storesAccess} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
+        bom ? <BomPanel jobId={jobId} bom={bom} access={storesAccess} canVerify={canVerify} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
       ) : view === "assembly" ? (
         assembly ? <AssemblyPanel jobId={jobId} data={assembly} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
       ) : view === "qcp" ? (
