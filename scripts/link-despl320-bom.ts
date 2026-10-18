@@ -55,8 +55,10 @@ export function planLinks(
   const links: LinkPlan["links"] = [];
   const unlinkedTags = new Set<string>();
   for (const c of components) {
-    const itemNo = LINKS[c.tag];
-    if (itemNo === undefined || !known.has(itemNo)) { unlinkedTags.add(c.tag); continue; }
+    // Production's DESPL-320 rows come from an older seed run that suffixed the serial ("N1-320SR01"); the seed now writes "N1".
+    const base = c.tag.replace(/-320SR\d+$/, "");
+    const itemNo = LINKS[base];
+    if (itemNo === undefined || !known.has(itemNo)) { unlinkedTags.add(base); continue; }
     if (c.bomItemId === null) links.push({ componentId: c.id, tag: c.tag, itemNo });
   }
   return { newItems, links, unlinkedTags: [...unlinkedTags].sort() };

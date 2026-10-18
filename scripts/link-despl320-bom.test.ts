@@ -34,4 +34,10 @@ describe("link-despl320-bom plan", () => {
     expect(second.newItems).toEqual([]);
     expect(second.links).toEqual([]);
   });
+
+  it("links a component whose tag carries the serial suffix (production's older seed), and reports unlinked tags without it", () => {
+    const plan = planLinks(bomNos, [{ id: 1, tag: "N1-320SR01", bomItemId: null }, { id: 2, tag: "SKIRT-320SR02", bomItemId: null }]);
+    expect(plan.links).toEqual([{ componentId: 1, tag: "N1-320SR01", itemNo: LINKS.N1 }]);
+    expect(plan.unlinkedTags).toEqual(["SKIRT"]);
+  });
 });
