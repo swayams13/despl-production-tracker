@@ -1,5 +1,7 @@
 import { withTenant, type Tx } from "@/lib/db";
-import { audited } from "@/lib/audit";
+import { audited, recordAudit } from "@/lib/audit";
+import { FEATURES } from "@/lib/shared/flags";
+import { findOpenItemNcrIds, lockFloorUnits, rollupForComponentOperation } from "./_shared";
 import { assertClientScope, assertNotClientUser, requireRole, type Actor } from "@/lib/authz";
 import { ISSUE_ROLES, LOT_HEAT_ROLES, RECEIVE_ROLES, SCRAP_ROLES } from "@/lib/shared/stores-access";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -239,7 +241,7 @@ async function stockTxnTx(
     }
   }
 
-  return audited(tx, actor, async () => {
+  const txn = await audited(tx, actor, async () => {
     const txn = await tx.stockTxn.create({
       data: { stockLotId, type, qty, by: actor.userId, componentId: componentId ?? null, note: note ?? null, jobId },
     });
@@ -255,6 +257,48 @@ async function stockTxnTx(
       },
     };
   });
+  if (type === "ISSUE" && componentId != null && FEATURES.leanFloor) await completeReceiptOnIssue(tx, actor, componentId, txn.id);
+  return txn;
+}
+
+/**
+ * Issuing material to a part is that part's Receipt: the material is in the shop and assigned to it.
+ * So the part's RECEIPT operation is written in the same transaction, from the issue, and the cutting
+ * start no longer needs an override for it. Written the way a Done is (recordWork): COMPLETE when the
+ * operation does not need QC, SUBMITTED when it does (invariant 3: never a QC verify skipped), server
+ * clock, `submittedBy` the Stores user. Audited as derived from the issue. Does nothing when there is no
+ * RECEIPT step, it is already submitted or complete, or a rejection NCR is open on it. MTC Verification
+ * is deliberately not derived: it is a check, not a fact.
+ */
+async function completeReceiptOnIssue(tx: Tx, actor: Actor, componentId: number, stockTxnId: number): Promise<void> {
+  const comp = await tx.component.findUnique({ where: { id: componentId }, select: { jobId: true, unitId: true } });
+  if (!comp) return;
+  // The unit's floor lock first (as recordWork takes it), then read the operation, so a Done racing this issue is not overwritten.
+  await lockFloorUnits(tx, comp.jobId, [comp.unitId]);
+  const op = await tx.componentOperation.findFirst({
+    where: { componentId, operation: { code: "RECEIPT" }, status: { in: ["NOT_STARTED", "IN_PROGRESS"] } },
+    orderBy: { seq: "asc" },
+    select: { id: true, status: true, requiresQc: true, startedAt: true },
+  });
+  if (!op) return;
+  if ((await findOpenItemNcrIds(tx, "COMPONENT_OP", op.id)).length) return;
+  const now = new Date();
+  const to = op.requiresQc ? "SUBMITTED" : "COMPLETE";
+  const updated = await tx.componentOperation.update({
+    where: { id: op.id },
+    data: { status: to, startedAt: op.startedAt ?? now, submittedBy: actor.userId, ...(to === "COMPLETE" ? { finishedAt: now } : {}) },
+    select: { status: true, startedAt: true, finishedAt: true, submittedBy: true },
+  });
+  await recordAudit(tx, actor, {
+    action: "work.receipt.derived",
+    entityType: "ComponentOperation",
+    entityId: op.id,
+    before: { status: op.status },
+    after: { ...updated, recordedAt: now, derivedFrom: { stockTxnId } },
+    eventType: "WorkDone",
+    eventPayload: { kind: "COMPONENT_OP", id: op.id, from: op.status, to, unitId: comp.unitId, derivedFrom: "stock.issue" },
+  });
+  await rollupForComponentOperation(tx, actor, op.id);
 }
 
 /** Issue stock from a lot to a component. Refuses if it would drive the
