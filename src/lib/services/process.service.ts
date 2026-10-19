@@ -118,10 +118,11 @@ async function loadGate(
  * Lean Core L1.2e (invariant 12 as revised): with the lean floor on, a unit's
  * plan with mapped steps/operations takes its status from them
  * (rollupProcessPlan), so a direct start/submit/verify/hold is refused. Off:
- * unchanged. JOB-grain plans (unitId null) and unmapped plans are not derived.
+ * unchanged. Unmapped plans are not derived; a JOB-grain plan (unitId null, L1.3) is derived from
+ * the mapped items of every unit of the job.
  */
 async function assertNotDerived(tx: Tx, plan: ProcessPlan): Promise<void> {
-  if (!FEATURES.leanFloor || plan.unitId == null) return;
+  if (!FEATURES.leanFloor) return;
   const mapped = await loadMappedOps(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
   if (mapped.length > 0) throw new AppError(ERROR_CODES.DERIVED_STATUS, { processPlanId: plan.id });
 }

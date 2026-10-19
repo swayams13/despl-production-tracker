@@ -1,6 +1,7 @@
 import { startReadiness } from "@/lib/schedule";
 import type { ScheduleEdge, PredecessorState } from "@/lib/schedule";
 import type { ProcessPlan } from "@/generated/prisma/client";
+import { predecessorStatus } from "@/lib/shared/job-grain";
 
 export type PlanState = "BLOCKED" | "READY" | "IN_PROGRESS" | "SUBMITTED" | "ON_HOLD" | "DONE";
 
@@ -59,9 +60,10 @@ export function compareRankedPlans(a: RankedPlan, b: RankedPlan): number {
 export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
   const { plans, edges, floatByProcessId, processNameById, today } = input;
 
-  // status lookup keyed by (jobProcessId, unitId) for same-unit predecessor reads.
-  const key = (jobProcessId: number, unitId: number | null) => `${jobProcessId}:${unitId ?? "null"}`;
-  const statusByKey = new Map(plans.map((p) => [key(p.jobProcessId, p.unitId), p.status]));
+  // A process's plans by process, for predecessor reads that respect JOB grain (L1.3): a unit sees its own
+  // plan or the job-level one, a job-level plan waits for the least advanced unit.
+  const plansByProcess = new Map<number, Array<{ unitId: number | null; status: ProcessPlan["status"] }>>();
+  for (const p of plans) plansByProcess.set(p.jobProcessId, [...(plansByProcess.get(p.jobProcessId) ?? []), p]);
   const edgesByProc = new Map<number, ScheduleEdge[]>();
   for (const e of edges) {
     if (!edgesByProc.has(e.processId)) edgesByProc.set(e.processId, []);
@@ -89,7 +91,7 @@ export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
         const procEdges = edgesByProc.get(plan.jobProcessId) ?? [];
         const predStates: PredecessorState[] = procEdges.map((e) => ({
           predecessorId: e.predecessorId,
-          status: statusByKey.get(key(e.predecessorId, plan.unitId)) ?? "NOT_STARTED",
+          status: predecessorStatus(plansByProcess.get(e.predecessorId) ?? [], plan.unitId),
         }));
         const { ready, blockingPredecessorIds } = startReadiness(procEdges, predStates);
         if (ready) {
@@ -105,7 +107,7 @@ export function prioritize(input: PrioritizeInput): Map<number, RankedPlan[]> {
     }
     if (overdue) {
       reasonCode = "OVERDUE";
-      reasonText = `Overdue — file a delay reason to continue. ${reasonText}`;
+      reasonText = `Overdue — say why. ${reasonText}`;
     }
     return { plan, state, overdue, reasonCode, reasonText, criticalPath, floatDays, blockingPredecessorIds: blockingIds };
   });

@@ -113,12 +113,12 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadPrioritizedJob (DB)", async () =
     const kpis = await loadJobKpis(actor, job.id);
 
     expect(kpis).not.toBeNull();
-    expect(kpis!.totalPlans).toBe(324); // P4.0 bootstrap plan count
+    expect(kpis!.totalPlans).toBe(228); // 24 per-unit processes x 9 units + 12 job-level plans (L1.3)
     expect(kpis!.percentComplete).toBeGreaterThanOrEqual(0);
     expect(kpis!.percentComplete).toBeLessThanOrEqual(100);
     expect(kpis!.deptMatrix.length).toBeGreaterThan(0);
     // byState buckets every plan exactly once — no double-counting, none dropped.
-    expect(Object.values(kpis!.byState).reduce((a, b) => a + b, 0)).toBe(324);
+    expect(Object.values(kpis!.byState).reduce((a, b) => a + b, 0)).toBe(228);
 
     // §4.2 dashboard fields — structural + directional checks (the shared
     // no-cleanup fixture makes exact values test-order-dependent; these pin
