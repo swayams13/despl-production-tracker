@@ -43,7 +43,7 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
       ),
     [view.rows],
   );
-  const { pending, outcomes, queue, undo, dismiss } = useFloorWrites(titleOf);
+  const { pending, outcomes, queue, undo, dismiss, busy } = useFloorWrites(titleOf);
 
   const rows = showAll ? view.rows : view.rows.slice(0, VISIBLE);
   const hidden = view.rows.length - rows.length;
@@ -87,6 +87,7 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
                   row={r}
                   canRecord={view.canRecord}
                   unitPublicId={view.unit.publicId}
+                  busy={busy(r.key)}
                   onAct={(action) => setSheet({ row: r, action })}
                 />
               ))}
@@ -116,9 +117,9 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
           row={sheet.row}
           action={sheet.action}
           onClose={() => setSheet(null)}
-          onConfirm={(label, send) => {
+          onConfirm={(label, send, keys) => {
             setSheet(null);
-            queue(label, send);
+            queue(label, send, keys);
           }}
         />
       )}
@@ -130,11 +131,14 @@ function FloorRowView({
   row,
   canRecord,
   unitPublicId,
+  busy,
   onAct,
 }: {
   row: FloorRow;
   canRecord: boolean;
   unitPublicId: string;
+  /** A write for this row is waiting (Undo window), sending or refreshing: its buttons are off. */
+  busy: boolean;
   onAct: (action: "DONE" | "START") => void;
 }) {
   const d = useDict();
@@ -155,21 +159,22 @@ function FloorRowView({
             {row.startedAt ? d.floor.startedAt(new Date(row.startedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })) : ""}
             {others > 0 && (row.state === "READY" || row.state === "IN_PROGRESS") ? d.floor.alsoOnOthers(others) : ""}
           </span>
+          {row.returnedNote != null && <span className="fl-returned">{d.floor.returnedByQc(row.returnedNote)}</span>}
         </div>
         {canRecord && (row.state === "READY" || row.state === "IN_PROGRESS") && (
           <div className="fl-actions">
             {row.state === "READY" && (
-              <button className="btn" onClick={() => onAct("START")}>
+              <button className="btn" disabled={busy} onClick={() => onAct("START")}>
                 {d.common.start}
               </button>
             )}
-            <button className="btn btn-accent fl-done" onClick={() => onAct("DONE")}>
+            <button className="btn btn-accent fl-done" disabled={busy} onClick={() => onAct("DONE")}>
               {d.common.done}
             </button>
           </div>
         )}
         {canRecord && row.state === "NEEDS_OVERRIDE" && row.canOverride && (
-          <button className="btn" onClick={() => onAct("START")}>
+          <button className="btn" disabled={busy} onClick={() => onAct("START")}>
             {d.common.startEarly}
           </button>
         )}

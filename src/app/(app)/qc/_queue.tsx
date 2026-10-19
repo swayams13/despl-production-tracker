@@ -12,18 +12,21 @@ import type { ActionResult } from "@/app/actions/_action";
 import type { QcQueueView } from "@/lib/services/qc-queue.read";
 import {
   HOLD_STATUS_LABEL,
+  dispositionChoices,
   evidenceMessage,
   qcHref,
   type HoldRow,
   type JobGroup,
+  type NcrDisposition,
   type NcrQueueRow,
   type QcTab,
   type ReadyRow,
 } from "@/lib/shared/qc-queue";
 
 type Refusal = { key: string; code: string; message: string };
-type Disposition = "USE_AS_IS" | "REPAIR" | "REWORK" | "SCRAP" | "CONCESSION";
+type Disposition = NcrDisposition;
 
+const DISPOSITION_LABEL: Record<NcrDisposition, string> = { REWORK: "Rework", REPAIR: "Repair", USE_AS_IS: "Use as is", CONCESSION: "Concession", SCRAP: "Scrap" };
 const TAB_LABEL: Record<QcTab, string> = { ready: "Ready to inspect", holds: "Open holds", ncrs: "NCRs" };
 const STATUS_CHIP: Record<string, string> = {
   AWAITING_TPI: "c-hold",
@@ -55,7 +58,9 @@ export function QcQueueClient({ view, viewerId }: { view: QcQueueView; viewerId:
       setRefusal(null);
       setOpenKey(null);
       toast.success(done);
-      router.refresh();
+      // After an await React no longer tracks the transition: start the refresh in its own, so `pending` (which turns
+      // every button off) stays true until the new rows are on screen, and the acted-on row cannot be tapped twice.
+      start(() => router.refresh());
     });
 
   const ctx = { access, pending, openKey, setOpenKey, refusal, setRefusal, act, viewerId };
@@ -326,7 +331,8 @@ function HoldItem({ row, access, pending, openKey, setOpenKey, refusal, setRefus
 
 function NcrItem({ row, access, pending, openKey, setOpenKey, refusal, setRefusal, act, viewerId }: Ctx & { row: NcrQueueRow }) {
   const key = `NCR:${row.ncrId}`;
-  const [disposition, setDisposition] = useState<Disposition>("REWORK");
+  const choices = dispositionChoices(row, access);
+  const [disposition, setDisposition] = useState<Disposition>(choices[0] ?? "REWORK");
   const [notes, setNotes] = useState("");
   const [clause, setClause] = useState("");
   const [due, setDue] = useState("");
@@ -345,7 +351,7 @@ function NcrItem({ row, access, pending, openKey, setOpenKey, refusal, setRefusa
         </div>
         {!open && (
           <span className="qq-acts">
-            {access.disposition && row.status === "OPEN" && (
+            {choices.length > 0 && row.status === "OPEN" && (
               <button className="btn" disabled={pending} onClick={() => { setRefusal(null); setOpenKey(key); }}>
                 Disposition…
               </button>
@@ -361,11 +367,9 @@ function NcrItem({ row, access, pending, openKey, setOpenKey, refusal, setRefusa
       {open && (
         <div className="qq-form qq-grid">
           <select aria-label="Disposition" value={disposition} onChange={(e) => setDisposition(e.target.value as Disposition)}>
-            <option value="REWORK">Rework</option>
-            <option value="REPAIR">Repair</option>
-            <option value="USE_AS_IS">Use as is</option>
-            <option value="CONCESSION">Concession</option>
-            <option value="SCRAP">Scrap</option>
+            {choices.map((c) => (
+              <option key={c} value={c}>{DISPOSITION_LABEL[c]}</option>
+            ))}
           </select>
           {rework && <input type="date" aria-label="Rework due date" value={due} onChange={(e) => setDue(e.target.value)} />}
           {disposition === "CONCESSION" && (
