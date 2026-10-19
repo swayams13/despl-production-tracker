@@ -249,7 +249,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
 
       let unitCount = 0;
       let firstEquipmentId: number | null = null;
-      const unitIds: number[] = [];
+      const blockUnits: { equipmentTypeId: number | null; unitIds: number[] }[] = [];
       for (const block of parsed.equipments) {
         const equipment = await tx.equipment.create({
           data: {
@@ -265,7 +265,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo, jobId: job.id })),
           select: { id: true },
         });
-        unitIds.push(...units.map((u) => u.id));
+        blockUnits.push({ equipmentTypeId: block.equipmentTypeId ?? null, unitIds: units.map((u) => u.id) });
         unitCount += block.serials.length;
       }
 
@@ -283,14 +283,21 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           ? await materializeComponentsFromBomItems(tx, parsed.familyId, firstEquipmentId, bom.createdIds, job.id)
           : { componentCount: 0, skippedNoRoute: 0 };
 
-      const assembly = await materializeAssemblyStepsFromTemplate(
-        tx,
-        actor.tenantId,
-        job.id,
-        parsed.familyId,
-        unitIds,
-        qcp.qcpTemplateId,
-      );
+      // J1: each equipment block takes the template of its own equipment type.
+      const assembly = { stepCount: 0, boundToQcp: 0 };
+      for (const block of blockUnits) {
+        const r = await materializeAssemblyStepsFromTemplate(
+          tx,
+          actor.tenantId,
+          job.id,
+          parsed.familyId,
+          block.unitIds,
+          qcp.qcpTemplateId,
+          block.equipmentTypeId,
+        );
+        assembly.stepCount += r.stepCount;
+        assembly.boundToQcp += r.boundToQcp;
+      }
 
       const result: CreateJobResult = {
         jobId: job.id,

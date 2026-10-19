@@ -9,6 +9,7 @@ import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./
 import { closeNcr, closeRuleNcrsOnRedo } from "./ncr.service";
 import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
 import { assertFloorHard } from "./work.facts";
+import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
 import { notify, userIdsWithRole } from "./notifications.service";
 import { recordQcpExecutionTx } from "./qcp.service";
 import {
@@ -610,25 +611,20 @@ export async function materializeAssemblyStepsFromTemplate(
   familyId: number,
   unitIds: number[],
   qcpTemplateId: number | null,
+  equipmentTypeId: number | null = null,
 ): Promise<{ stepCount: number; boundToQcp: number }> {
   if (unitIds.length === 0) return { stepCount: 0, boundToQcp: 0 };
 
-  const asmTemplate = await tx.assemblyTemplate.findFirst({ where: { tenantId, familyId } });
-  if (!asmTemplate) return { stepCount: 0, boundToQcp: 0 }; // no assembly template authored for this family yet — a legitimate seam
-
-  const version = await tx.assemblyTemplateVersion.findFirst({
-    where: { templateId: asmTemplate.id, status: "PUBLISHED" },
-    orderBy: { version: "desc" },
-    include: { steps: { orderBy: { seq: "asc" } } },
-  });
-  if (!version || version.steps.length === 0) return { stepCount: 0, boundToQcp: 0 };
+  // No assembly template authored for this family yet is a legitimate seam.
+  const version = await resolveAssemblyTemplateVersion(tx, tenantId, familyId, equipmentTypeId);
+  if (!version) return { stepCount: 0, boundToQcp: 0 };
   const steps = version.steps;
 
-  // createJob is the only caller and always creates a brand-new Job, whose
-  // assemblyTemplateVersionId is unconditionally null — no "already pinned,
-  // don't re-pin" branch needed (unlike the seed script, which can also run
-  // against an existing job).
-  await tx.job.update({ where: { id: jobId }, data: { assemblyTemplateVersionId: version.id } });
+  // createJob only ever writes a brand-new Job, so the pin starts null. A job
+  // with several equipment blocks calls this once per block: the first block's
+  // version stays the job-level pin (J3 makes it per-equipment), later calls
+  // must not overwrite it.
+  await tx.job.updateMany({ where: { id: jobId, assemblyTemplateVersionId: null }, data: { assemblyTemplateVersionId: version.id } });
 
   // Occurrence index of each step within its own srNo group, in template step order.
   const srNoOccurrence = new Map<number, number>(); // templateStepId -> 0-based index within its srNo group

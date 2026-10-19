@@ -694,7 +694,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     const refs = await seedRefs();
     const qcpSource = await owner.qcpTemplate.findFirstOrThrow({ where: { job: { jobNumber: "DESPL-320" } } });
     const asmVersion = await owner.assemblyTemplateVersion.findFirstOrThrow({
-      where: { template: { tenantId: 1, familyId: refs.familyId }, status: "PUBLISHED" },
+      where: { template: { tenantId: 1, familyId: refs.familyId, equipmentTypeId: null }, status: "PUBLISHED" },
       orderBy: { version: "desc" },
       include: { steps: true },
     });

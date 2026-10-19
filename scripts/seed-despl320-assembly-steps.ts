@@ -27,6 +27,7 @@
 // scripts/seed-despl320-and-de0467.ts has created the DESPL-320 Job/Unit rows.)
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client";
+import { resolveAssemblyTemplateVersion } from "../src/lib/services/assembly-template.resolve";
 
 const prisma = new PrismaClient({
   datasourceUrl: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
@@ -63,21 +64,14 @@ async function main() {
   const family = await prisma.productFamily.findFirst({ where: { id: job.familyId } });
   if (!family) throw new Error(`${jobNumber}'s ProductFamily (id ${job.familyId}) not found`);
 
-  const asmTemplate = await prisma.assemblyTemplate.findFirst({
-    where: { tenantId: org.id, familyId: job.familyId },
-  });
-  if (!asmTemplate) {
+  // J1: the equipment type's own template, else the family-level fallback.
+  const equipment = await prisma.equipment.findFirst({ where: { jobId: job.id }, orderBy: { id: "asc" } });
+  const asmVersion = await resolveAssemblyTemplateVersion(prisma, org.id, job.familyId, equipment?.equipmentTypeId ?? null);
+  if (!asmVersion) {
     throw new Error(
-      `No AssemblyTemplate for family "${family.code}" — run scripts/backfill-assembly-template-v1.ts or pnpm db:seed first`,
+      `No published AssemblyTemplate version for family "${family.code}" — run scripts/backfill-assembly-template-v1.ts or pnpm db:seed first`,
     );
   }
-  const asmVersion = await prisma.assemblyTemplateVersion.findFirst({
-    where: { templateId: asmTemplate.id, status: "PUBLISHED" },
-    orderBy: { version: "desc" },
-    include: { steps: { orderBy: { seq: "asc" } } },
-  });
-  if (!asmVersion) throw new Error(`AssemblyTemplate ${asmTemplate.id} has no PUBLISHED version`);
-  if (asmVersion.steps.length === 0) throw new Error(`AssemblyTemplateVersion ${asmVersion.id} has no steps`);
 
   if (job.assemblyTemplateVersionId == null) {
     await prisma.job.update({ where: { id: job.id }, data: { assemblyTemplateVersionId: asmVersion.id } });
