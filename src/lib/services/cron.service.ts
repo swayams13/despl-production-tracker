@@ -3,7 +3,7 @@ import { ROLES, type Actor } from "@/lib/authz";
 import { isWorkingDay, subtractWorkingDays, DEFAULT_CALENDAR } from "@/lib/schedule";
 import type { WorkCalendarInput } from "@/lib/schedule/types";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
-import { syncOverdueStageNotifications, syncHoldPointAgedNotifications } from "./notifications.service";
+import { syncOverdueStageNotifications, syncHoldPointAgedNotifications, syncLateReasonReminders } from "./notifications.service";
 import { publishDigest } from "./reports.service";
 import { sendMorningDigest, type DigestEmailResult } from "./digest-email.service";
 
@@ -37,7 +37,7 @@ export async function runAlertReconciliation(): Promise<TenantRunResult[]> {
 
   for (const org of orgs) {
     try {
-      await Promise.all([syncOverdueStageNotifications(org.id), syncHoldPointAgedNotifications(org.id)]);
+      await Promise.all([syncOverdueStageNotifications(org.id), syncHoldPointAgedNotifications(org.id), syncLateReasonReminders(org.id)]);
       results.push({ tenantId: org.id, ok: true });
     } catch (e) {
       console.error("[cron] alert reconciliation failed", { tenantId: org.id, error: e });

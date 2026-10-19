@@ -11,3 +11,9 @@ export const HOLD_POINT_AGE_ALERT_DAYS = 5;
 
 /** D32: nudgeQc's own cooldown, per (plan, actor), derived server-side from the last NUDGE Notification row — never client state. */
 export const NUDGE_COOLDOWN_MINUTES = 30;
+
+/** L1.4: late-reason reminders start at this IST hour, on working days only. */
+export const LATE_REASON_REMINDER_HOUR_IST = 10;
+
+/** L1.4: hours after a plan's first reminder before the Production Head is told it still has no reason. */
+export const LATE_REASON_ESCALATE_HOURS = 24;

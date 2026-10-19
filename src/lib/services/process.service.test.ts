@@ -135,6 +135,8 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
   const { startProcess, submitProcess, verifyProcess, holdProcess, resumeProcess } = await import(
     "./process.service"
   );
+  const { withTenant } = await import("@/lib/db");
+  const { assertLateReasonFiled } = await import("./_shared");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   let tenantId = 0;
@@ -143,7 +145,8 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
   let supB: Actor; // supervisor in deptB
   let planA = 0;
   let planB = 0;
-  let planC = 0; // overdue, deptB — delay-block subject
+  let planC = 0; // overdue, deptB — late-reason subject
+  let planD = 0; // not overdue, deptB, same unit — must stay writable while planC is unreasoned
   let jobId = 0;
 
   const future = new Date(Date.now() + 30 * 864e5);
@@ -194,6 +197,9 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     const jpC = await owner.jobProcess.create({
       data: { jobId: job.id, seq: 30, code: "30", name: "C", departmentId: deptB.id },
     });
+    const jpD = await owner.jobProcess.create({
+      data: { jobId: job.id, seq: 35, code: "35", name: "D", departmentId: deptB.id },
+    });
     await owner.jobProcessEdge.create({
       data: { jobId: job.id, processId: jpB.id, predecessorId: jpA.id, type: "FINISH_TO_START", lagDays: 0 },
     });
@@ -223,6 +229,7 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     planA = (await mkPlan(jpA.id, deptA.id, future)).id;
     planB = (await mkPlan(jpB.id, deptA.id, future)).id;
     planC = (await mkPlan(jpC.id, deptB.id, past)).id;
+    planD = (await mkPlan(jpD.id, deptB.id, future)).id;
 
     const userSup = await owner.user.create({
       data: { tenantId, email: "sup@x", username: "sup", name: "Sup", passwordHash: "x" },
@@ -295,18 +302,33 @@ describe.skipIf(!RUN_DB)("process state machine (DB-backed)", async () => {
     await expectCode(verifyProcess(qc, { processPlanId: planC }), ERROR_CODES.INVALID_STATE_TRANSITION);
   });
 
-  it("delay block: an overdue unreasoned plan blocks the department until a reason is filed (#7)", async () => {
-    await expectCode(startProcess(supB, { processPlanId: planC }), ERROR_CODES.REASON_REQUIRED);
+  it("late reasons never block other writes; a late plan needs its own reason to be submitted (#7 as revised)", async () => {
+    // planC is overdue with no reason. A different plan of the same department and unit still starts...
+    const other = await startProcess(supB, { processPlanId: planD });
+    expect(other.status).toBe("IN_PROGRESS");
+    // ...and so does the late plan itself (late is not a reason to refuse work).
+    const started = await startProcess(supB, { processPlanId: planC });
+    expect(started.status).toBe("IN_PROGRESS");
 
+    // Submitting the late plan asks for the reason, with the categories to choose from.
     const cat = await owner.delayCategoryRef.create({
       data: { tenantId, code: "MAT", name: "Material shortage" },
     });
+    let thrown: unknown;
+    try {
+      await submitProcess(supB, { processPlanId: planC });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(isAppError(thrown) && thrown.code).toBe(ERROR_CODES.LATE_REASON_REQUIRED);
+    expect(isAppError(thrown) && JSON.stringify(thrown.detail)).toContain(`"id":${cat.id}`);
+    expect((await owner.processPlan.findUniqueOrThrow({ where: { id: planC } })).status).toBe("IN_PROGRESS");
+
+    // With the reason filed the check passes (planC stays IN_PROGRESS for the hold/resume cases below).
     await owner.delayReason.create({
       data: { jobId, processPlanId: planC, categoryId: cat.id, detail: "late plate", filedBy: supB.userId },
     });
-
-    const started = await startProcess(supB, { processPlanId: planC });
-    expect(started.status).toBe("IN_PROGRESS");
+    await withTenant(tenantId, (tx) => assertLateReasonFiled(tx, { id: planC, plannedFinish: past }, tenantId));
   });
 
   /**
@@ -534,9 +556,9 @@ describe.skipIf(!RUN_DB)("S1: excluded process does not deadlock its successor (
  * so it cannot exercise either invariant.
  *
  * Every generateSchedule call below uses a projectStartDate 30 days out so no
- * plannedFinish in the run is ever overdue — that keeps assertNoUnfiledDelayBlock
- * (invariant #7, unrelated to this task) out of the way; it is exercised
- * elsewhere (see planC above).
+ * plannedFinish in the run is ever overdue — that keeps the late-reason
+ * check on submit (invariant #7, unrelated to this task) out of the way; it is
+ * exercised elsewhere (see planC above).
  *
  * Investigation for the hold-point test (see task-3-report.md for the full
  * query + result): DESPL-320's seeded QCP template DOES link a blocking ("H",

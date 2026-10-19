@@ -489,32 +489,25 @@ export async function lockProcessPlanForUpdate(
 // ── Invariant gates that read from source tables ─────────────────────────
 
 /**
- * Invariant #7: a department with an OVERDUE plan (plannedFinish < now, not
- * COMPLETE) on this unit and no DelayReason filed is blocked from further
- * progress writes on the unit until a categorised reason is filed.
+ * Invariant #7 as revised (Lean Core L1.4): a late item is never a reason to refuse OTHER
+ * writes. The one refusal left is on the late plan itself: submitting it (the legacy path;
+ * recordWork asks for the reason in the same Done) needs a filed DelayReason, else
+ * LATE_REASON_REQUIRED with the categories to choose from. "Late" is the same test
+ * recordWork uses: plannedFinish before today's IST calendar day.
  */
-export async function assertNoUnfiledDelayBlock(
+export async function assertLateReasonFiled(
   tx: Tx,
-  args: { ownerDepartmentId: number; scheduleRunId: number; unitId: number | null },
+  plan: { id: number; plannedFinish: Date | null },
+  tenantId: number,
 ): Promise<void> {
-  const overdue = await tx.processPlan.findFirst({
-    where: {
-      scheduleRunId: args.scheduleRunId,
-      ownerDepartmentId: args.ownerDepartmentId,
-      unitId: args.unitId ?? null,
-      status: { not: "COMPLETE" },
-      plannedFinish: { lt: istCalendarDayMarker() },
-      delayReasons: { none: {} },
-    },
-    select: { id: true, jobProcessId: true, plannedFinish: true },
+  if (!plan.plannedFinish || plan.plannedFinish >= istCalendarDayMarker()) return;
+  if ((await tx.delayReason.count({ where: { processPlanId: plan.id } })) > 0) return;
+  const categories = await tx.delayCategoryRef.findMany({
+    where: { tenantId, active: true },
+    orderBy: { id: "asc" },
+    select: { id: true, code: true, name: true },
   });
-  if (overdue) {
-    throw new AppError(ERROR_CODES.REASON_REQUIRED, {
-      ownerDepartmentId: args.ownerDepartmentId,
-      overdueProcessPlanId: overdue.id,
-      jobProcessId: overdue.jobProcessId,
-    });
-  }
+  throw new AppError(ERROR_CODES.LATE_REASON_REQUIRED, { processPlanId: plan.id, plannedFinish: plan.plannedFinish, categories });
 }
 
 /**
