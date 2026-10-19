@@ -6,7 +6,7 @@ import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
 import { projectComponentRoute, computeComponentDisplayStatus, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
-import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
+import { explodeBomItem, computeAvailableForShortage, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
 
 /**
  * Job detail — BOM & Components tab (§4.3, §9.6).
@@ -115,7 +115,10 @@ export interface BomStockLot {
   id: number;
   heatNumber: string | null;
   location: string;
+  /** What was received into the lot. */
   qty: number;
+  /** What is still in it: received, less issues and scrap, plus returns. */
+  onHand: number;
   receivedAt: string;
 }
 
@@ -571,7 +574,14 @@ export async function loadBomTree(
         shortage: shortageVal?.toNumber() ?? null,
         stockLots: [...it.stockLots]
           .sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime())
-          .map((lot) => ({ id: lot.id, heatNumber: lot.heatNumber, location: lot.location, qty: lot.qty.toNumber(), receivedAt: lot.receivedAt.toISOString() })),
+          .map((lot) => ({
+            id: lot.id,
+            heatNumber: lot.heatNumber,
+            location: lot.location,
+            qty: lot.qty.toNumber(),
+            onHand: computeAvailableToIssue([lot])!.toNumber(),
+            receivedAt: lot.receivedAt.toISOString(),
+          })),
       };
       const list = byGroup.get(groupName) ?? [];
       list.push(row);
