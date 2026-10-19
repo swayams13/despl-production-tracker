@@ -9,7 +9,8 @@ import {
   createEquipmentTypeAction,
   updateEquipmentTypeAction,
 } from "@/app/actions/job-intake";
-import { specFieldsFor, type SpecField } from "@/lib/shared/specs";
+import { questionsForLine, type ConfigQuestionDef } from "@/lib/shared/config-questions";
+import { ConfigAnswerFields } from "@/components/industrial/config-answer-fields";
 import type { EquipmentTypeAdminRow } from "@/lib/services/job-intake.read";
 
 type Family = { id: number; code: string; name: string };
@@ -21,7 +22,15 @@ function summarizeSpecs(specs: Record<string, unknown> | null): string {
   return `${n} field${n === 1 ? "" : "s"}`;
 }
 
-export function EquipmentTypesClient({ rows, families }: { rows: EquipmentTypeAdminRow[]; families: Family[] }) {
+export function EquipmentTypesClient({
+  rows,
+  families,
+  questions,
+}: {
+  rows: EquipmentTypeAdminRow[];
+  families: Family[];
+  questions: ConfigQuestionDef[];
+}) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
   const [editRow, setEditRow] = useState<EquipmentTypeAdminRow | null>(null);
@@ -97,12 +106,14 @@ export function EquipmentTypesClient({ rows, families }: { rows: EquipmentTypeAd
       {addOpen && (
         <EquipmentTypeDialog
           families={families}
+          questions={questions}
           onClose={() => setAddOpen(false)}
         />
       )}
       {editRow && (
         <EquipmentTypeDialog
           families={families}
+          questions={questions}
           row={editRow}
           onClose={() => setEditRow(null)}
         />
@@ -190,51 +201,15 @@ function FamilyGroup({
   );
 }
 
-function SpecsEditor({
-  fields,
-  values,
-  onChange,
-}: {
-  fields: SpecField[];
-  values: Record<string, string>;
-  onChange: (key: string, value: string) => void;
-}) {
-  if (fields.length === 0) {
-    return <p className="note" style={{ margin: 0, textAlign: "left" }}>No design fields are defined for this family yet.</p>;
-  }
-  return (
-    <div className="emp-grid">
-      {fields.map((f) => (
-        <div key={f.key}>
-          <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>
-            {f.label}{f.unit ? ` (${f.unit})` : ""}
-          </label>
-          {f.type === "select" ? (
-            <select className="ws-detail" value={values[f.key] ?? ""} onChange={(e) => onChange(f.key, e.target.value)}>
-              <option value="">—</option>
-              {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-          ) : (
-            <input
-              className="ws-detail"
-              type={f.type === "number" ? "number" : "text"}
-              value={values[f.key] ?? ""}
-              onChange={(e) => onChange(f.key, e.target.value)}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 /** One dialog for both add (no `row`) and edit (`row` supplied) — same fields, different submit call. */
 function EquipmentTypeDialog({
   families,
+  questions,
   row,
   onClose,
 }: {
   families: Family[];
+  questions: ConfigQuestionDef[];
   row?: EquipmentTypeAdminRow;
   onClose: () => void;
 }) {
@@ -250,7 +225,7 @@ function EquipmentTypeDialog({
   );
 
   const family = families.find((f) => f.id === familyId) ?? null;
-  const fields = family ? specFieldsFor(family.code) : [];
+  const fields = questionsForLine(questions.filter((q) => q.familyId === family?.id), row?.id ?? null);
   const setSpec = (key: string, value: string) => setSpecs((s) => ({ ...s, [key]: value }));
 
   const submit = () => {
@@ -327,7 +302,7 @@ function EquipmentTypeDialog({
             </div>
 
             <div className="sh-sec">Default design specs</div>
-            <SpecsEditor fields={fields} values={specs} onChange={setSpec} />
+            <ConfigAnswerFields questions={fields} values={specs} onChange={setSpec} emptyText="No design questions are defined for this family yet." />
           </div>
           <div className="sh-ft">
             <button className="btn" onClick={onClose}>Cancel</button>

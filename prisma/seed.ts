@@ -28,6 +28,7 @@ import { hash } from "@node-rs/argon2";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import type { AssemblyStepRole } from "../src/generated/prisma/enums";
 import { ensurePvEquipmentTypes, SKIRT_TYPE_CODE } from "../src/lib/services/equipment-type.setup";
+import { ensurePvConfigQuestions } from "../src/lib/services/config-questions.setup";
 import {
   ProcessEdgeType,
   Sourcing,
@@ -872,6 +873,9 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
       // to the skirt type when its equipment is created (section 11).
       const pvTypes = await ensurePvEquipmentTypes(tx, tenantId, { apply: true });
       stats.equipmentTypes = pvTypes.typesCreated.length;
+
+      // J2: the PV design questions (the old SPEC_FIELDS) as data.
+      stats.configQuestions = (await ensurePvConfigQuestions(tx, tenantId, { apply: true })).created.length;
 
       // ── 8. Component route library (25 routes) ───────────────────────
       // Previously present in seed/component-routes.json but modelled nowhere.

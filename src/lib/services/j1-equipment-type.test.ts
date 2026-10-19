@@ -279,7 +279,6 @@ describe.skipIf(!RUN_DB)("Lean Core J1 equipment type anchor (DB)", async () => 
         targetDispatchDate: null,
         priority: "NORMAL",
         remarks: null,
-        specs: null,
         excludedProcessCodes: [],
         equipments: blocks.map((bl, i) => ({
           equipmentTypeId: bl.typeId,

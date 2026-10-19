@@ -12,5 +12,5 @@ export default async function EquipmentTypesPage() {
   const [rows, options] = await Promise.all([loadEquipmentTypeAdmin(actor), loadIntakeOptions(actor)]);
   const families = options.families.map((f) => ({ id: f.id, code: f.code, name: f.name }));
 
-  return <EquipmentTypesClient rows={rows} families={families} />;
+  return <EquipmentTypesClient rows={rows} families={families} questions={options.questions} />;
 }
