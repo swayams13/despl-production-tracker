@@ -17,7 +17,9 @@ describe("collapseUnitPlans", () => {
     ["all not started", [plan(1, "NOT_STARTED"), plan(2, "NOT_STARTED")], "NOT_STARTED"],
     ["all complete", [plan(1, "COMPLETE"), plan(2, "COMPLETE")], "COMPLETE"],
     ["all in progress", [plan(1, "IN_PROGRESS"), plan(2, "IN_PROGRESS")], "IN_PROGRESS"],
-    ["all submitted", [plan(1, "SUBMITTED"), plan(2, "SUBMITTED")], "SUBMITTED"],
+    ["all submitted by the same person", [plan(1, "SUBMITTED", { submittedBy: 7 }), plan(2, "SUBMITTED", { submittedBy: 7 })], "SUBMITTED"],
+    ["submitted by different people: back to IN_PROGRESS (no maker may verify their own work)", [plan(1, "SUBMITTED", { submittedBy: 7 }), plan(2, "SUBMITTED", { submittedBy: 8 })], "IN_PROGRESS"],
+    ["submitted with no recorded maker: back to IN_PROGRESS", [plan(1, "SUBMITTED", { submittedBy: 7 }), plan(2, "SUBMITTED")], "IN_PROGRESS"],
     ["some complete, some not started: not complete", [plan(1, "COMPLETE"), plan(2, "NOT_STARTED")], "IN_PROGRESS"],
     ["one started", [plan(1, "NOT_STARTED"), plan(2, "IN_PROGRESS")], "IN_PROGRESS"],
     ["a submitted mix is flattened", [plan(1, "SUBMITTED"), plan(2, "COMPLETE")], "IN_PROGRESS"],
@@ -35,8 +37,9 @@ describe("collapseUnitPlans", () => {
     expect(open).toMatchObject({ status: "IN_PROGRESS", actualStart: d("2026-10-05"), actualFinish: null, verifiedBy: null });
   });
 
-  it("keeps the submitter of a submitted plan, so maker-checker still has a maker", () => {
-    expect(collapseUnitPlans([plan(2, "SUBMITTED", { submittedBy: 7 }), plan(1, "SUBMITTED", { submittedBy: 4 })]).submittedBy).toBe(4);
+  it("keeps the one maker of a submitted plan, so maker-checker still has a maker; drops it when it flattens to IN_PROGRESS", () => {
+    expect(collapseUnitPlans([plan(2, "SUBMITTED", { submittedBy: 4 }), plan(1, "SUBMITTED", { submittedBy: 4 })])).toMatchObject({ status: "SUBMITTED", submittedBy: 4 });
+    expect(collapseUnitPlans([plan(2, "SUBMITTED", { submittedBy: 7 }), plan(1, "SUBMITTED", { submittedBy: 4 })])).toMatchObject({ status: "IN_PROGRESS", submittedBy: null });
   });
 });
 
@@ -44,10 +47,15 @@ describe("isRiskyMix", () => {
   it.each([
     [["SUBMITTED", "COMPLETE"], true],
     [["ON_HOLD", "IN_PROGRESS"], true],
-    [["SUBMITTED", "SUBMITTED"], false],
+    [["SUBMITTED", "SUBMITTED"], false], // same maker (7) on both
     [["COMPLETE", "NOT_STARTED"], false],
     [["IN_PROGRESS"], false],
-  ] as const)("%j -> %s", (statuses, want) => expect(isRiskyMix(statuses.map((status) => ({ status })))).toBe(want));
+  ] as const)("%j -> %s", (statuses, want) => expect(isRiskyMix(statuses.map((status) => ({ status, submittedBy: 7 })))).toBe(want));
+
+  it("all submitted, but by different people or with no recorded maker, is risky: it cannot stay SUBMITTED", () => {
+    expect(isRiskyMix([{ status: "SUBMITTED", submittedBy: 7 }, { status: "SUBMITTED", submittedBy: 8 }])).toBe(true);
+    expect(isRiskyMix([{ status: "SUBMITTED", submittedBy: 7 }, { status: "SUBMITTED", submittedBy: null }])).toBe(true);
+  });
 });
 
 describe("predecessorStatus", () => {

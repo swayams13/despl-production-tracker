@@ -22,17 +22,26 @@ export type Collapsed = Pick<CollapsiblePlan, "status" | "actualStart" | "actual
 const earliest = (ds: Array<Date | null>) => ds.filter((d): d is Date => d != null).reduce<Date | null>((a, d) => (a && a <= d ? a : d), null);
 const latest = (ds: Array<Date | null>) => ds.filter((d): d is Date => d != null).reduce<Date | null>((a, d) => (a && a >= d ? a : d), null);
 
+/** All submitted by one and the same person: the only case in which a collapsed plan can honestly stay SUBMITTED. */
+function singleMaker(plans: readonly Pick<CollapsiblePlan, "status" | "submittedBy">[]): boolean {
+  const makers = new Set(plans.map((p) => p.submittedBy));
+  return makers.size === 1 && !makers.has(null);
+}
+
 /**
  * One JOB plan from a job's per-unit plans of the same process (reschedule carry-forward and the
  * backfill). Status: the shared status when all agree; else IN_PROGRESS if any unit has started, else
  * NOT_STARTED. COMPLETE only when every unit is. Earliest start, latest finish (finish only when COMPLETE).
- * Maker-checker survives: a collapsed SUBMITTED plan keeps the lowest-id submitter, a COMPLETE one its verifier.
+ * Maker-checker (invariant 3): a collapsed plan is SUBMITTED only when every unit was submitted by the SAME
+ * person, who stays its maker. Units submitted by different people go back to IN_PROGRESS to be submitted
+ * again: keeping one of the makers would let another maker verify their own work.
  */
 export function collapseUnitPlans(plans: readonly CollapsiblePlan[]): Collapsed {
   const sorted = [...plans].sort((a, b) => a.id - b.id);
   const statuses = new Set(sorted.map((p) => p.status));
-  const status: ProcessPlanStatus =
+  let status: ProcessPlanStatus =
     statuses.size === 1 ? sorted[0].status : statuses.size === 0 || [...statuses].every((s) => s === "NOT_STARTED") ? "NOT_STARTED" : "IN_PROGRESS";
+  if (status === "SUBMITTED" && !singleMaker(sorted)) status = "IN_PROGRESS";
   const done = status === "COMPLETE";
   return {
     status,
@@ -40,15 +49,19 @@ export function collapseUnitPlans(plans: readonly CollapsiblePlan[]): Collapsed 
     actualFinish: done ? latest(sorted.map((p) => p.actualFinish)) : null,
     reportedStartAt: earliest(sorted.map((p) => p.reportedStartAt)),
     reportedFinishAt: done ? latest(sorted.map((p) => p.reportedFinishAt)) : null,
-    submittedBy: status === "SUBMITTED" || done ? (sorted.find((p) => p.submittedBy != null)?.submittedBy ?? null) : null,
+    submittedBy: status === "SUBMITTED" ? sorted[0].submittedBy : done ? (sorted.find((p) => p.submittedBy != null)?.submittedBy ?? null) : null,
     verifiedBy: done ? (sorted.find((p) => p.verifiedBy != null)?.verifiedBy ?? null) : null,
   };
 }
 
-/** A mix the collapse would flatten to IN_PROGRESS while a unit is waiting on QC or on hold: the backfill skips it and reports. */
-export function isRiskyMix(plans: readonly Pick<CollapsiblePlan, "status">[]): boolean {
+/**
+ * A state the collapse would flatten to IN_PROGRESS while a unit is waiting on QC or on hold, or units submitted
+ * by different people: the backfill skips it and reports it.
+ */
+export function isRiskyMix(plans: readonly Pick<CollapsiblePlan, "status" | "submittedBy">[]): boolean {
   const s = new Set(plans.map((p) => p.status));
-  return s.size > 1 && (s.has("SUBMITTED") || s.has("ON_HOLD"));
+  if (s.size > 1 && (s.has("SUBMITTED") || s.has("ON_HOLD"))) return true;
+  return s.size === 1 && s.has("SUBMITTED") && !singleMaker(plans);
 }
 
 const ADVANCE: Record<ProcessPlanStatus, number> = { NOT_STARTED: 0, IN_PROGRESS: 1, ON_HOLD: 1, SUBMITTED: 2, COMPLETE: 3 };

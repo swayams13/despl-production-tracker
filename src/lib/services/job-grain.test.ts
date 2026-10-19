@@ -99,6 +99,24 @@ describe.skipIf(!RUN_DB)("JOB-grain processes (DB)", async () => {
       if (want.status === "SUBMITTED") expect(plan.submittedBy).toBe(maker.userId);
     });
 
+    it("units submitted by DIFFERENT people never collapse into a SUBMITTED plan (a maker could then verify their own work)", async () => {
+      const j = await o.job({ units: 2, processes: [{ code: "5" }] });
+      const alice = await o.user("alice", ["SUPERVISOR"], [o.fab.id]);
+      const bob = await o.user("bob", ["SUPERVISOR"], [o.fab.id]);
+      await owner.processPlan.update({ where: { id: j.plan("5", 0) }, data: { status: "SUBMITTED", submittedBy: alice.userId } });
+      await owner.processPlan.update({ where: { id: j.plan("5", 1) }, data: { status: "SUBMITTED", submittedBy: bob.userId } });
+
+      // the backfill reports it as risky and skips it unless forced...
+      const planned = await planJobGrainBackfill(owner, { jobNumbers: [j.job.jobNumber] });
+      expect(planned[0].processes[0]).toMatchObject({ code: "5", risky: true, skipped: true });
+
+      // ...and a reschedule that does collapse it returns the work to IN_PROGRESS with no maker on record.
+      await setGrain(j.processes.get("5")!, "JOB");
+      await reschedule(j.job.id);
+      const [plan] = (await current(j.job.id)).processPlans.filter((p) => p.jobProcessId === j.processes.get("5")!);
+      expect(plan).toMatchObject({ unitId: null, status: "IN_PROGRESS", submittedBy: null });
+    });
+
     it("the previous run stays, with its per-unit plans (nothing is deleted)", async () => {
       const j = await o.job({ units: 2, processes: [{ code: "5" }] });
       await setGrain(j.processes.get("5")!, "JOB");
