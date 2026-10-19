@@ -21,7 +21,7 @@ CREATE TABLE "equipment_type_components" (
     CONSTRAINT "equipment_type_components_pkey" PRIMARY KEY ("id")
 );
 
-CREATE UNIQUE INDEX "equipment_type_components_equipment_type_id_component_type_id_key"
+CREATE UNIQUE INDEX "equipment_type_components_type_component_key"
   ON "equipment_type_components"("equipment_type_id", "component_type_id");
 CREATE INDEX "equipment_type_components_tenant_id_idx" ON "equipment_type_components"("tenant_id");
 CREATE INDEX "equipment_type_components_component_type_id_idx" ON "equipment_type_components"("component_type_id");

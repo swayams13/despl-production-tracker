@@ -674,7 +674,7 @@ model EquipmentTypeComponent {
   equipmentType EquipmentTypeRef @relation(fields: [equipmentTypeId], references: [id], onDelete: Cascade)
   componentType ComponentTypeRef @relation(fields: [componentTypeId], references: [id])
 
-  @@unique([equipmentTypeId, componentTypeId])
+  @@unique([equipmentTypeId, componentTypeId], map: "equipment_type_components_type_component_key")
   @@index([tenantId])
   @@index([componentTypeId])
   @@map("equipment_type_components")
@@ -2382,7 +2382,7 @@ model AssemblyTemplate {
 
   tenant        Organization              @relation(fields: [tenantId], references: [id])
   family        ProductFamily             @relation(fields: [familyId], references: [id])
-  equipmentType EquipmentTypeRef?         @relation(fields: [equipmentTypeId], references: [id])
+  equipmentType EquipmentTypeRef?         @relation(fields: [equipmentTypeId], references: [id], onDelete: Restrict)
   versions      AssemblyTemplateVersion[]
 
   @@index([tenantId])
