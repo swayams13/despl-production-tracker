@@ -27,6 +27,7 @@ import { randomUUID } from "node:crypto";
 import { hash } from "@node-rs/argon2";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import type { AssemblyStepRole } from "../src/generated/prisma/enums";
+import { ensurePvEquipmentTypes, SKIRT_TYPE_CODE } from "../src/lib/services/equipment-type.setup";
 import {
   ProcessEdgeType,
   Sourcing,
@@ -866,6 +867,12 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
       });
       stats.assemblyTemplateSteps = await tx.assemblyTemplateStep.count({ where: { versionId: asmV1.id } });
 
+      // ── 7d. Lean Core J1: PV equipment types + the "vertical on skirt"
+      // assembly template (a copy of v1 above) and kit. DESPL-320 is linked
+      // to the skirt type when its equipment is created (section 11).
+      const pvTypes = await ensurePvEquipmentTypes(tx, tenantId, { apply: true });
+      stats.equipmentTypes = pvTypes.typesCreated.length;
+
       // ── 8. Component route library (25 routes) ───────────────────────
       // Previously present in seed/component-routes.json but modelled nowhere.
       let routeStepCount = 0;
@@ -1310,8 +1317,9 @@ async function seedDemo(
         ),
       });
 
+      const pvSkirtType = await tx.equipmentTypeRef.findFirst({ where: { tenantId, code: SKIRT_TYPE_CODE } });
       const pilotEquipment = await tx.equipment.create({
-        data: { jobId: pilotJob.id, name: qcpFile.template.vessel, blockNo: 1 },
+        data: { jobId: pilotJob.id, name: qcpFile.template.vessel, blockNo: 1, equipmentTypeId: pvSkirtType?.id ?? null },
       });
       const from = serialRange ? Number(serialRange[1]) : 1;
       const to = serialRange ? Number(serialRange[2]) : 1;

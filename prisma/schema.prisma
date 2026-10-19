@@ -318,6 +318,7 @@ model Organization {
   jobs                         Job[]
   componentTypes               ComponentTypeRef[]
   equipmentTypes               EquipmentTypeRef[]
+  equipmentTypeComponents      EquipmentTypeComponent[]
   workOrderStages              WorkOrderStage[]
   operations                   OperationRef[]
   operationRefSeqs             OperationRefFamilySeq[]
@@ -616,12 +617,13 @@ model ComponentTypeRef {
   /// carry their attributes in `partFamily`.
   kind     ComponentTypeKind @default(RAW_FORM)
 
-  tenant            Organization    @relation(fields: [tenantId], references: [id])
+  tenant            Organization             @relation(fields: [tenantId], references: [id])
   routeTemplates    RouteTemplate[]
   components        Component[]
   bomItems          BomItem[]
-  partFamily        PartFamily?     @relation("PartFamilyType")
-  rawFormOfFamilies PartFamily[]    @relation("PartFamilyRawForm")
+  equipmentTypeKits EquipmentTypeComponent[]
+  partFamily        PartFamily?              @relation("PartFamilyType")
+  rawFormOfFamilies PartFamily[]             @relation("PartFamilyRawForm")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -644,14 +646,38 @@ model EquipmentTypeRef {
   defaultSpecs      Json?   @map("default_specs")
   active            Boolean @default(true)
 
-  tenant     Organization  @relation(fields: [tenantId], references: [id])
-  family     ProductFamily @relation(fields: [familyId], references: [id])
-  equipments Equipment[]
+  tenant           Organization             @relation(fields: [tenantId], references: [id])
+  family           ProductFamily            @relation(fields: [familyId], references: [id])
+  equipments       Equipment[]
+  assemblyTemplate AssemblyTemplate?
+  components       EquipmentTypeComponent[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([familyId])
   @@map("equipment_type_refs")
+}
+
+/// Lean Core J1: the component kit of an equipment type. Configuration only:
+/// scheduling and gating read materialised rows, never this table (J5 reads it
+/// at BOM release). `qtySource` is FIXED | NOZZLE_SCHEDULE | ANSWER:<key>
+/// (CHECK in the migration; parsed by src/lib/shared/equipment-type.ts).
+model EquipmentTypeComponent {
+  id              Int    @id @default(autoincrement())
+  tenantId        Int    @map("tenant_id")
+  equipmentTypeId Int    @map("equipment_type_id")
+  componentTypeId Int    @map("component_type_id")
+  defaultQty      Int    @default(1) @map("default_qty")
+  qtySource       String @default("FIXED") @map("qty_source")
+
+  tenant        Organization     @relation(fields: [tenantId], references: [id])
+  equipmentType EquipmentTypeRef @relation(fields: [equipmentTypeId], references: [id], onDelete: Cascade)
+  componentType ComponentTypeRef @relation(fields: [componentTypeId], references: [id])
+
+  @@unique([equipmentTypeId, componentTypeId])
+  @@index([tenantId])
+  @@index([componentTypeId])
+  @@map("equipment_type_components")
 }
 
 /// Canonical manufacturing operation. Grows per product family
@@ -2345,14 +2371,19 @@ enum AssemblyStepRole {
 }
 
 model AssemblyTemplate {
-  id       Int    @id @default(autoincrement())
-  tenantId Int    @map("tenant_id")
-  familyId Int    @map("family_id")
-  name     String
+  id              Int    @id @default(autoincrement())
+  tenantId        Int    @map("tenant_id")
+  familyId        Int    @map("family_id")
+  name            String
+  /// Lean Core J1: set = this template belongs to one equipment type (at most
+  /// one per type, NULLs are distinct). NULL = the family-level template, the
+  /// fallback for untyped equipment or a type with no template of its own.
+  equipmentTypeId Int?   @unique @map("equipment_type_id")
 
-  tenant   Organization              @relation(fields: [tenantId], references: [id])
-  family   ProductFamily             @relation(fields: [familyId], references: [id])
-  versions AssemblyTemplateVersion[]
+  tenant        Organization              @relation(fields: [tenantId], references: [id])
+  family        ProductFamily             @relation(fields: [familyId], references: [id])
+  equipmentType EquipmentTypeRef?         @relation(fields: [equipmentTypeId], references: [id])
+  versions      AssemblyTemplateVersion[]
 
   @@index([tenantId])
   @@index([familyId])

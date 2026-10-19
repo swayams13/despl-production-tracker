@@ -25,7 +25,7 @@ async function main() {
     where: { tenantId: org.id, code: "PRESSURE_VESSEL" },
   });
   const template = await prisma.assemblyTemplate.findFirstOrThrow({
-    where: { tenantId: org.id, familyId: family.id },
+    where: { tenantId: org.id, familyId: family.id, equipmentTypeId: null },
   });
   const version = await prisma.assemblyTemplateVersion.findFirstOrThrow({
     where: { templateId: template.id, version: 1 },
