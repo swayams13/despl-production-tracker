@@ -1,6 +1,8 @@
 import { withTenant } from "@/lib/db";
 import { assertNotClientUser, ROLES, requireRole, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import type { ConfigQuestionDef } from "@/lib/shared/config-questions";
+import { loadQuestionDefs } from "./config-rules";
 
 /**
  * Everything the intake wizard's dropdowns need, in one round trip.
@@ -39,6 +41,8 @@ export interface IntakeOptions {
     defaultDesignCode: string | null;
     defaultSpecs: Record<string, unknown> | null;
   }>;
+  /** Active config questions of every family (J2); the client filters by family and the lines' equipment types. */
+  questions: ConfigQuestionDef[];
   qcpTemplates: Array<{ id: number; label: string; vessel: string; revision: number; itemCount: number }>;
   bomSources: Array<{ equipmentId: number; label: string; itemCount: number }>;
 }
@@ -122,6 +126,7 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
         };
       }),
       calendars,
+      questions: await loadQuestionDefs(tx, actor.tenantId),
       equipmentTypes: equipmentTypes.map((e) => ({
         ...e,
         defaultSpecs: (e.defaultSpecs as Record<string, unknown> | null) ?? null,

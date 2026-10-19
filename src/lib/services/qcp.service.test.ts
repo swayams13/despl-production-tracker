@@ -763,7 +763,6 @@ describe.skipIf(!RUN_DB)("qcp.service — library authoring (DB)", async () => {
       targetDispatchDate: null,
       priority: "NORMAL",
       remarks: null,
-      specs: null,
       excludedProcessCodes: [],
       exclusionReason: null,
       equipments: [{ equipmentTypeId: null, name: "Vessel", blockNo: 1, remarks: null, serials: ["SR01"] }],

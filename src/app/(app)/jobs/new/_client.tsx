@@ -14,7 +14,7 @@ import {
   type CreateJobActionResult,
   type ScheduleVerdict,
 } from "@/app/actions/job-intake";
-import { specFieldsFor } from "@/lib/shared/specs";
+import { ConfigAnswerFields } from "@/components/industrial/config-answer-fields";
 import type { IntakeOptions, IntakeFamily } from "@/lib/services/job-intake.read";
 import type { CreateJobInput } from "@/lib/shared/schemas";
 
@@ -76,7 +76,8 @@ interface WizardState {
   equipments: EquipBlockState[];
   // step 4
   designCode: string;
-  specs: Record<string, string>;
+  /** Answers to the config questions, as typed; applied to every equipment line (the server keeps each line's own questions). */
+  answers: Record<string, string>;
   copyBomFromEquipmentId: number | null;
   // step 5
   remarks: string;
@@ -123,7 +124,7 @@ function defaultState(options: IntakeOptions): WizardState {
     qcpTemplateSourceId: null,
     equipments: [emptyBlock()],
     designCode: "",
-    specs: {},
+    answers: {},
     copyBomFromEquipmentId: null,
     remarks: "",
   };
@@ -260,7 +261,6 @@ export function NewJobWizard({ options }: { options: IntakeOptions }) {
       targetDispatchDate: state.targetDispatchDate ? new Date(state.targetDispatchDate) : null,
       priority: state.priority,
       remarks: state.remarks.trim() || null,
-      specs: Object.keys(state.specs).length ? state.specs : null,
       excludedProcessCodes: state.excludedProcessCodes,
       exclusionReason: state.excludedProcessCodes.length > 0 ? state.exclusionReason.trim() || null : null,
       equipments: state.equipments.map((e) => ({
@@ -268,6 +268,7 @@ export function NewJobWizard({ options }: { options: IntakeOptions }) {
         name: e.name.trim(),
         blockNo: e.blockNo.trim() ? Number(e.blockNo) : null,
         remarks: e.remarks.trim() || null,
+        config: Object.keys(state.answers).length ? state.answers : null,
         serials: e.serials.map((x) => x.trim()).filter(Boolean),
       })),
       qcpTemplateSourceId: state.qcpTemplateSourceId,
@@ -788,9 +789,9 @@ function StepEquipment({
     if (type) {
       patch({
         designCode: type.defaultDesignCode ?? state.designCode,
-        specs: type.defaultSpecs
+        answers: type.defaultSpecs
           ? Object.fromEntries(Object.entries(type.defaultSpecs).map(([k, v]) => [k, String(v)]))
-          : state.specs,
+          : state.answers,
       });
     }
   };
@@ -917,8 +918,11 @@ function StepConfig({
   options: IntakeOptions;
   family: IntakeFamily | null;
 }) {
-  const fields = family ? specFieldsFor(family.code) : [];
-  const setSpec = (key: string, value: string) => patch({ specs: { ...state.specs, [key]: value } });
+  // Family-level questions plus those of every equipment type chosen on step 3.
+  const familyQuestions = options.questions.filter((q) => q.familyId === family?.id);
+  const chosenTypes = new Set(state.equipments.map((b) => b.equipmentTypeId));
+  const questions = familyQuestions.filter((q) => q.equipmentTypeId == null || chosenTypes.has(q.equipmentTypeId));
+  const setAnswer = (key: string, value: string) => patch({ answers: { ...state.answers, [key]: value } });
 
   return (
     <>
@@ -930,32 +934,12 @@ function StepConfig({
             <input className="ws-detail" style={{ maxWidth: 320 }} value={state.designCode} onChange={(e) => patch({ designCode: e.target.value })} />
           </div>
 
-          {fields.length === 0 ? (
-            <p className="note" style={{ margin: 0, textAlign: "left" }}>No design fields are defined for this equipment type yet.</p>
-          ) : (
-            <div className="emp-grid">
-              {fields.map((f) => (
-                <div key={f.key}>
-                  <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>
-                    {f.label}{f.unit ? ` (${f.unit})` : ""}
-                  </label>
-                  {f.type === "select" ? (
-                    <select className="ws-detail" value={state.specs[f.key] ?? ""} onChange={(e) => setSpec(f.key, e.target.value)}>
-                      <option value="">—</option>
-                      {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  ) : (
-                    <input
-                      className="ws-detail"
-                      type={f.type === "number" ? "number" : "text"}
-                      value={state.specs[f.key] ?? ""}
-                      onChange={(e) => setSpec(f.key, e.target.value)}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <ConfigAnswerFields
+            questions={questions}
+            values={state.answers}
+            onChange={setAnswer}
+            emptyText="No design questions are defined for this equipment type yet."
+          />
         </div>
       </div>
 
@@ -1076,9 +1060,13 @@ function StepReview({
           <dl className="sh-kv">
             <div style={{ display: "contents" }}><dt>Design code</dt><dd>{state.designCode || "—"}</dd></div>
           </dl>
-          {Object.keys(state.specs).length > 0 && (
+          {Object.keys(state.answers).length > 0 && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-              {Object.entries(state.specs).filter(([, v]) => v).map(([k, v]) => <span className="tag" key={k}>{k}: {v}</span>)}
+              {Object.entries(state.answers)
+                .filter(([, v]) => v)
+                .map(([k, v]) => (
+                  <span className="tag" key={k}>{options.questions.find((q) => q.key === k)?.label ?? k}: {v}</span>
+                ))}
             </div>
           )}
         </div>

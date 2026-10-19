@@ -19,6 +19,7 @@ import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid } from "./welding.service";
 import { closeNcr } from "./ncr.service";
 import { notify, userIdsWithRole } from "./notifications.service";
+import { flushRuleDecisions, LineRules } from "./config-rules";
 import {
   startComponentOperationSchema,
   submitComponentOperationSchema,
@@ -743,6 +744,10 @@ export async function materializeComponentsFromBomItems(
   // flag has been reviewed (an APPROVED family); anything else keeps today's value.
   const reviewedTypeIds = new Set(approvedFamilies.map((f) => f.componentTypeId));
 
+  // J2: this line's answers decide which route steps become operations; one
+  // ledger row per rule-bearing step and line (not per component).
+  const rules = await LineRules.load(tx, equipmentId);
+
   let componentCount = 0;
   let skippedNoRoute = 0;
   const usedTags = new Set<string>();
@@ -774,9 +779,10 @@ export async function materializeComponentsFromBomItems(
         },
       });
 
-      if (routeVersion.steps.length > 0) {
+      const routeSteps = routeVersion.steps.filter((step) => rules.decide("ROUTE_STEP", step.id, step.includeWhen));
+      if (routeSteps.length > 0) {
         await tx.componentOperation.createMany({
-          data: routeVersion.steps.map((step) => ({
+          data: routeSteps.map((step) => ({
             componentId: component.id,
             seq: step.seq,
             operationId: step.operationId,
@@ -798,6 +804,7 @@ export async function materializeComponentsFromBomItems(
     }
   }
 
+  await flushRuleDecisions(tx, [rules]);
   return { componentCount, skippedNoRoute };
 }
 

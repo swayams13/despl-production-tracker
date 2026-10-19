@@ -108,7 +108,12 @@ export async function ensurePvEquipmentTypes(
           },
         });
         await db.assemblyTemplateStep.createMany({
-          data: version.steps.map(({ id: _id, versionId: _versionId, ...step }) => ({ ...step, versionId: copy.id })),
+          data: version.steps.map(({ id: _id, versionId: _versionId, includeWhen, ...step }) => ({
+            ...step,
+            versionId: copy.id,
+            // a Json column copies as undefined (SQL NULL) or the rule itself
+            includeWhen: includeWhen === null ? undefined : (includeWhen as Prisma.InputJsonValue),
+          })),
         });
         audit("setup.assemblyTemplate.create", "AssemblyTemplate", template.id, {
           equipmentTypeId: skirtTypeId,

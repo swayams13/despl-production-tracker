@@ -105,7 +105,6 @@ describe.skipIf(!RUN_DB)("S20 — Gate 2 end-to-end integration (DB)", async () 
       targetDispatchDate: null,
       priority: "NORMAL",
       remarks: null,
-      specs: null,
       excludedProcessCodes: [],
       exclusionReason: null,
       equipments: [{ equipmentTypeId: null, name: "S20 Vessel", blockNo: 1, remarks: null, serials: ["S20-U1"] }],
