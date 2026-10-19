@@ -959,9 +959,9 @@ function GoverningDrawingSection({ jobId, drawing }: { jobId: number; drawing: B
   );
 }
 
-/** " (1 of 2)" on a step whose operation the route uses more than once (a head's pressing and trimming are both Forming). */
+/** " (Trimming)", or " (1 of 2)" without route names, on a step whose operation the route uses more than once (a head's pressing and trimming are both Forming). */
 function repeatSuffixes(operations: BomComponentOp[]): Map<number, string> {
-  return repeatedOpSuffixes(operations.map((o) => ({ key: o.seq, group: 0, name: o.operationName, seq: o.seq })));
+  return repeatedOpSuffixes(operations.map((o) => ({ key: o.seq, group: 0, name: o.operationName, seq: o.seq, printed: o.printed })));
 }
 
 function RouteSteps({

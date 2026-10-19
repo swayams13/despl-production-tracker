@@ -246,7 +246,7 @@ interface RawComponentForSummary {
   } | null;
   routeVersion: {
     id: number;
-    steps: { seq: number; operation: { id: number; name: string } }[];
+    steps: { seq: number; printed: string | null; operation: { id: number; name: string } }[];
   } | null;
   operations: {
     id: number;
@@ -283,6 +283,7 @@ function buildComponentSummary(
     seq: s.seq,
     operationId: s.operation.id,
     operationName: s.operation.name,
+    printed: s.printed,
     leadTimeProcessSeq: resolveProcessSeq(
       { operationId: s.operation.id, seq: s.seq, routeVersionId },
       familySeqByStep,
@@ -424,7 +425,7 @@ export async function loadBomTree(
                 id: true,
                 steps: {
                   orderBy: { seq: "asc" },
-                  select: { seq: true, operation: { select: { id: true, name: true } } },
+                  select: { seq: true, printed: true, operation: { select: { id: true, name: true } } },
                 },
               },
             },
@@ -479,7 +480,7 @@ export async function loadBomTree(
             id: true,
             steps: {
               orderBy: { seq: "asc" },
-              select: { seq: true, operation: { select: { id: true, name: true } } },
+              select: { seq: true, printed: true, operation: { select: { id: true, name: true } } },
             },
           },
         },

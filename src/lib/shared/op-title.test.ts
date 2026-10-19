@@ -27,4 +27,23 @@ describe("repeatedOpSuffixes", () => {
     expect(repeatedOpSuffixes([{ key: 1, group: 1, name: "A", seq: 1 }, { key: 2, group: 1, name: "B", seq: 2 }]).size).toBe(0);
     expect(repeatedOpSuffixes([]).size).toBe(0);
   });
+  describe("printed step names", () => {
+    const head = (a: string | null, b: string | null) => [
+      { key: 2, group: 1, name: "Forming", seq: 2, printed: a },
+      { key: 3, group: 1, name: "Forming", seq: 3, printed: b },
+    ];
+    it("uses the route's own names when every repeat has a distinct one", () => {
+      const m = repeatedOpSuffixes(head("Pressing/Spinning", "Trimming"));
+      expect(m.get(2)).toBe(" (Pressing/Spinning)");
+      expect(m.get(3)).toBe(" (Trimming)");
+    });
+    it("falls back to numbering when a name is missing, blank or shared", () => {
+      for (const [a, b] of [["Pressing", null], ["Pressing", "  "], ["Trimming", "Trimming"]] as const) {
+        expect([...repeatedOpSuffixes(head(a, b)).values()]).toEqual([" (1 of 2)", " (2 of 2)"]);
+      }
+    });
+    it("a name used once is still left alone", () => {
+      expect(repeatedOpSuffixes([{ key: 1, group: 1, name: "Cutting", seq: 1, printed: "Plate Cutting" }]).size).toBe(0);
+    });
+  });
 });

@@ -8,6 +8,7 @@ import { OVERRIDE_CATEGORIES } from "@/lib/shared/schemas";
 import type { StageSegment } from "@/components/industrial/stage-status";
 import { loadFloorFacts, rowKey } from "./work.facts";
 import { loadUnitSpinesBatch } from "./spine.read";
+import { routeStepNames } from "./route-step-names";
 
 /**
  * Lean Core L2.2: everything the Floor screen (/u/[publicId]) needs, for one
@@ -176,7 +177,7 @@ export async function loadFloorUnit(
           seq: true,
           componentId: true,
           operation: { select: { name: true } },
-          component: { select: { tag: true, componentType: { select: { name: true } } } },
+          component: { select: { tag: true, routeVersionId: true, componentType: { select: { name: true } } } },
         },
       }),
       all ? Promise.resolve([]) : tx.department.findMany({ where: { id: { in: deptIds } }, select: { name: true } }),
@@ -200,7 +201,8 @@ export async function loadFloorUnit(
         templateStepId: s.templateStepId,
       });
     }
-    const repeats = repeatedOpSuffixes(opLabels.map((o) => ({ key: o.id, group: o.componentId, name: o.operation.name, seq: o.seq })));
+    const printed = await routeStepNames(tx, opLabels.map((o) => ({ id: o.id, seq: o.seq, routeVersionId: o.component.routeVersionId })));
+    const repeats = repeatedOpSuffixes(opLabels.map((o) => ({ key: o.id, group: o.componentId, name: o.operation.name, seq: o.seq, printed: printed.get(o.id) })));
     for (const o of opLabels) {
       const type = o.component.componentType.name;
       label.set(rowKey("COMPONENT_OP", o.id), {
