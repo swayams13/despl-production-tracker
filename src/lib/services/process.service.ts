@@ -33,7 +33,7 @@ import {
   assertEvidenceSatisfied,
   assertNoOpenHoldPoint,
   assertNoOpenNcr,
-  assertNoUnfiledDelayBlock,
+  assertLateReasonFiled,
   loadJobSpine,
   lockProcessPlanForUpdate,
   loadPredecessorStates,
@@ -129,8 +129,7 @@ async function assertNotDerived(tx: Tx, plan: ProcessPlan): Promise<void> {
 // ── Transitions ──────────────────────────────────────────────────────────
 
 /**
- * NOT_STARTED → IN_PROGRESS. Department-scoped; the department may owe no
- * unfiled delay reason (#7); every predecessor must be advanced enough to start
+ * NOT_STARTED → IN_PROGRESS. Department-scoped; every predecessor must be advanced enough to start
  * per its edge type (#2/#11). Sets actualStart from the server clock (#1).
  */
 export async function startProcess(actor: Actor, input: StartProcessInput): Promise<ProcessPlan> {
@@ -142,12 +141,6 @@ export async function startProcess(actor: Actor, input: StartProcessInput): Prom
     requireDepartmentScope(actor, plan.ownerDepartmentId);
     await assertNotDerived(tx, plan);
     const to = assertTransition("start", plan.status);
-
-    await assertNoUnfiledDelayBlock(tx, {
-      ownerDepartmentId: plan.ownerDepartmentId,
-      scheduleRunId: plan.scheduleRunId,
-      unitId: plan.unitId,
-    });
 
     const { edges, states } = await loadGate(tx, plan);
     assertCanStart(edges, states);
@@ -175,7 +168,8 @@ export async function startProcess(actor: Actor, input: StartProcessInput): Prom
 
 /**
  * IN_PROGRESS → SUBMITTED (maker step). Department-scoped; records submittedBy
- * for the maker–checker rule enforced at verify. Delay block (#7) still applies.
+ * for the maker–checker rule enforced at verify. A late plan needs its delay reason
+ * filed first (invariant 7 as revised: this plan only, never other writes).
  */
 export async function submitProcess(actor: Actor, input: SubmitProcessInput): Promise<ProcessPlan> {
   const { processPlanId } = submitProcessSchema.parse(input);
@@ -187,11 +181,7 @@ export async function submitProcess(actor: Actor, input: SubmitProcessInput): Pr
     await assertNotDerived(tx, plan);
     const to = assertTransition("submit", plan.status);
 
-    await assertNoUnfiledDelayBlock(tx, {
-      ownerDepartmentId: plan.ownerDepartmentId,
-      scheduleRunId: plan.scheduleRunId,
-      unitId: plan.unitId,
-    });
+    await assertLateReasonFiled(tx, plan, actor.tenantId);
 
     await assertComponentOpsComplete(tx, { jobProcessId: plan.jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
 

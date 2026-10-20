@@ -14,6 +14,8 @@ const TYPE_LABEL: Record<string, string> = {
   JOB_CREATED: "New job",
   ITEM_SUBMITTED: "Awaiting verification",
   STAGE_OVERDUE: "Overdue",
+  LATE_REASON_REMINDER: "Reason needed",
+  LATE_REASON_ESCALATED: "No reason filed",
   NUDGE: "Nudge",
   HOLD_POINT_AGED: "Hold point aging",
   DIGEST_PUBLISHED: "Daily digest",

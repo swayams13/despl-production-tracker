@@ -15,11 +15,9 @@ import { notify, userIdsWithRole } from "./notifications.service";
 /**
  * Delay reasons (CLAUDE.md invariant #7).
  *
- * Filing a categorised reason is the ONLY thing that clears the block
- * assertNoUnfiledDelayBlock enforces: once a department's overdue ProcessPlan
- * has a DelayReason row, that department's progress writes on the unit flow
- * again. So this service is the unblock half of the mandatory-delay-reason
- * invariant — the block half lives in _shared + the other progress services.
+ * Filing a categorised reason is what lets a late plan be submitted on the legacy
+ * path (assertLateReasonFiled); recordWork takes the reason in the same Done. It
+ * never blocks other writes (invariant 7 as revised, L1.4).
  */
 
 /**

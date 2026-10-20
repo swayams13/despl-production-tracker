@@ -36,7 +36,7 @@ import { closeRuleNcrsOnRedo } from "./ncr.service";
  * component operations, assembly steps and (non-derived) process plans of ONE
  * job, gated by the D2 registry in floor-rules.ts — HARD rules refuse, SOFT
  * order needs an override reason. Process edges are schedule-only: this never
- * calls assertCanStart / assertCanComplete / assertNoUnfiledDelayBlock.
+ * calls assertCanStart / assertCanComplete (and no delay block: L1.4).
  *
  * One transaction, partial success: every refusal is an AppError thrown
  * before that item writes, caught and reported; any other error (SQL, audit
