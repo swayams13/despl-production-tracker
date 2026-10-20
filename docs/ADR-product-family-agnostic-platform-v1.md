@@ -103,6 +103,8 @@ other than "none", the design is wrong, and that should be said before implement
 
 ### Accepted exception: `specs.ts`'s per-family field map (B11)
 
+> **Retired 20 Oct 2026 (Lean Core J2).** `specs.ts` and `SPEC_FIELDS` are gone: the questions are rows in `config_questions` (scoped to a family or an equipment type), the answers live per equipment line in `Equipment.config`, and a new family's questions are data to author, not code. The reasoning below is kept as history; nothing in scheduling or gating reads either table (guarded by `config-isolation.test.ts`).
+
 `src/lib/shared/specs.ts`'s `SPEC_FIELDS` is a hardcoded `Record<familyCode, SpecField[]>` — adding a
 family's design-spec fields (e.g. a heat exchanger's TEMA type, shell/tube-side design pressure,
 tube count) means editing this file. By the standing acceptance test above, that is a code change,

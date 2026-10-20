@@ -788,8 +788,6 @@ export const createJobSchema = z
     // Matches enum JobPriority at schema.prisma:60 — URGENT, not CRITICAL.
     priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
     remarks: z.string().trim().min(1).nullable().default(null),
-    /** Filtered through the family's SPEC_FIELDS in the service. */
-    specs: z.record(z.string(), z.unknown()).nullable().default(null),
     /** TemplateProcess.code values this client skips, e.g. PWHT. Only codes with TemplateProcess.optional === true may actually be excluded — enforced in the service (AUD-033). */
     excludedProcessCodes: z.array(z.string().trim().min(1)).default([]),
     /** Free-text reason for each optional process excluded — required when excludedProcessCodes is non-empty (AUD-033). */
@@ -802,6 +800,8 @@ export const createJobSchema = z
             name: z.string().trim().min(1, "Each equipment block needs a name"),
             blockNo: z.number().int().positive().nullable().default(null),
             remarks: z.string().trim().min(1).nullable().default(null),
+            /** Answers to the family's / equipment type's config questions (J2). Filtered through ConfigQuestion in the service. */
+            config: z.record(z.string(), z.unknown()).nullable().optional(),
             serials: z
               .array(z.string().trim().min(1))
               .min(1, "Each equipment block needs at least one serial number"),

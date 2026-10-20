@@ -10,6 +10,7 @@ import { closeNcr, closeRuleNcrsOnRedo } from "./ncr.service";
 import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
 import { assertFloorHard } from "./work.facts";
 import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
+import type { LineRules } from "./config-rules";
 import { notify, userIdsWithRole } from "./notifications.service";
 import { recordQcpExecutionTx } from "./qcp.service";
 import {
@@ -612,13 +613,21 @@ export async function materializeAssemblyStepsFromTemplate(
   unitIds: number[],
   qcpTemplateId: number | null,
   equipmentTypeId: number | null = null,
+  /** J2: this line's answers. Absent = no rules evaluated (every step materialised, as before). */
+  rules: LineRules | null = null,
+  /** J2: QCP source items a rule dropped; their position still counts when steps bind to items. */
+  skippedQcp: { srNo: string; sequence: number }[] = [],
 ): Promise<{ stepCount: number; boundToQcp: number }> {
   if (unitIds.length === 0) return { stepCount: 0, boundToQcp: 0 };
 
   // No assembly template authored for this family yet is a legitimate seam.
   const version = await resolveAssemblyTemplateVersion(tx, tenantId, familyId, equipmentTypeId);
   if (!version) return { stepCount: 0, boundToQcp: 0 };
-  const steps = version.steps;
+  // Occurrence indices below are counted over the FULL template, so a rule that
+  // drops one step never shifts which QCP item the later steps bind to (J2).
+  const allSteps = version.steps;
+  const steps = rules ? allSteps.filter((st) => rules.decide("ASSEMBLY_STEP", st.id, st.includeWhen)) : allSteps;
+  if (steps.length === 0) return { stepCount: 0, boundToQcp: 0 };
 
   // createJob only ever writes a brand-new Job, so the pin starts null. A job
   // with several equipment blocks calls this once per block: the first block's
@@ -629,23 +638,27 @@ export async function materializeAssemblyStepsFromTemplate(
   // Occurrence index of each step within its own srNo group, in template step order.
   const srNoOccurrence = new Map<number, number>(); // templateStepId -> 0-based index within its srNo group
   const srNoCounters = new Map<string, number>();
-  for (const step of steps) {
+  for (const step of allSteps) {
     if (!step.srNo) continue;
     const idx = srNoCounters.get(step.srNo) ?? 0;
     srNoOccurrence.set(step.id, idx);
     srNoCounters.set(step.srNo, idx + 1);
   }
 
-  const qcpItemsBySrNo = new Map<string, { id: number }[]>();
+  // id null = a checkpoint a rule dropped from the job's QCP; it keeps its place in the order.
+  const qcpItemsBySrNo = new Map<string, { id: number | null; sequence: number }[]>();
   if (qcpTemplateId != null) {
     const qcpItems = await tx.qcpItem.findMany({
       where: { qcpTemplateId },
-      orderBy: { sequence: "asc" },
-      select: { id: true, srNo: true },
+      select: { id: true, srNo: true, sequence: true },
     });
-    for (const item of qcpItems) {
+    const all = [
+      ...qcpItems.map((q) => ({ id: q.id as number | null, srNo: q.srNo, sequence: q.sequence })),
+      ...skippedQcp.map((q) => ({ id: null, srNo: q.srNo, sequence: q.sequence })),
+    ].sort((a, b) => a.sequence - b.sequence);
+    for (const item of all) {
       const list = qcpItemsBySrNo.get(item.srNo) ?? [];
-      list.push({ id: item.id });
+      list.push({ id: item.id, sequence: item.sequence });
       qcpItemsBySrNo.set(item.srNo, list);
     }
   }
@@ -657,12 +670,13 @@ export async function materializeAssemblyStepsFromTemplate(
     const candidates = qcpItemsBySrNo.get(step.srNo);
     const idx = srNoOccurrence.get(step.id) ?? 0;
     const match = candidates?.[idx];
-    if (!match) {
+    if (!match || match.id == null) {
       throw new AppError(ERROR_CODES.QCP_ITEM_UNRESOLVED, {
         templateStepId: step.id,
         srNo: step.srNo,
         occurrence: idx,
         qcpTemplateId,
+        ...(match && match.id == null ? { droppedByRule: true } : {}),
       });
     }
     return match.id;

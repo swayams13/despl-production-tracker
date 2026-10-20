@@ -4,7 +4,8 @@ import { audited } from "@/lib/audit";
 import { requireRole, assertNotClientUser, hasRole, ROLES, type Actor, type RoleCode } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { hashPassword } from "@/lib/auth/password";
-import { validateSpecs } from "@/lib/shared/specs";
+import { questionsForLine, validateAnswers } from "@/lib/shared/config-questions";
+import { loadQuestionDefs } from "./config-rules";
 import { notify, userIdsWithRole } from "./notifications.service";
 import {
   createUserSchema,
@@ -843,9 +844,12 @@ export async function createEquipmentType(
       );
     }
 
-    // Defaults are filtered through the family's own field map, so the catalog
-    // cannot seed a job with a key no form will ever show.
-    const specs = defaultSpecs ? validateSpecs(family.code, defaultSpecs) : null;
+    // Defaults are filtered through the family's own questions, so the catalog
+    // cannot seed a job with a key no form will ever show. A new type has no
+    // question of its own yet, so only family-level questions apply.
+    const specs = defaultSpecs
+      ? validateAnswers(questionsForLine(await loadQuestionDefs(tx, actor.tenantId, familyId), null), defaultSpecs)
+      : null;
 
     return audited(tx, actor, async () => {
       const row = await tx.equipmentTypeRef.create({
@@ -893,7 +897,10 @@ export async function updateEquipmentType(
         ? undefined
         : parsed.defaultSpecs === null
           ? null
-          : validateSpecs(row.family.code, parsed.defaultSpecs);
+          : validateAnswers(
+              questionsForLine(await loadQuestionDefs(tx, actor.tenantId, row.familyId), row.id),
+              parsed.defaultSpecs,
+            );
 
     return audited(tx, actor, async () => {
       const updated = await tx.equipmentTypeRef.update({
