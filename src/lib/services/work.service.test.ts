@@ -551,6 +551,14 @@ describe.skipIf(!RUN_DB)("L1.2d recordWork (DB)", async () => {
       ]);
     });
 
+    it("an unreasoned late plan never blocks the unit's other work (invariant 7 as revised)", async () => {
+      // Process 15 is late with no reason filed; step 1 belongs to process 16, same unit and department.
+      const j = await o.job({ processes: [{ code: "15", plannedFinish: yesterday() }, { code: "16" }], steps: [{ seq: 1, processSeq: 16, requiresQc: false }] });
+      expect((await rec(sup, j, "START", [[S, j.step(1)]])).applied).toHaveLength(1);
+      expect((await rec(sup, j, "DONE", [[S, j.step(1)]])).applied).toMatchObject([{ late: false }]);
+      expect(await owner.delayReason.count({ where: { processPlanId: j.plan("15", 0) } })).toBe(0);
+    });
+
     it("a plan that already has a reason needs no second one", async () => {
       const j = await lateJob();
       await owner.delayReason.create({ data: { jobId: j.job.id, processPlanId: j.plan("15", 0), categoryId: o.category.id, filedBy: sup.userId } });

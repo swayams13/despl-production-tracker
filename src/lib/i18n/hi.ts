@@ -80,6 +80,7 @@ export const hi: Dict = {
     showMore: (n) => `${n} और दिखाएँ`, // REVIEW: DESPL
     startedAt: (time) => ` · ${time} पर शुरू हुआ`, // REVIEW: DESPL
     alsoOnOthers: (n) => ` · ${n} और यूनिट पर भी`, // REVIEW: DESPL
+    returnedByQc: (why) => `QC ने वापस भेजा${why ? `: ${why}` : ""}`, // REVIEW: DESPL
   },
   today: {
     title: "आज", // REVIEW: DESPL

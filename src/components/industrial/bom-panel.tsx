@@ -387,7 +387,7 @@ function BomItemForm({
       else {
         toast.success(editing ? "BOM item updated." : "BOM item added.");
         onDone();
-        router.refresh();
+        start(() => router.refresh());
       }
     });
   };
@@ -542,7 +542,7 @@ function ComponentDetail({
         setRecording(false);
         setHeatNumber("");
         setMtcRef("");
-        router.refresh();
+        start(() => router.refresh());
       }
     });
   };
@@ -691,7 +691,7 @@ function ProcurementEventControl({ jobId, bomItemId, access }: { jobId: number; 
         setLogging(false);
         setQty("");
         setRefNo("");
-        router.refresh();
+        start(() => router.refresh());
       }
     });
   };
@@ -749,7 +749,7 @@ function StockLotMoveControl({
         setMode("idle");
         setQty("");
         setNote("");
-        router.refresh();
+        start(() => router.refresh());
       }
     });
   };
@@ -791,7 +791,7 @@ function LotHeatControl({ jobId, lotId }: { jobId: number; lotId: number }) {
       }
       toast.success("Heat number recorded.");
       setOpen(false);
-      router.refresh();
+      start(() => router.refresh());
     });
   };
   if (!open) return <button className="btn" style={{ padding: "2px 8px", fontSize: "var(--fs-xs, 11px)" }} onClick={() => setOpen(true)}>Add heat number</button>;
@@ -828,7 +828,7 @@ function StockSection({ jobId, item, componentId, access }: { jobId: number; ite
         setHeatNumber("");
         setLocation("");
         setQty("");
-        router.refresh();
+        start(() => router.refresh());
       }
     });
   };
@@ -903,7 +903,7 @@ function GoverningDrawingSection({ jobId, drawing }: { jobId: number; drawing: B
         toast.success("Drawing revision issued.");
         setIssuing(false);
         setRevisionNo("");
-        router.refresh();
+        start(() => router.refresh());
       }
     });
   };
@@ -984,7 +984,7 @@ function RouteSteps({
       if (!r.ok) toast.error(r.message);
       else {
         toast.success(ok);
-        router.refresh();
+        start(() => router.refresh());
       }
     });
 

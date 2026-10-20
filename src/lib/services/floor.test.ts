@@ -13,7 +13,7 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { loadFloorUnit } = await import("./floor.read");
   const { notifyBlocker, ensureJointForStep, jointTypeOf } = await import("./floor.service");
-  const { recordWork } = await import("./work.service");
+  const { recordWork, inspect } = await import("./work.service");
   const { makeWorkOrg } = await import("./work.test-util");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -159,6 +159,32 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
       });
       const v = await view(head, j.units[0].publicId);
       expect(v.rows.map((r) => r.title).sort()).toEqual(["CUTTING", "FORMING (1 of 2)", "FORMING (2 of 2)", "NDT"]);
+    });
+  });
+
+  // ── a step QC sent back ───────────────────────────────────────────────
+  describe("a step QC sent back", () => {
+    const job = () => o.job({ processes: [{ code: "20" }], steps: [{ seq: 1, processSeq: 20 }, { seq: 2, processSeq: 20 }] });
+    const rowOf = async (j: Awaited<ReturnType<typeof job>>, id: number) => (await view(sup, j.units[0].publicId)).rows.find((r) => r.id === id)!;
+
+    it("says it came back and why; the latest rejection's reason wins; a step never rejected, and one resubmitted, show nothing", async () => {
+      const j = await job();
+      await recordWork(sup, { jobId: j.job.id, action: "START", items: [{ kind: S, id: j.step(1) }] });
+      expect((await rowOf(j, j.step(1))).returnedNote).toBeNull(); // in progress, never rejected
+
+      await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: S, id: j.step(1) }] });
+      await inspect(qcUser, { kind: S, targetId: j.step(1), result: "REJECT", reason: "Weld toe undercut", categoryId: o.category.id });
+      expect(await rowOf(j, j.step(1))).toMatchObject({ state: "IN_PROGRESS", returnedNote: "Weld toe undercut" });
+      expect((await rowOf(j, j.step(2))).returnedNote).toBeNull(); // a sibling step is unaffected
+
+      await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: S, id: j.step(1) }] });
+      await inspect(qcUser, { kind: S, targetId: j.step(1), result: "REJECT", reason: "Still undercut at the toe", categoryId: o.category.id });
+      expect((await rowOf(j, j.step(1))).returnedNote).toBe("Still undercut at the toe");
+
+      // Done again: it is waiting for QC, no longer a step to act on, so no stale note on it.
+      await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: S, id: j.step(1) }] });
+      const resubmitted = (await view(sup, j.units[0].publicId)).rows.find((r) => r.id === j.step(1));
+      expect(resubmitted?.returnedNote ?? null).toBeNull();
     });
   });
 

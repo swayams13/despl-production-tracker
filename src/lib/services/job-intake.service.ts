@@ -13,7 +13,8 @@ import {
   type UpdateJobDetailsInput,
   type SetJobStatusInput,
 } from "@/lib/shared/schemas";
-import { validateSpecs } from "@/lib/shared/specs";
+import type { RuleDecision } from "@/lib/shared/include-when";
+import { flushRuleDecisions, lineConfig, LineRules, loadQuestionDefs } from "./config-rules";
 import { notifyJobCreated } from "./notifications.service";
 import { materializeComponentsFromBomItems } from "./component.service";
 import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
@@ -48,6 +49,9 @@ export interface CreateJobResult {
    * job's route. Reported, never silently dropped — the wizard lists them.
    */
   unmatchedQcpProcessCodes: string[];
+  /** J2: includeWhen decisions recorded in config_rule_decisions, and how many rested on a missing answer or an unreadable rule. */
+  ruleDecisionCount: number;
+  flaggedRuleCount: number;
 }
 
 export async function createJob(actor: Actor, input: CreateJobInput): Promise<CreateJobResult> {
@@ -164,7 +168,28 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       throw new AppError(ERROR_CODES.EXCLUSION_REASON_REQUIRED);
     }
 
-    const specs = parsed.specs ? validateSpecs(family.code, parsed.specs) : null;
+    // J2: each line's answers, filtered through the family's questions, and the
+    // includeWhen decision for every process (configure time, once). Job-level
+    // processes are shared by all lines until J3, so a process is dropped only
+    // when EVERY line's answers drop it.
+    const questions = await loadQuestionDefs(tx, actor.tenantId, parsed.familyId);
+    const blockConfigs = parsed.equipments.map((b) => lineConfig(questions, b.equipmentTypeId, b.config));
+    const probes = parsed.equipments.map((b, i) => LineRules.fromConfig(0, 0, questions, b.equipmentTypeId, blockConfigs[i]));
+    const processRules = new Map<string, { included: boolean; perLine: RuleDecision[] }>();
+    for (const tp of version.processes) {
+      if (tp.includeWhen == null) continue;
+      const perLine: RuleDecision[] = probes.map((p) =>
+        // AUD-033: a rule never removes a mandatory process; the ignored rule is flagged for the planner
+        tp.optional
+          ? p.peek(tp.includeWhen)
+          : {
+              included: true,
+              flagged: true,
+              reason: { rule: tp.includeWhen, clauses: [], missing: [], invalid: "rule ignored: this process is mandatory" },
+            },
+      );
+      processRules.set(tp.code, { included: perLine.some((d) => d.included), perLine });
+    }
 
     // ── Write ────────────────────────────────────────────────────────────
     return audited(tx, actor, async () => {
@@ -187,7 +212,6 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           targetDispatchDate: parsed.targetDispatchDate,
           priority: parsed.priority,
           remarks: parsed.remarks,
-          specs: specs === null ? undefined : (specs as never),
         },
       });
 
@@ -212,7 +236,21 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           // change a running job (invariant 9).
           grain: tp.grain,
           requiresQc: tp.requiresQc,
-          included: !excluded.has(tp.code),
+          included: !excluded.has(tp.code) && (processRules.get(tp.code)?.included ?? true),
+          // J2: the reason is kept when a rule decided or flagged it (a manual exclusion has its own audit reason)
+          inclusionReason:
+            !excluded.has(tp.code) && processRules.has(tp.code)
+              ? ({
+                  byRule: true,
+                  lines: processRules.get(tp.code)!.perLine.map((d, i) => ({
+                    line: i + 1,
+                    included: d.included,
+                    flagged: d.flagged,
+                    missing: d.reason.missing,
+                    ...(d.reason.invalid ? { invalid: d.reason.invalid } : {}),
+                  })),
+                } as never)
+              : undefined,
         })),
       });
 
@@ -249,8 +287,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
 
       let unitCount = 0;
       let firstEquipmentId: number | null = null;
-      const unitIds: number[] = [];
-      for (const block of parsed.equipments) {
+      const blockUnits: { equipmentTypeId: number | null; unitIds: number[]; rules: LineRules }[] = [];
+      for (const [i, block] of parsed.equipments.entries()) {
         const equipment = await tx.equipment.create({
           data: {
             jobId: job.id,
@@ -258,20 +296,26 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             name: block.name,
             blockNo: block.blockNo,
             remarks: block.remarks,
+            config: Object.keys(blockConfigs[i]).length > 0 ? (blockConfigs[i] as never) : undefined,
           },
         });
+        const rules = LineRules.fromConfig(job.id, equipment.id, questions, block.equipmentTypeId ?? null, blockConfigs[i]);
+        for (const [code, pr] of processRules) {
+          const tp = version.processes.find((p) => p.code === code)!;
+          rules.record("TEMPLATE_PROCESS", tp.id, pr.perLine[i]);
+        }
         firstEquipmentId ??= equipment.id;
         const units = await tx.unit.createManyAndReturn({
           data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo, jobId: job.id })),
           select: { id: true },
         });
-        unitIds.push(...units.map((u) => u.id));
+        blockUnits.push({ equipmentTypeId: block.equipmentTypeId ?? null, unitIds: units.map((u) => u.id), rules });
         unitCount += block.serials.length;
       }
 
       const qcp = parsed.qcpTemplateSourceId
-        ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdByCode, actor.tenantId)
-        : { qcpTemplateId: null, itemCount: 0, unmatchedProcessCodes: [] as string[] };
+        ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdByCode, actor.tenantId, blockUnits.map((b) => b.rules))
+        : { qcpTemplateId: null, itemCount: 0, unmatchedProcessCodes: [] as string[], skipped: [] as { srNo: string; sequence: number }[] };
 
       const bom =
         parsed.copyBomFromEquipmentId != null && firstEquipmentId != null
@@ -283,14 +327,28 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           ? await materializeComponentsFromBomItems(tx, parsed.familyId, firstEquipmentId, bom.createdIds, job.id)
           : { componentCount: 0, skippedNoRoute: 0 };
 
-      const assembly = await materializeAssemblyStepsFromTemplate(
-        tx,
-        actor.tenantId,
-        job.id,
-        parsed.familyId,
-        unitIds,
-        qcp.qcpTemplateId,
-      );
+      // J1: each equipment block takes the template of its own equipment type.
+      const assembly = { stepCount: 0, boundToQcp: 0 };
+      for (const block of blockUnits) {
+        const r = await materializeAssemblyStepsFromTemplate(
+          tx,
+          actor.tenantId,
+          job.id,
+          parsed.familyId,
+          block.unitIds,
+          qcp.qcpTemplateId,
+          block.equipmentTypeId,
+          block.rules,
+          qcp.skipped,
+        );
+        assembly.stepCount += r.stepCount;
+        assembly.boundToQcp += r.boundToQcp;
+      }
+
+      // The component step above flushed its own (route step) decisions for the first line; the rest go here.
+      await flushRuleDecisions(tx, blockUnits.map((b) => b.rules));
+      const ruleDecisionCount = await tx.configRuleDecision.count({ where: { jobId: job.id } });
+      const flaggedRuleCount = await tx.configRuleDecision.count({ where: { jobId: job.id, flagged: true } });
 
       const result: CreateJobResult = {
         jobId: job.id,
@@ -303,6 +361,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         componentCount: components.componentCount,
         assemblyStepCount: assembly.stepCount,
         unmatchedQcpProcessCodes: qcp.unmatchedProcessCodes,
+        ruleDecisionCount,
+        flaggedRuleCount,
       };
 
       return {
@@ -324,6 +384,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             bomItemCount: result.bomItemCount,
             componentCount: result.componentCount,
             assemblyStepCount: result.assemblyStepCount,
+            ruleDecisionCount: result.ruleDecisionCount,
+            flaggedRuleCount: result.flaggedRuleCount,
             excludedProcessCodes: parsed.excludedProcessCodes,
             exclusionReason: parsed.exclusionReason,
           },
@@ -533,7 +595,14 @@ async function cloneQcpTemplate(
   jobId: number,
   jpIdByCode: Map<string, number>,
   tenantId: number,
-): Promise<{ qcpTemplateId: number; itemCount: number; unmatchedProcessCodes: string[] }> {
+  lineRules: LineRules[],
+): Promise<{
+  qcpTemplateId: number;
+  itemCount: number;
+  unmatchedProcessCodes: string[];
+  /** J2: source items a rule dropped (not cloned); their position still counts when steps bind to items. */
+  skipped: { srNo: string; sequence: number }[];
+}> {
   const source = await tx.qcpTemplate.findFirst({
     // AUD-078: qcp_templates now carries its own real tenant_id (job-owned
     // rows via the derive trigger, library rows set directly at authoring
@@ -572,7 +641,19 @@ async function cloneQcpTemplate(
   }
 
   const unmatched = new Set<string>();
+  const skipped: { srNo: string; sequence: number }[] = [];
+  let itemCount = 0;
   for (const item of source.items) {
+    // J2: an item with a rule is kept when ANY line's answers keep it; each line's decision is on the ledger.
+    if (item.includeWhen != null) {
+      const decisions = lineRules.map((l) => l.peek(item.includeWhen));
+      decisions.forEach((d, i) => lineRules[i].record("QCP_ITEM", item.id, d));
+      if (lineRules.length > 0 && !decisions.some((d) => d.included)) {
+        skipped.push({ srNo: item.srNo, sequence: item.sequence });
+        continue;
+      }
+    }
+    itemCount++;
     const created = await tx.qcpItem.create({
       data: {
         qcpTemplateId: copy.id,
@@ -624,7 +705,7 @@ async function cloneQcpTemplate(
     }
   }
 
-  return { qcpTemplateId: copy.id, itemCount: source.items.length, unmatchedProcessCodes: [...unmatched] };
+  return { qcpTemplateId: copy.id, itemCount, unmatchedProcessCodes: [...unmatched], skipped };
 }
 
 /**

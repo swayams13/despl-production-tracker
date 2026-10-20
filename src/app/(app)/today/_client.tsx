@@ -64,7 +64,7 @@ export function TodayClient({
       ),
     [s],
   );
-  const { pending, outcomes, queue, undo, dismiss } = useFloorWrites(titleOf);
+  const { pending, outcomes, queue, undo, dismiss, busy } = useFloorWrites(titleOf);
 
   const total = s.summary.assigned;
   const todayRows = showAll ? s.today : s.today.slice(0, SHOWN);
@@ -132,7 +132,7 @@ export function TodayClient({
             <section className="fl-group">
               <h2>{d.today.doFirst}</h2>
               <ul>
-                <RowCard row={s.doFirst} first onAct={act} />
+                <RowCard row={s.doFirst} first busy={busy(s.doFirst.key)} onAct={act} />
               </ul>
             </section>
           )}
@@ -141,7 +141,7 @@ export function TodayClient({
               <h2>{d.today.todaySection(s.today.length)}</h2>
               <ul>
                 {todayRows.map((r) => (
-                  <RowCard key={r.key} row={r} onAct={act} />
+                  <RowCard key={r.key} row={r} busy={busy(r.key)} onAct={act} />
                 ))}
               </ul>
               {s.today.length > SHOWN && !showAll && (
@@ -156,7 +156,7 @@ export function TodayClient({
               <h2>{d.today.blockedSection(s.blocked.length)}</h2>
               <ul>
                 {s.blocked.map((r) => (
-                  <RowCard key={r.key} row={r} onAct={act} />
+                  <RowCard key={r.key} row={r} busy={busy(r.key)} onAct={act} />
                 ))}
               </ul>
             </section>
@@ -168,7 +168,7 @@ export function TodayClient({
               </summary>
               <ul>
                 {s.upcoming.map((r) => (
-                  <RowCard key={r.key} row={r} onAct={act} />
+                  <RowCard key={r.key} row={r} busy={busy(r.key)} onAct={act} />
                 ))}
               </ul>
             </details>
@@ -210,9 +210,9 @@ export function TodayClient({
           row={sheet.row}
           action={sheet.action}
           onClose={() => setSheet(null)}
-          onConfirm={(label, send) => {
+          onConfirm={(label, send, keys) => {
             setSheet(null);
-            queue(label, send);
+            queue(label, send, keys);
           }}
         />
       )}
@@ -220,7 +220,7 @@ export function TodayClient({
   );
 }
 
-function RowCard({ row, first, onAct }: { row: TodayRow; first?: boolean; onAct: (row: TodayRow, a: "DONE" | "START") => void }) {
+function RowCard({ row, first, busy, onAct }: { row: TodayRow; first?: boolean; /** A write for this row is waiting (Undo window), sending or refreshing: its buttons are off. */ busy: boolean; onAct: (row: TodayRow, a: "DONE" | "START") => void }) {
   const d = useDict();
   const stopped = row.state === "BLOCKED" || (row.state === "NEEDS_OVERRIDE" && !row.canOverride);
   const waiting = row.refusal ? row.refusal.missing.length + row.refusal.moreMissing : 0;
@@ -236,21 +236,22 @@ function RowCard({ row, first, onAct }: { row: TodayRow; first?: boolean; onAct:
             {stateLabel(d, row.state)}
             {row.stage !== row.title ? ` · ${row.stage}` : ""} · {d.today.due} {fmtDue(d, row.dueAt)}
           </span>
+          {row.returnedNote != null && <span className="fl-returned">{d.floor.returnedByQc(row.returnedNote)}</span>}
         </div>
         {!stopped && (
           <div className="fl-actions">
             {row.state === "READY" && (
-              <button className="btn" onClick={() => onAct(row, "START")}>
+              <button className="btn" disabled={busy} onClick={() => onAct(row, "START")}>
                 {d.common.start}
               </button>
             )}
             {row.state === "NEEDS_OVERRIDE" && row.canOverride && (
-              <button className="btn" onClick={() => onAct(row, "START")}>
+              <button className="btn" disabled={busy} onClick={() => onAct(row, "START")}>
                 {d.common.startEarly}
               </button>
             )}
             {(row.state === "READY" || row.state === "IN_PROGRESS" || row.state === "NEEDS_OVERRIDE") && (
-              <button className="btn btn-accent fl-done" onClick={() => onAct(row, "DONE")}>
+              <button className="btn btn-accent fl-done" disabled={busy} onClick={() => onAct(row, "DONE")}>
                 {d.common.markDone}
               </button>
             )}

@@ -3,7 +3,7 @@ import { z } from "zod";
 import {
   jobProcessToScheduleProcess,
   jobEdgeToScheduleEdge,
-  assertNoUnfiledDelayBlock,
+  assertLateReasonFiled,
   assertNoOpenHoldPoint,
   assertUnitHasNoOpenNcr,
   assertUnitHasNoOpenHoldPoint,
@@ -177,7 +177,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("DB-backed helpers (service suites ex
       persistScheduleRun,
       getCurrentScheduleRun,
       lockProcessPlanForUpdate,
-      assertNoUnfiledDelayBlock,
+      assertLateReasonFiled,
       assertNoOpenHoldPoint,
       assertUnitHasNoOpenNcr,
       assertUnitHasNoOpenHoldPoint,

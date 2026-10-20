@@ -50,7 +50,7 @@ async function main() {
   });
 
   const existing = await prisma.assemblyTemplate.findFirst({
-    where: { tenantId: org.id, familyId: family.id },
+    where: { tenantId: org.id, familyId: family.id, equipmentTypeId: null },
   });
   if (existing) {
     console.log("PRESSURE_VESSEL AssemblyTemplate already exists — nothing to backfill.");

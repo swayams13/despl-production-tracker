@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileDelayReason } from "./delay.service";
-import { assertNoUnfiledDelayBlock } from "./_shared";
+import { assertLateReasonFiled } from "./_shared";
 import { withTenant } from "@/lib/db";
 import { isAppError, ERROR_CODES } from "@/lib/shared/errors";
 import { ROLES, type Actor } from "@/lib/authz";
@@ -8,7 +8,7 @@ import { ROLES, type Actor } from "@/lib/authz";
 /**
  * fileDelayReason is the unblock half of invariant #7. Two guarantees to pin:
  *   · a read-only client user can never file (pure — refused before any DB), and
- *   · filing clears the assertNoUnfiledDelayBlock block for that department
+ *   · filing clears assertLateReasonFiled for that plan
  *     (behavioural — gated on RUN_DB_TESTS, needs a seeded overdue plan).
  * The wrong-department refusal is behavioural too: the service locks the plan
  * FIRST (concurrency contract) before it can read ownerDepartmentId to scope
@@ -68,7 +68,6 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("fileDelayReason — file → unblock
   let tenantId = 0;
   let deptId = 0;
   let otherDeptId = 0;
-  let runId = 0;
   let planId = 0;
   let categoryId = 0;
 
@@ -112,7 +111,6 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("fileDelayReason — file → unblock
         isCurrent: true,
       },
     });
-    runId = run.id;
     const plan = await owner.processPlan.create({
       data: {
         jobId: job.id,
@@ -131,24 +129,23 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("fileDelayReason — file → unblock
     await owner.$disconnect();
   });
 
-  it("blocks before filing, unblocks after (invariant #7)", async () => {
+  it("a late plan needs its reason before it can be submitted; filing clears it (invariant #7 as revised)", async () => {
     const dept = actor({ tenantId, departmentIds: [deptId] });
+    const plan = await owner.processPlan.findUniqueOrThrow({ where: { id: planId } });
+    const check = () => withTenant(tenantId, (tx) => assertLateReasonFiled(tx, plan, tenantId));
 
-    // Block fires.
-    await expect(
-      withTenant(tenantId, (tx) =>
-        assertNoUnfiledDelayBlock(tx, { ownerDepartmentId: deptId, scheduleRunId: runId, unitId: null }),
-      ),
-    ).rejects.toMatchObject({ code: ERROR_CODES.REASON_REQUIRED });
+    // Refused, with the categories to choose from.
+    await expect(check()).rejects.toMatchObject({
+      code: ERROR_CODES.LATE_REASON_REQUIRED,
+      detail: { processPlanId: planId, categories: [expect.objectContaining({ id: categoryId })] },
+    });
 
     // File the reason.
     const reason = await fileDelayReason(dept, { processPlanId: planId, categoryId });
     expect(reason.filedBy).toBe(dept.userId);
 
-    // Block cleared.
-    await withTenant(tenantId, (tx) =>
-      assertNoUnfiledDelayBlock(tx, { ownerDepartmentId: deptId, scheduleRunId: runId, unitId: null }),
-    );
+    // Cleared.
+    await check();
   });
 
   it("refuses a supervisor outside the plan's department (invariant #8)", async () => {

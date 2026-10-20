@@ -2,8 +2,10 @@ import { withTenant, type Tx } from "@/lib/db";
 import { assertNotClientUser, ROLES, type Actor } from "@/lib/authz";
 import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { HOLD_POINT_AGE_ALERT_DAYS, NUDGE_COOLDOWN_MINUTES } from "@/lib/shared/constants";
-import { istCalendarDayMarker } from "@/lib/shared/business-day";
+import { HOLD_POINT_AGE_ALERT_DAYS, LATE_REASON_ESCALATE_HOURS, LATE_REASON_REMINDER_HOUR_IST, NUDGE_COOLDOWN_MINUTES } from "@/lib/shared/constants";
+import { IST_OFFSET_MS, istCalendarDayMarker } from "@/lib/shared/business-day";
+import { DEFAULT_CALENDAR, isWorkingDay } from "@/lib/schedule";
+import type { WorkCalendarInput } from "@/lib/schedule/types";
 import { loadPlanNotifyContext } from "./_shared";
 import { loadQcCockpit } from "./qc-cockpit.read";
 import type { ProcessPlan } from "@/generated/prisma/client";
@@ -119,6 +121,44 @@ export async function markAllNotificationsRead(actor: Actor): Promise<void> {
 }
 
 /**
+ * Who hears about a plan (SPEC §8): the assignee, provided they are still active — `setUserActive`
+ * deactivation does NOT release a user's plans (C29), so an assignee can be unable to log in — else the
+ * owning department's users. `withProductionHead` adds the Production Head. One batched lookup per call.
+ */
+async function planRecipients(
+  tx: Tx,
+  tenantId: number,
+  plans: ReadonlyArray<{ ownerDepartmentId: number; assigneeUserId: number | null }>,
+  withProductionHead: boolean,
+): Promise<(plan: { ownerDepartmentId: number; assigneeUserId: number | null }) => number[]> {
+  const productionHeadIds = withProductionHead ? await userIdsWithRole(tx, tenantId, ROLES.PRODUCTION_HEAD) : [];
+  const deptIds = [...new Set(plans.map((p) => p.ownerDepartmentId))];
+  const supervisorRows = await tx.user.findMany({
+    where: { tenantId, active: true, departments: { some: { departmentId: { in: deptIds } } } },
+    select: { id: true, departments: { select: { departmentId: true } } },
+  });
+  const supervisorsByDept = new Map<number, number[]>();
+  for (const u of supervisorRows) {
+    for (const d of u.departments) {
+      if (!deptIds.includes(d.departmentId)) continue;
+      const list = supervisorsByDept.get(d.departmentId) ?? [];
+      list.push(u.id);
+      supervisorsByDept.set(d.departmentId, list);
+    }
+  }
+  const assigneeIds = [...new Set(plans.map((p) => p.assigneeUserId).filter((id): id is number => id != null))];
+  const activeAssigneeIds = new Set(
+    assigneeIds.length === 0
+      ? []
+      : (await tx.user.findMany({ where: { tenantId, id: { in: assigneeIds }, active: true }, select: { id: true } })).map((u) => u.id),
+  );
+  return (plan) =>
+    plan.assigneeUserId != null && activeAssigneeIds.has(plan.assigneeUserId)
+      ? [...new Set([plan.assigneeUserId, ...productionHeadIds])]
+      : [...new Set([...(supervisorsByDept.get(plan.ownerDepartmentId) ?? []), ...productionHeadIds])];
+}
+
+/**
  * ponytail: a full table scan of current plans/hold-points per call, fine at
  * demo scale (hundreds of rows) — the hourly cron (`/api/cron/alerts`, see
  * cron.service.ts's `runAlertReconciliation`) now exists and calls this
@@ -154,50 +194,10 @@ export async function syncOverdueStageNotifications(tenantId: number): Promise<v
     const pending = overduePlans.filter((p) => !notifiedIds.has(p.id));
     if (pending.length === 0) return;
 
-    const productionHeadIds = await userIdsWithRole(tx, tenantId, ROLES.PRODUCTION_HEAD);
-
-    // One batched lookup for every distinct owning department instead of one
-    // query per plan.
-    const deptIds = [...new Set(pending.map((p) => p.ownerDepartmentId))];
-    const supervisorRows = await tx.user.findMany({
-      where: { tenantId, active: true, departments: { some: { departmentId: { in: deptIds } } } },
-      select: { id: true, departments: { select: { departmentId: true } } },
-    });
-    const supervisorsByDept = new Map<number, number[]>();
-    for (const u of supervisorRows) {
-      for (const d of u.departments) {
-        if (!deptIds.includes(d.departmentId)) continue;
-        const list = supervisorsByDept.get(d.departmentId) ?? [];
-        list.push(u.id);
-        supervisorsByDept.set(d.departmentId, list);
-      }
-    }
-
-    // One batched lookup for every distinct assignee, same pattern as
-    // supervisorsByDept above — `setUserActive` deactivation does NOT release
-    // a user's assigned plans (by design, C29), so an assignee referenced
-    // here can be inactive and unable to log in at all.
-    const assigneeIds = [...new Set(pending.map((p) => p.assigneeUserId).filter((id): id is number => id != null))];
-    const activeAssigneeIds = new Set(
-      assigneeIds.length === 0
-        ? []
-        : (
-            await tx.user.findMany({
-              where: { tenantId, id: { in: assigneeIds }, active: true },
-              select: { id: true },
-            })
-          ).map((u) => u.id),
-    );
+    const recipientsOf = await planRecipients(tx, tenantId, pending, true);
 
     for (const plan of pending) {
-      // Assignee-first (SPEC §8): an assigned plan notifies the assignee +
-      // PH only, PROVIDED the assignee is still active — an inactive
-      // assignee can't act on it, so fall back to dept-supervisors + PH
-      // instead of notifying only an account nobody can log into.
-      const recipients =
-        plan.assigneeUserId != null && activeAssigneeIds.has(plan.assigneeUserId)
-          ? [...new Set([plan.assigneeUserId, ...productionHeadIds])]
-          : [...new Set([...(supervisorsByDept.get(plan.ownerDepartmentId) ?? []), ...productionHeadIds])];
+      const recipients = recipientsOf(plan);
       if (recipients.length === 0) continue;
 
       const ctx = await loadPlanNotifyContext(tx, plan as ProcessPlan);
@@ -212,6 +212,106 @@ export async function syncOverdueStageNotifications(tenantId: number): Promise<v
           title: `${ctx.processName} crossed its due date${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}`,
           body: `${ctx.jobNumber} · ${ctx.deptName}`,
           payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo },
+        })),
+      );
+    }
+  });
+}
+
+/**
+ * Lean Core L1.4 (invariant 7 as revised): a late plan with no delay reason is never a reason to
+ * refuse other writes; this is the nag instead. From 10:00 IST on a working day, each such plan's
+ * assignee (else its department) gets one LATE_REASON_REMINDER per IST day; once its first reminder is
+ * LATE_REASON_ESCALATE_HOURS old the Production Head gets one LATE_REASON_ESCALATED. Filing the reason
+ * (or completing the plan) ends both. Hourly-cron safe: overlapping runs queue on an advisory lock and
+ * the (type, plan, day) check below is read-then-insert, as the other sweeps are. `now` is a parameter
+ * for tests.
+ */
+export async function syncLateReasonReminders(tenantId: number, now: Date = new Date()): Promise<void> {
+  if (new Date(now.getTime() + IST_OFFSET_MS).getUTCHours() < LATE_REASON_REMINDER_HOUR_IST) return;
+  const today = istCalendarDayMarker(now);
+  const day = today.toISOString().slice(0, 10);
+
+  await withTenant(tenantId, async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`late-reason-reminders:${tenantId}`}))`;
+
+    const cal = await tx.workCalendar.findFirst({ where: { isDefault: true }, include: { holidays: true } });
+    const calendar: WorkCalendarInput = cal ? { weekOffDays: cal.weekOffDays, holidays: cal.holidays.map((h) => h.date) } : DEFAULT_CALENDAR;
+    if (!isWorkingDay(today, calendar)) return;
+
+    // Same tenant scoping as syncOverdueStageNotifications: process_plans has no tenant_id of its own.
+    const late = await tx.processPlan.findMany({
+      where: {
+        status: { not: "COMPLETE" },
+        plannedFinish: { lt: today },
+        scheduleRun: { isCurrent: true },
+        jobProcess: { job: { tenantId } },
+        delayReasons: { none: {} },
+      },
+      select: { id: true, jobProcessId: true, unitId: true, ownerDepartmentId: true, assigneeUserId: true, scheduleRunId: true, status: true, baselineStart: true, baselineFinish: true, plannedStart: true, plannedFinish: true, submittedBy: true, verifiedBy: true, actualStart: true, actualFinish: true },
+    });
+    if (late.length === 0) return;
+
+    const prior = await tx.notification.findMany({
+      where: { type: { in: ["LATE_REASON_REMINDER", "LATE_REASON_ESCALATED"] }, entityType: "ProcessPlan", entityId: { in: late.map((p) => p.id) } },
+      select: { type: true, entityId: true, createdAt: true, payload: true },
+    });
+    const remindedToday = new Set<number>();
+    const firstReminder = new Map<number, Date>();
+    const escalated = new Set<number>();
+    for (const n of prior) {
+      if (n.entityId == null) continue;
+      if (n.type === "LATE_REASON_ESCALATED") escalated.add(n.entityId);
+      else {
+        const sent = n.payload as { day?: string; sentAt?: string } | null;
+        if (sent?.day === day) remindedToday.add(n.entityId);
+        // The sweep's own clock (payload.sentAt), not the row's createdAt: the two agree in production, and this keeps `now` testable.
+        const at = sent?.sentAt ? new Date(sent.sentAt) : n.createdAt;
+        const first = firstReminder.get(n.entityId);
+        if (!first || at < first) firstReminder.set(n.entityId, at);
+      }
+    }
+
+    const dueReminder = late.filter((p) => !remindedToday.has(p.id));
+    const escalateBefore = now.getTime() - LATE_REASON_ESCALATE_HOURS * 3_600_000;
+    const dueEscalation = late.filter((p) => !escalated.has(p.id) && (firstReminder.get(p.id)?.getTime() ?? Infinity) <= escalateBefore);
+    if (dueReminder.length === 0 && dueEscalation.length === 0) return;
+
+    const recipientsOf = await planRecipients(tx, tenantId, late, false);
+    const productionHeadIds = dueEscalation.length > 0 ? await userIdsWithRole(tx, tenantId, ROLES.PRODUCTION_HEAD) : [];
+
+    for (const plan of dueReminder) {
+      const recipients = recipientsOf(plan);
+      if (recipients.length === 0) continue;
+      const ctx = await loadPlanNotifyContext(tx, plan as ProcessPlan);
+      await notify(
+        tx,
+        tenantId,
+        recipients.map((recipientId) => ({
+          recipientId,
+          type: "LATE_REASON_REMINDER",
+          entityType: "ProcessPlan",
+          entityId: plan.id,
+          title: `${ctx.processName} is late${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}: say why`,
+          body: `${ctx.jobNumber} · ${ctx.deptName}`,
+          payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo, day, sentAt: now.toISOString() },
+        })),
+      );
+    }
+    for (const plan of dueEscalation) {
+      if (productionHeadIds.length === 0) continue;
+      const ctx = await loadPlanNotifyContext(tx, plan as ProcessPlan);
+      await notify(
+        tx,
+        tenantId,
+        productionHeadIds.map((recipientId) => ({
+          recipientId,
+          type: "LATE_REASON_ESCALATED",
+          entityType: "ProcessPlan",
+          entityId: plan.id,
+          title: `${ctx.processName} is late with no reason filed${ctx.serialNo ? ` — Unit ${ctx.serialNo}` : ""}`,
+          body: `${ctx.jobNumber} · ${ctx.deptName}`,
+          payload: { jobId: ctx.jobId, unitId: ctx.unitId, stageNo: ctx.stageNo, day },
         })),
       );
     }

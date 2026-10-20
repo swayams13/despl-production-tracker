@@ -22,5 +22,6 @@ export default async function QcCockpit({ searchParams }: { searchParams: Promis
   }
 
   const cockpit = await loadQcCockpit(actor);
-  return <QcCockpitClient cockpit={cockpit} />;
+  // Only QC dispositions an ordinary NCR (ncr.service); the Production Head sees the list, not the button.
+  return <QcCockpitClient cockpit={cockpit} canDisposition={resolveQcAccess(actor).disposition} />;
 }

@@ -105,7 +105,6 @@ describe.skipIf(!RUN_DB)("S20 — Gate 2 end-to-end integration (DB)", async () 
       targetDispatchDate: null,
       priority: "NORMAL",
       remarks: null,
-      specs: null,
       excludedProcessCodes: [],
       exclusionReason: null,
       equipments: [{ equipmentTypeId: null, name: "S20 Vessel", blockNo: 1, remarks: null, serials: ["S20-U1"] }],
@@ -118,7 +117,7 @@ describe.skipIf(!RUN_DB)("S20 — Gate 2 end-to-end integration (DB)", async () 
 
     // ── 2. generateSchedule (schedule.service) ─────────────────────────
     // Start the plan "today" — a past projectStartDate would make the first
-    // plan genuinely overdue and correctly trip assertNoUnfiledDelayBlock,
+    // plan genuinely overdue and ask for a late reason on submit,
     // which is a different gate than the one this test exercises.
     const run = await generateSchedule(admin, {
       jobId: r.jobId,

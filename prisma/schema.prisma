@@ -318,6 +318,9 @@ model Organization {
   jobs                         Job[]
   componentTypes               ComponentTypeRef[]
   equipmentTypes               EquipmentTypeRef[]
+  equipmentTypeComponents      EquipmentTypeComponent[]
+  configQuestions              ConfigQuestion[]
+  configRuleDecisions          ConfigRuleDecision[]
   workOrderStages              WorkOrderStage[]
   operations                   OperationRef[]
   operationRefSeqs             OperationRefFamilySeq[]
@@ -616,12 +619,13 @@ model ComponentTypeRef {
   /// carry their attributes in `partFamily`.
   kind     ComponentTypeKind @default(RAW_FORM)
 
-  tenant            Organization    @relation(fields: [tenantId], references: [id])
+  tenant            Organization             @relation(fields: [tenantId], references: [id])
   routeTemplates    RouteTemplate[]
   components        Component[]
   bomItems          BomItem[]
-  partFamily        PartFamily?     @relation("PartFamilyType")
-  rawFormOfFamilies PartFamily[]    @relation("PartFamilyRawForm")
+  equipmentTypeKits EquipmentTypeComponent[]
+  partFamily        PartFamily?              @relation("PartFamilyType")
+  rawFormOfFamilies PartFamily[]             @relation("PartFamilyRawForm")
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -644,14 +648,114 @@ model EquipmentTypeRef {
   defaultSpecs      Json?   @map("default_specs")
   active            Boolean @default(true)
 
-  tenant     Organization  @relation(fields: [tenantId], references: [id])
-  family     ProductFamily @relation(fields: [familyId], references: [id])
-  equipments Equipment[]
+  tenant           Organization             @relation(fields: [tenantId], references: [id])
+  family           ProductFamily            @relation(fields: [familyId], references: [id])
+  equipments       Equipment[]
+  assemblyTemplate AssemblyTemplate?
+  components       EquipmentTypeComponent[]
+  configQuestions  ConfigQuestion[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
   @@index([familyId])
   @@map("equipment_type_refs")
+}
+
+/// Lean Core J1: the component kit of an equipment type. Configuration only:
+/// scheduling and gating read materialised rows, never this table (J5 reads it
+/// at BOM release). `qtySource` is FIXED | NOZZLE_SCHEDULE | ANSWER:<key>
+/// (CHECK in the migration; parsed by src/lib/shared/equipment-type.ts).
+model EquipmentTypeComponent {
+  id              Int    @id @default(autoincrement())
+  tenantId        Int    @map("tenant_id")
+  equipmentTypeId Int    @map("equipment_type_id")
+  componentTypeId Int    @map("component_type_id")
+  defaultQty      Int    @default(1) @map("default_qty")
+  qtySource       String @default("FIXED") @map("qty_source")
+
+  tenant        Organization     @relation(fields: [tenantId], references: [id])
+  equipmentType EquipmentTypeRef @relation(fields: [equipmentTypeId], references: [id], onDelete: Cascade)
+  componentType ComponentTypeRef @relation(fields: [componentTypeId], references: [id])
+
+  @@unique([equipmentTypeId, componentTypeId], map: "equipment_type_components_type_component_key")
+  @@index([tenantId])
+  @@index([componentTypeId])
+  @@map("equipment_type_components")
+}
+
+enum ConfigQuestionType {
+  NUMBER
+  TEXT
+  SELECT
+  BOOLEAN
+}
+
+enum ConfigRuleEntity {
+  TEMPLATE_PROCESS
+  ASSEMBLY_STEP
+  ROUTE_STEP
+  QCP_ITEM
+}
+
+/// Lean Core J2: a question asked when an equipment line is configured. Scope
+/// is the family (equipmentTypeId null) or one equipment type. Replaces the
+/// hard-coded SPEC_FIELDS (ADR B11). Keys are snake_case (CHECK in the
+/// migration) so J1's `ANSWER:<key>` quantities and includeWhen rules can name them.
+model ConfigQuestion {
+  id              Int                @id @default(autoincrement())
+  tenantId        Int                @map("tenant_id")
+  familyId        Int                @map("family_id")
+  equipmentTypeId Int?               @map("equipment_type_id")
+  key             String
+  label           String
+  type            ConfigQuestionType
+  unit            String?
+  /// SELECT only: string array.
+  options         Json?
+  defaultValue    Json?              @map("default_value")
+  help            String?
+  sortOrder       Int                @default(0) @map("sort_order")
+  active          Boolean            @default(true)
+
+  tenant        Organization      @relation(fields: [tenantId], references: [id])
+  family        ProductFamily     @relation(fields: [familyId], references: [id])
+  equipmentType EquipmentTypeRef? @relation(fields: [equipmentTypeId], references: [id], onDelete: Restrict)
+
+  @@unique([familyId, key])
+  @@index([tenantId])
+  @@index([equipmentTypeId])
+  @@map("config_questions")
+}
+
+/// Lean Core J2: what an includeWhen rule decided for one equipment line, and
+/// why. One row per (line, rule-bearing entity) at configure time. Rows for
+/// excluded entities exist nowhere else: the excluded steps, QCP items and
+/// operations are not materialised. entityId is the TEMPLATE row's id
+/// (template process, assembly template step, route step, or the source QCP item).
+/// Append-only.
+model ConfigRuleDecision {
+  id          Int              @id @default(autoincrement())
+  /// H1 job-level RLS backstop.
+  jobId       Int              @map("job_id")
+  /// AUD-001: 0 is a placeholder; the aud001 trigger overwrites it from job_id.
+  tenantId    Int              @default(0) @map("tenant_id")
+  equipmentId Int              @map("equipment_id")
+  entityType  ConfigRuleEntity @map("entity_type")
+  entityId    Int              @map("entity_id")
+  included    Boolean
+  /// True when a missing answer or an unreadable rule decided the outcome.
+  flagged     Boolean          @default(false)
+  reason      Json
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant    Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  equipment Equipment    @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([tenantId])
+  @@index([equipmentId])
+  @@map("config_rule_decisions")
 }
 
 /// Canonical manufacturing operation. Grows per product family
@@ -839,6 +943,7 @@ model ProductFamily {
   jobs              Job[]
   routes            RouteTemplate[]
   equipmentTypes    EquipmentTypeRef[]
+  configQuestions   ConfigQuestion[]
   assemblyTemplates AssemblyTemplate[]
   workOrderStages   WorkOrderStage[]
   operationRefSeqs  OperationRefFamilySeq[]
@@ -946,6 +1051,9 @@ model TemplateProcess {
   grain                   ProcessGrain         @default(UNIT)
   /// Lean Core L1.1 (D3): see OperationRef.requiresQc.
   requiresQc              Boolean              @default(true) @map("requires_qc")
+  /// Lean Core J2: {all|any:[{key,op,value}]}; null = always applies. Honoured
+  /// only when `optional` is true: a rule never removes a mandatory process.
+  includeWhen             Json?                @map("include_when")
 
   version            ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment  Department             @relation(fields: [defaultDepartmentId], references: [id])
@@ -1072,6 +1180,7 @@ model Job {
   materialIdentifications      MaterialIdentification[]
   itemTests                    ItemTest[]
   sequenceOverrides            SequenceOverride[]
+  configRuleDecisions          ConfigRuleDecision[]
   workRequests                 WorkRequest[]
 
   @@unique([tenantId, jobNumber])
@@ -1094,21 +1203,25 @@ model Equipment {
   /// labels and no catalog entry. Backfilling them would mean inventing
   /// catalog rows, so they stay unlinked.
   equipmentTypeId Int?    @map("equipment_type_id")
+  /// Lean Core J2: this line's answers to its config questions, by question
+  /// key. Configuration only: scheduling and gating never read it.
+  config          Json?
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
   tenantId        Int     @default(0) @map("tenant_id")
 
-  job           Job                @relation(fields: [jobId], references: [id])
-  tenant        Organization       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  equipmentType EquipmentTypeRef?  @relation(fields: [equipmentTypeId], references: [id])
+  job           Job                  @relation(fields: [jobId], references: [id])
+  tenant        Organization         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  equipmentType EquipmentTypeRef?    @relation(fields: [equipmentTypeId], references: [id])
   units         Unit[]
   bomItems      BomItem[]
   bomRevisions  BomRevision[]
   components    Component[]
   scheduleRuns  ScheduleRun[]
   snapshots     ProgressSnapshot[]
+  ruleDecisions ConfigRuleDecision[]
 
   @@index([jobId])
   @@index([equipmentTypeId])
@@ -1218,6 +1331,9 @@ model JobProcess {
   grain                   ProcessGrain @default(UNIT)
   /// Lean Core L1.1 (D3): copied from TemplateProcess at intake.
   requiresQc              Boolean      @default(true) @map("requires_qc")
+  /// Lean Core J2: why `included` is what it is when a rule (not a manual
+  /// exclusion) decided it: the rule, the answers used, any missing keys.
+  inclusionReason         Json?        @map("inclusion_reason")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
@@ -2345,14 +2461,19 @@ enum AssemblyStepRole {
 }
 
 model AssemblyTemplate {
-  id       Int    @id @default(autoincrement())
-  tenantId Int    @map("tenant_id")
-  familyId Int    @map("family_id")
-  name     String
+  id              Int    @id @default(autoincrement())
+  tenantId        Int    @map("tenant_id")
+  familyId        Int    @map("family_id")
+  name            String
+  /// Lean Core J1: set = this template belongs to one equipment type (at most
+  /// one per type, NULLs are distinct). NULL = the family-level template, the
+  /// fallback for untyped equipment or a type with no template of its own.
+  equipmentTypeId Int?   @unique @map("equipment_type_id")
 
-  tenant   Organization              @relation(fields: [tenantId], references: [id])
-  family   ProductFamily             @relation(fields: [familyId], references: [id])
-  versions AssemblyTemplateVersion[]
+  tenant        Organization              @relation(fields: [tenantId], references: [id])
+  family        ProductFamily             @relation(fields: [familyId], references: [id])
+  equipmentType EquipmentTypeRef?         @relation(fields: [equipmentTypeId], references: [id], onDelete: Restrict)
+  versions      AssemblyTemplateVersion[]
 
   @@index([tenantId])
   @@index([familyId])
@@ -2412,6 +2533,9 @@ model AssemblyTemplateStep {
   /// null/false (invariant 9); a fresh database takes them from the seed JSON.
   role                AssemblyStepRole?
   pressurePart        Boolean           @default(false) @map("pressure_part")
+  /// Lean Core J2: see TemplateProcess.includeWhen. A published version is
+  /// immutable (invariant 9): a rule arrives with a new version.
+  includeWhen         Json?             @map("include_when")
 
   version           AssemblyTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment Department              @relation(fields: [defaultDepartmentId], references: [id])
@@ -2679,6 +2803,8 @@ model QcpItem {
   /// gate once cloned into a real job. Unused/ignored once the item belongs
   /// to a job-owned template; real linkage there is via QcpItemProcess.
   libraryProcessCodes String[]    @default([]) @map("library_process_codes")
+  /// Lean Core J2: see TemplateProcess.includeWhen. Read when the item is cloned into a job.
+  includeWhen         Json?       @map("include_when")
   /// H1 job-level RLS backstop: denormalized from qcpTemplate.jobId. Stays
   /// null for library templates (qcpTemplate.jobId IS NULL) — never forced.
   /// AUD-069: RESTRICT, not the original SET NULL — see QcpTemplate.job.
@@ -2764,6 +2890,8 @@ model QcpExecution {
   callGivenOn       DateTime?          @map("call_given_on")
   /// SERVER CLOCK ONLY (invariant #1)
   callAttendedOn    DateTime?          @map("call_attended_on")
+  /// Who RECORDED this result, whatever it was: set on an ACCEPTED, NA and REJECTED attempt alike (qcp.service sets it
+  /// from the acting user every time). The name is historical; there is no separate recorded-by column on this table.
   clearedBy         Int?               @map("cleared_by")
   /// L2.6: the third-party inspector's name when QC clears a point on their behalf.
   clearedByPartyRef String?            @map("cleared_by_party_ref")
