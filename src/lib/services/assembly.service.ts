@@ -617,12 +617,17 @@ export async function materializeAssemblyStepsFromTemplate(
   rules: LineRules | null = null,
   /** J2: QCP source items a rule dropped; their position still counts when steps bind to items. */
   skippedQcp: { srNo: string; sequence: number }[] = [],
+  /** J3a: the line these units belong to; it records the assembly template version its steps came from. */
+  equipmentId: number | null = null,
 ): Promise<{ stepCount: number; boundToQcp: number }> {
   if (unitIds.length === 0) return { stepCount: 0, boundToQcp: 0 };
 
   // No assembly template authored for this family yet is a legitimate seam.
   const version = await resolveAssemblyTemplateVersion(tx, tenantId, familyId, equipmentTypeId);
   if (!version) return { stepCount: 0, boundToQcp: 0 };
+  if (equipmentId != null) {
+    await tx.equipment.update({ where: { id: equipmentId }, data: { assemblyTemplateVersionId: version.id } });
+  }
   // Occurrence indices below are counted over the FULL template, so a rule that
   // drops one step never shifts which QCP item the later steps bind to (J2).
   const allSteps = version.steps;

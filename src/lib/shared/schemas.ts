@@ -797,6 +797,8 @@ export const createJobSchema = z
         z
           .object({
             equipmentTypeId: id.nullable().default(null),
+            /** J3a: run this line on another published route (of its own family). Null = the job's route. */
+            templateVersionId: id.nullish(),
             name: z.string().trim().min(1, "Each equipment block needs a name"),
             blockNo: z.number().int().positive().nullable().default(null),
             remarks: z.string().trim().min(1).nullable().default(null),

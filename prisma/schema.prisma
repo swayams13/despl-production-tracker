@@ -1004,11 +1004,12 @@ model ProcessTemplateVersion {
   /// and the service treats a null-vs-null comparison as a match.
   updatedAt   DateTime?      @updatedAt @map("updated_at")
 
-  template  ProcessTemplate   @relation(fields: [templateId], references: [id])
-  processes TemplateProcess[]
-  edges     TemplateEdge[]
-  jobs      Job[]
-  publisher User?             @relation(fields: [publishedBy], references: [id])
+  template   ProcessTemplate   @relation(fields: [templateId], references: [id])
+  processes  TemplateProcess[]
+  edges      TemplateEdge[]
+  jobs       Job[]
+  equipments Equipment[]
+  publisher  User?             @relation(fields: [publishedBy], references: [id])
 
   @@unique([templateId, version])
   @@index([templateId])
@@ -1194,37 +1195,48 @@ model Job {
 }
 
 model Equipment {
-  id              Int     @id @default(autoincrement())
-  jobId           Int     @map("job_id")
-  name            String
-  blockNo         Int?    @map("block_no")
-  remarks         String?
+  id                        Int     @id @default(autoincrement())
+  jobId                     Int     @map("job_id")
+  name                      String
+  blockNo                   Int?    @map("block_no")
+  remarks                   String?
   /// Nullable: the seeded DE0463/DE0467 blocks came from CSV with free-text
   /// labels and no catalog entry. Backfilling them would mean inventing
   /// catalog rows, so they stay unlinked.
-  equipmentTypeId Int?    @map("equipment_type_id")
+  equipmentTypeId           Int?    @map("equipment_type_id")
   /// Lean Core J2: this line's answers to its config questions, by question
   /// key. Configuration only: scheduling and gating never read it.
-  config          Json?
+  config                    Json?
+  /// Lean Core J3a: the process route this line runs (pinned, invariant 9).
+  /// Equal to `jobs.template_version_id` for a line on the job's own route;
+  /// any other value gives the line its own UNIT-grain `job_processes`.
+  templateVersionId         Int?    @map("template_version_id")
+  /// Lean Core J3a: the assembly template version this line's steps came from.
+  assemblyTemplateVersionId Int?    @map("assembly_template_version_id")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId        Int     @default(0) @map("tenant_id")
+  tenantId                  Int     @default(0) @map("tenant_id")
 
-  job           Job                  @relation(fields: [jobId], references: [id])
-  tenant        Organization         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  equipmentType EquipmentTypeRef?    @relation(fields: [equipmentTypeId], references: [id])
-  units         Unit[]
-  bomItems      BomItem[]
-  bomRevisions  BomRevision[]
-  components    Component[]
-  scheduleRuns  ScheduleRun[]
-  snapshots     ProgressSnapshot[]
-  ruleDecisions ConfigRuleDecision[]
+  job                     Job                      @relation(fields: [jobId], references: [id])
+  tenant                  Organization             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  equipmentType           EquipmentTypeRef?        @relation(fields: [equipmentTypeId], references: [id])
+  templateVersion         ProcessTemplateVersion?  @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  assemblyTemplateVersion AssemblyTemplateVersion? @relation(fields: [assemblyTemplateVersionId], references: [id], onDelete: Restrict)
+  jobProcesses            JobProcess[]
+  units                   Unit[]
+  bomItems                BomItem[]
+  bomRevisions            BomRevision[]
+  components              Component[]
+  scheduleRuns            ScheduleRun[]
+  snapshots               ProgressSnapshot[]
+  ruleDecisions           ConfigRuleDecision[]
 
   @@index([jobId])
   @@index([equipmentTypeId])
+  @@index([templateVersionId])
+  @@index([assemblyTemplateVersionId])
   @@index([tenantId])
   @@map("equipments")
 }
@@ -1334,12 +1346,19 @@ model JobProcess {
   /// Lean Core J2: why `included` is what it is when a rule (not a manual
   /// exclusion) decided it: the rule, the answers used, any missing keys.
   inclusionReason         Json?        @map("inclusion_reason")
+  /// Lean Core J3a: NULL = the job-level set (every JOB-grain process, and the
+  /// UNIT-grain processes of lines on the job's own route). Set = this line's
+  /// own route, only for a line pinned to a different template version.
+  /// CHECK: only UNIT-grain rows carry a line. The line must belong to the job
+  /// (trigger job_processes_line_same_job_trg).
+  equipmentId             Int?         @map("equipment_id")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
   tenantId                Int          @default(0) @map("tenant_id")
 
+  equipment          Equipment?       @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
   job                Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
   tenant             Organization     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   templateProcess    TemplateProcess? @relation(fields: [templateProcessId], references: [id])
@@ -1349,8 +1368,11 @@ model JobProcess {
   processPlans       ProcessPlan[]
   qcpItemLinks       QcpItemProcess[]
 
-  @@unique([jobId, code])
+  // Uniqueness of (job, code) is two partial unique indexes (migration
+  // 20261021100000): job_processes_job_code_shared_key WHERE equipment_id IS NULL and
+  // job_processes_job_line_code_key (job_id, equipment_id, code) WHERE equipment_id IS NOT NULL.
   @@index([jobId])
+  @@index([equipmentId])
   @@index([departmentId])
   @@index([templateProcessId])
   @@index([tenantId])
@@ -2488,9 +2510,10 @@ model AssemblyTemplateVersion {
   publishedAt DateTime?      @map("published_at")
   notes       String?
 
-  template AssemblyTemplate       @relation(fields: [templateId], references: [id])
-  steps    AssemblyTemplateStep[]
-  jobs     Job[]
+  template   AssemblyTemplate       @relation(fields: [templateId], references: [id])
+  steps      AssemblyTemplateStep[]
+  jobs       Job[]
+  equipments Equipment[]
 
   @@unique([templateId, version])
   @@index([templateId])

@@ -1,3 +1,4 @@
+import { routeKey, routeWhere } from "./line-route";
 import type { Tx } from "@/lib/db";
 import { AppError } from "@/lib/shared/errors";
 import {
@@ -86,6 +87,17 @@ export async function loadFloorFacts(
   job: { id: number; familyId: number },
   unitId: number | null,
 ): Promise<FloorFacts> {
+  // J3a: a unit on its own route (another template version than the job's) is gated by that route's
+  // exclusions, not by the job-level ones; every other unit, and the job view, as before.
+  const unitRoute =
+    unitId == null
+      ? undefined
+      : await tx.unit
+          .findUnique({
+            where: { id: unitId },
+            select: { equipment: { select: { id: true, templateVersionId: true, job: { select: { templateVersionId: true } } } } },
+          })
+          .then((u) => (u ? routeKey(u.equipment.job.templateVersionId, u.equipment) : null));
   const [steps, ops, plans, excluded, resolveSeq] = await Promise.all([
     unitId == null
       ? Promise.resolve([])
@@ -140,7 +152,10 @@ export async function loadFloorFacts(
         _count: { select: { delayReasons: true } },
       },
     }),
-    tx.jobProcess.findMany({ where: { jobId: job.id, included: false }, select: { code: true } }),
+    tx.jobProcess.findMany({
+      where: { jobId: job.id, included: false, ...(unitRoute === undefined ? {} : routeWhere(unitRoute)) },
+      select: { code: true },
+    }),
     loadOpSeqResolver(tx, job.familyId),
   ]);
   // Component route order: position in the canonical route (legacy

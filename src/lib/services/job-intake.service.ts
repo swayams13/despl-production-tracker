@@ -52,6 +52,8 @@ export interface CreateJobResult {
   /** J2: includeWhen decisions recorded in config_rule_decisions, and how many rested on a missing answer or an unreadable rule. */
   ruleDecisionCount: number;
   flaggedRuleCount: number;
+  /** J3a: edges of a line's own route that pointed at a job-level process the job's route lacks (not copied). */
+  droppedEdgeCount: number;
 }
 
 export async function createJob(actor: Actor, input: CreateJobInput): Promise<CreateJobResult> {
@@ -121,6 +123,37 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       if (!cal) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "WorkCalendar", calendarId: parsed.calendarId });
     }
 
+    // J3a: a line runs the job's own route unless it names another published
+    // version (of its own family) — then that line gets its own UNIT-grain processes.
+    const otherVersionIds = [
+      ...new Set(
+        parsed.equipments.map((b) => b.templateVersionId).filter((v): v is number => v != null && v !== version.id),
+      ),
+    ];
+    const otherVersions = otherVersionIds.length
+      ? await tx.processTemplateVersion.findMany({
+          where: { id: { in: otherVersionIds }, template: { tenantId: actor.tenantId } },
+          include: { template: true, processes: true, edges: true },
+        })
+      : [];
+    for (const vid of otherVersionIds) {
+      const v = otherVersions.find((x) => x.id === vid);
+      if (!v) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ProcessTemplateVersion", templateVersionId: vid });
+      if (v.status !== "PUBLISHED") {
+        throw new AppError(ERROR_CODES.TEMPLATE_VERSION_NOT_PUBLISHED, { templateVersionId: v.id, status: v.status });
+      }
+      if (v.processes.length === 0) {
+        throw new AppError(
+          ERROR_CODES.VALIDATION_FAILED,
+          { templateVersionId: v.id },
+          "That process route has no processes.",
+        );
+      }
+    }
+    const versionById = new Map([[version.id, version], ...otherVersions.map((v) => [v.id, v] as const)]);
+    const versionOf = (b: { templateVersionId?: number | null }) => versionById.get(b.templateVersionId ?? version.id)!;
+    const onJobRoute = parsed.equipments.map((b) => versionOf(b).id === version.id);
+
     const typeIds = parsed.equipments
       .map((e) => e.equipmentTypeId)
       .filter((x): x is number => x != null);
@@ -131,7 +164,11 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       if (types.length !== new Set(typeIds).size) {
         throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "EquipmentTypeRef", equipmentTypeIds: typeIds });
       }
-      const wrongFamily = types.filter((t) => t.familyId !== parsed.familyId);
+      const typeById = new Map(types.map((t) => [t.id, t]));
+      const wrongFamily = parsed.equipments.flatMap((b) => {
+        const t = b.equipmentTypeId != null ? typeById.get(b.equipmentTypeId) : undefined;
+        return t && t.familyId !== versionOf(b).template.familyId ? [t] : [];
+      });
       if (wrongFamily.length > 0) {
         throw new AppError(
           ERROR_CODES.VALIDATION_FAILED,
@@ -141,7 +178,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       }
     }
 
-    const templateCodes = new Set(version.processes.map((p) => p.code));
+    const usedProcesses = [...versionById.values()].flatMap((v) => v.processes);
+    const templateCodes = new Set(usedProcesses.map((p) => p.code));
     const unknownExclusions = parsed.excludedProcessCodes.filter((c) => !templateCodes.has(c));
     if (unknownExclusions.length > 0) {
       throw new AppError(ERROR_CODES.NOT_FOUND, {
@@ -154,9 +192,11 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
     // which processes are conditional (schema doc: "Conditional processes
     // (e.g. PWHT) can be excluded per job"). Excluding anything else drops it
     // silently — no ProcessPlan, nothing to gate, nothing to verify.
-    const nonOptionalExclusions = version.processes
-      .filter((tp) => parsed.excludedProcessCodes.includes(tp.code) && !tp.optional)
-      .map((tp) => tp.code);
+    const nonOptionalExclusions = [
+      ...new Set(
+        usedProcesses.filter((tp) => parsed.excludedProcessCodes.includes(tp.code) && !tp.optional).map((tp) => tp.code),
+      ),
+    ];
     if (nonOptionalExclusions.length > 0) {
       throw new AppError(ERROR_CODES.PROCESS_NOT_OPTIONAL, { processCodes: nonOptionalExclusions });
     }
@@ -168,27 +208,58 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       throw new AppError(ERROR_CODES.EXCLUSION_REASON_REQUIRED);
     }
 
-    // J2: each line's answers, filtered through the family's questions, and the
-    // includeWhen decision for every process (configure time, once). Job-level
-    // processes are shared by all lines until J3, so a process is dropped only
-    // when EVERY line's answers drop it.
-    const questions = await loadQuestionDefs(tx, actor.tenantId, parsed.familyId);
-    const blockConfigs = parsed.equipments.map((b) => lineConfig(questions, b.equipmentTypeId, b.config));
-    const probes = parsed.equipments.map((b, i) => LineRules.fromConfig(0, 0, questions, b.equipmentTypeId, blockConfigs[i]));
-    const processRules = new Map<string, { included: boolean; perLine: RuleDecision[] }>();
+    // J2: each line's answers, filtered through its family's questions, and the
+    // includeWhen decision for every process (configure time, once).
+    // J3a: a process row has a scope. Job-level rows (every JOB-grain process, and the
+    // UNIT-grain ones of lines on the job's route) are dropped only when EVERY line they
+    // serve drops them; a line on its own route decides its own rows.
+    const familyIds = [...new Set(parsed.equipments.map((b) => versionOf(b).template.familyId))];
+    const questionsByFamily = new Map(
+      await Promise.all(
+        familyIds.map(async (f) => [f, await loadQuestionDefs(tx, actor.tenantId, f)] as const),
+      ),
+    );
+    const lineQuestions = parsed.equipments.map((b) => questionsByFamily.get(versionOf(b).template.familyId)!);
+    const blockConfigs = parsed.equipments.map((b, i) => lineConfig(lineQuestions[i], b.equipmentTypeId, b.config));
+    const probes = parsed.equipments.map((b, i) =>
+      LineRules.fromConfig(0, 0, lineQuestions[i], b.equipmentTypeId, blockConfigs[i]),
+    );
+    type ScopedProcess = {
+      tp: (typeof version.processes)[number];
+      /** Index into parsed.equipments for a line's own route; null = the job-level set. */
+      line: number | null;
+      /** The lines this row serves (their answers decide it). */
+      lines: number[];
+      rule?: { included: boolean; perLine: { line: number; d: RuleDecision }[] };
+    };
+    const scoped: ScopedProcess[] = [];
+    const allLines = parsed.equipments.map((_, i) => i);
+    const routeLines = allLines.filter((i) => onJobRoute[i]);
     for (const tp of version.processes) {
+      if (tp.grain === "JOB") scoped.push({ tp, line: null, lines: allLines });
+      else if (routeLines.length > 0) scoped.push({ tp, line: null, lines: routeLines });
+    }
+    for (const i of allLines) {
+      if (onJobRoute[i]) continue;
+      for (const tp of versionOf(parsed.equipments[i]).processes) {
+        if (tp.grain === "UNIT") scoped.push({ tp, line: i, lines: [i] });
+      }
+    }
+    for (const sp of scoped) {
+      const tp = sp.tp;
       if (tp.includeWhen == null) continue;
-      const perLine: RuleDecision[] = probes.map((p) =>
+      const perLine = sp.lines.map((line) => ({
+        line,
         // AUD-033: a rule never removes a mandatory process; the ignored rule is flagged for the planner
-        tp.optional
-          ? p.peek(tp.includeWhen)
+        d: tp.optional
+          ? probes[line].peek(tp.includeWhen)
           : {
               included: true,
               flagged: true,
               reason: { rule: tp.includeWhen, clauses: [], missing: [], invalid: "rule ignored: this process is mandatory" },
             },
-      );
-      processRules.set(tp.code, { included: perLine.some((d) => d.included), perLine });
+      }));
+      sp.rule = { included: perLine.some((x) => x.d.included), perLine };
     }
 
     // ── Write ────────────────────────────────────────────────────────────
@@ -215,80 +286,19 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         },
       });
 
-      const excluded = new Set(parsed.excludedProcessCodes);
-      await tx.jobProcess.createMany({
-        data: version.processes.map((tp) => ({
-          jobId: job.id,
-          templateProcessId: tp.id,
-          seq: tp.seq,
-          code: tp.code,
-          name: tp.name,
-          departmentId: tp.defaultDepartmentId,
-          durationMinDays: tp.durationMinDays,
-          durationMaxDays: tp.durationMaxDays,
-          envelopeFinishByMinDays: tp.envelopeFinishByMinDays,
-          envelopeFinishByMaxDays: tp.envelopeFinishByMaxDays,
-          envelopeStartByMinDays: tp.envelopeStartByMinDays,
-          envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
-          workOrderStages: tp.workOrderStages,
-          provisional: tp.provisional,
-          // Lean Core L1.1: copied at intake so later template edits cannot
-          // change a running job (invariant 9).
-          grain: tp.grain,
-          requiresQc: tp.requiresQc,
-          included: !excluded.has(tp.code) && (processRules.get(tp.code)?.included ?? true),
-          // J2: the reason is kept when a rule decided or flagged it (a manual exclusion has its own audit reason)
-          inclusionReason:
-            !excluded.has(tp.code) && processRules.has(tp.code)
-              ? ({
-                  byRule: true,
-                  lines: processRules.get(tp.code)!.perLine.map((d, i) => ({
-                    line: i + 1,
-                    included: d.included,
-                    flagged: d.flagged,
-                    missing: d.reason.missing,
-                    ...(d.reason.invalid ? { invalid: d.reason.invalid } : {}),
-                  })),
-                } as never)
-              : undefined,
-        })),
-      });
-
-      const jobProcesses = await tx.jobProcess.findMany({
-        where: { jobId: job.id },
-        select: { id: true, code: true },
-      });
-      const jpIdByCode = new Map(jobProcesses.map((p) => [p.code, p.id]));
-      const tpCodeById = new Map(version.processes.map((p) => [p.id, p.code]));
-
-      // Edges are copied for ALL processes, including excluded ones.
-      // lib/schedule/exclude.ts::bypassExcluded splices an excluded node out by
-      // composing lag = lagPX + duration(X) + lagXS across it, so an excluded
-      // process must keep both its edges and its durations. Dropping either
-      // would treat it as taking zero days and drag every successor early —
-      // that function's own comment calls this invariant #10 territory.
-      await tx.jobProcessEdge.createMany({
-        data: version.edges.map((e) => ({
-          jobId: job.id,
-          processId: jpIdByCode.get(tpCodeById.get(e.processId)!)!,
-          predecessorId: jpIdByCode.get(tpCodeById.get(e.predecessorId)!)!,
-          type: e.type,
-          lagDays: e.lagDays,
-          enforcement: e.enforcement,
-        })),
-      });
-
-      await notifyJobCreated(
-        tx,
-        actor,
-        { id: job.id, jobNumber: job.jobNumber, projectName: job.projectName },
-        version.processes.map((tp) => tp.defaultDepartmentId),
-      );
-
+      // Equipment lines and their units first: a line on its own route needs its id for its processes.
       let unitCount = 0;
       let firstEquipmentId: number | null = null;
-      const blockUnits: { equipmentTypeId: number | null; unitIds: number[]; rules: LineRules }[] = [];
+      const equipmentIds: number[] = [];
+      const blockUnits: {
+        equipmentId: number;
+        familyId: number;
+        equipmentTypeId: number | null;
+        unitIds: number[];
+        rules: LineRules;
+      }[] = [];
       for (const [i, block] of parsed.equipments.entries()) {
+        const lineVersion = versionOf(block);
         const equipment = await tx.equipment.create({
           data: {
             jobId: job.id,
@@ -297,24 +307,135 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             blockNo: block.blockNo,
             remarks: block.remarks,
             config: Object.keys(blockConfigs[i]).length > 0 ? (blockConfigs[i] as never) : undefined,
+            templateVersionId: lineVersion.id,
           },
         });
-        const rules = LineRules.fromConfig(job.id, equipment.id, questions, block.equipmentTypeId ?? null, blockConfigs[i]);
-        for (const [code, pr] of processRules) {
-          const tp = version.processes.find((p) => p.code === code)!;
-          rules.record("TEMPLATE_PROCESS", tp.id, pr.perLine[i]);
-        }
+        equipmentIds.push(equipment.id);
+        const rules = LineRules.fromConfig(job.id, equipment.id, lineQuestions[i], block.equipmentTypeId ?? null, blockConfigs[i]);
         firstEquipmentId ??= equipment.id;
         const units = await tx.unit.createManyAndReturn({
           data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo, jobId: job.id })),
           select: { id: true },
         });
-        blockUnits.push({ equipmentTypeId: block.equipmentTypeId ?? null, unitIds: units.map((u) => u.id), rules });
+        blockUnits.push({
+          equipmentId: equipment.id,
+          familyId: lineVersion.template.familyId,
+          equipmentTypeId: block.equipmentTypeId ?? null,
+          unitIds: units.map((u) => u.id),
+          rules,
+        });
         unitCount += block.serials.length;
       }
 
+      const excluded = new Set(parsed.excludedProcessCodes);
+      await tx.jobProcess.createMany({
+        data: scoped.map((sp) => {
+          const tp = sp.tp;
+          return {
+            jobId: job.id,
+            equipmentId: sp.line == null ? null : equipmentIds[sp.line],
+            templateProcessId: tp.id,
+            seq: tp.seq,
+            code: tp.code,
+            name: tp.name,
+            departmentId: tp.defaultDepartmentId,
+            durationMinDays: tp.durationMinDays,
+            durationMaxDays: tp.durationMaxDays,
+            envelopeFinishByMinDays: tp.envelopeFinishByMinDays,
+            envelopeFinishByMaxDays: tp.envelopeFinishByMaxDays,
+            envelopeStartByMinDays: tp.envelopeStartByMinDays,
+            envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
+            workOrderStages: tp.workOrderStages,
+            provisional: tp.provisional,
+            // Lean Core L1.1: copied at intake so later template edits cannot
+            // change a running job (invariant 9).
+            grain: tp.grain,
+            requiresQc: tp.requiresQc,
+            included: !excluded.has(tp.code) && (sp.rule?.included ?? true),
+            // J2: the reason is kept when a rule decided or flagged it (a manual exclusion has its own audit reason)
+            inclusionReason:
+              !excluded.has(tp.code) && sp.rule
+                ? ({
+                    byRule: true,
+                    lines: sp.rule.perLine.map(({ line, d }) => ({
+                      line: line + 1,
+                      included: d.included,
+                      flagged: d.flagged,
+                      missing: d.reason.missing,
+                      ...(d.reason.invalid ? { invalid: d.reason.invalid } : {}),
+                    })),
+                  } as never)
+                : undefined,
+          };
+        }),
+      });
+
+      const jobProcesses = await tx.jobProcess.findMany({
+        where: { jobId: job.id },
+        select: { id: true, code: true, equipmentId: true },
+        orderBy: { id: "asc" },
+      });
+      const scopeKey = (equipmentId: number | null, code: string) => `${equipmentId ?? "job"}:${code}`;
+      const jpIdByScope = new Map(jobProcesses.map((p) => [scopeKey(p.equipmentId, p.code), p.id]));
+      // A QCP item names a process by code; it links every row of that code (the job-level one first).
+      const jpIdsByCode = new Map<string, number[]>();
+      for (const p of jobProcesses) jpIdsByCode.set(p.code, [...(jpIdsByCode.get(p.code) ?? []), p.id]);
+
+      // Edges are copied for ALL processes, including excluded ones.
+      // lib/schedule/exclude.ts::bypassExcluded splices an excluded node out by
+      // composing lag = lagPX + duration(X) + lagXS across it, so an excluded
+      // process must keep both its edges and its durations. Dropping either
+      // would treat it as taking zero days and drag every successor early —
+      // that function's own comment calls this invariant #10 territory.
+      // J3a: the job's edges join job-level rows; a line on its own route has
+      // its UNIT-grain rows wired to each other and to the job-level rows of the
+      // same code (an edge to a code the job route lacks is dropped, counted below).
+      const edgeData: {
+        jobId: number;
+        processId: number;
+        predecessorId: number;
+        type: (typeof version.edges)[number]["type"];
+        lagDays: number;
+        enforcement: (typeof version.edges)[number]["enforcement"];
+      }[] = [];
+      let droppedEdgeCount = 0;
+      const wire = (v: typeof version, line: number | null) => {
+        const tpById = new Map(v.processes.map((p) => [p.id, p]));
+        const resolve = (tpId: number) => {
+          const tp = tpById.get(tpId)!;
+          // Lines on the job route and JOB-grain processes resolve to the job-level set.
+          return jpIdByScope.get(scopeKey(line != null && tp.grain === "UNIT" ? equipmentIds[line] : null, tp.code));
+        };
+        for (const e of v.edges) {
+          // The job's own route owns edges between two JOB-grain processes; a line's route never re-adds them.
+          if (line != null && tpById.get(e.processId)!.grain === "JOB" && tpById.get(e.predecessorId)!.grain === "JOB") continue;
+          const processId = resolve(e.processId);
+          const predecessorId = resolve(e.predecessorId);
+          if (processId == null || predecessorId == null) {
+            droppedEdgeCount++;
+            continue;
+          }
+          edgeData.push({ jobId: job.id, processId, predecessorId, type: e.type, lagDays: e.lagDays, enforcement: e.enforcement });
+        }
+      };
+      wire(version, null);
+      for (const i of allLines) if (!onJobRoute[i]) wire(versionOf(parsed.equipments[i]), i);
+      await tx.jobProcessEdge.createMany({ data: edgeData });
+
+      await notifyJobCreated(
+        tx,
+        actor,
+        { id: job.id, jobNumber: job.jobNumber, projectName: job.projectName },
+        scoped.map((sp) => sp.tp.defaultDepartmentId),
+      );
+
+      // J2: every line's includeWhen decision for the rows it serves goes on the ledger.
+      for (const sp of scoped) {
+        for (const { line, d } of sp.rule?.perLine ?? []) blockUnits[line].rules.record("TEMPLATE_PROCESS", sp.tp.id, d);
+      }
+
       const qcp = parsed.qcpTemplateSourceId
-        ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdByCode, actor.tenantId, blockUnits.map((b) => b.rules))
+        ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdsByCode, actor.tenantId, blockUnits.map((b) => b.rules))
         : { qcpTemplateId: null, itemCount: 0, unmatchedProcessCodes: [] as string[], skipped: [] as { srNo: string; sequence: number }[] };
 
       const bom =
@@ -324,7 +445,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
 
       const components =
         bom.createdIds.length > 0 && firstEquipmentId != null
-          ? await materializeComponentsFromBomItems(tx, parsed.familyId, firstEquipmentId, bom.createdIds, job.id)
+          ? await materializeComponentsFromBomItems(tx, blockUnits[0].familyId, firstEquipmentId, bom.createdIds, job.id)
           : { componentCount: 0, skippedNoRoute: 0 };
 
       // J1: each equipment block takes the template of its own equipment type.
@@ -334,12 +455,13 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           tx,
           actor.tenantId,
           job.id,
-          parsed.familyId,
+          block.familyId,
           block.unitIds,
           qcp.qcpTemplateId,
           block.equipmentTypeId,
           block.rules,
           qcp.skipped,
+          block.equipmentId,
         );
         assembly.stepCount += r.stepCount;
         assembly.boundToQcp += r.boundToQcp;
@@ -353,8 +475,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
       const result: CreateJobResult = {
         jobId: job.id,
         publicId: job.publicId,
-        processCount: version.processes.length,
-        edgeCount: version.edges.length,
+        processCount: scoped.length,
+        edgeCount: edgeData.length,
         unitCount,
         qcpItemCount: qcp.itemCount,
         bomItemCount: bom.count,
@@ -363,6 +485,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         unmatchedQcpProcessCodes: qcp.unmatchedProcessCodes,
         ruleDecisionCount,
         flaggedRuleCount,
+        droppedEdgeCount,
       };
 
       return {
@@ -386,6 +509,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             assemblyStepCount: result.assemblyStepCount,
             ruleDecisionCount: result.ruleDecisionCount,
             flaggedRuleCount: result.flaggedRuleCount,
+            droppedEdgeCount: result.droppedEdgeCount,
             excludedProcessCodes: parsed.excludedProcessCodes,
             exclusionReason: parsed.exclusionReason,
           },
@@ -593,7 +717,7 @@ async function cloneQcpTemplate(
   tx: Tx,
   sourceId: number,
   jobId: number,
-  jpIdByCode: Map<string, number>,
+  jpIdsByCode: Map<string, number[]>,
   tenantId: number,
   lineRules: LineRules[],
 ): Promise<{
@@ -694,14 +818,16 @@ async function cloneQcpTemplate(
     }
 
     for (const code of codes) {
-      const newJobProcessId = jpIdByCode.get(code);
-      if (newJobProcessId == null) {
+      const newJobProcessIds = jpIdsByCode.get(code);
+      if (!newJobProcessIds?.length) {
         unmatched.add(code);
         continue;
       }
-      await tx.qcpItemProcess.create({
-        data: { qcpItemId: created.id, jobProcessId: newJobProcessId, jobId },
-      });
+      for (const newJobProcessId of newJobProcessIds) {
+        await tx.qcpItemProcess.create({
+          data: { qcpItemId: created.id, jobProcessId: newJobProcessId, jobId },
+        });
+      }
     }
   }
 
