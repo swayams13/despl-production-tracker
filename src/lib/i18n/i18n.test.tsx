@@ -84,7 +84,7 @@ describe("L2.12 shared floor components follow the provider", () => {
     renderToStaticMarkup(
       <LocaleProvider locale={locale}>
         <FloorOutcomes outcomes={[outcome]} dismiss={() => {}} />
-        <FloorUndoStack pending={[{ id: "p", label: "x" }]} undo={() => {}} />
+        <FloorUndoStack pending={[{ id: "p", label: "x", keys: [] }]} undo={() => {}} />
       </LocaleProvider>,
     );
 

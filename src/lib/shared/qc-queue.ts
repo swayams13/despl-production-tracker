@@ -182,6 +182,20 @@ export interface NcrQueueRow extends QcWhere {
   awaitingRatification: boolean;
   /** The user who accepted it, so the UI can hide Ratify from them (the service refuses anyway). */
   concessionBy: number | null;
+  /** An H5 / H6 rule NCR (welding after the final PWHT or after hydro): resolved by repair, or by a concession. */
+  ruleNcr: boolean;
+}
+
+export type NcrDisposition = "REWORK" | "REPAIR" | "USE_AS_IS" | "CONCESSION" | "SCRAP";
+
+/**
+ * Which dispositions a viewer may choose for an NCR (the screen's mirror of ncr.service's rules, which still refuse):
+ * QC dispositions an ordinary NCR any way, and a rule NCR only by repair; the Production Head's one disposition is
+ * accepting a rule NCR as a concession. An empty list means no Disposition button.
+ */
+export function dispositionChoices(row: Pick<NcrQueueRow, "ruleNcr">, access: { disposition: boolean; concede: boolean }): NcrDisposition[] {
+  if (row.ruleNcr) return [...(access.disposition ? (["REPAIR"] as const) : []), ...(access.concede ? (["CONCESSION"] as const) : [])];
+  return access.disposition ? ["REWORK", "REPAIR", "USE_AS_IS", "CONCESSION", "SCRAP"] : [];
 }
 
 // ── Grouping and paging ──────────────────────────────────────────────────────

@@ -88,6 +88,7 @@ export const en = {
     showMore: (n: number) => `Show ${n} more`,
     startedAt: (time: string) => ` · started ${time}`,
     alsoOnOthers: (n: number) => ` · also on ${n} other unit${n === 1 ? "" : "s"}`,
+    returnedByQc: (why: string) => `Returned by QC${why ? `: ${why}` : ""}`,
   },
   today: {
     title: "Today",

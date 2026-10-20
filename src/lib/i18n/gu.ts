@@ -80,6 +80,7 @@ export const gu: Dict = {
     showMore: (n) => `વધુ ${n} બતાવો`, // REVIEW: DESPL
     startedAt: (time) => ` · ${time} વાગ્યે શરૂ થયું`, // REVIEW: DESPL
     alsoOnOthers: (n) => ` · બીજા ${n} યુનિટ પર પણ`, // REVIEW: DESPL
+    returnedByQc: (why) => `QC એ પાછું મોકલ્યું${why ? `: ${why}` : ""}`, // REVIEW: DESPL
   },
   today: {
     title: "આજે", // REVIEW: DESPL

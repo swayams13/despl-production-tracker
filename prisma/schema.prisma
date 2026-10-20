@@ -2890,6 +2890,8 @@ model QcpExecution {
   callGivenOn       DateTime?          @map("call_given_on")
   /// SERVER CLOCK ONLY (invariant #1)
   callAttendedOn    DateTime?          @map("call_attended_on")
+  /// Who RECORDED this result, whatever it was: set on an ACCEPTED, NA and REJECTED attempt alike (qcp.service sets it
+  /// from the acting user every time). The name is historical; there is no separate recorded-by column on this table.
   clearedBy         Int?               @map("cleared_by")
   /// L2.6: the third-party inspector's name when QC clears a point on their behalf.
   clearedByPartyRef String?            @map("cleared_by_party_ref")

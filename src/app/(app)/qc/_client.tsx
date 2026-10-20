@@ -146,7 +146,7 @@ function QueueRowCard({ row, onOpen }: { row: QcQueueRow; onOpen: () => void }) 
   );
 }
 
-export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
+export function QcCockpitClient({ cockpit, canDisposition }: { cockpit: QcCockpit; canDisposition: boolean }) {
   const { sheet, openStage, refreshStage, closeSheet } = useStageSheetLauncher();
   const router = useRouter();
   const [recordingKey, setRecordingKey] = useState<string | null>(null);
@@ -292,9 +292,11 @@ export function QcCockpitClient({ cockpit }: { cockpit: QcCockpit }) {
                   }}
                 />
               ) : (
-                <button className="btn" disabled={dispositionPending} onClick={() => setDispositioningId(n.ncrId)}>
-                  Disposition…
-                </button>
+                canDisposition && (
+                  <button className="btn" disabled={dispositionPending} onClick={() => setDispositioningId(n.ncrId)}>
+                    Disposition…
+                  </button>
+                )
               )}
               {dispositioningId === n.ncrId && <RefusalNote refusal={refusal} />}
             </div>

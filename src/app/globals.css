@@ -869,6 +869,7 @@ body {
 .theme-industrial .fl-main { min-width: 0; flex: 1 1 200px; display: grid; gap: 2px; }
 .theme-industrial .fl-main b { font-weight: 600; font-size: 14px; }
 .theme-industrial .fl-main span, .theme-industrial .fl-sub { color: var(--muted); font-size: 12px; }
+.theme-industrial .fl-main .fl-returned { color: var(--s-hold); font-weight: 600; }
 .theme-industrial .fl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-undo .btn, .theme-industrial .fl-more { min-height: 40px; }
 .theme-industrial .fl-done { min-width: 96px; }

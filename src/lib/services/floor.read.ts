@@ -62,6 +62,8 @@ export interface FloorRow {
   heatComponentId: number | null;
   /** The same step on the unit's siblings, not yet done. Empty for weld steps (one joint per unit). */
   siblings: FloorSibling[];
+  /** A step QC sent back and that is in progress again: QC's reason ("Returned by QC"), else an empty string; null = not returned. */
+  returnedNote: string | null;
 }
 
 export interface FloorUnitView {
@@ -271,11 +273,29 @@ export async function loadFloorUnit(
         weld: jointRef && row.weldJointId == null ? { jointRef, existingJointId: null } : null,
         heatComponentId: refusal?.code === ERROR_CODES.HEAT_NUMBER_NOT_PICKED && item.kind === "COMPONENT_OP" ? (row.componentId ?? null) : null,
         siblings: [],
+        returnedNote: null,
       });
     }
 
     rows.sort((a, b) => RANK[a.state] - RANK[b.state] || a.group.localeCompare(b.group) || a.id - b.id);
     const shown = rows.slice(0, ROW_CAP);
+
+    // A step QC rejected is in progress again and looks like any other: say that it came back, and why.
+    const back = shown.filter((r) => r.state === "IN_PROGRESS");
+    const backOpIds = back.filter((r) => r.kind === "COMPONENT_OP").map((r) => r.id);
+    const backStepIds = back.filter((r) => r.kind === "ASSEMBLY_STEP").map((r) => r.id);
+    const [opRejections, stepRejections] = await Promise.all([
+      backOpIds.length
+        ? tx.componentOperationRejection.findMany({ where: { componentOperationId: { in: backOpIds } }, orderBy: { rejectedAt: "desc" }, select: { componentOperationId: true, detail: true } })
+        : Promise.resolve([]),
+      backStepIds.length
+        ? tx.assemblyStepRejection.findMany({ where: { assemblyStepId: { in: backStepIds } }, orderBy: { rejectedAt: "desc" }, select: { assemblyStepId: true, detail: true } })
+        : Promise.resolve([]),
+    ]);
+    const latest = new Map<string, string>();
+    for (const r of opRejections) if (!latest.has(rowKey("COMPONENT_OP", r.componentOperationId))) latest.set(rowKey("COMPONENT_OP", r.componentOperationId), r.detail ?? "");
+    for (const r of stepRejections) if (!latest.has(rowKey("ASSEMBLY_STEP", r.assemblyStepId))) latest.set(rowKey("ASSEMBLY_STEP", r.assemblyStepId), r.detail ?? "");
+    for (const r of back) r.returnedNote = latest.get(r.key) ?? null;
 
     // Weld steps: is the joint already logged on this unit (another step of the group bound it)?
     const refs = [...new Set(shown.flatMap((r) => (r.weld ? [r.weld.jointRef] : [])))];
