@@ -36,7 +36,6 @@ function input(over: Partial<CreateJobInput> = {}): CreateJobInput {
     targetDispatchDate: null,
     priority: "NORMAL",
     remarks: null,
-    specs: null,
     excludedProcessCodes: [],
     equipments: [{ equipmentTypeId: null, name: "Vessel", blockNo: 1, remarks: null, serials: ["SR01"] }],
     qcpTemplateSourceId: null,
@@ -694,7 +693,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     const refs = await seedRefs();
     const qcpSource = await owner.qcpTemplate.findFirstOrThrow({ where: { job: { jobNumber: "DESPL-320" } } });
     const asmVersion = await owner.assemblyTemplateVersion.findFirstOrThrow({
-      where: { template: { tenantId: 1, familyId: refs.familyId }, status: "PUBLISHED" },
+      where: { template: { tenantId: 1, familyId: refs.familyId, equipmentTypeId: null }, status: "PUBLISHED" },
       orderBy: { version: "desc" },
       include: { steps: true },
     });
@@ -775,17 +774,6 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     expect(copiedChild.parentBomItemId).toBe(copiedParent.id); // points at the COPIED parent...
     expect(copiedChild.parentBomItemId).not.toBe(parent.id); // ...never the source's
     expect(copiedChild.parentBomItemId).not.toBeNull();
-  });
-
-  it("stores only spec keys defined for the family", async () => {
-    const refs = await seedRefs();
-    const r = await createJob(
-      actor(),
-      base({ jobNumber: "TEST-SPECS-1", specs: { designPressure: "10.5", bogus: "x" } }, refs),
-    );
-    created.push(r.jobId);
-    const job = await owner.job.findUniqueOrThrow({ where: { id: r.jobId } });
-    expect(job.specs).toEqual({ designPressure: 10.5 });
   });
 
   // ── S19: setJobStatus ────────────────────────────────────────────────

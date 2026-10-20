@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ageDaysOf,
   compareHolds,
+  dispositionChoices,
   evidenceMessage,
   evidenceNeeded,
   groupByJobUnit,
@@ -136,5 +137,26 @@ describe("evidenceMessage", () => {
   });
   it.each([[undefined], [null], [[]], ["x"], [[1, 2]]])("is null for %j (not an evidence refusal)", (v) => {
     expect(evidenceMessage(v)).toBeNull();
+  });
+});
+
+describe("dispositionChoices: who may disposition which NCR (mirrors ncr.service, which still refuses)", () => {
+  const QC = { disposition: true, concede: false };
+  const HEAD = { disposition: false, concede: true };
+  const BOTH = { disposition: true, concede: true };
+  const NEITHER = { disposition: false, concede: false };
+  const ordinary = { ruleNcr: false };
+  const rule = { ruleNcr: true };
+
+  it("an ordinary NCR: QC chooses any way; the Production Head gets no button (the rehearsal's FORBIDDEN)", () => {
+    expect(dispositionChoices(ordinary, QC)).toEqual(["REWORK", "REPAIR", "USE_AS_IS", "CONCESSION", "SCRAP"]);
+    expect(dispositionChoices(ordinary, HEAD)).toEqual([]);
+    expect(dispositionChoices(ordinary, NEITHER)).toEqual([]);
+  });
+  it("an H5 / H6 rule NCR: QC repairs, the Production Head accepts a concession, nobody else gets a button", () => {
+    expect(dispositionChoices(rule, QC)).toEqual(["REPAIR"]);
+    expect(dispositionChoices(rule, HEAD)).toEqual(["CONCESSION"]);
+    expect(dispositionChoices(rule, BOTH)).toEqual(["REPAIR", "CONCESSION"]);
+    expect(dispositionChoices(rule, NEITHER)).toEqual([]);
   });
 });

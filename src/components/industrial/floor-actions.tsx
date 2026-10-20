@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ensureJointAction, notifyBlockerAction, recordWorkAction } from "@/app/actions/work";
 import { loadHeatChoicesAction, pickHeatNumberAction } from "@/app/actions/heat";
@@ -48,6 +48,8 @@ export interface Outcome {
 export interface PendingView {
   id: string;
   label: string;
+  /** The rows (`KIND:id`) this write will change: they stay disabled until the screen shows the result. */
+  keys: string[];
 }
 export interface SendResult {
   applied: number;
@@ -69,10 +71,16 @@ export function useFloorWrites(titleOf: Map<string, string>) {
   const d = useDict();
   const [pending, setPending] = useState<PendingView[]>([]);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
-  const queued = useRef(new Map<string, { send: () => Promise<SendResult>; label: string; timer: ReturnType<typeof setTimeout> }>());
+  // Rows whose write was sent and whose result the screen has not shown yet: still disabled, so a second tap cannot repeat it.
+  const [settling, setSettling] = useState<Set<string>>(new Set());
+  const [refreshing, startRefresh] = useTransition();
+  useEffect(() => {
+    if (!refreshing && settling.size > 0) setSettling(new Set());
+  }, [refreshing, settling]);
+  const queued = useRef(new Map<string, { send: () => Promise<SendResult>; label: string; keys: string[]; timer: ReturnType<typeof setTimeout> }>());
 
   const finish = useCallback(
-    async (id: string, label: string, send: () => Promise<SendResult>) => {
+    async (id: string, label: string, send: () => Promise<SendResult>, keys: string[] = []) => {
       let out: SendResult;
       try {
         out = await send();
@@ -88,10 +96,12 @@ export function useFloorWrites(titleOf: Map<string, string>) {
           message: r.message,
         })),
         error: out.error,
-        retry: out.error ? () => { setOutcomes((o) => o.filter((x) => x.id !== id)); void finish(id, label, send); } : undefined,
+        retry: out.error ? () => { setOutcomes((o) => o.filter((x) => x.id !== id)); void finish(id, label, send, keys); } : undefined,
       };
       setOutcomes((o) => [outcome, ...o.filter((x) => x.id !== id)]);
-      router.refresh();
+      // router.refresh() after an await is not tracked by React: start it in its own transition, so `refreshing` is true until the new rows are on screen.
+      setSettling((cur) => new Set([...cur, ...keys]));
+      startRefresh(() => router.refresh());
     },
     [router, titleOf, d],
   );
@@ -103,16 +113,16 @@ export function useFloorWrites(titleOf: Map<string, string>) {
       clearTimeout(q.timer);
       queued.current.delete(id);
       setPending((p) => p.filter((x) => x.id !== id));
-      void finish(id, q.label, q.send);
+      void finish(id, q.label, q.send, q.keys);
     },
     [finish],
   );
 
-  const queue = (label: string, send: () => Promise<SendResult>) => {
+  const queue = (label: string, send: () => Promise<SendResult>, keys: string[] = []) => {
     const id = crypto.randomUUID();
     const timer = setTimeout(() => flush(id), UNDO_MS);
-    queued.current.set(id, { send, label, timer });
-    setPending((p) => [...p, { id, label }]);
+    queued.current.set(id, { send, label, keys, timer });
+    setPending((p) => [...p, { id, label, keys }]);
   };
 
   const undo = (id: string) => {
@@ -146,7 +156,9 @@ export function useFloorWrites(titleOf: Map<string, string>) {
     };
   }, [flush]);
 
-  return { pending, outcomes, queue, undo, dismiss };
+  /** True from the tap until the screen shows the result (Undo window, sending, refreshing): the row's buttons are off. */
+  const busy = (key: string) => settling.has(key) || pending.some((p) => p.keys.includes(key));
+  return { pending, outcomes, queue, undo, dismiss, busy };
 }
 
 /** Outcome cards (a partial result stays until dismissed). */
@@ -331,7 +343,7 @@ export function ActionSheet({
   row: SheetRow;
   action: "DONE" | "START";
   onClose: () => void;
-  onConfirm: (label: string, send: () => Promise<SendResult>) => void;
+  onConfirm: (label: string, send: () => Promise<SendResult>, keys: string[]) => void;
 }) {
   const [when, setWhen] = useState<"now" | "earlier">("now");
   const [earlier, setEarlier] = useState("");
@@ -397,7 +409,7 @@ export function ActionSheet({
         refused: r.result.refused.map((x) => ({ kind: x.kind, id: x.id, message: x.message })),
       };
     };
-    onConfirm(label, send);
+    onConfirm(label, send, [`${row.kind}:${row.id}`, ...chosen.map((s) => `${row.kind}:${s.id}`)]);
   };
 
   return (

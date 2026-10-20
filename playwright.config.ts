@@ -6,6 +6,12 @@ const LEAN_SPECS = /(floor|today|team|qc|portfolio|job-overview|travellers)\.spe
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // One retry in CI, so `trace: 'on-first-retry'` below actually records a trace
+  // of the job-overview tab-click flake (router does not commit the navigation
+  // within the wait; progress.md, 18/19 Oct). The HTML report CI uploads embeds
+  // it. A test that passes only on retry shows as "flaky" in the report, not green.
+  // Not a fix: remove once the flake has a root cause.
+  retries: process.env.CI ? 1 : 0,
   reporter: 'html',
   use: {
     baseURL: 'http://localhost:3000',

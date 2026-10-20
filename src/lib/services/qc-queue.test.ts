@@ -58,9 +58,9 @@ describe.skipIf(!RUN_DB)("L2.6 QC queue (DB)", async () => {
 
   describe("access", () => {
     it("QC, Production Head, Management and Admin view; QC alone inspects; others see nothing", async () => {
-      expect(resolveQcAccess(qc)).toMatchObject({ view: true, inspect: true, waive: false, ratify: true });
-      expect(resolveQcAccess(head)).toMatchObject({ view: true, inspect: false, waive: true, disposition: true, ratify: false });
-      expect(resolveQcAccess(mgmt)).toMatchObject({ view: true, inspect: false, waive: false, disposition: false });
+      expect(resolveQcAccess(qc)).toMatchObject({ view: true, inspect: true, waive: false, disposition: true, concede: false, ratify: true });
+      expect(resolveQcAccess(head)).toMatchObject({ view: true, inspect: false, waive: true, disposition: false, concede: true, ratify: false });
+      expect(resolveQcAccess(mgmt)).toMatchObject({ view: true, inspect: false, waive: false, disposition: false, concede: false });
       expect(resolveQcAccess(sup).view).toBe(false);
       expect(resolveQcAccess({ ...qc, clientId: 5 }).view).toBe(false);
     });
@@ -344,6 +344,7 @@ describe.skipIf(!RUN_DB)("L2.6 QC queue (DB)", async () => {
       expect(rows.map((r) => r.ncrId)).toEqual([open.id, conc.id]); // oldest first, closed absent
       expect(rows[0]).toMatchObject({ status: "OPEN", awaitingRatification: false, categoryName: "H5 · welding after final PWHT", raisedByName: "maker" });
       expect(rows[1]).toMatchObject({ awaitingRatification: true, concessionBy: head.userId });
+      expect(rows.map((r) => r.ruleNcr)).toEqual([true, true]); // both are H5 rule NCRs: the Production Head may accept them as a concession
       expect(v.counts.ncrs).toBe(2);
       expect((await loadQcQueue(bQc, q({ tab: "ncrs", jobId: j.job.id }))).counts.ncrs).toBe(0);
     });

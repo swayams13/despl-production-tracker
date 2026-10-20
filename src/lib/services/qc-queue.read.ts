@@ -50,8 +50,10 @@ export interface QcAccess {
   inspect: boolean;
   /** Approve a pending waiver (invariant 4). */
   waive: boolean;
-  /** Disposition an NCR. */
+  /** Disposition an NCR (QC; a rule NCR only by repair). */
   disposition: boolean;
+  /** Accept a rule NCR as a concession (the Production Head). */
+  concede: boolean;
   /** Ratify a concession. */
   ratify: boolean;
 }
@@ -62,7 +64,8 @@ export function resolveQcAccess(actor: Actor): QcAccess {
     view,
     inspect: view && hasRole(actor, ROLES.QC),
     waive: view && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN),
-    disposition: view && hasRole(actor, ROLES.QC, ROLES.PRODUCTION_HEAD),
+    disposition: view && hasRole(actor, ROLES.QC),
+    concede: view && hasRole(actor, ROLES.PRODUCTION_HEAD),
     ratify: view && hasRole(actor, ROLES.QC),
   };
 }
@@ -527,6 +530,7 @@ async function buildNcrs(tx: Tx, s: Scope, now: Date): Promise<NcrQueueRow[]> {
       ageDays: ageDaysOf(at, now),
       awaitingRatification: n.ruleCode != null && n.disposition === "CONCESSION" && n.concessionApprovedById != null,
       concessionBy: n.concessionApprovedById,
+      ruleNcr: n.ruleCode != null,
     });
   }
   return out.sort((a, b) => a.raisedAt.localeCompare(b.raisedAt) || a.ncrId - b.ncrId);

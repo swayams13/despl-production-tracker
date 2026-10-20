@@ -732,7 +732,7 @@ describe.skipIf(!RUN_DB)("qcp.service — library authoring (DB)", async () => {
     // in that same srNo-bearing step order for the indices to line up, even
     // though only the INSPECTION steps ever get resolved against them.
     const asmVersion = await owner.assemblyTemplateVersion.findFirstOrThrow({
-      where: { template: { tenantId: 1, familyId: version.template.familyId }, status: "PUBLISHED" },
+      where: { template: { tenantId: 1, familyId: version.template.familyId, equipmentTypeId: null }, status: "PUBLISHED" },
       orderBy: { version: "desc" },
       include: { steps: { orderBy: { seq: "asc" } } },
     });
@@ -763,7 +763,6 @@ describe.skipIf(!RUN_DB)("qcp.service — library authoring (DB)", async () => {
       targetDispatchDate: null,
       priority: "NORMAL",
       remarks: null,
-      specs: null,
       excludedProcessCodes: [],
       exclusionReason: null,
       equipments: [{ equipmentTypeId: null, name: "Vessel", blockNo: 1, remarks: null, serials: ["SR01"] }],
