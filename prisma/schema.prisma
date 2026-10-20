@@ -100,6 +100,24 @@ enum JobStatus {
   CANCELLED
 }
 
+enum AssemblyStepScope {
+  PER_UNIT
+  PER_JOINT
+  PER_COMPONENT
+}
+
+enum JointType {
+  LONG_SEAM
+  CIRC_SEAM
+  NOZZLE
+  ATTACHMENT
+}
+
+enum PlannedJointSource {
+  IMPORTED
+  GENERATED
+}
+
 enum ProcessEdgeType {
   FINISH_TO_START
   START_TO_START_WITH_OVERLAP
@@ -304,10 +322,11 @@ enum SnapshotCadence {
 
 /// A tenant. DESPL today; sibling Vedanta Group companies later.
 model Organization {
-  id        Int      @id @default(autoincrement())
-  code      String   @unique
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
+  id            Int            @id @default(autoincrement())
+  code          String         @unique
+  name          String
+  createdAt     DateTime       @default(now()) @map("created_at")
+  plannedJoints PlannedJoint[]
 
   clients                      Client[]
   users                        User[]
@@ -610,14 +629,15 @@ model UserDepartment {
 // ── Reference vocabularies (see design note 4) ──────────────────────────
 
 model ComponentTypeRef {
-  id       Int               @id @default(autoincrement())
-  tenantId Int               @map("tenant_id")
-  code     String
-  name     String
-  active   Boolean           @default(true)
+  id                    Int                    @id @default(autoincrement())
+  tenantId              Int                    @map("tenant_id")
+  code                  String
+  name                  String
+  active                Boolean                @default(true)
   /// Lean Core M1. RAW_FORM (default) = today's behaviour. PART_FAMILY rows
   /// carry their attributes in `partFamily`.
-  kind     ComponentTypeKind @default(RAW_FORM)
+  kind                  ComponentTypeKind      @default(RAW_FORM)
+  assemblyTemplateSteps AssemblyTemplateStep[]
 
   tenant            Organization             @relation(fields: [tenantId], references: [id])
   routeTemplates    RouteTemplate[]
@@ -1096,43 +1116,44 @@ model TemplateEdge {
 /// and every existing doc. `clientOrderNo` vs `jobNumber` resolves C5: both
 /// live CSVs carry Work Order DE0455-01 while the jobs are DE0463/DE0467.
 model Job {
-  id                        Int         @id @default(autoincrement())
-  tenantId                  Int         @map("tenant_id")
+  id                        Int            @id @default(autoincrement())
+  tenantId                  Int            @map("tenant_id")
   /// Opaque id for client-facing URLs — sequential ids leak order volume.
-  publicId                  String      @unique @map("public_id")
-  clientId                  Int         @map("client_id")
-  familyId                  Int         @map("family_id")
-  templateVersionId         Int         @map("template_version_id")
+  publicId                  String         @unique @map("public_id")
+  clientId                  Int            @map("client_id")
+  familyId                  Int            @map("family_id")
+  templateVersionId         Int            @map("template_version_id")
   /// Nullable — a family with no authored assembly sequence yet
   /// (HEAT_EXCHANGER, PIPING_SYSTEM as of Phase 2) must still create jobs.
   /// Pinned at intake exactly like templateVersionId once an intake UI exists
   /// for it; for now set directly (see A2's materialisation script).
-  assemblyTemplateVersionId Int?        @map("assembly_template_version_id")
-  calendarId                Int?        @map("calendar_id")
-  jobNumber                 String      @map("job_number")
+  assemblyTemplateVersionId Int?           @map("assembly_template_version_id")
+  calendarId                Int?           @map("calendar_id")
+  jobNumber                 String         @map("job_number")
   /// The client's own order number, when it differs from ours (C5).
-  clientOrderNo             String?     @map("client_order_no")
-  projectName               String?     @map("project_name")
-  poRef                     String?     @map("po_ref")
-  designCode                String?     @map("design_code")
-  orderDate                 DateTime?   @map("order_date")
+  clientOrderNo             String?        @map("client_order_no")
+  projectName               String?        @map("project_name")
+  poRef                     String?        @map("po_ref")
+  designCode                String?        @map("design_code")
+  orderDate                 DateTime?      @map("order_date")
   /// The contractual date given to the client. BACKWARD scheduling anchors on
   /// this by default, and every overdue / KPI / forecast-vs-due calculation
   /// measures against it. Renamed from `deliveryDate` (22 Aug 2026): the CSV
   /// import was writing a *dispatch* date into a field the scheduler read as a
   /// *required delivery* date, conflating two different commitments.
-  committedDeliveryDate     DateTime?   @map("committed_delivery_date")
+  committedDeliveryDate     DateTime?      @map("committed_delivery_date")
   /// DESPL's own internal target, normally earlier than the committed date and
   /// carrying their buffer. Never shown to a client user.
-  targetDispatchDate        DateTime?   @map("target_dispatch_date")
+  targetDispatchDate        DateTime?      @map("target_dispatch_date")
   /// Family-shaped design configuration (design pressure, MDMT, MOC, …).
   /// Display and reference data ONLY. Nothing in lib/schedule/ or the gating
   /// path may read it — the moment a schedule depends on a free-shaped blob,
   /// refusals stop being explainable (invariant #12).
   specs                     Json?
-  priority                  JobPriority @default(NORMAL)
-  status                    JobStatus   @default(ACTIVE)
+  priority                  JobPriority    @default(NORMAL)
+  status                    JobStatus      @default(ACTIVE)
   remarks                   String?
+  plannedJoints             PlannedJoint[]
 
   tenant                       Organization                  @relation(fields: [tenantId], references: [id])
   client                       Client                        @relation(fields: [clientId], references: [id])
@@ -1195,29 +1216,30 @@ model Job {
 }
 
 model Equipment {
-  id                        Int     @id @default(autoincrement())
-  jobId                     Int     @map("job_id")
+  id                        Int            @id @default(autoincrement())
+  jobId                     Int            @map("job_id")
   name                      String
-  blockNo                   Int?    @map("block_no")
+  blockNo                   Int?           @map("block_no")
   remarks                   String?
   /// Nullable: the seeded DE0463/DE0467 blocks came from CSV with free-text
   /// labels and no catalog entry. Backfilling them would mean inventing
   /// catalog rows, so they stay unlinked.
-  equipmentTypeId           Int?    @map("equipment_type_id")
+  equipmentTypeId           Int?           @map("equipment_type_id")
   /// Lean Core J2: this line's answers to its config questions, by question
   /// key. Configuration only: scheduling and gating never read it.
   config                    Json?
   /// Lean Core J3a: the process route this line runs (pinned, invariant 9).
   /// Equal to `jobs.template_version_id` for a line on the job's own route;
   /// any other value gives the line its own UNIT-grain `job_processes`.
-  templateVersionId         Int?    @map("template_version_id")
+  templateVersionId         Int?           @map("template_version_id")
   /// Lean Core J3a: the assembly template version this line's steps came from.
-  assemblyTemplateVersionId Int?    @map("assembly_template_version_id")
+  assemblyTemplateVersionId Int?           @map("assembly_template_version_id")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId                  Int     @default(0) @map("tenant_id")
+  tenantId                  Int            @default(0) @map("tenant_id")
+  plannedJoints             PlannedJoint[]
 
   job                     Job                      @relation(fields: [jobId], references: [id])
   tenant                  Organization             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -2080,6 +2102,7 @@ model Component {
   materialIdentifications MaterialIdentification[]
   governingDrawing        AssemblyDrawing?         @relation("ComponentGoverningDrawing", fields: [governingDrawingId], references: [id])
   builtToRevision         DrawingRevision?         @relation("ComponentBuiltToRevision", fields: [builtToRevisionId], references: [id])
+  assemblySteps           AssemblyStep[]
 
   /// Component grain follows the serial (unitId), not the equipment — a
   /// serialised job's components carry a plain tag ("SHELL", not
@@ -2329,33 +2352,68 @@ model Welder {
   @@map("welders")
 }
 
+/// Lean Core J4a: a joint the equipment line is planned to have (the weld map's rows).
+/// GENERATED from answers (shell courses) or IMPORTED; `confirmed` = QC has accepted it.
+/// Job-grain RLS, like config_rule_decisions. The line must belong to the job (trigger).
+model PlannedJoint {
+  id          Int                @id @default(autoincrement())
+  jobId       Int                @map("job_id")
+  /// AUD-001: 0 is a placeholder; the BEFORE INSERT trigger derives it from job_id.
+  tenantId    Int                @default(0) @map("tenant_id")
+  equipmentId Int                @map("equipment_id")
+  jointNo     String             @map("joint_no")
+  jointType   JointType          @map("joint_type")
+  /// What it joins, free text ("Shell course 1 to course 2").
+  joins       String?
+  wpsRef      String?            @map("wps_ref")
+  ndtExtent   String?            @map("ndt_extent")
+  source      PlannedJointSource
+  confirmed   Boolean            @default(false)
+  sortOrder   Int                @default(0) @map("sort_order")
+  createdAt   DateTime           @default(now()) @map("created_at")
+
+  job           Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  tenant        Organization   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  equipment     Equipment      @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  assemblySteps AssemblyStep[]
+  weldJoints    WeldJoint[]
+
+  @@unique([equipmentId, jointNo])
+  @@index([jobId])
+  @@index([tenantId])
+  @@map("planned_joints")
+}
+
 /// FR-W2: one butt-weld joint/seam, welder(s) + date + size/type. Joint
 /// number is the printed weld-map id (e.g. LS-1, CS-2, N4-W1) — free text,
 /// not unique, since re-numbering across jobs is a real-world fact of life.
 model WeldJoint {
-  id          Int      @id @default(autoincrement())
-  jobId       Int      @map("job_id")
-  unitId      Int?     @map("unit_id")
-  jointNo     String   @map("joint_no")
-  jointType   String   @map("joint_type")
-  weldSize    String?  @map("weld_size")
+  id             Int      @id @default(autoincrement())
+  jobId          Int      @map("job_id")
+  unitId         Int?     @map("unit_id")
+  jointNo        String   @map("joint_no")
+  jointType      String   @map("joint_type")
+  weldSize       String?  @map("weld_size")
   /// §4.7 dialog field: Welding Procedure Specification reference.
-  wpsRef      String?  @map("wps_ref")
+  wpsRef         String?  @map("wps_ref")
   /// Set by whoever logs the joint, not auto-derived from jointNo — DESPL-320's
   /// spec has no job-agnostic joint-number → component mapping (A3, Phase 2).
-  componentId Int?     @map("component_id")
-  loggedBy    Int      @map("logged_by")
-  createdAt   DateTime @default(now()) @map("created_at")
+  componentId    Int?     @map("component_id")
+  /// Lean Core J4a: the planned joint this as-welded record belongs to, when known.
+  plannedJointId Int?     @map("planned_joint_id")
+  loggedBy       Int      @map("logged_by")
+  createdAt      DateTime @default(now()) @map("created_at")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId    Int      @default(0) @map("tenant_id")
+  tenantId       Int      @default(0) @map("tenant_id")
 
   job           Job               @relation(fields: [jobId], references: [id])
   tenant        Organization      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   unit          Unit?             @relation(fields: [unitId], references: [id])
   component     Component?        @relation(fields: [componentId], references: [id])
+  plannedJoint  PlannedJoint?     @relation(fields: [plannedJointId], references: [id], onDelete: Restrict)
   logger        User              @relation(fields: [loggedBy], references: [id])
   welders       WeldJointWelder[]
   ndtResults    NdtResult[]
@@ -2364,6 +2422,7 @@ model WeldJoint {
   @@index([jobId])
   @@index([unitId])
   @@index([componentId])
+  @@index([plannedJointId])
   @@index([tenantId])
   @@map("weld_joints")
 }
@@ -2559,7 +2618,14 @@ model AssemblyTemplateStep {
   /// Lean Core J2: see TemplateProcess.includeWhen. A published version is
   /// immutable (invariant 9): a rule arrives with a new version.
   includeWhen         Json?             @map("include_when")
+  /// Lean Core J4a: PER_UNIT (today) | PER_JOINT (one row per planned joint of `jointType`)
+  /// | PER_COMPONENT (one row per component of `componentTypeId`). A CHECK ties each scope to
+  /// its own selector; a PER_JOINT step has no literal `jointRef`.
+  scope               AssemblyStepScope @default(PER_UNIT)
+  jointType           JointType?        @map("joint_type")
+  componentTypeId     Int?              @map("component_type_id")
 
+  componentType     ComponentTypeRef?       @relation(fields: [componentTypeId], references: [id], onDelete: Restrict)
   version           AssemblyTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment Department              @relation(fields: [defaultDepartmentId], references: [id])
   steps             AssemblyStep[]
@@ -2569,6 +2635,7 @@ model AssemblyTemplateStep {
   @@index([defaultDepartmentId])
   /// S21: same hot-path join as OperationRef.leadTimeProcessSeq, for the AssemblyStep side.
   @@index([leadTimeProcessSeq])
+  @@index([componentTypeId])
   @@map("assembly_template_steps")
 }
 
@@ -2607,6 +2674,11 @@ model AssemblyStep {
   /// a real QcpItem — links the hold/witness points assertNoOpenHoldPoint
   /// already enforces, no change needed there).
   qcpItemId           Int?              @map("qcp_item_id")
+  /// Lean Core J4a: the planned joint this row was expanded for (PER_JOINT steps; the backfill
+  /// also sets it on a literal single-joint step). `jointRef` stays the joint number.
+  plannedJointId      Int?              @map("planned_joint_id")
+  /// Lean Core J4a: the component this row was expanded for (PER_COMPONENT steps).
+  componentId         Int?              @map("component_id")
   remarks             String?
   /// H1 job-level RLS backstop: denormalized from unit.equipment.jobId.
   jobId               Int               @map("job_id")
@@ -2620,6 +2692,8 @@ model AssemblyStep {
   templateStep      AssemblyTemplateStep    @relation(fields: [templateStepId], references: [id])
   weldJoint         WeldJoint?              @relation(fields: [weldJointId], references: [id])
   qcpItem           QcpItem?                @relation(fields: [qcpItemId], references: [id])
+  plannedJoint      PlannedJoint?           @relation(fields: [plannedJointId], references: [id], onDelete: Restrict)
+  component         Component?              @relation(fields: [componentId], references: [id], onDelete: Restrict)
   performedByWelder Welder?                 @relation(fields: [performedByWelderId], references: [id])
   performedByUser   User?                   @relation(fields: [performedByUserId], references: [id])
   submitter         User?                   @relation("AssemblyStepSubmittedBy", fields: [submittedBy], references: [id])
@@ -2635,6 +2709,8 @@ model AssemblyStep {
   @@index([status])
   @@index([weldJointId])
   @@index([qcpItemId])
+  @@index([plannedJointId])
+  @@index([componentId])
   @@index([performedByWelderId])
   @@index([performedByUserId])
   @@index([jobId])

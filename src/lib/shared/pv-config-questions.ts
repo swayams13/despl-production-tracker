@@ -1,7 +1,7 @@
 // Lean Core J2: the pressure-vessel design questions, moved out of the
 // hard-coded SPEC_FIELDS (ADR B11 retired) into config_questions rows. Same
-// seven fields, snake_case keys. No new question is invented here: further
-// ones (e.g. whether PWHT applies) arrive with the DE0423 content (J4/J5/M2).
+// seven fields, snake_case keys, plus J4a's shell_courses (drives the generated
+// seams). Further ones (e.g. whether PWHT applies) arrive with the DE0423 content (J5/M2).
 import type { ConfigQuestionDef } from "./config-questions";
 
 export const PV_CONFIG_QUESTIONS: readonly ConfigQuestionDef[] = [
@@ -12,6 +12,7 @@ export const PV_CONFIG_QUESTIONS: readonly ConfigQuestionDef[] = [
   { key: "capacity", label: "Capacity", type: "NUMBER", unit: "L" },
   { key: "orientation", label: "Orientation", type: "SELECT", options: ["Vertical", "Horizontal"] },
   { key: "radiography", label: "Radiography", type: "SELECT", options: ["Full", "Spot", "None"] },
+  { key: "shell_courses", label: "Shell courses", type: "NUMBER", help: "Number of rolled shell courses; sets the long and circumferential seams" },
 ];
 
 /** The old camelCase spec keys, as stored in Job.specs and EquipmentTypeRef.defaultSpecs. */

@@ -2,7 +2,8 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
 import { audited, recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { deriveRequiresQc, jointRefs } from "@/lib/shared/floor-rules";
+import { deriveRequiresQc, jointRefs, requiredJointRef } from "@/lib/shared/floor-rules";
+import { GENERATED_JOINT_TYPES, generateShellJoints, MAX_SHELL_COURSES } from "@/lib/shared/joint-generator";
 import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
@@ -101,9 +102,10 @@ async function lockAssemblyStepForUpdate(
   await tx.$executeRaw`SELECT set_config('app.job_id', ${String(step.jobId)}, true)`;
 
   const previousStep =
-    step.templateStep.seq > 1
+    step.seq > 1
       ? await tx.assemblyStep.findFirst({
-          where: { unitId: step.unitId, templateStep: { seq: step.templateStep.seq - 1 } },
+          // J4a: by the row's own seq. It equals the template seq until a scoped step expands.
+          where: { unitId: step.unitId, seq: step.seq - 1 },
           select: { seq: true, status: true },
         })
       : null;
@@ -192,10 +194,12 @@ export async function submitAssemblyStep(actor: Actor, input: SubmitAssemblyStep
     const to = assertAssemblyStepTransition("submit", step.status);
     if (lean) await assertFloorHard(tx, "ASSEMBLY_STEP", step.id, "DONE");
 
-    if (step.templateStep.jointRef != null && weldJointId == null && newJoint == null && step.weldJointId == null) {
+    // J4a: a row expanded for a planned joint names its joint on the row itself (its template step has no literal jointRef).
+    const stepJointRef = requiredJointRef(step);
+    if (stepJointRef != null && weldJointId == null && newJoint == null && step.weldJointId == null) {
       throw new AppError(
         ERROR_CODES.VALIDATION_FAILED,
-        { assemblyStepId, jointRef: step.templateStep.jointRef },
+        { assemblyStepId, jointRef: stepJointRef },
         "This weld step needs a joint bound before it can be submitted — pick an existing one or log it now.",
       );
     }
@@ -210,7 +214,16 @@ export async function submitAssemblyStep(actor: Actor, input: SubmitAssemblyStep
           where: { id: unit.equipmentId },
           select: { jobId: true },
         });
-        const joint = await createWeldJointTx(tx, actor, equipment.jobId, step.unitId, null, newJoint);
+        // J4a: a row expanded for a planned joint logs that joint, under its number; a literal step is as before.
+        const joint = await createWeldJointTx(
+          tx,
+          actor,
+          equipment.jobId,
+          step.unitId,
+          null,
+          step.plannedJointId != null && step.jointRef ? { ...newJoint, jointNo: step.jointRef } : newJoint,
+          step.plannedJointId,
+        );
         boundWeldJointId = joint.id;
       }
 
@@ -340,7 +353,13 @@ async function completeStepLocked(tx: Tx, actor: Actor, step: LockedStep, to: Op
       const externalBlocking = partyCodes.some(
         (pc) => pc.qcpCode.blocksCompletion && pc.inspectionParty.code !== org?.code,
       );
-      if (!externalBlocking) {
+      // J4a: several rows of one unit can share a checkpoint (a PER_JOINT inspection expands per
+      // joint). It is cleared only when the last of them is complete; until then the hold stays
+      // open. A REJECT still records at once (latest wins), so one bad joint re-opens it.
+      const openSiblings = await tx.assemblyStep.count({
+        where: { unitId: step.unitId, qcpItemId: step.qcpItemId, id: { not: step.id }, status: { not: "COMPLETE" } },
+      });
+      if (!externalBlocking && openSiblings === 0) {
         const exec = await recordQcpExecutionTx(tx, actor, {
           qcpItemId: step.qcpItemId,
           unitId: step.unitId,
@@ -619,6 +638,8 @@ export async function materializeAssemblyStepsFromTemplate(
   skippedQcp: { srNo: string; sequence: number }[] = [],
   /** J3a: the line these units belong to; it records the assembly template version its steps came from. */
   equipmentId: number | null = null,
+  /** J4a: the line's answers (shell_courses plans its seams when the route has PER_JOINT steps). */
+  answers: Record<string, unknown> = {},
 ): Promise<{ stepCount: number; boundToQcp: number }> {
   if (unitIds.length === 0) return { stepCount: 0, boundToQcp: 0 };
 
@@ -687,6 +708,55 @@ export async function materializeAssemblyStepsFromTemplate(
     return match.id;
   }
 
+  // J4a: PER_JOINT steps expand per planned joint of their type, PER_COMPONENT per component.
+  // The seams a shell implies are generated here from the line's answer when the line has
+  // none yet; any other joint type (nozzle, attachment) has to be on the weld map already.
+  let joints: { id: number; jointNo: string; jointType: string }[] = [];
+  if (equipmentId != null) {
+    joints = await tx.plannedJoint.findMany({
+      where: { equipmentId },
+      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+      select: { id: true, jointNo: true, jointType: true },
+    });
+  }
+  const jointTypesNeeded = [...new Set(steps.filter((st) => st.scope === "PER_JOINT").map((st) => st.jointType!))];
+  const toGenerate = jointTypesNeeded.filter(
+    (t) => (GENERATED_JOINT_TYPES as readonly string[]).includes(t) && !joints.some((j) => j.jointType === t),
+  );
+  if (toGenerate.length > 0) {
+    const courses = answers.shell_courses;
+    if (equipmentId == null || typeof courses !== "number" || !Number.isInteger(courses) || courses < 1 || courses > MAX_SHELL_COURSES) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { answerKey: "shell_courses", jointTypes: toGenerate },
+        "This route has welds that follow the shell courses. Enter the number of shell courses (1 to 30) so the long and circumferential seams can be planned.",
+      );
+    }
+    await tx.plannedJoint.createMany({
+      data: generateShellJoints(courses)
+        .filter((j) => toGenerate.includes(j.jointType))
+        .map((j) => ({ jobId, equipmentId, jointNo: j.jointNo, jointType: j.jointType, joins: j.joins, sortOrder: j.sortOrder, source: "GENERATED" as const })),
+    });
+    joints = await tx.plannedJoint.findMany({
+      where: { equipmentId },
+      orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+      select: { id: true, jointNo: true, jointType: true },
+    });
+  }
+  const componentTypeIds = [...new Set(steps.filter((st) => st.scope === "PER_COMPONENT").map((st) => st.componentTypeId!))];
+  const componentsByUnit = new Map<number, { id: number; componentTypeId: number }[]>();
+  if (componentTypeIds.length > 0) {
+    const comps = await tx.component.findMany({
+      where: { unitId: { in: unitIds }, componentTypeId: { in: componentTypeIds } },
+      orderBy: { id: "asc" },
+      select: { id: true, unitId: true, componentTypeId: true },
+    });
+    for (const c of comps) {
+      if (c.unitId == null) continue;
+      componentsByUnit.set(c.unitId, [...(componentsByUnit.get(c.unitId) ?? []), { id: c.id, componentTypeId: c.componentTypeId! }]);
+    }
+  }
+
   let stepCount = 0;
   let boundToQcp = 0;
   const rows: {
@@ -698,38 +768,56 @@ export async function materializeAssemblyStepsFromTemplate(
     role: AssemblyStepRole | null;
     jointRef: string | null;
     pressurePart: boolean;
+    plannedJointId: number | null;
+    componentId: number | null;
     jobId: number;
   }[] = [];
   for (const unitId of unitIds) {
+    // Rows an expansion adds shift every later template step by that many seqs (a step that
+    // expands to nothing leaves a gap). A route with no scoped step is unchanged: extra stays 0.
+    let extra = 0;
     for (const step of steps) {
-      const qcpItemId = resolveQcpItemId(step);
-      if (qcpItemId != null) boundToQcp++;
-      // Lean Core L1.1 (D3) / L1.2 (D2): copied at intake, like grain/enforcement;
-      // the floor rules read the job row, never the template.
-      rows.push({
-        unitId,
-        templateStepId: step.id,
-        seq: step.seq,
-        qcpItemId,
-        // D3 (L1.2c): derived by rule only where the template step carries a
-        // role (reviewed facts); a role-less step keeps the template value.
-        // Either level can waive QC, hence the AND.
-        requiresQc:
-          step.requiresQc &&
-          (!step.role ||
-            deriveRequiresQc({
-              kind: "ASSEMBLY_STEP",
-              stepKind: step.kind,
-              role: step.role,
-              qcpLinked: qcpItemId != null,
-              pressure: step.pressurePart,
-            }).requiresQc),
-        role: step.role,
-        jointRef: step.jointRef,
-        pressurePart: step.pressurePart,
-        jobId,
-      });
-      stepCount++;
+      const targets: { plannedJointId: number | null; componentId: number | null; jointRef: string | null }[] =
+        step.scope === "PER_JOINT"
+          ? joints.filter((j) => j.jointType === step.jointType).map((j) => ({ plannedJointId: j.id, componentId: null, jointRef: j.jointNo }))
+          : step.scope === "PER_COMPONENT"
+            ? (componentsByUnit.get(unitId) ?? [])
+                .filter((c) => c.componentTypeId === step.componentTypeId)
+                .map((c) => ({ plannedJointId: null, componentId: c.id, jointRef: step.jointRef }))
+            : [{ plannedJointId: null, componentId: null, jointRef: step.jointRef }];
+      for (const [i, target] of targets.entries()) {
+        const qcpItemId = resolveQcpItemId(step);
+        if (qcpItemId != null) boundToQcp++;
+        // Lean Core L1.1 (D3) / L1.2 (D2): copied at intake, like grain/enforcement;
+        // the floor rules read the job row, never the template.
+        rows.push({
+          unitId,
+          templateStepId: step.id,
+          seq: step.seq + extra + i,
+          qcpItemId,
+          // D3 (L1.2c): derived by rule only where the template step carries a
+          // role (reviewed facts); a role-less step keeps the template value.
+          // Either level can waive QC, hence the AND.
+          requiresQc:
+            step.requiresQc &&
+            (!step.role ||
+              deriveRequiresQc({
+                kind: "ASSEMBLY_STEP",
+                stepKind: step.kind,
+                role: step.role,
+                qcpLinked: qcpItemId != null,
+                pressure: step.pressurePart,
+              }).requiresQc),
+          role: step.role,
+          jointRef: target.jointRef,
+          pressurePart: step.pressurePart,
+          plannedJointId: target.plannedJointId,
+          componentId: target.componentId,
+          jobId,
+        });
+        stepCount++;
+      }
+      extra += Math.max(targets.length - 1, 0);
     }
   }
   await tx.assemblyStep.createMany({ data: rows });

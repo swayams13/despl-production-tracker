@@ -464,27 +464,27 @@ describe.skipIf(!RUN_DB)("Lean Core J2 questions and rules (DB)", async () => {
     });
   });
   describe("ensurePvConfigQuestions (the old SPEC_FIELDS as rows)", () => {
-    it("dry run writes nothing; apply creates the seven questions and renames legacy default-spec keys; a second apply changes nothing", async () => {
+    it("dry run writes nothing; apply creates the PV questions (the seven spec fields and shell_courses) and renames legacy default-spec keys; a second apply changes nothing", async () => {
       const w = await world("SETUP", { questions: [] });
       await owner.equipmentTypeRef.update({
         where: { id: w.eqType.id },
         data: { defaultSpecs: { designPressure: 10.5, orientation: "Vertical", weird: 1 } },
       });
       const dry = await ensurePvConfigQuestions(owner, w.tenantId, { apply: false });
-      expect(dry.created).toHaveLength(7);
+      expect(dry.created).toHaveLength(8);
       expect(dry.renamed).toHaveLength(1);
       expect(await owner.configQuestion.count({ where: { tenantId: w.tenantId } })).toBe(0);
       expect((await owner.equipmentTypeRef.findUniqueOrThrow({ where: { id: w.eqType.id } })).defaultSpecs).toHaveProperty("designPressure");
 
       await ensurePvConfigQuestions(owner, w.tenantId, { apply: true, audit: true, auditSource: "j2 test" });
       const keys = (await owner.configQuestion.findMany({ where: { tenantId: w.tenantId }, orderBy: { sortOrder: "asc" } })).map((q) => q.key);
-      expect(keys).toEqual(["design_pressure", "design_temperature", "mdmt", "moc", "capacity", "orientation", "radiography"]);
+      expect(keys).toEqual(["design_pressure", "design_temperature", "mdmt", "moc", "capacity", "orientation", "radiography", "shell_courses"]);
       expect((await owner.equipmentTypeRef.findUniqueOrThrow({ where: { id: w.eqType.id } })).defaultSpecs).toEqual({
         design_pressure: 10.5,
         orientation: "Vertical",
         weird: 1,
       });
-      expect(await owner.auditLog.count({ where: { tenantId: w.tenantId, userAgent: "j2 test" } })).toBe(8);
+      expect(await owner.auditLog.count({ where: { tenantId: w.tenantId, userAgent: "j2 test" } })).toBe(9); // 8 questions + 1 rename
 
       const again = await ensurePvConfigQuestions(owner, w.tenantId, { apply: true, audit: true, auditSource: "j2 test" });
       expect(again).toMatchObject({ created: [], renamed: [] });

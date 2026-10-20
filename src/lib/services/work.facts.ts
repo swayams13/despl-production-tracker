@@ -11,6 +11,7 @@ import {
   type StepItem,
   type UnitFacts,
   type WorkKind,
+  requiredJointRef,
 } from "@/lib/shared/floor-rules";
 import { loadOpSeqResolver, openQcpItemIdsForUnit } from "./_shared";
 
@@ -110,6 +111,7 @@ export async function loadFloorFacts(
             requiresQc: true,
             role: true,
             jointRef: true,
+            plannedJointId: true,
             pressurePart: true,
             startedAt: true,
             reportedStartAt: true,
@@ -241,7 +243,7 @@ export async function loadFloorFacts(
       departmentId: s.templateStep.defaultDepartmentId,
       startedAt: s.reportedStartAt ?? s.startedAt,
       stepKind: s.templateStep.kind,
-      templateJointRef: s.templateStep.jointRef,
+      templateJointRef: requiredJointRef(s),
       weldJointId: s.weldJointId,
     });
   }

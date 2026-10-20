@@ -126,6 +126,7 @@ export async function ensureJointForStep(actor: Actor, input: EnsureJointInput):
         jobId: true,
         unitId: true,
         jointRef: true,
+        plannedJointId: true,
         templateStep: { select: { jointRef: true, defaultDepartmentId: true } },
       },
     });
@@ -151,7 +152,7 @@ export async function ensureJointForStep(actor: Actor, input: EnsureJointInput):
       jointNo,
       jointType: jointTypeOf(jointNo),
       welderIds,
-    });
+    }, step.plannedJointId);
     await recordAudit(tx, actor, {
       action: "welding.logJoint",
       entityType: "WeldJoint",
