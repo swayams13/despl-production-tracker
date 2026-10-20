@@ -152,6 +152,16 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
     });
   });
 
+  describe("repeated operations on a part's route", () => {
+    it("are numbered so two Forming steps (a head's pressing and trimming) read apart; a name used once is unchanged", async () => {
+      const j = await o.job({
+        components: [{ tag: "HEAD", ops: [{ code: "CUTTING" }, { code: "FORMING" }, { code: "FORMING" }, { code: "NDT" }] }],
+      });
+      const v = await view(head, j.units[0].publicId);
+      expect(v.rows.map((r) => r.title).sort()).toEqual(["CUTTING", "FORMING (1 of 2)", "FORMING (2 of 2)", "NDT"]);
+    });
+  });
+
   // ── a step QC sent back ───────────────────────────────────────────────
   describe("a step QC sent back", () => {
     const job = () => o.job({ processes: [{ code: "20" }], steps: [{ seq: 1, processSeq: 20 }, { seq: 2, processSeq: 20 }] });

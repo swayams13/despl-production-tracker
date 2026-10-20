@@ -15,6 +15,7 @@ import {
 import { createDrawingRevisionAction } from "@/app/actions/drawing";
 import { receiveStockAction, issueStockAction, returnStockAction, scrapStockAction, recordLotHeatAction } from "@/app/actions/stock";
 import { storesAccess, type StoresAccess } from "@/lib/shared/stores-access";
+import { repeatedOpSuffixes } from "@/lib/shared/op-title";
 
 /** Callers that pass no access (the old BOM tab) see every control and let the server refuse, as before. */
 const ALL_ACCESS: StoresAccess = storesAccess(["ADMIN", "PRODUCTION_HEAD", "QC", "STORES"]);
@@ -55,6 +56,7 @@ export function BomPanel({
   bom,
   tabHref,
   access = ALL_ACCESS,
+  canVerify = true,
   initialItemId = null,
 }: {
   jobId: number;
@@ -62,6 +64,8 @@ export function BomPanel({
   tabHref?: string;
   /** What the viewer's role may do (L2.14): controls it cannot use are not shown. */
   access?: StoresAccess;
+  /** Verify and Reject on a submitted step are QC's (the server refuses anyone else): shown only to QC. Callers that pass nothing see them, as before. */
+  canVerify?: boolean;
   /** Open this BOM item first (a link from the Materials pipeline or the Stores queue). */
   initialItemId?: number | null;
 }) {
@@ -190,13 +194,13 @@ export function BomPanel({
           <h3>{selected ? `Component — ${selected.partName}` : "Select an item"}</h3>
           {selected?.components[0] && <StatusChip status={selected.components[0].displayStatus} />}
         </div>
-        {selected ? <ComponentDetail jobId={jobId} item={selected} welders={bom.welders} delayCategories={bom.delayCategories} access={access} /> : (
+        {selected ? <ComponentDetail jobId={jobId} item={selected} welders={bom.welders} delayCategories={bom.delayCategories} access={access} canVerify={canVerify} /> : (
           <p className="note" style={{ margin: "16px 0" }}>Click a BOM item on the left to view its component detail.</p>
         )}
       </div>
 
       {bom.subAssemblyComponents.length > 0 && (
-        <SubAssemblyComponents jobId={jobId} bom={bom} base={base} />
+        <SubAssemblyComponents jobId={jobId} bom={bom} base={base} canVerify={canVerify} />
       )}
     </div>
   );
@@ -210,7 +214,7 @@ export function BomPanel({
  * different id space than `BomItem.id`, and keeping them in a visually
  * separate section with its own toggle state avoids any risk of collision.
  */
-function SubAssemblyComponents({ jobId, bom, base }: { jobId: number; bom: BomTree; base: string }) {
+function SubAssemblyComponents({ jobId, bom, base, canVerify }: { jobId: number; bom: BomTree; base: string; canVerify: boolean }) {
   const [openId, setOpenId] = useState<number | null>(null);
   const router = useRouter();
   const components = bom.subAssemblyComponents;
@@ -256,7 +260,7 @@ function SubAssemblyComponents({ jobId, bom, base }: { jobId: number; bom: BomTr
             {openId === comp.id && (
               <div style={{ padding: "12px 16px" }}>
                 {comp.operations.length > 0 ? (
-                  <RouteSteps jobId={jobId} operations={comp.operations} welders={bom.welders} delayCategories={bom.delayCategories} />
+                  <RouteSteps jobId={jobId} operations={comp.operations} welders={bom.welders} delayCategories={bom.delayCategories} canVerify={canVerify} />
                 ) : (
                   <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No component instance / operation route recorded yet.</p>
                 )}
@@ -507,12 +511,14 @@ function ComponentDetail({
   welders,
   delayCategories,
   access,
+  canVerify,
 }: {
   jobId: number;
   item: BomItemRow;
   welders: WelderOption[];
   delayCategories: DelayCategoryOption[];
   access: StoresAccess;
+  canVerify: boolean;
 }) {
   // One component per unit when a BOM line feeds a multi-unit job: act on the serial chosen here, not always the first.
   const [compId, setCompId] = useState<number | null>(null);
@@ -636,7 +642,7 @@ function ComponentDetail({
 
       <div className="sh-sec">Component route</div>
       {comp && comp.operations.length > 0 ? (
-        <RouteSteps jobId={jobId} operations={comp.operations} welders={welders} delayCategories={delayCategories} />
+        <RouteSteps jobId={jobId} operations={comp.operations} welders={welders} delayCategories={delayCategories} canVerify={canVerify} />
       ) : (
         <p style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)", margin: 0 }}>No component instance / operation route recorded yet.</p>
       )}
@@ -648,7 +654,7 @@ function ComponentDetail({
             .filter((o) => o.startedAt || o.finishedAt)
             .map((o, i) => (
               <div key={i}>
-                {o.operationName} — {o.status === "COMPLETE" ? "complete" : o.status === "IN_PROGRESS" ? "in progress" : o.status.toLowerCase()}
+                {o.operationName}{repeatSuffixes(comp.operations).get(o.seq) ?? ""} — {o.status === "COMPLETE" ? "complete" : o.status === "IN_PROGRESS" ? "in progress" : o.status.toLowerCase()}
                 <small>{o.finishedAt ? fmtDate(o.finishedAt) : o.startedAt ? `started ${fmtDate(o.startedAt)}` : ""}</small>
               </div>
             ))}
@@ -948,18 +954,26 @@ function GoverningDrawingSection({ jobId, drawing }: { jobId: number; drawing: B
   );
 }
 
+/** " (1 of 2)" on a step whose operation the route uses more than once (a head's pressing and trimming are both Forming). */
+function repeatSuffixes(operations: BomComponentOp[]): Map<number, string> {
+  return repeatedOpSuffixes(operations.map((o) => ({ key: o.seq, group: 0, name: o.operationName, seq: o.seq })));
+}
+
 function RouteSteps({
   jobId,
   operations,
   welders,
   delayCategories,
+  canVerify,
 }: {
   jobId: number;
   operations: BomComponentOp[];
   welders: WelderOption[];
   delayCategories: DelayCategoryOption[];
+  canVerify: boolean;
 }) {
   const { collapsedDoneCount, visible } = groupProjectedRoute(operations);
+  const suffix = repeatSuffixes(operations);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -992,13 +1006,13 @@ function RouteSteps({
               disabled={op.qcpCheckpoints.length === 0}
             >
               <i style={{ background: STAGE_STATUS[mapOpStatus(op.status)].colorVar }} />
-              <span className="sh-route-step-name">{op.operationName}</span>
+              <span className="sh-route-step-name">{op.operationName}{suffix.get(op.seq) ?? ""}</span>
               <span className="sh-route-step-status">{stepStatusLabel(op.status)}</span>
               {op.qcpCheckpoints.length > 0 && (
                 <span className="sh-route-step-badge">{op.qcpCheckpoints.length} QCP</span>
               )}
             </button>
-            <RouteStepAction jobId={jobId} op={op} pending={pending} run={run} welders={welders} delayCategories={delayCategories} />
+            <RouteStepAction jobId={jobId} op={op} pending={pending} run={run} welders={welders} delayCategories={delayCategories} canVerify={canVerify} />
           </div>
           <StepMeta op={op} />
           {openSeq === op.seq && op.qcpCheckpoints.length > 0 && (
@@ -1058,6 +1072,7 @@ function RouteStepAction({
   run,
   welders,
   delayCategories,
+  canVerify,
 }: {
   jobId: number;
   op: BomComponentOp;
@@ -1065,6 +1080,7 @@ function RouteStepAction({
   run: (fn: () => Promise<ActionResult>, ok: string) => void;
   welders: WelderOption[];
   delayCategories: DelayCategoryOption[];
+  canVerify: boolean;
 }) {
   const [mode, setMode] = useState<"idle" | "submit" | "reject">("idle");
   const [welderId, setWelderId] = useState("");
@@ -1137,6 +1153,8 @@ function RouteStepAction({
   }
 
   if (op.status === "SUBMITTED") {
+    // Verify and Reject are QC's: nothing to show to anyone else (the server would refuse them).
+    if (!canVerify) return null;
     if (mode === "reject")
       return (
         <div className="sh-route-step-form" onClick={stop} style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 0" }}>

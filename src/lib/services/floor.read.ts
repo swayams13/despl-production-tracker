@@ -1,5 +1,6 @@
 import { withTenant } from "@/lib/db";
 import { assertNotClientUser, hasRole, ROLES, type Actor, type RoleCode } from "@/lib/authz";
+import { repeatedOpSuffixes } from "@/lib/shared/op-title";
 import { ERROR_CODES, ERROR_MESSAGES, SEQUENCE_OVERRIDE_OPERATOR_MESSAGE, type ErrorCode } from "@/lib/shared/errors";
 import { canOverride, checkStart, evaluateHard, type FloorItem } from "@/lib/shared/floor-rules";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
@@ -172,6 +173,8 @@ export async function loadFloorUnit(
         select: {
           id: true,
           operationId: true,
+          seq: true,
+          componentId: true,
           operation: { select: { name: true } },
           component: { select: { tag: true, componentType: { select: { name: true } } } },
         },
@@ -197,10 +200,11 @@ export async function loadFloorUnit(
         templateStepId: s.templateStepId,
       });
     }
+    const repeats = repeatedOpSuffixes(opLabels.map((o) => ({ key: o.id, group: o.componentId, name: o.operation.name, seq: o.seq })));
     for (const o of opLabels) {
       const type = o.component.componentType.name;
       label.set(rowKey("COMPONENT_OP", o.id), {
-        title: o.operation.name,
+        title: `${o.operation.name}${repeats.get(o.id) ?? ""}`,
         group: o.component.tag.toLowerCase().includes(type.toLowerCase()) ? o.component.tag : `${type} · ${o.component.tag}`,
         operationId: o.operationId,
         tag: o.component.tag,

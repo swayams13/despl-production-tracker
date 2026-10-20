@@ -78,6 +78,10 @@ describe("verify maker–checker guard", () => {
     ["different QC user → allowed", qc(8), 7, undefined],
     ["no QC role → forbidden", { ...qc(8), roles: [ROLES.SUPERVISOR] }, 7, ERROR_CODES.FORBIDDEN],
     ["admin is not exempt (no QC role) → forbidden", { ...qc(9), roles: [ROLES.ADMIN] }, 7, ERROR_CODES.FORBIDDEN],
+    // The Parts panel hides Verify/Reject from anyone but QC and relies on this, not the screen, as the gate.
+    ...[ROLES.STORES, ROLES.PRODUCTION_HEAD, ROLES.OPERATOR, ROLES.PLANNER, ROLES.ENGINEERING, ROLES.MANAGEMENT].map(
+      (r): [string, Actor, number | null, string | undefined] => [`${r} alone → forbidden`, { ...qc(10), roles: [r] }, 7, ERROR_CODES.FORBIDDEN],
+    ),
   ];
 
   it.each(cases)("%s", (_label, actor, submittedBy, expected) => {
