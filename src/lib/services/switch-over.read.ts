@@ -1,7 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { OFFICE_PROCESS_MAX_SEQ, type WorkKind } from "@/lib/shared/floor-rules";
+import { OFFICE_PROCESS_MAX_SEQ, requiredJointRef, type WorkKind } from "@/lib/shared/floor-rules";
 
 /**
  * Lean Core L2.10 part B: the list a Production Head ticks at the switch-over
@@ -63,8 +63,8 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
       tx.assemblyStep.findMany({
         where: { jobId, templateStep: { kind: "WORK" } },
         select: {
-          id: true, unitId: true, seq: true, status: true, templateStepId: true, weldJointId: true,
-          templateStep: { select: { activity: true, groupName: true, jointRef: true } },
+          id: true, unitId: true, seq: true, status: true, templateStepId: true, weldJointId: true, jointRef: true,
+          templateStep: { select: { activity: true, groupName: true, jointRef: true, scope: true } },
         },
       }),
       tx.componentOperation.findMany({
@@ -80,7 +80,7 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
     ]);
 
     // Joints already logged on a unit, so a weld step that shares one needs no welder.
-    const jointNos = [...new Set(steps.flatMap((s) => (s.templateStep.jointRef && s.weldJointId == null ? [s.templateStep.jointRef.trim()] : [])))];
+    const jointNos = [...new Set(steps.flatMap((s) => (requiredJointRef(s) && s.weldJointId == null ? [requiredJointRef(s)!.trim()] : [])))];
     const joints = jointNos.length
       ? await tx.weldJoint.findMany({ where: { jobId, jointNo: { in: jointNos } }, select: { id: true, unitId: true, jointNo: true } })
       : [];
@@ -108,7 +108,7 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
     }
     // 3. Assembly steps, in the unit's assembly sequence.
     for (const s of [...steps].sort((a, b) => a.seq - b.seq)) {
-      const jointRef = s.templateStep.jointRef?.trim() || null;
+      const jointRef = requiredJointRef(s)?.trim() || null;
       add(s.unitId, {
         key: `ASSEMBLY_STEP:${s.id}`, kind: "ASSEMBLY_STEP", id: s.id, title: s.templateStep.activity, group: s.templateStep.groupName, status: s.status,
         matchKey: `S:${s.templateStepId}`,

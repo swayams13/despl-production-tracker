@@ -296,6 +296,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         equipmentTypeId: number | null;
         unitIds: number[];
         rules: LineRules;
+        answers: Record<string, unknown>;
       }[] = [];
       for (const [i, block] of parsed.equipments.entries()) {
         const lineVersion = versionOf(block);
@@ -323,6 +324,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           equipmentTypeId: block.equipmentTypeId ?? null,
           unitIds: units.map((u) => u.id),
           rules,
+          answers: blockConfigs[i],
         });
         unitCount += block.serials.length;
       }
@@ -462,6 +464,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
           block.rules,
           qcp.skipped,
           block.equipmentId,
+          block.answers,
         );
         assembly.stepCount += r.stepCount;
         assembly.boundToQcp += r.boundToQcp;

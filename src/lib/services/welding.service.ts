@@ -84,6 +84,8 @@ export async function createWeldJointTx(
   unitId: number | null,
   componentId: number | null,
   fields: CreateWeldJointFields,
+  /** J4a: the planned joint this as-welded record is for, when known. */
+  plannedJointId: number | null = null,
 ): Promise<WeldJoint> {
   // RLS on `jobs` (tenant-root) makes this the tenant-scoping check: a
   // cross-tenant jobId resolves to zero rows rather than a leaked row.
@@ -110,6 +112,7 @@ export async function createWeldJointTx(
       jobId,
       unitId: unitId ?? null,
       componentId: componentId ?? null,
+      plannedJointId,
       jointNo: fields.jointNo,
       jointType: fields.jointType,
       weldSize: fields.weldSize ?? null,

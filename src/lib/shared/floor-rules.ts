@@ -106,6 +106,17 @@ const steps = (f: UnitFacts) => f.items.filter((i): i is StepItem => i.kind === 
 const ops = (f: UnitFacts) => f.items.filter((i): i is OpItem => i.kind === "COMPONENT_OP");
 const ref = (i: FloorItem) => ({ kind: i.kind, id: i.id });
 
+/**
+ * The joint a step must have bound before its weld is recorded. As always, the template step's
+ * own jointRef; J4a adds the rows a PER_JOINT template step expands to (it carries none itself,
+ * the row names its joint). A row-level jointRef alone (the L1.2c floor-facts copy), and a
+ * planned-joint link added later by the backfill, do not create the requirement.
+ */
+export const requiredJointRef = (s: {
+  jointRef: string | null;
+  templateStep: { jointRef: string | null; scope: string };
+}): string | null => s.templateStep.jointRef ?? (s.templateStep.scope === "PER_JOINT" ? s.jointRef : null);
+
 /** The joints a jointRef names: one, or several separated by commas. */
 export const jointRefs = (ref: string | null) => (ref ?? "").split(",").map((j) => j.trim()).filter(Boolean);
 const joints = (s: StepItem) => jointRefs(s.jointRef);

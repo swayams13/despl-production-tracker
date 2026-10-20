@@ -1,3 +1,4 @@
+import { requiredJointRef } from "@/lib/shared/floor-rules";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import type { OperationStatus, TestResult } from "@/generated/prisma/client";
@@ -126,10 +127,11 @@ export async function loadAssemblyGrid(actor: Actor, jobId: number, unitId?: num
         finishedAt: true,
         submittedBy: true,
         remarks: true,
+        jointRef: true,
         performedByWelder: { select: { name: true } },
         performedByUser: { select: { name: true } },
         templateStep: {
-          select: { groupCode: true, groupName: true, srNo: true, activity: true, kind: true, jointRef: true },
+          select: { groupCode: true, groupName: true, srNo: true, activity: true, kind: true, jointRef: true, scope: true },
         },
         weldJoint: {
           select: {
@@ -169,7 +171,7 @@ export async function loadAssemblyGrid(actor: Actor, jobId: number, unitId?: num
         performedByWelderName: s.performedByWelder?.name ?? null,
         performedByUserName: s.performedByUser?.name ?? null,
         remarks: s.remarks,
-        jointRef: s.templateStep.jointRef,
+        jointRef: requiredJointRef(s),
         weldJoint: s.weldJoint
           ? {
               id: s.weldJoint.id,

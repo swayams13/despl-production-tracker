@@ -11,6 +11,7 @@ import {
   type StepItem,
   type UnitFacts,
   type WorkKind,
+  requiredJointRef,
 } from "@/lib/shared/floor-rules";
 import { loadOpSeqResolver, openQcpItemIdsForUnit } from "./_shared";
 
@@ -115,7 +116,7 @@ export async function loadFloorFacts(
             reportedStartAt: true,
             weldJointId: true,
             qcpItemId: true,
-            templateStep: { select: { kind: true, jointRef: true, leadTimeProcessSeq: true, defaultDepartmentId: true } },
+            templateStep: { select: { kind: true, jointRef: true, scope: true, leadTimeProcessSeq: true, defaultDepartmentId: true } },
           },
         }),
     tx.componentOperation.findMany({
@@ -241,7 +242,7 @@ export async function loadFloorFacts(
       departmentId: s.templateStep.defaultDepartmentId,
       startedAt: s.reportedStartAt ?? s.startedAt,
       stepKind: s.templateStep.kind,
-      templateJointRef: s.templateStep.jointRef,
+      templateJointRef: requiredJointRef(s),
       weldJointId: s.weldJointId,
     });
   }
