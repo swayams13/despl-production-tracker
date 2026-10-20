@@ -59,7 +59,7 @@ export function assertAssemblyStepTransition(action: AssemblyStepAction, from: O
 }
 
 type LockedStep = AssemblyStep & {
-  templateStep: { seq: number; defaultDepartmentId: number; kind: string; jointRef: string | null; groupCode: string };
+  templateStep: { seq: number; defaultDepartmentId: number; kind: string; jointRef: string | null; scope: string; groupCode: string };
 };
 
 /**
@@ -92,7 +92,7 @@ async function lockAssemblyStepForUpdate(
   const step = await tx.assemblyStep.findFirst({
     where: { id: assemblyStepId, unit: { equipment: { job: { tenantId } } } },
     include: {
-      templateStep: { select: { seq: true, defaultDepartmentId: true, kind: true, jointRef: true, groupCode: true } },
+      templateStep: { select: { seq: true, defaultDepartmentId: true, kind: true, jointRef: true, scope: true, groupCode: true } },
     },
   });
   if (!step) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyStep", assemblyStepId });

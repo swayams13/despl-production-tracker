@@ -63,8 +63,8 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
       tx.assemblyStep.findMany({
         where: { jobId, templateStep: { kind: "WORK" } },
         select: {
-          id: true, unitId: true, seq: true, status: true, templateStepId: true, weldJointId: true, jointRef: true, plannedJointId: true,
-          templateStep: { select: { activity: true, groupName: true, jointRef: true } },
+          id: true, unitId: true, seq: true, status: true, templateStepId: true, weldJointId: true, jointRef: true,
+          templateStep: { select: { activity: true, groupName: true, jointRef: true, scope: true } },
         },
       }),
       tx.componentOperation.findMany({

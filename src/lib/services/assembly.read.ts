@@ -128,11 +128,10 @@ export async function loadAssemblyGrid(actor: Actor, jobId: number, unitId?: num
         submittedBy: true,
         remarks: true,
         jointRef: true,
-        plannedJointId: true,
         performedByWelder: { select: { name: true } },
         performedByUser: { select: { name: true } },
         templateStep: {
-          select: { groupCode: true, groupName: true, srNo: true, activity: true, kind: true, jointRef: true },
+          select: { groupCode: true, groupName: true, srNo: true, activity: true, kind: true, jointRef: true, scope: true },
         },
         weldJoint: {
           select: {

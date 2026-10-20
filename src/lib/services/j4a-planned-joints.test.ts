@@ -350,6 +350,24 @@ describe.skipIf(!RUN_DB)("Lean Core J4a planned joints (DB)", async () => {
       expect(bound.weldJoint).toMatchObject({ jointNo: "LS-1", plannedJointId: weld.plannedJointId });
     });
 
+    it("linking a planned joint by the backfill does not create the binding requirement either", async () => {
+      const w = await world("LINKED", [
+        { kind: "WORK", activity: "Prep", srNo: "1" },
+        { kind: "WORK", activity: "Fit up", srNo: "2" },
+      ]);
+      const r = await w.make();
+      const eq = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+      const fit = (await stepsOf(r.jobId)).find((s) => s.templateStep.activity === "Fit up")!;
+      await owner.assemblyStep.update({ where: { id: fit.id }, data: { jointRef: "LS-1" } });
+      await owner.$transaction((tx) => backfillPlannedJoints(tx as never, w.tenantId, { apply: true }));
+      const linked = await owner.assemblyStep.findUniqueOrThrow({ where: { id: fit.id } });
+      expect(linked.plannedJointId).not.toBeNull();
+      expect(await owner.plannedJoint.count({ where: { equipmentId: eq.id } })).toBe(1);
+      await owner.assemblyStep.updateMany({ where: { unitId: fit.unitId, seq: { lt: fit.seq } }, data: { status: "COMPLETE" } });
+      await startAssemblyStep(w.actor, { assemblyStepId: fit.id });
+      await expect(submitAssemblyStep(w.actor, { assemblyStepId: fit.id } as never)).resolves.toMatchObject({ status: "SUBMITTED" });
+    });
+
     it("a row-level jointRef alone (the floor-facts copy) does not create the binding requirement", async () => {
       const w = await world("ROWREF", [
         { kind: "WORK", activity: "Prep", srNo: "1" },
