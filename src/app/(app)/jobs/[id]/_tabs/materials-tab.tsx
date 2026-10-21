@@ -46,6 +46,9 @@ export function MaterialsTab({
       <Link className={`btn${view === "parts" ? " jt-on" : ""}`} href={`/jobs/${jobId}?tab=materials&view=parts`} aria-current={view === "parts" ? "page" : undefined}>
         Parts and stock
       </Link>
+      <Link className="btn" href={`/jobs/${jobId}/drawings`}>
+        Drawings
+      </Link>
       {canImport && (
         <Link className="btn" href={`/jobs/${jobId}/import`}>
           Load tracker sheet
