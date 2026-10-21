@@ -112,6 +112,18 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("tenant RLS coverage (DB)", () => {
     ).toEqual([]);
   });
 
+  it("J8: milestones and milestone_process_maps are tenant-root tables with RLS and a tenant_isolation policy", async () => {
+    const rows = await prisma.$queryRaw<Array<{ relname: string; relrowsecurity: boolean; policies: bigint }>>`
+      SELECT c.relname, c.relrowsecurity,
+             (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation') AS policies
+      FROM pg_class c WHERE c.relname IN ('milestones', 'milestone_process_maps') ORDER BY c.relname
+    `;
+    expect(rows.map((r) => [r.relname, r.relrowsecurity, Number(r.policies)])).toEqual([
+      ["milestone_process_maps", true, 1],
+      ["milestones", true, 1],
+    ]);
+  });
+
   it("includes equipment_type_refs in the protected set", async () => {
     const rows = await prisma.$queryRaw<Array<{ relrowsecurity: boolean }>>`
       SELECT relrowsecurity FROM pg_class WHERE relname = 'equipment_type_refs'

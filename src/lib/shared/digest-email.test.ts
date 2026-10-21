@@ -6,8 +6,8 @@ const base = (over: Partial<DigestPayload> = {}): DigestPayload => ({
   workDay: "2027-02-10",
   asOf: "2027-02-11T03:00:00Z",
   jobsAtRisk: [
-    { jobNumber: "DESPL-327", health: "DELAYED", forecast: "2027-03-30", committed: "2027-03-18", slipDays: 12, percentComplete: 41, topBlocker: "Hydro test waiting on PWHT" },
-    { jobNumber: "DESPL-320", health: "AT_RISK", forecast: null, committed: "2027-04-02", slipDays: null, percentComplete: 63, topBlocker: null },
+    { jobNumber: "DESPL-327", health: "DELAYED", forecast: "2027-03-30", committed: "2027-03-18", slipDays: 12, percentComplete: 41, topBlocker: "Hydro test waiting on PWHT", milestone: { label: "Pressure test 20%", plannedFinish: "2027-03-12", late: true } },
+    { jobNumber: "DESPL-320", health: "AT_RISK", forecast: null, committed: "2027-04-02", slipDays: null, percentComplete: 63, topBlocker: null, milestone: null },
   ],
   overdueTotal: 5,
   overdueByDept: [{ dept: "Fabrication", overdue: 3, topReason: "Material delay", topReasonCount: 2 }, { dept: "QC", overdue: 2, topReason: null, topReasonCount: 0 }],
@@ -45,6 +45,13 @@ describe("L2.11 digest email render", () => {
     expect(html).toContain("63 of 78");
     expect(html).toContain('href="https://tracker.despl.in/dashboard"');
     expect(text).toContain("Open dashboard: https://tracker.despl.in/dashboard");
+  });
+
+  it("J8: one milestone line per at-risk job that has a milestone map, none for a job without", () => {
+    const { html, text } = renderDigest(base());
+    expect(text).toContain("  Milestone: Pressure test 20%, planned finish 12 Mar (late)");
+    expect(html).toContain("Milestone: Pressure test 20%, planned finish 12 Mar (late)");
+    expect(text.match(/Milestone:/g)).toHaveLength(1);
   });
 
   it("leaves the button out without an app URL", () => {

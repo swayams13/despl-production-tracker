@@ -404,6 +404,9 @@ model Organization {
   dispatchBatches              DispatchBatch[]
   qcpTemplates                 QcpTemplate[]
 
+  milestones    Milestone[]
+  milestoneMaps MilestoneProcessMap[]
+
   @@map("organizations")
 }
 
@@ -968,6 +971,7 @@ model ProductFamily {
   configQuestions   ConfigQuestion[]
   assemblyTemplates AssemblyTemplate[]
   workOrderStages   WorkOrderStage[]
+  milestoneMaps     MilestoneProcessMap[]
   operationRefSeqs  OperationRefFamilySeq[]
   routeStepSeqs     RouteStepFamilySeq[]
 
@@ -3361,4 +3365,42 @@ model DomainEvent {
   @@index([tenantId, aggregateType, aggregateId, at])
   @@index([tenantId, type, at])
   @@map("domain_events")
+}
+
+/// Lean Core J8 (decision D9): the company-wide milestone list (about ten), used by
+/// Portfolio, the digest and client updates. Tenant-root, like the master data.
+model Milestone {
+  id        Int    @id @default(autoincrement())
+  tenantId  Int    @map("tenant_id")
+  code      String
+  name      String
+  sortOrder Int    @map("sort_order")
+
+  tenant Organization          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  maps   MilestoneProcessMap[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("milestones")
+}
+
+/// Lean Core J8: which milestone a family's process rolls up to. Keyed by process
+/// CODE (not template process id) so it survives template versions, as QCP
+/// matching does. `weight` NULL = planned effort from the process duration.
+model MilestoneProcessMap {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int      @map("tenant_id")
+  familyId    Int      @map("family_id")
+  processCode String   @map("process_code")
+  milestoneId Int      @map("milestone_id")
+  weight      Decimal? @db.Decimal(8, 2)
+
+  tenant    Organization  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  family    ProductFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  milestone Milestone     @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, processCode])
+  @@index([tenantId])
+  @@index([milestoneId])
+  @@map("milestone_process_maps")
 }
