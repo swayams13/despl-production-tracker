@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireActor, assertNotClientUser, type Actor } from "@/lib/authz";
-import { AppError, ERROR_CODES, isAppError, ERROR_MESSAGES, type ErrorCode } from "@/lib/shared/errors";
+import { AppError, ERROR_CODES, isAppError, messageFor, type ErrorCode } from "@/lib/shared/errors";
 
 /** Error code → HTTP status. Refusals stay explainable (CLAUDE.md invariant #12). */
 const STATUS: Record<ErrorCode, number> = {
@@ -133,7 +133,7 @@ export function route<T>(
         // support conversation ("it refused me") is greppable.
         console.info("[api] refused", { requestId, code: e.code, status });
         return NextResponse.json(
-          { error: { code: e.code, message: ERROR_MESSAGES[e.code] ?? "Request failed." } },
+          { error: { code: e.code, message: messageFor(e.code, e.detail) ?? "Request failed." } },
           { status, headers: { "x-request-id": requestId } },
         );
       }

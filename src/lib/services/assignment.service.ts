@@ -9,6 +9,8 @@ import {
   type Actor,
 } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
+import { OFFICE_PROCESS_MAX_SEQ } from "@/lib/shared/floor-rules";
+import { FLOOR_ROLES } from "./work.service";
 import {
   claimPlanSchema,
   assignPlanSchema,
@@ -55,6 +57,13 @@ export async function claimPlan(actor: Actor, input: ClaimPlanInput): Promise<Pr
     }
     if (plan.status === "COMPLETE") {
       throw new AppError(ERROR_CODES.PLAN_COMPLETE, { processPlanId });
+    }
+    // A planner-only user records processes 1–11 and nothing else (work.service), so claims only those.
+    if (hasRole(actor, ROLES.PLANNER) && !hasRole(actor, ...FLOOR_ROLES)) {
+      const jp = await tx.jobProcess.findFirst({ where: { id: plan.jobProcessId }, select: { seq: true } });
+      if ((jp?.seq ?? Infinity) > OFFICE_PROCESS_MAX_SEQ) {
+        throw new AppError(ERROR_CODES.FORBIDDEN, { reason: "a planner claims processes 1–11 only", processPlanId });
+      }
     }
     if (plan.assigneeUserId != null) {
       throw new AppError(ERROR_CODES.ALREADY_ASSIGNED, {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -9,7 +9,10 @@ vi.mock("@/app/actions/work", () => ({ ensureJointAction: vi.fn(), notifyBlocker
 vi.mock("@/app/actions/heat", () => ({ loadHeatChoicesAction: vi.fn(), pickHeatNumberAction: vi.fn() }));
 
 import { LocaleProvider } from "@/lib/i18n/provider";
-import { UNDO_MS, useFloorWrites } from "./floor-actions";
+import { notifyBlockerAction } from "@/app/actions/work";
+import { en } from "@/lib/i18n/en";
+import { hi } from "@/lib/i18n/hi";
+import { UNDO_MS, doneLabel, nudgeText, NotifyBlockerButton, useFloorWrites } from "./floor-actions";
 
 /**
  * Rehearsal finding: after "marked done" the row still showed live Done / Start buttons until the Undo window had passed and
@@ -74,4 +77,31 @@ describe("useFloorWrites: busy rows", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("floor messages (rehearsal polish)", () => {
+  it("nudge: nobody holds the role -> says so plainly; someone does -> told", () => {
+    expect(nudgeText(en, "Stores", 0)).toBe("Nobody is set up for Stores yet. Ask the Production Head.");
+    expect(nudgeText(en, "Stores", 2)).toBe("Stores has been told.");
+    expect(nudgeText(hi, "Stores", 0)).not.toBe(nudgeText(hi, "Stores", 1));
+  });
+
+  it("Done: a step QC must verify says sent to QC; one that completed directly says marked done", () => {
+    expect(doneLabel(en, "Fit-up", 1, [{ to: "SUBMITTED" }])).toBe("Fit-up sent to QC");
+    expect(doneLabel(en, "Fit-up", 3, [{ to: "SUBMITTED" }, { to: "SUBMITTED" }, { to: "SUBMITTED" }])).toBe("Fit-up sent to QC on 3 units");
+    expect(doneLabel(en, "Fit-up", 1, [{ to: "COMPLETE" }])).toBe("Fit-up marked done");
+    expect(doneLabel(en, "Fit-up", 2, [{ to: "SUBMITTED" }, { to: "COMPLETE" }])).toBe("Fit-up marked done on 2 units");
+    expect(doneLabel(en, "Fit-up", 1, [])).toBe("Fit-up marked done");
+  });
+
+  const row = { kind: "ASSEMBLY_STEP" as const, id: 1, refusal: { clearedBy: { role: "STORES", label: "Stores" } } as never };
+  it.each([[0, "Nobody is set up for Stores yet. Ask the Production Head."], [2, "Stores has been told."]])(
+    "Notify button with %i recipients shows its message",
+    async (recipients, text) => {
+      vi.mocked(notifyBlockerAction).mockResolvedValueOnce({ ok: true, recipients });
+      render(<NotifyBlockerButton unitPublicId="u" row={row} />, { wrapper });
+      await act(async () => screen.getByRole("button", { name: "Notify Stores" }).click());
+      expect(screen.getByRole("button").textContent).toBe(text);
+    },
+  );
 });

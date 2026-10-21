@@ -1394,7 +1394,7 @@ body {
 .theme-industrial .qq-acts { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .theme-industrial .qq-form { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .theme-industrial .qq-form input { flex: 1 1 200px; }
-.theme-industrial .qq-refusal { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.theme-industrial .qq-refusal { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--s-overdue); }
 .theme-industrial .qq-pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; font-size: 12px; }
 @media (pointer: coarse) {
   .theme-industrial .qq-tab, .theme-industrial .qq-acts .btn, .theme-industrial .qq-pager .btn { min-height: 48px; }

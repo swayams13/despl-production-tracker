@@ -7,6 +7,14 @@
 
 export const QC_PAGE_SIZE = 25;
 
+/**
+ * Who may open the QC queue (`resolveQcAccess().view`) and who may record a hold-point
+ * result (`recordQcpExecution`). One list each, read by the server rule, the nav and the
+ * job QC tab's Record button, so a control never shows for a role the server refuses.
+ */
+export const QC_VIEW_ROLES = ["QC", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"] as const;
+export const QC_RECORD_ROLES = ["QC"] as const;
+
 export type QcTab = "ready" | "holds" | "ncrs";
 export const QC_TABS: readonly QcTab[] = ["ready", "holds", "ncrs"];
 

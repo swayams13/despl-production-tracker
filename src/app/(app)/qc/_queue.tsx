@@ -174,14 +174,10 @@ function Groups<T extends { jobId: number; jobNumber: string; unitId: number | n
   );
 }
 
-function Refused({ r, k }: { r: Refusal | null; k: string }) {
+export function Refused({ r, k }: { r: Refusal | null; k: string }) {
   if (!r || r.key !== k) return null;
   return (
     <div className="qq-refusal" role="alert">
-      <span className="chip c-overdue">
-        <i />
-        {r.code}
-      </span>
       <span>{r.message}</span>
     </div>
   );
@@ -204,7 +200,7 @@ function ReadyItem({ row, access, pending, openKey, setOpenKey, refusal, setRefu
         </div>
         {access.inspect && !rejecting && (
           <span className="qq-acts">
-            <button className="btn btn-accent" disabled={pending} onClick={() => act(row.key, () => inspectAction({ ...target, result: "ACCEPT" }), "Accepted.")}>
+            <button className="btn btn-accent" disabled={pending} onClick={() => act(row.key, () => inspectAction({ ...target, result: "ACCEPT" }), `${row.title} accepted.`)}>
               Accept
             </button>
             <button className="btn" disabled={pending} onClick={() => { setRefusal(null); setOpenKey(row.key); }}>
@@ -219,7 +215,7 @@ function ReadyItem({ row, access, pending, openKey, setOpenKey, refusal, setRefu
           <button
             className="btn btn-accent"
             disabled={pending || !reason.trim()}
-            onClick={() => act(row.key, () => inspectAction({ ...target, result: "REJECT", reason }), "Rejected. An NCR is open.")}
+            onClick={() => act(row.key, () => inspectAction({ ...target, result: "REJECT", reason }), `${row.title} rejected. An NCR is open.`)}
           >
             Reject
           </button>

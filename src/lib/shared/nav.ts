@@ -10,6 +10,7 @@
  * routes exist (build prompt §8.2 item 21).
  */
 import type { RoleCode } from "@/lib/authz";
+import { QC_VIEW_ROLES } from "./qc-queue";
 
 export type NavIcon =
   | "dashboard" | "jobs" | "workspace" | "departments" | "qc" | "welding"
@@ -26,6 +27,8 @@ export interface NavItem {
   badge?: "overdue" | "unread" | "team" | "qc";
   /** Hidden until the named switch is on (a route that 404s while it is off is a dead control). */
   needs?: "leanFloor";
+  /** The audience while leanFloor is on, when the page narrows it (QC queue: who `resolveQcAccess` lets in). */
+  rolesWhenLean?: readonly RoleCode[];
   /** The href while a switch is on (Today: /my-day until leanFloor, then /today). */
   hrefWhen?: { leanFloor: string };
 }
@@ -42,20 +45,23 @@ const FLOOR_AND_OFFICE: readonly RoleCode[] = [
 // a role's primary label beats the "more" one (e.g. QC "Queue" over "QC & hold points").
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: "today", href: "/my-day", hrefWhen: { leanFloor: "/today" }, label: "Today", icon: "navToday", roles: ["OPERATOR", "SUPERVISOR"], group: "primary", badge: "overdue" },
+  // Planning/PPC records processes 1-11 here (recordWork allows a planner nothing else); the floor
+  // Today only exists with leanFloor, so no /my-day fallback entry.
+  { id: "today-planner", href: "/today", label: "Today", icon: "navToday", roles: ["PLANNER"], group: "primary", needs: "leanFloor" },
   { id: "team", href: "/workspace", hrefWhen: { leanFloor: "/team" }, label: "Team", icon: "workspace", roles: ["SUPERVISOR", "PRODUCTION_HEAD"], group: "primary", badge: "team" },
   { id: "qc-queue", href: "/qc", label: "Queue", icon: "qc", roles: ["QC"], group: "primary", badge: "qc" },
   { id: "scan", href: "/scan", label: "Scan", icon: "scan", roles: ["OPERATOR", "SUPERVISOR", "QC"], group: "primary", needs: "leanFloor" },
   { id: "materials", href: "/materials", label: "Materials", icon: "jobs", roles: ["STORES"], group: "primary" },
   { id: "portfolio", href: "/dashboard", label: "Portfolio", icon: "dashboard", roles: ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"], group: "primary" },
   { id: "jobs", href: "/jobs", label: "Jobs", icon: "jobs", roles: ["SUPERVISOR", "QC", "PLANNER", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN", "ENGINEERING", "STORES"], group: "primary" },
-  { id: "new-job", href: "/jobs/new", label: "New job", icon: "newJob", roles: ["PLANNER"], group: "primary" },
+  { id: "new-job", href: "/jobs/new", label: "New job", icon: "newJob", roles: ["ADMIN", "PRODUCTION_HEAD"], group: "primary" },
   { id: "alerts", href: "/alerts", label: "Alerts", icon: "navAlerts", roles: ["OPERATOR"], group: "primary", badge: "unread" },
   { id: "admin-users", href: "/admin", label: "Users & departments", icon: "admin", roles: ["ADMIN", "MANAGEMENT"], group: "primary" },
   { id: "admin-templates", href: "/admin/templates", label: "Templates", icon: "admin", roles: ["ADMIN", "PRODUCTION_HEAD"], group: "primary" },
 
   // More: pages that exist but are not in a role's spec list. Sidebar only.
   { id: "materials-more", href: "/materials", label: "Materials", icon: "jobs", roles: ["ADMIN", "PRODUCTION_HEAD", "PLANNER"], group: "more" },
-  { id: "qc-holds", href: "/qc", label: "QC & hold points", icon: "qc", roles: ["SUPERVISOR", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN", "PLANNER"], group: "more" },
+  { id: "qc-holds", href: "/qc", label: "QC & hold points", icon: "qc", roles: [...QC_VIEW_ROLES, "SUPERVISOR", "PLANNER"], rolesWhenLean: QC_VIEW_ROLES, group: "more" },
   { id: "departments", href: "/departments", label: "Departments", icon: "departments", roles: FLOOR_AND_OFFICE, group: "more" },
   { id: "welding", href: "/welding", label: "Welding", icon: "welding", roles: FLOOR_AND_OFFICE, group: "more" },
   { id: "reports", href: "/reports", label: "Reports", icon: "reports", roles: FLOOR_AND_OFFICE, group: "more" },
@@ -102,7 +108,8 @@ export function navFor(roles: readonly string[], on: NavSwitches = {}): NavSet {
   const seen = new Set<string>();
   const out: NavSet = { primary: [], more: [] };
   for (const raw of NAV_ITEMS) {
-    if (!raw.roles.some((r) => roles.includes(r))) continue;
+    const allowed = on.leanFloor && raw.rolesWhenLean ? raw.rolesWhenLean : raw.roles;
+    if (!allowed.some((r) => roles.includes(r))) continue;
     if (raw.needs && !on[raw.needs]) continue;
     const item = on.leanFloor && raw.hrefWhen ? { ...raw, href: raw.hrefWhen.leanFloor } : raw;
     if (seen.has(item.href)) continue;

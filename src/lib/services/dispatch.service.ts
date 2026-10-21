@@ -180,6 +180,20 @@ export async function addUnitToBatch(actor: Actor, input: AddUnitToBatchInput): 
 }
 
 /**
+ * An empty batch passes every per-unit gate vacuously, so release and
+ * dispatch must refuse it up front (invariant 2: dispatch needs complete
+ * production, which cannot be shown for zero units).
+ */
+function assertBatchHasUnits(unitCount: number, dispatchBatchId: number, doing: string): void {
+  if (unitCount > 0) return;
+  throw new AppError(
+    ERROR_CODES.VALIDATION_FAILED,
+    { entity: "DispatchBatch", dispatchBatchId, reason: "NO_UNITS" },
+    `Add at least one packed unit to this batch before ${doing}.`,
+  );
+}
+
+/**
  * Production-Head-only release approval (same role gate as
  * override.service.ts's applyDurationOverride). Requires derived status
  * PLANNED; stamps releaseApprovedBy/releaseApprovedAt server-side.
@@ -208,6 +222,7 @@ export async function approveDispatchRelease(
           where: { dispatchBatchId: batch.id },
           select: { unitId: true },
         });
+        assertBatchHasUnits(links.length, batch.id, "approving release");
         for (const { unitId } of links) {
           await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
           await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);
@@ -282,6 +297,7 @@ export async function recordDispatch(actor: Actor, input: RecordDispatchInput): 
           where: { dispatchBatchId: batch.id },
           select: { unitId: true },
         });
+        assertBatchHasUnits(links.length, batch.id, "recording dispatch");
         for (const { unitId } of links) {
           await assertUnitHasNoOpenHoldPoint(tx, unitId, batch.jobId);
           await assertUnitHasNoOpenNcr(tx, unitId, batch.jobId);

@@ -1,7 +1,10 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ROLES } from "@/lib/authz";
+import { ROLES, type Actor } from "@/lib/authz";
+import { MASTER_DATA_READ_ROLES } from "@/lib/services/master-data.service";
+import { resolveQcAccess } from "@/lib/services/qc-queue.read";
+import { MATERIALS_QUEUE_ROLES } from "./stores-access";
 import { NAV_ITEMS, activeItem, landingFor, navFor, sidebarJobs } from "./nav";
 
 const hrefs = (items: { href: string }[]) => items.map((i) => i.href);
@@ -11,10 +14,10 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     ["OPERATOR", ["/my-day", "/alerts"]],
     ["SUPERVISOR", ["/my-day", "/workspace", "/jobs"]],
     ["QC", ["/qc", "/jobs"]],
-    ["PLANNER", ["/jobs", "/jobs/new"]],
-    ["PRODUCTION_HEAD", ["/workspace", "/dashboard", "/jobs", "/admin/templates"]],
+    ["PLANNER", ["/jobs"]],
+    ["PRODUCTION_HEAD", ["/workspace", "/dashboard", "/jobs", "/jobs/new", "/admin/templates"]],
     ["MANAGEMENT", ["/dashboard", "/jobs", "/admin"]],
-    ["ADMIN", ["/dashboard", "/jobs", "/admin", "/admin/templates"]],
+    ["ADMIN", ["/dashboard", "/jobs", "/jobs/new", "/admin", "/admin/templates"]],
     ["ENGINEERING", ["/jobs"]],
     ["STORES", ["/materials", "/jobs"]],
   ];
@@ -40,6 +43,20 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     expect(navFor(["SUPERVISOR"], { leanFloor: true }).primary.find((i) => i.href === "/today")?.badge).toBe("overdue");
     // a role without Today is untouched by the switch
     expect(hrefs(navFor(["QC"], { leanFloor: true }).primary)).not.toContain("/today");
+  });
+
+  it("New job is only for the roles that can create one (job-intake: ADMIN, PRODUCTION_HEAD); never a planner", () => {
+    for (const on of [{}, { leanFloor: true }]) {
+      expect(hrefs(navFor(["PLANNER"], on).primary)).not.toContain("/jobs/new");
+      for (const r of ["ADMIN", "PRODUCTION_HEAD"]) expect(hrefs(navFor([r], on).primary), r).toContain("/jobs/new");
+    }
+  });
+
+  it("Today reaches a planner only with leanFloor on (it is where processes 1-11 are recorded)", () => {
+    expect(hrefs(navFor(["PLANNER"]).primary)).toEqual(["/jobs"]);
+    expect(hrefs(navFor(["PLANNER"], { leanFloor: true }).primary)).toEqual(["/today", "/jobs"]);
+    // no duplicate when a user also holds a floor role
+    expect(hrefs(navFor(["PLANNER", "SUPERVISOR"], { leanFloor: true }).primary).filter((h) => h === "/today")).toHaveLength(1);
   });
 
   it("Team is /workspace until leanFloor is on, then /team, with the department overdue badge", () => {
@@ -139,7 +156,7 @@ describe("activeItem: longest segment-boundary prefix", () => {
   const { primary } = navFor(["PLANNER"]);
   it("distinguishes /jobs from /jobs/new", () => {
     expect(activeItem(primary, "/jobs")?.id).toBe("jobs");
-    expect(activeItem(primary, "/jobs/new")?.id).toBe("new-job");
+    expect(activeItem(navFor(["ADMIN"]).primary, "/jobs/new")?.id).toBe("new-job");
     expect(activeItem(primary, "/jobs/12/activity")?.id).toBe("jobs");
   });
   it("does not match a shared string prefix", () => {
@@ -172,5 +189,47 @@ describe("L2.14 Materials queue entry", () => {
       const all = navFor([r]);
       expect([...all.primary, ...all.more].map((i) => i.href), r).not.toContain("/materials");
     }
+  });
+});
+
+describe("no dead nav items: every item shown to a role is enterable by that role", () => {
+  const ADMIN_PH = ["ADMIN", "PRODUCTION_HEAD"];
+  // What each role-gated page does before it renders (the redirect / refusal at the top of its page.tsx).
+  // A route not listed here has no role gate. /qc: with leanFloor off the legacy cockpit is open.
+  const enterable = (role: string, href: string, leanFloor: boolean): boolean => {
+    const gates: Record<string, readonly string[]> = {
+      "/dashboard": ["MANAGEMENT", "PRODUCTION_HEAD", "ADMIN"],
+      "/jobs/new": ADMIN_PH,
+      "/admin": ["ADMIN", "MANAGEMENT"],
+      "/admin/templates": ADMIN_PH,
+      "/admin/families": ADMIN_PH,
+      "/admin/equipment-types": ADMIN_PH,
+      "/admin/routes": ADMIN_PH,
+      "/admin/qcp-templates": ADMIN_PH,
+      "/admin/master-data": MASTER_DATA_READ_ROLES,
+      "/materials": MATERIALS_QUEUE_ROLES,
+    };
+    if (href === "/qc") return !leanFloor || resolveQcAccess({ roles: [role], clientId: null } as unknown as Actor).view;
+    return !gates[href] || gates[href].includes(role);
+  };
+
+  const cases = Object.values(ROLES)
+    .filter((r) => r !== "CLIENT_VIEWER")
+    .flatMap((role) => [false, true].map((leanFloor) => [role, leanFloor] as const));
+
+  it.each(cases)("%s (leanFloor %s)", (role, leanFloor) => {
+    const { primary, more } = navFor([role], { leanFloor });
+    for (const item of [...primary, ...more]) {
+      expect(enterable(role, item.href, leanFloor), `${role} sees "${item.label}" -> ${item.href}`).toBe(true);
+    }
+  });
+
+  it("with the lean floor on, QC & hold points reaches only who can open the queue; off, the cockpit keeps its old audience", () => {
+    const holds = (role: string, leanFloor: boolean) => navFor([role], { leanFloor }).more.some((i) => i.id === "qc-holds");
+    for (const r of ["SUPERVISOR", "PLANNER"]) {
+      expect(holds(r, true), r).toBe(false);
+      expect(holds(r, false), r).toBe(true);
+    }
+    for (const r of ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"]) expect(holds(r, true), r).toBe(true);
   });
 });
