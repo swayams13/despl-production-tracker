@@ -18,6 +18,7 @@ import { flushRuleDecisions, lineConfig, LineRules, loadQuestionDefs } from "./c
 import { notifyJobCreated } from "./notifications.service";
 import { materializeComponentsFromBomItems } from "./component.service";
 import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
+import { bindExistingInspectionSteps, type BindExistingResult } from "./assembly-qcp-match";
 
 /**
  * Job intake (docs/superpowers/specs/2026-08-22-job-intake-design.md).
@@ -704,6 +705,73 @@ export async function setJobStatus(actor: Actor, input: SetJobStatusInput): Prom
   });
 }
 
+export interface AttachQcpResult extends BindExistingResult {
+  qcpTemplateId: number;
+  itemCount: number;
+  unmatchedProcessCodes: string[];
+}
+
+/**
+ * JG2: give an existing job a QC plan. Same clone as createJob (items, parties,
+ * process links, per-line include rules), then binds the job's NOT_STARTED
+ * unbound inspection steps. `requiresQc` on existing rows is not re-derived.
+ * One plan per job: a job that has one refuses (replacing is not built).
+ */
+export async function attachQcpTemplate(
+  actor: Actor,
+  input: { jobId: number; qcpTemplateSourceId: number },
+): Promise<AttachQcpResult> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  const { jobId, qcpTemplateSourceId } = input;
+  if (!Number.isInteger(jobId) || !Number.isInteger(qcpTemplateSourceId)) throw new AppError(ERROR_CODES.VALIDATION_FAILED, { jobId, qcpTemplateSourceId });
+
+  return withTenant(actor.tenantId, async (tx) => {
+    const job = await tx.job.findFirst({ where: { id: jobId, tenantId: actor.tenantId }, select: { id: true } });
+    if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
+    // Serialise two attaches on one job: the loser then sees the winner's template.
+    await tx.$queryRaw`SELECT id FROM jobs WHERE id = ${jobId} FOR UPDATE`;
+    if ((await tx.qcpTemplate.count({ where: { jobId } })) > 0) throw new AppError(ERROR_CODES.QCP_ALREADY_ATTACHED, { jobId });
+
+    const jobProcesses = await tx.jobProcess.findMany({ where: { jobId }, select: { id: true, code: true }, orderBy: { id: "asc" } });
+    const jpIdsByCode = new Map<string, number[]>();
+    for (const p of jobProcesses) jpIdsByCode.set(p.code, [...(jpIdsByCode.get(p.code) ?? []), p.id]);
+    const equipments = await tx.equipment.findMany({ where: { jobId }, select: { id: true }, orderBy: { id: "asc" } });
+    const lineRules = await Promise.all(equipments.map((e) => LineRules.load(tx, e.id)));
+
+    return audited(tx, actor, async () => {
+      const qcp = await cloneQcpTemplate(tx, qcpTemplateSourceId, jobId, jpIdsByCode, actor.tenantId, lineRules);
+      await flushRuleDecisions(tx, lineRules);
+      const bind = await bindExistingInspectionSteps(tx, jobId, qcp.qcpTemplateId, qcp.skipped);
+      const result: AttachQcpResult = {
+        qcpTemplateId: qcp.qcpTemplateId,
+        itemCount: qcp.itemCount,
+        unmatchedProcessCodes: qcp.unmatchedProcessCodes,
+        ...bind,
+      };
+      return {
+        result,
+        audit: {
+          action: "qcp.attach",
+          entityType: "Job",
+          entityId: jobId,
+          before: null,
+          after: {
+            qcpTemplateId: qcp.qcpTemplateId,
+            sourceId: qcpTemplateSourceId,
+            itemCount: qcp.itemCount,
+            boundSteps: bind.bound,
+            leftUnboundSteps: bind.leftUnbound.length,
+            unmatchedProcessCodes: qcp.unmatchedProcessCodes,
+          },
+          eventType: "QcpAttached",
+          eventPayload: { jobId, qcpTemplateId: qcp.qcpTemplateId },
+        },
+      };
+    });
+  });
+}
+
 /**
  * Deep-copy a QCP template onto a new job: parties, items, party codes, and
  * the item→process links rebuilt by matching process CODE (not id).
@@ -716,7 +784,7 @@ export async function setJobStatus(actor: Actor, input: SetJobStatusInput): Prom
  * QcpExecution rows are NOT copied — those are the source job's actual
  * inspection results.
  */
-async function cloneQcpTemplate(
+export async function cloneQcpTemplate(
   tx: Tx,
   sourceId: number,
   jobId: number,

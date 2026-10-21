@@ -110,6 +110,8 @@ export const ERROR_CODES = {
   CROSS_JOB_ASSIGNMENT: "CROSS_JOB_ASSIGNMENT",
   /** materialiseAssemblySteps (S17): an AssemblyTemplateStep's qcpSrNo has no corresponding QcpItem in the job's cloned QcpTemplate at the expected occurrence — refuses rather than leaving qcpItemId silently null. */
   QCP_ITEM_UNRESOLVED: "QCP_ITEM_UNRESOLVED",
+  /** attachQcpTemplate (JG2): the job already has a QC plan; replacing one is not built. */
+  QCP_ALREADY_ATTACHED: "QCP_ALREADY_ATTACHED",
   /** setJobStatus (S19): status COMPLETE was requested while a ProcessPlan on the job's current ScheduleRun is not yet COMPLETE. */
   JOB_HAS_INCOMPLETE_PLANS: "JOB_HAS_INCOMPLETE_PLANS",
   /** setOperationRefFamilySeq (C6): the given number is not among the family's own published TemplateProcess.seq values. */
@@ -238,6 +240,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   UNIT_NOT_PACKED: "This unit has not been packed yet. Assign it to a package before adding it to a dispatch batch.",
   CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
   QCP_ITEM_UNRESOLVED: "This QCP template does not cover the assembly checklist. Pick another QCP template.",
+  QCP_ALREADY_ATTACHED: "This job already has a QC plan. Replacing it is not supported.",
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
   ROUTE_STEP_SEQ_UNKNOWN:
     "This number does not match any process in the family's published route — check the template's process list.",
