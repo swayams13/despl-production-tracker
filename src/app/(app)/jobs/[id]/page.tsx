@@ -15,7 +15,7 @@ import { loadJobMaterials } from "@/lib/services/job-materials.read";
 import { loadQcCounts, loadQcQueue, resolveQcAccess } from "@/lib/services/qc-queue.read";
 import { FEATURES } from "@/lib/shared/flags";
 import { jobTabUrl, parseMaterialsView, resolveJobTab } from "@/lib/shared/job-tabs";
-import type { QcQuery } from "@/lib/shared/qc-queue";
+import { QC_RECORD_ROLES, type QcQuery } from "@/lib/shared/qc-queue";
 import { JobDetailClient } from "./_client";
 import { IMPORT_ROLES } from "@/lib/services/job-import.service";
 import { SWITCH_OVER_ROLES } from "@/lib/services/switch-over.read";
@@ -62,6 +62,8 @@ export default async function JobDetail({
   // AUD-003: approveQcpWaiver's own role gate — same pair as
   // createDispatchBatch/approveDispatchRelease.
   const canApproveQcpWaiver = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  // recordQcpExecution's own role gate (the QCP grid's Record… / Reject / Clear).
+  const canRecordQcp = hasRole(actor, ...QC_RECORD_ROLES);
 
   const { id } = await params;
   const jobId = Number(id);
@@ -130,6 +132,7 @@ export default async function JobDetail({
         }
         qcp={qcp}
         canApproveWaiver={canApproveQcpWaiver}
+        canRecord={canRecordQcp}
       />
     );
   } else if (leanDispatch) {
@@ -156,6 +159,7 @@ export default async function JobDetail({
       canManagePacking={canManagePacking}
       canManageDispatch={canManageDispatch}
       canApproveQcpWaiver={canApproveQcpWaiver}
+      canRecordQcp={canRecordQcp}
       storesAccess={storesAccess(actor.roles)}
       canVerify={canVerify}
       tab={tab}

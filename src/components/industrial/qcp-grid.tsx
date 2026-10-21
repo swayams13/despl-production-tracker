@@ -16,7 +16,7 @@ const CHIP: Record<string, string> = {
   "Pending waiver": "c-hold",
 };
 
-export function QcpGrid({ jobId, data, canApproveWaiver, tabHref }: { jobId: number; data: QcpGridData; canApproveWaiver: boolean; tabHref?: string }) {
+export function QcpGrid({ jobId, data, canApproveWaiver, canRecord, tabHref }: { jobId: number; data: QcpGridData; canApproveWaiver: boolean; canRecord: boolean; tabHref?: string }) {
   const router = useRouter();
   const [recordingId, setRecordingId] = useState<number | null>(null);
   const [pending, start] = useTransition();
@@ -95,6 +95,7 @@ export function QcpGrid({ jobId, data, canApproveWaiver, tabHref }: { jobId: num
                 onRecord={record}
                 onApproveWaiver={approveWaiver}
                 canApproveWaiver={canApproveWaiver}
+                canRecord={canRecord}
                 pending={pending}
               />
             ))}
@@ -112,6 +113,7 @@ function QcpSectionRows({
   onRecord,
   onApproveWaiver,
   canApproveWaiver,
+  canRecord,
   pending,
 }: {
   sec: QcpGridData["sections"][number];
@@ -120,6 +122,7 @@ function QcpSectionRows({
   onRecord: (qcpItemId: number, result: "ACCEPTED" | "REJECTED" | "NA") => void;
   onApproveWaiver: (qcpItemId: number) => void;
   canApproveWaiver: boolean;
+  canRecord: boolean;
   pending: boolean;
 }) {
   return (
@@ -138,6 +141,7 @@ function QcpSectionRows({
           onRecord={onRecord}
           onApproveWaiver={onApproveWaiver}
           canApproveWaiver={canApproveWaiver}
+          canRecord={canRecord}
           pending={pending}
         />
       ))}
@@ -152,6 +156,7 @@ function QcpRow({
   onRecord,
   onApproveWaiver,
   canApproveWaiver,
+  canRecord,
   pending,
 }: {
   row: QcpGridRow;
@@ -160,9 +165,11 @@ function QcpRow({
   onRecord: (qcpItemId: number, result: "ACCEPTED" | "REJECTED" | "NA") => void;
   onApproveWaiver: (qcpItemId: number) => void;
   canApproveWaiver: boolean;
+  canRecord: boolean;
   pending: boolean;
 }) {
-  const actionable = row.status !== "Cleared" && !row.pendingWaiver;
+  // Record/Reject/Clear is QC_RECORD_ROLES server-side; other roles read the results only.
+  const actionable = canRecord && row.status !== "Cleared" && !row.pendingWaiver;
   // AUD-003: a Production Head/Admin sign-off, not the QC Reject/Clear pair —
   // only offered on a checkpoint that is actually sitting in the pending-NA
   // state, and only to a role that can call approveQcpWaiver server-side.

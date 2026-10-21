@@ -4,6 +4,7 @@ import { jointRefs } from "@/lib/shared/floor-rules";
 import {
   ageDaysOf,
   classRank,
+  QC_VIEW_ROLES,
   compareHolds,
   groupByJobUnit,
   holdIsReached,
@@ -59,7 +60,7 @@ export interface QcAccess {
 }
 
 export function resolveQcAccess(actor: Actor): QcAccess {
-  const view = actor.clientId === null && hasRole(actor, ROLES.QC, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
+  const view = actor.clientId === null && hasRole(actor, ...QC_VIEW_ROLES);
   return {
     view,
     inspect: view && hasRole(actor, ROLES.QC),
