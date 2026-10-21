@@ -509,6 +509,16 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
       await expect(svc.startBomRevision(w.actors.admin, { equipmentId: released.equipmentId })).rejects.toMatchObject({ code: "BOM_RELEASE_DIFF_NOT_BUILT" });
     });
 
+    it("the preview of a released revision still lists its lines, with the stored counts", async () => {
+      const w = await world("RELLINES");
+      const j = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }, { itemNo: 2, partName: "Plate", typeId: w.plt.id }] });
+      const r = await svc.releaseBomRevision(w.actors.eng, ack(j));
+      const p = await svc.previewBomRelease(w.actors.eng, j.target);
+      expect(p.state).toBe("ALREADY_RELEASED");
+      expect(p.lines.map((l) => l.itemNo)).toEqual([1, 2]);
+      expect(p.counts).toMatchObject({ components: r.counts.components, steps: r.counts.steps });
+    });
+
     it("an import with no revision on a line with no floor rows waits in a draft revision and makes no components; the release then makes them", async () => {
       const w = await world("IMPORTWAIT");
       const j = await bare(w);

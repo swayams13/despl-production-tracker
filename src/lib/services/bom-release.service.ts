@@ -149,14 +149,17 @@ async function run(tx: Tx, actor: Actor, equipmentId: number, bomRevisionId: num
     warnings: [] as ReleaseWarning[],
   };
 
-  if (revision.materializedAt) return { ...base, state: "ALREADY_RELEASED", counts: await storedCounts(tx, equipmentId, 0) };
-  const other = await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null }, id: { not: revision.id } } });
-  if (other > 0) return { ...base, state: "OTHER_REVISION_RELEASED", counts: null };
-  const [haveComponents, haveSteps] = await Promise.all([
-    tx.component.count({ where: { equipmentId } }),
-    tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
-  ]);
-  if (haveComponents + haveSteps > 0) return { ...base, state: "LEGACY_MATERIALIZED", counts: null };
+  // Whatever the state, the lines are listed (read only unless READY); only READY writes floor rows.
+  let early: Exclude<BomReleaseState, "READY" | "REFUSED"> | null = null;
+  if (revision.materializedAt) early = "ALREADY_RELEASED";
+  else if ((await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null }, id: { not: revision.id } } })) > 0) early = "OTHER_REVISION_RELEASED";
+  else {
+    const [haveComponents, haveSteps] = await Promise.all([
+      tx.component.count({ where: { equipmentId } }),
+      tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
+    ]);
+    if (haveComponents + haveSteps > 0) early = "LEGACY_MATERIALIZED";
+  }
 
   // ── Lines ────────────────────────────────────────────────────────────
   const familyId = equipment.templateVersion?.template.familyId ?? equipment.job.familyId;
@@ -222,6 +225,7 @@ async function run(tx: Tx, actor: Actor, equipmentId: number, bomRevisionId: num
     };
   });
   const refusals = lines.flatMap((l) => (l.issue ? [{ code: l.issue.code, bomItemId: l.bomItemId, itemNo: l.itemNo, message: l.issue.message }] : []));
+  if (early) return { ...base, lines, state: early, counts: early === "ALREADY_RELEASED" ? await storedCounts(tx, equipmentId, lines.filter((l) => l.componentTypeId == null).length) : null };
   if (refusals.length > 0) return { ...base, lines, refusals, state: "REFUSED", counts: null };
 
   // ── Write the floor rows ─────────────────────────────────────────────
