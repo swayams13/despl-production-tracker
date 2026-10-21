@@ -16,6 +16,7 @@ import { createDrawingRevisionAction } from "@/app/actions/drawing";
 import { receiveStockAction, issueStockAction, returnStockAction, scrapStockAction, recordLotHeatAction } from "@/app/actions/stock";
 import { storesAccess, type StoresAccess } from "@/lib/shared/stores-access";
 import { repeatedOpSuffixes } from "@/lib/shared/op-title";
+import { plural } from "@/lib/shared/plural";
 
 /** Callers that pass no access (the old BOM tab) see every control and let the server refuse, as before. */
 const ALL_ACCESS: StoresAccess = storesAccess(["ADMIN", "PRODUCTION_HEAD", "QC", "STORES"]);
@@ -101,7 +102,7 @@ export function BomPanel({
       <div className="card">
         <div className="hd">
           <h3>Bill of materials — {bom.equipmentName}</h3>
-          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{totalItems} items</span>
+          <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>{plural(totalItems, "item")}</span>
           {bom.equipments.length > 1 && (
             <select
               className="btn"
@@ -137,7 +138,7 @@ export function BomPanel({
             bom.groups.map((g) => (
               <div key={g.name} className={`bom-grp${openGroups.has(g.name) ? " open" : ""}`}>
                 <div className="bom-hd" onClick={() => toggle(g.name)}>
-                  <span className="car">▶</span>{g.name}<span className="cnt">{g.items.length} items</span>
+                  <span className="car">▶</span>{g.name}<span className="cnt">{plural(g.items.length, "item")}</span>
                 </div>
                 <div className="bom-items">
                   {g.items.map((it) => {

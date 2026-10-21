@@ -17,6 +17,7 @@ import {
 import { ConfigAnswerFields } from "@/components/industrial/config-answer-fields";
 import type { IntakeOptions, IntakeFamily } from "@/lib/services/job-intake.read";
 import type { CreateJobInput } from "@/lib/shared/schemas";
+import { plural } from "@/lib/shared/plural";
 
 // ── Shared little formatters ───────────────────────────────────────────────
 function fmtDate(iso: string): string {
@@ -168,6 +169,14 @@ export function step1Valid(s: WizardState): boolean {
   if (!s.clientId || !s.jobNumber.trim() || !s.committedDeliveryDate) return false;
   if (s.targetDispatchDate && s.committedDeliveryDate && s.targetDispatchDate > s.committedDeliveryDate) return false;
   return true;
+}
+/** Why Next is disabled on step 1 (null when it is not). Kept beside step1Valid so the two cannot disagree. */
+export function step1BlockReason(s: WizardState): string | null {
+  if (!s.clientId) return "Choose the client to continue";
+  if (!s.jobNumber.trim()) return "Enter the job number to continue";
+  if (!s.committedDeliveryDate) return "Enter the committed delivery date to continue";
+  if (s.targetDispatchDate > s.committedDeliveryDate) return "The target dispatch date cannot be after the committed delivery date";
+  return null;
 }
 function step2Valid(s: WizardState, families: IntakeFamily[]): boolean {
   const fam = families.find((f) => f.id === s.familyId);
@@ -366,6 +375,7 @@ export function NewJobWizard({ options }: { options: IntakeOptions }) {
       {state.step < 5 && (
         <div className="sh-ft" style={{ border: "none", padding: "16px 0 0", justifyContent: "space-between" }}>
           <button className="btn" onClick={back} disabled={state.step === 1}>← Back</button>
+          {state.step === 1 && step1BlockReason(state) && <span className="emp-hint" role="status">{step1BlockReason(state)}</span>}
           <button className="btn btn-accent" onClick={next} disabled={!canAdvance}>Next →</button>
         </div>
       )}
@@ -761,10 +771,20 @@ function StepRoute({
             style={{ maxWidth: 460 }}
           >
             <option value="">No QCP — attach later</option>
-            {options.qcpTemplates.map((q) => (
-              <option key={q.id} value={q.id}>{q.vessel} rev {q.revision} — {q.itemCount} items ({q.label})</option>
-            ))}
+            {options.qcpTemplates.map((q) => {
+              const warn = state.familyId != null && (q.assemblyGaps[state.familyId]?.length ?? 0) > 0;
+              return (
+                <option key={q.id} value={q.id}>
+                  {q.vessel} rev {q.revision} — {plural(q.itemCount, "item")} ({q.label}){warn ? " — may not cover the assembly checklist" : ""}
+                </option>
+              );
+            })}
           </select>
+          {state.familyId != null && options.qcpTemplates.some((q) => (q.assemblyGaps[state.familyId!]?.length ?? 0) > 0) && (
+            <div className="emp-hint" style={{ marginTop: 6 }}>
+              Templates marked as possibly not covering the assembly checklist may be refused when the job is created. If so, pick another QCP template.
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -963,7 +983,7 @@ function StepConfig({
           >
             <option value="">Don&apos;t copy a BOM</option>
             {options.bomSources.map((s) => (
-              <option key={s.equipmentId} value={s.equipmentId}>{s.label} — {s.itemCount} items</option>
+              <option key={s.equipmentId} value={s.equipmentId}>{s.label} — {plural(s.itemCount, "item")}</option>
             ))}
           </select>
           <div className="emp-hint">Copies BOM lines onto the first equipment block above.</div>
@@ -1089,10 +1109,6 @@ function StepReview({
               <div style={{ marginTop: 8 }}>
                 <Link href={`/jobs/${createError.detail.existingJobId}`} className="btn">View existing job →</Link>
               </div>
-            ) : createError.detail ? (
-              <div className="emp-hint" style={{ marginTop: 8 }}>
-                {Object.entries(createError.detail).map(([k, v]) => `${k}: ${String(v)}`).join(" · ")}
-              </div>
             ) : null}
           </div>
         </div>
@@ -1103,7 +1119,7 @@ function StepReview({
           <div className="hd"><h3>Job created</h3></div>
           <div style={{ padding: 16 }}>
             <p style={{ margin: "0 0 10px" }}>
-              <b>{createdJob.publicId}</b> — {createdJob.unitCount} unit{createdJob.unitCount === 1 ? "" : "s"}, {createdJob.processCount} processes, {createdJob.qcpItemCount} QCP items, {createdJob.bomItemCount} BOM lines, {createdJob.componentCount} components, {createdJob.assemblyStepCount} assembly steps.
+              <b>{state.jobNumber.trim()}</b> — {createdJob.unitCount} unit{createdJob.unitCount === 1 ? "" : "s"}, {createdJob.processCount} processes, {createdJob.qcpItemCount} QCP items, {createdJob.bomItemCount} BOM lines, {createdJob.componentCount} components, {createdJob.assemblyStepCount} assembly steps.
             </p>
             {createdJob.unmatchedQcpProcessCodes.length > 0 && (
               <p className="note" style={{ textAlign: "left", margin: "0 0 10px" }}>

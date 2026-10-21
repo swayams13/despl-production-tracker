@@ -237,7 +237,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This painting operation needs an accepted DFT reading for every planned coat before it can verify.",
   UNIT_NOT_PACKED: "This unit has not been packed yet. Assign it to a package before adding it to a dispatch batch.",
   CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
-  QCP_ITEM_UNRESOLVED: "An assembly checkpoint could not be matched to a QCP item. Contact an administrator.",
+  QCP_ITEM_UNRESOLVED: "This QCP template does not cover the assembly checklist. Pick another QCP template.",
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
   ROUTE_STEP_SEQ_UNKNOWN:
     "This number does not match any process in the family's published route — check the template's process list.",
@@ -291,6 +291,19 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   PAINT_BEFORE_HYDRO:
     "Hydro on this unit is not complete. Surface preparation and painting can start only after hydro is accepted.",
 };
+
+/** Short headings for refusals shown as a list (e.g. what blocks a dispatch); the full sentence is ERROR_MESSAGES. */
+const ERROR_LABELS: Partial<Record<ErrorCode, string>> = {
+  HOLD_POINT_OPEN: "Hold point not cleared",
+  UNIT_NOT_COMPLETE: "Production not complete",
+  NCR_OPEN: "Open NCR",
+};
+
+/** A plain-English heading for an error code; never the raw code. */
+export function errorLabel(code: ErrorCode): string {
+  const label = ERROR_LABELS[code] ?? code.replace(/_/g, " ").toLowerCase();
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
 
 /** D2: what an operator sees instead of SEQUENCE_OVERRIDE_REQUIRED's default, since they cannot override. */
 export const SEQUENCE_OVERRIDE_OPERATOR_MESSAGE = "Ask your supervisor to start this early.";

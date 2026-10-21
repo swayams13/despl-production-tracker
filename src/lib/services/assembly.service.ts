@@ -11,6 +11,7 @@ import { closeNcr, closeRuleNcrsOnRedo } from "./ncr.service";
 import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
 import { assertFloorHard } from "./work.facts";
 import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
+import { groupQcpBySrNo, matchInspectionStep, srNoOccurrences, type MatchQcpItem } from "./assembly-qcp-match";
 import type { LineRules } from "./config-rules";
 import { notify, userIdsWithRole } from "./notifications.service";
 import { recordQcpExecutionTx } from "./qcp.service";
@@ -661,51 +662,33 @@ export async function materializeAssemblyStepsFromTemplate(
   // must not overwrite it.
   await tx.job.updateMany({ where: { id: jobId, assemblyTemplateVersionId: null }, data: { assemblyTemplateVersionId: version.id } });
 
-  // Occurrence index of each step within its own srNo group, in template step order.
-  const srNoOccurrence = new Map<number, number>(); // templateStepId -> 0-based index within its srNo group
-  const srNoCounters = new Map<string, number>();
-  for (const step of allSteps) {
-    if (!step.srNo) continue;
-    const idx = srNoCounters.get(step.srNo) ?? 0;
-    srNoOccurrence.set(step.id, idx);
-    srNoCounters.set(step.srNo, idx + 1);
-  }
+  const srNoOccurrence = srNoOccurrences(allSteps);
 
   // id null = a checkpoint a rule dropped from the job's QCP; it keeps its place in the order.
-  const qcpItemsBySrNo = new Map<string, { id: number | null; sequence: number }[]>();
+  let qcpItemsBySrNo = new Map<string, MatchQcpItem[]>();
   if (qcpTemplateId != null) {
     const qcpItems = await tx.qcpItem.findMany({
       where: { qcpTemplateId },
       select: { id: true, srNo: true, sequence: true },
     });
-    const all = [
-      ...qcpItems.map((q) => ({ id: q.id as number | null, srNo: q.srNo, sequence: q.sequence })),
-      ...skippedQcp.map((q) => ({ id: null, srNo: q.srNo, sequence: q.sequence })),
-    ].sort((a, b) => a.sequence - b.sequence);
-    for (const item of all) {
-      const list = qcpItemsBySrNo.get(item.srNo) ?? [];
-      list.push({ id: item.id, sequence: item.sequence });
-      qcpItemsBySrNo.set(item.srNo, list);
-    }
+    qcpItemsBySrNo = groupQcpBySrNo([...qcpItems, ...skippedQcp.map((q) => ({ id: null, srNo: q.srNo, sequence: q.sequence }))]);
   }
 
   function resolveQcpItemId(step: (typeof steps)[number]): number | null {
-    // No QCP template chosen at intake at all — a legitimate seam, not a failure to resolve.
+    // No QCP template chosen at intake at all: a legitimate seam, not a failure to resolve.
     if (qcpTemplateId == null) return null;
-    if (step.kind !== "INSPECTION" || !step.srNo) return null;
-    const candidates = qcpItemsBySrNo.get(step.srNo);
-    const idx = srNoOccurrence.get(step.id) ?? 0;
-    const match = candidates?.[idx];
-    if (!match || match.id == null) {
+    const match = matchInspectionStep(step, srNoOccurrence, qcpItemsBySrNo);
+    if (match === "MISSING") {
+      const dropped = qcpItemsBySrNo.get(step.srNo!)?.[srNoOccurrence.get(step.id) ?? 0];
       throw new AppError(ERROR_CODES.QCP_ITEM_UNRESOLVED, {
         templateStepId: step.id,
         srNo: step.srNo,
-        occurrence: idx,
+        occurrence: srNoOccurrence.get(step.id) ?? 0,
         qcpTemplateId,
-        ...(match && match.id == null ? { droppedByRule: true } : {}),
+        ...(dropped && dropped.id == null ? { droppedByRule: true } : {}),
       });
     }
-    return match.id;
+    return match?.id ?? null;
   }
 
   // J4a: PER_JOINT steps expand per planned joint of their type, PER_COMPONENT per component.
