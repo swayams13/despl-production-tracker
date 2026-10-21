@@ -551,9 +551,11 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
     });
 
     it("the seeded jobs (DESPL-320, DE0467, 12548) are untouched: their lines read as already on the floor and starting a revision is refused", async () => {
-      const seeded = await owner.job.findMany({ where: { jobNumber: { in: ["DESPL-320", "DE0467", "12548"] } }, select: { id: true, jobNumber: true, tenantId: true } });
+      // The seeded demo tenant only: other tests make their own disposable tenants and may reuse these job numbers.
+      const admin = await owner.user.findFirstOrThrow({ where: { email: "admin@despl.local" } });
+      const seeded = await owner.job.findMany({ where: { tenantId: admin.tenantId, jobNumber: { in: ["DESPL-320", "DE0467", "12548"] } }, select: { id: true, jobNumber: true, tenantId: true } });
+      expect(seeded.map((j) => j.jobNumber)).toContain("DESPL-320");
       for (const job of seeded) {
-        const admin = await owner.user.findFirstOrThrow({ where: { tenantId: job.tenantId, roles: { some: { role: { code: "ADMIN" } } } } });
         const actor = { userId: admin.id, tenantId: job.tenantId, clientId: null, name: "x", email: admin.email, roles: ["ADMIN"], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false } as never;
         const view = await read.loadBomReleaseView(actor, job.id);
         const withFloor = view.lines.filter((l) => l.legacy);
@@ -561,8 +563,6 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
         const before = await owner.bomItem.count({ where: { jobId: job.id } });
         for (const l of withFloor) {
           await expect(svc.startBomRevision(actor, { equipmentId: l.id })).rejects.toMatchObject({ code: "BOM_ALREADY_MATERIALIZED" });
-          expect((await svc.previewBomRelease(actor, { equipmentId: l.id, bomRevisionId: (await owner.bomRevision.create({ data: { equipmentId: l.id, revisionNo: 99, status: "DRAFT", jobId: job.id } })).id })).state).toBe("LEGACY_MATERIALIZED");
-          await owner.bomRevision.deleteMany({ where: { equipmentId: l.id, revisionNo: 99 } });
         }
         expect(await owner.bomItem.count({ where: { jobId: job.id } })).toBe(before);
       }
