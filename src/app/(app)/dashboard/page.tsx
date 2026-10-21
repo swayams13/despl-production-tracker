@@ -4,6 +4,7 @@ import { landingFor } from "@/lib/shared/nav";
 import { FEATURES } from "@/lib/shared/flags";
 import { getActor, ROLES, hasRole } from "@/lib/authz";
 import { loadPortfolio, loadPortfolioFacts } from "@/lib/services/portfolio.read";
+import { loadAdoption } from "@/lib/services/adoption.read";
 import { HEALTH_LABEL } from "@/lib/services/job-health";
 import {
   ATTENTION_LIMIT,
@@ -62,6 +63,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const shown = rows.filter((r) => (!health || r.health === health) && (!jobId || r.id === jobId));
   const tiles = buildTiles({ counts, actionsDue: actionsDue(facts, null), health, jobId });
   const fc = forecastPastCommitted(rows);
+  const adoption = await loadAdoption(actor);
 
   return (
     <>
@@ -87,6 +89,33 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <a href={portfolioHref({ health })}>Show all jobs</a>
         </p>
       )}
+
+      <section id="adoption" className="card pf-sec" aria-labelledby="pf-adopt">
+        <div className="hd">
+          <h3 id="pf-adopt">Same-day updates</h3>
+          <span className="sub pf-hint">
+            <span className="mono">{adoption.streak}</span> of <span className="mono">{adoption.run}</span> working days at {adoption.target}% or more
+          </span>
+        </div>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>Day</th>
+              <th>Updates</th>
+              <th>Entered the same day</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...adoption.series].reverse().map((d) => (
+              <tr key={d.day}>
+                <td className="mono">{d.day}</td>
+                <td className="mono">{d.total}</td>
+                <td className="mono">{d.rate === null ? "—" : `${d.rate}%`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
 
       <section id="projects" className="card pf-sec" aria-labelledby="pf-projects">
         <div className="hd">
