@@ -7,10 +7,10 @@
 //
 // Invariant 9: the published version is never edited. The script clones it (template.service cloneVersion),
 // changes `grain` on the DRAFT clone only, and publishes it (publishVersion). Running jobs keep their pin.
-// Why Prisma for the grain and not saveDraftVersion: saveDraftVersion is a full replace whose schema does not
-// carry evidenceKind or includeWhen, so it would drop them from the clone. cloneVersion itself does not copy
-// those two columns either (template-copy.ts), so this script copies them from the source by process code and
-// then refuses to publish if the clone differs from the source in anything but grain.
+// Why Prisma for the grain and not saveDraftVersion: saveDraftVersion is a full replace, and a one-column
+// change does not need one. cloneVersion carries every column (J4c fixed template-copy.ts, which used to drop
+// evidenceKind and includeWhen; template-copy.test.ts proves it), and the script still refuses to publish if
+// the clone differs from the source in anything but grain.
 // Idempotent: nothing to do once the newest PUBLISHED version already has JOB on all of those codes.
 // Run with the owner URL (DIRECT_URL), like the other backfills; rehearse on a restored dump first.
 import "dotenv/config";
@@ -49,8 +49,6 @@ async function main() {
         (missing.length ? ` (missing: ${missing.join(", ")})` : "") +
         `; to switch UNIT -> JOB: ${toChange.map((r) => r.code).join(", ") || "none"}`,
     );
-    const carried = rows.filter((r) => r.evidenceKind != null || r.includeWhen != null).length;
-    console.log(`columns cloneVersion drops, copied by this script: ${carried} process(es) carry evidenceKind or includeWhen`);
     if (toChange.length === 0) {
       console.log("Nothing to do: the newest published version already has JOB grain on every D5 code.");
       return;
@@ -81,20 +79,7 @@ async function main() {
       sourceVersionId: source.id,
       notes: `L1.3: clone of v${source.version} with grain JOB on office processes ${[...wanted].join(", ")} (one plan per job).`,
     });
-    const copies = await prisma.templateProcess.findMany({ where: { versionId: draft.id } });
-    const copyByCode = new Map(copies.map((c) => [c.code, c]));
-    for (const r of rows) {
-      const c = copyByCode.get(r.code);
-      if (!c) throw new Error(`clone is missing process ${r.code}`);
-      await prisma.templateProcess.update({
-        where: { id: c.id },
-        data: {
-          evidenceKind: r.evidenceKind,
-          ...(r.includeWhen != null ? { includeWhen: r.includeWhen } : {}),
-          ...(wanted.has(r.code) ? { grain: "JOB" } : {}),
-        },
-      });
-    }
+    await prisma.templateProcess.updateMany({ where: { versionId: draft.id, code: { in: [...wanted] } }, data: { grain: "JOB" } });
     // Faithful clone check: every column except grain (on the D5 codes) must match the source.
     const finalRows = await prisma.templateProcess.findMany({ where: { versionId: draft.id } });
     const strip = (r: Record<string, unknown>) => {

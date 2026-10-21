@@ -100,9 +100,16 @@ export interface AssemblyRow {
   row: number;
   equipmentType: string;
   groupCode: string;
+  groupName: string;
   stepNo: string;
+  /** The sheet's own ordering number (10, 20, ...). */
+  seq: string;
   activity: string;
+  /** Work | Inspection. */
+  kind: string;
   partsUsed: string;
+  /** The sub-assembly the step produces. */
+  result: string;
   jointRef: string;
   department: string;
   stage: string;
@@ -375,9 +382,13 @@ const ASSEMBLY: Sheet<AssemblyRow> = {
     example: "example?",
     equipmentType: "equipment type",
     groupCode: "group code",
+    groupName: "group name",
     stepNo: "step no",
+    seq: "seq",
     activity: "activity",
+    kind: "kind",
     partsUsed: "parts / sub-assemblies used",
+    result: "result",
     jointRef: "weld joint ref",
     department: "department",
     stage: "counts toward stage no",
@@ -386,9 +397,13 @@ const ASSEMBLY: Sheet<AssemblyRow> = {
     row,
     equipmentType: r.equipmentType,
     groupCode: r.groupCode,
+    groupName: r.groupName,
     stepNo: r.stepNo,
+    seq: r.seq,
     activity: r.activity,
+    kind: r.kind,
     partsUsed: r.partsUsed,
+    result: r.result,
     jointRef: r.jointRef,
     department: r.department,
     stage: r.stage,
