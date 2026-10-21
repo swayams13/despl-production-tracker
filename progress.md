@@ -602,3 +602,11 @@ Fixed, test first (seen red): `raiseRuleNcr` accepted an NCR against a weld alre
 **Defaults taken:** Q5 as in the plan; template publish is a separate step after merge, not part of the migration.
 **Swayam runs:** runbook A (rehearsal on a fresh dump), merge, C (backfill `--job DESPL-320` first), D (template publish dry run then `--apply`), all on the phone hotspot.
 **Found, not fixed:** `template-copy.ts` `copyVersionContents` does not copy `evidenceKind` / `includeWhen`; a hand clone in the editor loses them.
+
+## Session — JG1: drawing register and link for H3, 21 Oct 2026 (branch `lean/JG1-drawing-release`, off `main`; no migration)
+
+**Shipped:** `createAssemblyDrawing` (drawing number unique per job, refused in the service as the schema has no constraint: `DRAWING_NUMBER_TAKEN`), bulk `linkDrawingToComponents` (all or nothing, one audit row per part, never re-points a part that has another drawing), page `/jobs/[id]/drawings` (register with H3 state, issue revision, release at risk, "pressure parts with no drawing" per line with select and link), a "Drawings" button on the Materials tab. First revision may be Rev 0 (`createDrawingRevisionSchema` now `min(0)`).
+**Defaults taken:** ENGINEERING may create, issue revisions and link, alongside ADMIN and PRODUCTION_HEAD (applies to `createDrawingRevision` and `linkGoverningDrawing` too; SJ to ratify). Release at risk unchanged: PRODUCTION_HEAD only, reason required. The page is readable by every internal role.
+**Proved:** `jg1-drawing-h3.test.ts` (DB): link, cutting refused DRAWING_NOT_RELEASED with no revision and with a DRAFT, at-risk release allowed, a newer revision voids it; role/client/tenant/other-job/duplicate tables; audit rows. Chrome on port 3102 via the real `/login` as SJ on DESPL-320 (its parts are not `pressure_retaining` in the seed; set for SHELL and both heads on SR01 in the test DB only): add GA drawing, issue Rev 0, bulk link 3 parts, release at risk.
+**Not checked in Chrome:** starting the cutting from the floor UI (needs material issued and a heat number first); covered by the DB test.
+**To do on production:** nothing (no migration, no data). Parts only gain H3 once they are linked here; DESPL-320's components still need `pressure_retaining` set by the part family at materialisation.

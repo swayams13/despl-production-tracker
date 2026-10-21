@@ -3,12 +3,58 @@ import { audited } from "@/lib/audit";
 import { assertClientScope, assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import {
+  createAssemblyDrawingSchema,
   createDrawingRevisionSchema,
   releaseDrawingAtRiskSchema,
+  type CreateAssemblyDrawingInput,
   type CreateDrawingRevisionInput,
   type ReleaseDrawingAtRiskInput,
 } from "@/lib/shared/schemas";
-import type { DrawingRevision } from "@/generated/prisma/client";
+import type { AssemblyDrawing, DrawingRevision } from "@/generated/prisma/client";
+
+/**
+ * JG1: who registers drawings, issues revisions and links parts to them.
+ * Engineering owns drawings in practice (default, SJ to ratify). Releasing at
+ * risk stays PRODUCTION_HEAD only.
+ */
+export const DRAWING_WRITE_ROLES = [ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.ENGINEERING] as const;
+
+/**
+ * JG1: register a drawing (no revision yet; issue Rev 0 next). Before this,
+ * `AssemblyDrawing` rows came only from seeds. The schema has no unique
+ * (job, drawing number), so duplicates are refused here.
+ */
+export async function createAssemblyDrawing(actor: Actor, input: CreateAssemblyDrawingInput): Promise<AssemblyDrawing> {
+  const { jobId, drawingTypeId, drawingNo, remarks } = createAssemblyDrawingSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ...DRAWING_WRITE_ROLES);
+
+  return withJob(actor.tenantId, jobId, async (tx) => {
+    const job = await tx.job.findFirst({ where: { id: jobId, tenantId: actor.tenantId }, select: { id: true, clientId: true } });
+    if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
+    assertClientScope(actor, job.clientId);
+    const type = await tx.drawingTypeRef.findFirst({ where: { id: drawingTypeId, tenantId: actor.tenantId, active: true }, select: { id: true } });
+    if (!type) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "DrawingTypeRef", drawingTypeId });
+    // ponytail: check-then-insert; two simultaneous creates of one number could both pass. Add a unique index if it ever happens.
+    const dup = await tx.assemblyDrawing.findFirst({ where: { jobId, drawingNo: { equals: drawingNo, mode: "insensitive" } }, select: { id: true } });
+    if (dup) throw new AppError(ERROR_CODES.DRAWING_NUMBER_TAKEN, { jobId, drawingNo, assemblyDrawingId: dup.id });
+
+    return audited(tx, actor, async () => {
+      const drawing = await tx.assemblyDrawing.create({ data: { jobId, drawingTypeId, drawingNo, remarks: remarks ?? null } });
+      return {
+        result: drawing,
+        audit: {
+          action: "drawing.create",
+          entityType: "AssemblyDrawing",
+          entityId: drawing.id,
+          after: { jobId, drawingTypeId, drawingNo, remarks: remarks ?? null },
+          eventType: "AssemblyDrawingCreated",
+          eventPayload: { jobId, drawingNo },
+        },
+      };
+    });
+  });
+}
 
 /**
  * Issue a new `DrawingRevision` for an `AssemblyDrawing` (B9, Phase 4).
@@ -30,7 +76,7 @@ export async function createDrawingRevision(
 ): Promise<DrawingRevision> {
   const { jobId, assemblyDrawingId, revisionNo, status } = createDrawingRevisionSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...DRAWING_WRITE_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     // H1: filter by the caller's declared jobId, not just tenantId — an

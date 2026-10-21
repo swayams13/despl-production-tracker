@@ -98,6 +98,8 @@ export const ERROR_CODES = {
   DRAWING_NOT_RELEASED: "DRAWING_NOT_RELEASED",
   /** createDrawingRevision: revisionNo must be strictly greater than the drawing's current highest (B9, Phase 4). */
   DRAWING_REVISION_NOT_INCREASING: "DRAWING_REVISION_NOT_INCREASING",
+  /** createAssemblyDrawing: the job already has a drawing with this number (JG1). */
+  DRAWING_NUMBER_TAKEN: "DRAWING_NUMBER_TAKEN",
   /** createBomRevision: revisionNo must be strictly greater than the equipment's current highest (B4, Phase 4). */
   BOM_REVISION_NOT_INCREASING: "BOM_REVISION_NOT_INCREASING",
   /** createBomItem/updateBomItem: the chosen parentBomItemId is a descendant of the item being written — a normal user refusal, not malformed data (B4, Phase 4). */
@@ -230,6 +232,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INSUFFICIENT_STOCK: "This would take the lot's available quantity below zero.",
   MATERIAL_NOT_AVAILABLE: "This part is recorded short. Resolve the shortage before starting this operation.",
   DRAWING_NOT_RELEASED: "This component's governing drawing is not released yet. Cutting cannot start until it is.",
+  DRAWING_NUMBER_TAKEN: "This job already has a drawing with that number. Open it and issue a revision instead.",
   DRAWING_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the drawing's current revision.",
   BOM_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the equipment's current BOM revision.",
   BOM_PARENT_WOULD_CYCLE: "Can't set this parent: it would create a circular reference. Pick a different parent item.",
