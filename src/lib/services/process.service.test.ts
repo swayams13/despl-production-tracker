@@ -626,9 +626,17 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
   // Idempotent (upsert, not create): both tests below share the seed DB with
   // no per-test cleanup (matching the existing "no cleanup" pattern in this
   // file), and the suite must stay green on a rerun (Step 4 runs it twice).
-  async function clearHold(jobProcessId: number, unitId: number, jobId: number): Promise<void> {
+  async function clearHold(jobProcessId: number, unitId: number, jobId: number, created?: number[]): Promise<void> {
     const itemIds = await blockingQcpItemIds(jobProcessId);
     for (const qcpItemId of itemIds) {
+      if (created) {
+        // Tracked mode: other files record attempts on these units and the latest attempt wins, so overwriting
+        // attempt 1 would not clear anything. Add a newer ACCEPTED attempt; the caller deletes it afterwards.
+        const latest = await owner.qcpExecution.findFirst({ where: { qcpItemId, unitId }, orderBy: { attemptNo: "desc" } });
+        const row = await owner.qcpExecution.create({ data: { qcpItemId, unitId, result: "ACCEPTED", attemptNo: (latest?.attemptNo ?? 0) + 1, jobId } });
+        created.push(row.id);
+        continue;
+      }
       await owner.qcpExecution.upsert({
         where: { qcpItemId_unitId_attemptNo: { qcpItemId, unitId, attemptNo: 1 } },
         create: { qcpItemId, unitId, result: "ACCEPTED", attemptNo: 1, jobId },
@@ -654,144 +662,157 @@ describe.skipIf(!RUN_DB)("per-unit gating + live hold points on DESPL-320 (DB, g
 
   const future = new Date(Date.now() + 30 * 864e5);
 
-  it("per-unit gating isolation: unit A's completion never gates unit B open", async () => {
+  /**
+   * Runs `fn` with every item that feeds a process on the given units (component operations and assembly steps,
+   * whichever mapping reaches them: the service's own loadMappedOps) marked COMPLETE, then restores them (even on
+   * failure): submitProcess refuses while a mapped item is open (Phase 3, R2), and left COMPLETE they would break
+   * every later run of the shared seed DB.
+   */
+  async function withMappedOpsComplete<T>(jobId: number, seq: number, unitIds: number[], fn: () => Promise<T>): Promise<T> {
+    const { withTenant } = await import("@/lib/db");
+    const { loadMappedOps } = await import("./_shared");
+    const { tenantId } = await owner.job.findUniqueOrThrow({ where: { id: jobId }, select: { tenantId: true } });
+    const jobProcessId = await procId(jobId, seq);
+    const items = (
+      await Promise.all(unitIds.map((unitId) => withTenant(tenantId, (tx) => loadMappedOps(tx, { jobProcessId, unitId, jobId }))))
+    ).flat();
+    const done = { status: "COMPLETE" as const, finishedAt: new Date() };
+    const ops = items.filter((i) => i.source === "fabrication");
+    const steps = items.filter((i) => i.source === "assembly");
+    const beforeOps = await owner.componentOperation.findMany({ where: { id: { in: ops.map((i) => i.id) } }, select: { id: true, status: true, finishedAt: true } });
+    const beforeSteps = await owner.assemblyStep.findMany({ where: { id: { in: steps.map((i) => i.id) } }, select: { id: true, status: true, finishedAt: true } });
+    await owner.componentOperation.updateMany({ where: { id: { in: ops.map((i) => i.id) } }, data: done });
+    await owner.assemblyStep.updateMany({ where: { id: { in: steps.map((i) => i.id) } }, data: done });
+    try {
+      return await fn();
+    } finally {
+      for (const { id, ...was } of beforeOps) await owner.componentOperation.update({ where: { id }, data: was });
+      for (const { id, ...was } of beforeSteps) await owner.assemblyStep.update({ where: { id }, data: was });
+    }
+  }
+
+  it("per-unit gating isolation: unit A's completion never gates unit B open (UNIT-grain 12 -> 13)", async () => {
     const { jobId, tenantId } = await despl320();
     const a = planner(tenantId);
 
-    const units = await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } });
-    const [unitA, unitB] = units;
+    const [unitA, unitB] = await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } });
 
-    // P = seq 1 (PO Receipt & Order Review, root — no predecessors of its
-    // own), S = seq 2 (Kick-Off / Pre-Inspection Meeting): a real
-    // FINISH_TO_START edge in the seeded spine.
-    const pId = await procId(jobId, 1);
-    const sId = await procId(jobId, 2);
+    // P = seq 12, S = seq 13: a real FINISH_TO_START edge between two UNIT-grain processes (processes 1-11 are
+    // job-level since L1.3, so per-unit gating is shown here).
+    const pId = await procId(jobId, 12);
+    const sId = await procId(jobId, 13);
+    expect((await owner.jobProcess.findUniqueOrThrow({ where: { id: pId } })).grain).toBe("UNIT");
+    expect((await owner.jobProcess.findUniqueOrThrow({ where: { id: sId } })).grain).toBe("UNIT");
     await resetPlans(jobId, [pId, sId], [unitA.id, unitB.id]);
 
-    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
-    const planId = (jobProcessId: number, unitId: number) =>
-      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unitId)!.id;
+    // P's own predecessor (process 11) is job-level: complete it for the test, and put it back afterwards.
+    const predIds = (await owner.jobProcessEdge.findMany({ where: { processId: pId }, select: { predecessorId: true } })).map((e) => e.predecessorId);
+    const predPlans = await owner.processPlan.findMany({
+      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: { in: predIds } },
+      select: { id: true, status: true, actualFinish: true },
+    });
+    await owner.processPlan.updateMany({ where: { id: { in: predPlans.map((x) => x.id) } }, data: { status: "COMPLETE", actualFinish: new Date() } });
+    const created: number[] = [];
+    try {
+      const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
+      const planId = (jobProcessId: number, unitId: number) =>
+        run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unitId)!.id;
 
-    // P carries a real blocking checkpoint (seeded QcpItem 4); clear it for
-    // unit A only so P can legitimately reach COMPLETE there.
-    await clearHold(pId, unitA.id, jobId);
+      // Clear any blocking checkpoint P carries, for unit A only, so P can legitimately reach COMPLETE there.
+      await clearHold(pId, unitA.id, jobId, created);
 
-    const maker = a;
-    const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
+      const maker = a;
+      const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
 
-    await startProcess(maker, { processPlanId: planId(pId, unitA.id) });
-    await submitProcess(maker, { processPlanId: planId(pId, unitA.id) });
-    const verifiedP = await verifyProcess(checker, { processPlanId: planId(pId, unitA.id) });
-    expect(verifiedP.status).toBe("COMPLETE");
+      await startProcess(maker, { processPlanId: planId(pId, unitA.id) });
+      await withMappedOpsComplete(jobId, 12, [unitA.id], async () => {
+        await submitProcess(maker, { processPlanId: planId(pId, unitA.id) });
+      });
+      const verifiedP = await verifyProcess(checker, { processPlanId: planId(pId, unitA.id) });
+      expect(verifiedP.status).toBe("COMPLETE");
 
-    // Core proof: unit A's own predecessor plan is COMPLETE, so S starts.
-    const startedA = await startProcess(maker, { processPlanId: planId(sId, unitA.id) });
-    expect(startedA.status).toBe("IN_PROGRESS");
+      // Core proof: unit A's own predecessor plan is COMPLETE, so S starts.
+      const startedA = await startProcess(maker, { processPlanId: planId(sId, unitA.id) });
+      expect(startedA.status).toBe("IN_PROGRESS");
 
-    // Unit B's predecessor plan for the SAME job process was never touched
-    // (still NOT_STARTED) — S must be refused on unit B. Before Task 3 this
-    // passed incorrectly (loadPredecessorStates ignored unitId, so completing
-    // P on ANY unit unblocked S on ALL units).
-    const err = await startProcess(maker, { processPlanId: planId(sId, unitB.id) }).catch((e) => e);
-    expect(isAppError(err) && err.code).toBe(ERROR_CODES.GATING_BLOCKED);
+      // Unit B's predecessor plan for the SAME job process was never touched (still NOT_STARTED): S must be
+      // refused on unit B. (loadPredecessorStates once ignored unitId, so completing P on ANY unit unblocked S on ALL.)
+      const err = await startProcess(maker, { processPlanId: planId(sId, unitB.id) }).catch((e) => e);
+      expect(isAppError(err) && err.code).toBe(ERROR_CODES.GATING_BLOCKED);
+    } finally {
+      await owner.qcpExecution.deleteMany({ where: { id: { in: created } } });
+      for (const x of predPlans) await owner.processPlan.update({ where: { id: x.id }, data: { status: x.status, actualFinish: x.actualFinish } });
+      await resetPlans(jobId, [pId, sId], [unitA.id, unitB.id]);
+    }
   });
 
-  it("verify refuses at a genuinely uncleared hold point", async () => {
+  it("a job-level plan (process 10) cannot verify while ANY unit's hold point is open; it can once every unit's is cleared", async () => {
     const { jobId, tenantId } = await despl320();
     const a = planner(tenantId);
+    const units = await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } });
+    const unitIds = units.map((u) => u.id);
 
-    // skip: 3 — the prior test in this file completes/starts real work on
-    // units[0]/units[1] (unitA/unitB), and qcp.service.test.ts's DB block
-    // reserves units[2] for the same reason (see its own comment) — this same
-    // shared DESPL-320 job, and persistScheduleRun now correctly carries real
-    // work forward across a reschedule (audit C1 fix) instead of silently
-    // resetting it. Pick a unit no known sibling file touches rather than
-    // relying on a fresh-slate reset that would itself be the bug being fixed.
-    // ponytail: unit-index reservation by convention/comment, not enforced —
-    // fine for the ~3 files that currently touch DESPL-320 unit-scoped state;
-    // a shared per-file-unit allocator (or per-test job/equipment fixtures)
-    // is the upgrade path if this keeps growing.
-    const unit = (
-      await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" }, skip: 3, take: 1 })
-    )[0];
-
-    // Reset every plan this test's own dependency chain drives, so a rerun
-    // against the same no-cleanup seed DB starts from NOT_STARTED again (same
-    // reasoning as resetPlans above the first test).
+    // Processes 1-10 are job-level since L1.3: one plan each, so this test clears and completes the chain once, job-wide.
     const chainSeqs = [1, 2, 3, 4, 7, 8, 9, 10];
     const chainIds = await Promise.all(chainSeqs.map((seq) => procId(jobId, seq)));
-    await resetPlans(jobId, chainIds, [unit.id]);
+    for (const id of chainIds) expect((await owner.jobProcess.findUniqueOrThrow({ where: { id } })).grain).toBe("JOB");
+    const resetChain = () =>
+      owner.processPlan.updateMany({
+        where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: { in: chainIds } },
+        data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
+      });
+    await resetChain();
 
-    const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
-    const planId = (jobProcessId: number) =>
-      run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId === unit.id)!.id;
-
-    const maker = a;
-    const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
-
-    async function complete(jobProcessId: number) {
-      const id = planId(jobProcessId);
-      await startProcess(maker, { processPlanId: id });
-      await submitProcess(maker, { processPlanId: id });
-      return verifyProcess(checker, { processPlanId: id });
-    }
-
-    // seq 1's checkpoint (QcpItem 4) also covers seq 2 (both link to the same
-    // item) — clear it once so the real dependency chain to seq 10 can
-    // legitimately reach COMPLETE: 2<-1 (F2S), 3<-2, 4<-3 (overlap, but
-    // completion still requires COMPLETE per invariant #11), 7<-3, 8<-4, 9<-4
-    // (F2S), 10<-7,8,9. seq 5 (Client Drawing Approval) and seq 6 (BOM & MTO
-    // Finalization) are NOT on this path — skipped.
-    const seq1Id = await procId(jobId, 1);
-    await clearHold(seq1Id, unit.id, jobId);
-
-    for (const seq of [1, 2, 3, 4, 7, 8, 9]) {
-      const id = await procId(jobId, seq);
-      const p = await complete(id);
-      expect(p.status).toBe("COMPLETE");
-    }
-
-    // seq 10 (Material Receipt & Incoming Inspection) gates open now — its
-    // predecessors (seq 7 Plates, seq 8 Pipes/Forgings/Fittings, seq 9
-    // Bought-Out Items) are all COMPLETE — so start+submit succeed.
-    const seq10Id = await procId(jobId, 10);
-    const blocking = await blockingQcpItemIds(seq10Id);
-    expect(blocking.length).toBeGreaterThan(0); // sanity: a real blocking checkpoint IS linked here
-
-    await startProcess(maker, { processPlanId: planId(seq10Id) });
-
-    // Phase 3, R2: seq 10 (RECEIPT, leadTimeProcessSeq 10) has real seeded
-    // ComponentOperations for this unit, still NOT_STARTED — submit is
-    // refused until they're complete, same discipline as this test already
-    // uses to clear a QCP hold point before proceeding.
-    const blockedSubmit = await submitProcess(maker, { processPlanId: planId(seq10Id) }).catch((e) => e);
-    expect(isAppError(blockedSubmit) && blockedSubmit.code).toBe(ERROR_CODES.COMPONENT_OPS_INCOMPLETE);
-    // Gate 3 fix: leadTimeProcessSeq is now family-scoped (OperationRefFamilySeq).
-    const job = await owner.job.findUniqueOrThrow({ where: { id: jobId }, select: { familyId: true } });
-    const seq10OperationRefIds = await owner.operationRefFamilySeq.findMany({
-      where: { familyId: job.familyId, leadTimeProcessSeq: 10 },
-      select: { operationRefId: true },
-    });
-    const seq10OpsWhere = {
-      component: { unitId: unit.id },
-      operationId: { in: seq10OperationRefIds.map((r) => r.operationRefId) },
-    };
-    // Restore these seeded rows afterwards (even on failure): left COMPLETE,
-    // the blocked-submit assertion above fails on every later run.
-    const seq10OpsBefore = await owner.componentOperation.findMany({ where: seq10OpsWhere, select: { id: true, status: true } });
-    await owner.componentOperation.updateMany({ where: seq10OpsWhere, data: { status: "COMPLETE" } });
-
+    const created: number[] = [];
     try {
-      await submitProcess(maker, { processPlanId: planId(seq10Id) });
+      const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
+      const planId = (jobProcessId: number) => {
+        const plan = run.processPlans.find((p) => p.jobProcessId === jobProcessId && p.unitId == null);
+        if (!plan) throw new Error(`no job-level plan for process ${jobProcessId}`);
+        return plan.id;
+      };
 
-      // ...but its OWN checkpoint (a different QcpItem than seq 1's) has no
-      // QcpExecution recorded for this unit — verify must refuse.
-      const err = await verifyProcess(checker, { processPlanId: planId(seq10Id) }).catch((e) => e);
-      expect(isAppError(err) && err.code).toBe(ERROR_CODES.HOLD_POINT_OPEN);
-    } finally {
-      for (const { id, status } of seq10OpsBefore) {
-        await owner.componentOperation.update({ where: { id }, data: { status } });
+      const maker = a;
+      const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
+
+      async function complete(seq: number) {
+        const jobProcessId = await procId(jobId, seq);
+        const id = planId(jobProcessId);
+        await startProcess(maker, { processPlanId: id });
+        await withMappedOpsComplete(jobId, seq, unitIds, async () => {
+          await submitProcess(maker, { processPlanId: id });
+        });
+        return verifyProcess(checker, { processPlanId: id });
       }
+
+      // Checkpoints on seq 1 and 2 (QcpItem 4) are cleared on every unit so the chain can reach seq 10.
+      const seq1Id = await procId(jobId, 1);
+      for (const u of unitIds) await clearHold(seq1Id, u, jobId, created);
+      for (const seq of [1, 2, 3, 4, 7, 8, 9]) expect((await complete(seq)).status).toBe("COMPLETE");
+
+      // seq 10's own checkpoint (a different QcpItem) is open on every unit.
+      const seq10Id = await procId(jobId, 10);
+      expect((await blockingQcpItemIds(seq10Id)).length).toBeGreaterThan(0);
+      await startProcess(maker, { processPlanId: planId(seq10Id) });
+      await withMappedOpsComplete(jobId, 10, unitIds, async () => {
+        await submitProcess(maker, { processPlanId: planId(seq10Id) });
+      });
+
+      // Open on all units: refused. Cleared on all but the last unit: still refused (any unit blocks).
+      const refuse = async () => {
+        const err = await verifyProcess(checker, { processPlanId: planId(seq10Id) }).catch((e) => e);
+        expect(isAppError(err) ? err.code : err instanceof Error ? err.message : `verified: ${JSON.stringify((err as { status?: string }).status)}`).toBe(ERROR_CODES.HOLD_POINT_OPEN);
+      };
+      await refuse();
+      for (const u of unitIds.slice(0, -1)) await clearHold(seq10Id, u, jobId, created);
+      await refuse();
+
+      // Cleared on the last unit too: verify goes through.
+      await clearHold(seq10Id, unitIds[unitIds.length - 1], jobId, created);
+      expect((await verifyProcess(checker, { processPlanId: planId(seq10Id) })).status).toBe("COMPLETE");
+    } finally {
+      await owner.qcpExecution.deleteMany({ where: { id: { in: created } } });
+      await resetChain();
     }
   });
 });

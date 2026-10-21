@@ -141,7 +141,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
   // DESPL-320 seeds 9 units (320SR01–09) on its one equipment. Its order date
   // is NULL by design (test above), so pass projectStartDate explicitly to
   // clear the SCHEDULE_DATA_MISSING refusal and actually exercise persistence.
-  it("expands DESPL-320 into 36 processes × 9 units, one plan per unit", async () => {
+  it("expands DESPL-320 into 24 per-unit processes × 9 units plus 12 job-level plans (L1.3)", async () => {
     const job = await owner.job.findFirst({ where: { jobNumber: "DESPL-320" } });
     if (!job) throw new Error("seed missing DESPL-320 — run pnpm db:seed");
     const a = actor({ tenantId: job.tenantId, clientId: null });
@@ -159,18 +159,24 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("generateSchedule persist + feasibili
     expect(unitCount).toBe(9);
     expect(includedProcessCount).toBe(36);
 
-    expect(run.processPlans.length).toBe(includedProcessCount * unitCount);
-    expect(run.processPlans.length).toBe(36 * 9);
+    // Lean Core L1.3 (D5): processes 1-11 and 33 are planned once per job (unit-less); the other 24 once per unit.
+    const jobLevel = await owner.jobProcess.count({ where: { jobId: job.id, included: { not: false }, grain: "JOB" } });
+    expect(jobLevel).toBe(12);
+    expect(run.processPlans.length).toBe((includedProcessCount - jobLevel) * unitCount + jobLevel);
+    expect(run.processPlans.length).toBe(24 * 9 + 12);
+    expect(run.processPlans.filter((p) => p.unitId == null)).toHaveLength(12);
     // Status is NOT asserted NOT_STARTED here: this file shares DESPL-320 with
     // other DB-gated test files, and persistScheduleRun now correctly carries
     // real work forward across a reschedule (audit C1 fix) instead of silently
     // resetting it — asserting a blanket clean slate would just be re-relying
     // on the bug this phase fixes. The per-unit expansion grain (P0.2) this
     // test exists to pin is the plan count and unitId assignment below.
+    // Every UNIT-grain plan names a unit (all 9 appear); the 12 job-level plans name none.
+    const jobProcessIds = new Set((await owner.jobProcess.findMany({ where: { jobId: job.id, grain: "JOB" }, select: { id: true } })).map((p) => p.id));
     for (const p of run.processPlans) {
-      expect(p.unitId).not.toBeNull();
+      expect(p.unitId == null).toBe(jobProcessIds.has(p.jobProcessId));
     }
-    const distinctUnitIds = new Set(run.processPlans.map((p) => p.unitId));
+    const distinctUnitIds = new Set(run.processPlans.filter((p) => p.unitId != null).map((p) => p.unitId));
     expect(distinctUnitIds.size).toBe(9);
   });
 

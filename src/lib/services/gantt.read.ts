@@ -41,7 +41,8 @@ export async function loadJobGantt(actor: Actor, jobId: number): Promise<JobGant
     const processById = new Map(processes.map((p) => [p.id, p]));
 
     const plans = await tx.processPlan.findMany({
-      where: { scheduleRunId: run.id, unitId: { in: units.map((u) => u.id) } },
+      // L1.3: unit-less (JOB-grain) plans too; each unit shows the job's plan for those processes.
+      where: { scheduleRunId: run.id, OR: [{ unitId: { in: units.map((u) => u.id) } }, { unitId: null }] },
       select: {
         unitId: true,
         jobProcessId: true,
@@ -64,6 +65,12 @@ export async function loadJobGantt(actor: Actor, jobId: number): Promise<JobGant
       const list = plansByUnit.get(p.unitId) ?? [];
       list.push(p);
       plansByUnit.set(p.unitId, list);
+    }
+    for (const jobPlan of plans.filter((p) => p.unitId == null)) {
+      for (const u of units) {
+        const list = plansByUnit.get(u.id) ?? [];
+        if (!list.some((p) => p.jobProcessId === jobPlan.jobProcessId)) plansByUnit.set(u.id, [...list, jobPlan]);
+      }
     }
 
     const ganttUnits: GanttUnit[] = units.map((u) => {

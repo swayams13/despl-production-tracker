@@ -138,10 +138,12 @@ export async function loadStageDetail(
     const run = await tx.scheduleRun.findFirst({ where: { jobId, equipmentId: null, isCurrent: true }, select: { id: true } });
     const plans = run
       ? await tx.processPlan.findMany({
-          where: { scheduleRunId: run.id, jobProcessId: { in: jpIds }, unitId },
+          // L1.3: a JOB-grain process has one unit-less plan, shown on every unit.
+          where: { scheduleRunId: run.id, jobProcessId: { in: jpIds }, OR: [{ unitId }, { unitId: null }] },
           select: {
             id: true,
             jobProcessId: true,
+            unitId: true,
             status: true,
             plannedStart: true,
             plannedFinish: true,
@@ -158,7 +160,8 @@ export async function loadStageDetail(
       : [];
     const nameBySubmitter = new Map(submitters.map((u) => [u.id, u.name]));
 
-    const planByProcess = new Map(plans.map((p) => [p.jobProcessId, p]));
+    // The unit's own plan wins over the job-level one (last write wins, unit plans last).
+    const planByProcess = new Map([...plans].sort((a, b) => Number(a.unitId != null) - Number(b.unitId != null)).map((p) => [p.jobProcessId, p]));
     const backingPlans: StageBackingPlan[] = await Promise.all(
       backingProcesses
         .filter((p) => planByProcess.has(p.id))

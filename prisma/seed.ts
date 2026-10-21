@@ -29,6 +29,7 @@ import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import type { AssemblyStepRole } from "../src/generated/prisma/enums";
 import { ensurePvEquipmentTypes, SKIRT_TYPE_CODE } from "../src/lib/services/equipment-type.setup";
 import { ensurePvConfigQuestions } from "../src/lib/services/config-questions.setup";
+import { JOB_GRAIN_PROCESS_CODES } from "../src/lib/shared/job-grain";
 import {
   ProcessEdgeType,
   Sourcing,
@@ -745,6 +746,9 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
           cumulativePrinted: p.cumulativePrinted,
           defaultDepartmentId: deptIdByCode.get(p.defaultDepartment)!,
           workOrderStages: p.workOrderStages,
+          // Lean Core L1.3 (D5, D3): processes 1-11 and 33 are planned once per job; the office processes 1-11 need no QC.
+          grain: JOB_GRAIN_PROCESS_CODES.includes(String(p.code)) ? ("JOB" as const) : ("UNIT" as const),
+          requiresQc: p.code > 11,
           envelopeFinishByMinDays: p.envelope.finishByMinDays,
           envelopeFinishByMaxDays: p.envelope.finishByMaxDays,
           envelopeStartByMinDays: p.envelope.startByMinDays,
@@ -1067,6 +1071,8 @@ async function seedDemo(
             envelopeStartByMinDays: tp.envelopeStartByMinDays,
             envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
             workOrderStages: tp.workOrderStages,
+            grain: tp.grain,
+            requiresQc: tp.requiresQc,
           })),
         });
         const jobProcesses = await tx.jobProcess.findMany({ where: { jobId: jobRow.id } });
@@ -1305,6 +1311,8 @@ async function seedDemo(
           envelopeStartByMinDays: tp.envelopeStartByMinDays,
           envelopeStartByMaxDays: tp.envelopeStartByMaxDays,
           workOrderStages: tp.workOrderStages,
+          grain: tp.grain,
+          requiresQc: tp.requiresQc,
         })),
       });
       const pilotProcesses = await tx.jobProcess.findMany({ where: { jobId: pilotJob.id } });
