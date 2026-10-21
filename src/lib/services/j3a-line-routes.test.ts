@@ -318,6 +318,16 @@ describe.skipIf(!RUN_DB)("Lean Core J3a route per equipment line (DB)", async ()
       const j = await w.make([{}, { routeVersionId: w.tvB.id, typeId: w.eqB.id }]);
       await expect(generateSchedule(w.actor, { jobId: j.jobId, mode: "FORWARD" })).rejects.toMatchObject({ code: "SCHEDULE_DATA_MISSING" });
     });
+
+    it("BACKWARD with no delivery date refuses, naming the missing date (not durations)", async () => {
+      const w = await world("NODATE");
+      const j = await w.make([{}]);
+      await owner.job.update({ where: { id: j.jobId }, data: { committedDeliveryDate: null } });
+      await expect(generateSchedule(w.actor, { jobId: j.jobId, mode: "BACKWARD" })).rejects.toMatchObject({
+        code: "SCHEDULE_DATA_MISSING",
+        detail: { missing: "committedDeliveryDate" },
+      });
+    });
   });
 
   describe("floor: exclusions stay on their own route", () => {

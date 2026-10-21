@@ -121,6 +121,7 @@ export async function generateSchedule(
         throw new AppError(ERROR_CODES.SCHEDULE_DATA_MISSING, {
           jobId: parsed.jobId,
           reason: 'BACKWARD schedule needs a required delivery date',
+          missing: 'committedDeliveryDate',
         });
       }
       projectStart = routes

@@ -49,7 +49,7 @@ vi.mock("@/lib/services/job-intake.service", () => ({
 }));
 vi.mock("@/lib/services/job-intake.read", () => ({}));
 vi.mock("@/lib/services/admin.service", () => ({}));
-vi.mock("@/lib/services/schedule.service", () => ({ generateSchedule: vi.fn() }));
+vi.mock("@/lib/services/schedule.service", () => ({ generateSchedule: vi.fn(async () => ({ feasibility: "FEASIBLE", shortfallDays: null, processPlans: [] })), getSchedule: vi.fn(async () => null) }));
 vi.mock("@/app/actions/auth", () => ({ logout: vi.fn() }));
 
 const { notFound } = await import("next/navigation");
@@ -60,8 +60,8 @@ const snapshot = await import("./actions/client-snapshot");
 const intake = await import("./actions/job-intake");
 const { default: PortalPage } = await import("./portal/page");
 
-const createInput = (familyId = 7) => ({ familyId }) as unknown as Parameters<typeof intake.createJobAction>[0];
-const datesInput = { jobId: 1, orderDate: null, committedDeliveryDate: null, targetDispatchDate: null };
+const createInput = (familyId = 7) => ({ familyId, committedDeliveryDate: new Date("2026-12-31") }) as unknown as Parameters<typeof intake.createJobAction>[0];
+const datesInput = { jobId: 1, orderDate: null, committedDeliveryDate: new Date("2026-12-31"), targetDispatchDate: null };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -100,7 +100,6 @@ describe("frozen Server Actions refuse with FEATURE_FROZEN and never reach the s
     { name: "publishSnapshotAction", call: () => snapshot.publishSnapshotAction(1), service: () => snapshotSvc.publishSnapshot },
     { name: "verifySnapshotAction", call: () => snapshot.verifySnapshotAction(1), service: () => snapshotSvc.verifySnapshot },
     { name: "rejectSnapshotAction", call: () => snapshot.rejectSnapshotAction(1, "wrong"), service: () => snapshotSvc.rejectSnapshot },
-    { name: "updateJobDatesAction (replan)", call: () => intake.updateJobDatesAction(datesInput), service: () => intakeSvc.updateJobDates },
     { name: "createJobAction, HEAT_EXCHANGER", familyCode: "HEAT_EXCHANGER", call: () => intake.createJobAction(createInput()), service: () => intakeSvc.createJob },
     { name: "createJobAction, PIPE_SPOOL", familyCode: "PIPE_SPOOL", call: () => intake.createJobAction(createInput()), service: () => intakeSvc.createJob },
     { name: "createJobAction, PIPING_SYSTEM", familyCode: "PIPING_SYSTEM", call: () => intake.createJobAction(createInput()), service: () => intakeSvc.createJob },

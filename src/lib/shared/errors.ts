@@ -123,6 +123,8 @@ export const ERROR_CODES = {
   EXCLUSION_REASON_REQUIRED: "EXCLUSION_REASON_REQUIRED",
   /** checkFeasibility (AUD-035): requiredMinDays exceeds requiredMaxDays — the envelope data fed in is internally inconsistent (distinct from SCHEDULE_DATA_MISSING's "no envelope at all"). */
   SCHEDULE_ENVELOPE_INVALID: "SCHEDULE_ENVELOPE_INVALID",
+  /** New-job wizard / date editor: a job needs the committed delivery date; without it no schedule can be built and the job has no planned dates. */
+  DELIVERY_DATE_REQUIRED: "DELIVERY_DATE_REQUIRED",
   /** A Server Action belonging to a feature switched off in src/lib/shared/flags.ts (Lean Core §4 freeze list). */
   FEATURE_FROZEN: "FEATURE_FROZEN",
   /** Master data (M3): an APPROVED part family or grade was edited directly; it must be revised (with a reason) first. */
@@ -248,6 +250,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "Excluding a process from the job's scope requires a reason, which is recorded.",
   SCHEDULE_ENVELOPE_INVALID:
     "This job's envelope data is inconsistent (minimum duration exceeds maximum) and cannot be scheduled. Contact an administrator.",
+  DELIVERY_DATE_REQUIRED:
+    "Enter the committed delivery date, the date promised to the client. Without it the job cannot be scheduled.",
   FEATURE_FROZEN:
     "This feature is switched off while the pilot runs. Ask the Production Head if you need it; only the system administrator can switch it back on.",
   REVISE_REQUIRED:

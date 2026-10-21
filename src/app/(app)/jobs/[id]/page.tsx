@@ -45,9 +45,11 @@ export default async function JobDetail({
   if (!actor) redirect("/login");
   if (actor.clientId !== null) redirect("/portal");
 
-  // Lean Core freeze: false hides the Client View tab and the date editor.
+  // Lean Core freeze: false hides the Client View tab.
   const canReviewClientUpdates = FEATURES.clientPortal && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
-  const canEditJobDates = FEATURES.cpmReplanUi && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  // Not behind cpmReplanUi: a missing or wrong delivery date must stay fixable.
+  // The action only schedules a job that has no schedule yet while replan is frozen.
+  const canEditJobDates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
   // cosmetic, the server is authoritative either way.
   const canManagePacking = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);

@@ -164,8 +164,8 @@ function readStateFromUrl(params: URLSearchParams, options: IntakeOptions): Wiza
 }
 
 // ── Step validation ─────────────────────────────────────────────────────
-function step1Valid(s: WizardState): boolean {
-  if (!s.clientId || !s.jobNumber.trim()) return false;
+export function step1Valid(s: WizardState): boolean {
+  if (!s.clientId || !s.jobNumber.trim() || !s.committedDeliveryDate) return false;
   if (s.targetDispatchDate && s.committedDeliveryDate && s.targetDispatchDate > s.committedDeliveryDate) return false;
   return true;
 }
@@ -283,11 +283,20 @@ export function NewJobWizard({ options }: { options: IntakeOptions }) {
     }
     const job = res.job!;
     setCreatedJob(job);
-    const v = await scheduleNewJobAction(
-      job.jobId,
-      state.committedDeliveryDate ? new Date(state.committedDeliveryDate) : undefined,
-    );
-    setVerdict(v);
+    try {
+      setVerdict(
+        await scheduleNewJobAction(
+          job.jobId,
+          state.committedDeliveryDate ? new Date(state.committedDeliveryDate) : undefined,
+        ),
+      );
+    } catch {
+      // The job exists; an unexpected scheduling failure must not leave "Open job" disabled.
+      setVerdict({
+        kind: "FAILED",
+        message: "The job was created, but its schedule could not be computed. Open the job and set the delivery date.",
+      });
+    }
     setCreating(false);
   };
 
@@ -430,9 +439,9 @@ function StepOrder({
 
         <div className="emp-grid" style={{ marginTop: 4 }}>
           <div>
-            <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Committed delivery date</label>
+            <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Committed delivery date *</label>
             <input className="ws-detail" type="date" value={state.committedDeliveryDate} onChange={(e) => patch({ committedDeliveryDate: e.target.value })} />
-            <div className="emp-hint">The date promised to the client. Lateness is measured against this.</div>
+            <div className="emp-hint">The date promised to the client. Required: the schedule is built backwards from it, and lateness is measured against it.</div>
           </div>
           <div>
             <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Target dispatch date</label>
