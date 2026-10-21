@@ -4,13 +4,14 @@ import { audited } from "@/lib/audit";
 import { assertNotClientUser, requireRole, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { BOM_RELEASE_ROLES } from "@/lib/shared/stores-access";
-import { bomReleaseTargetSchema, mapBomLinesSchema, releaseBomRevisionSchema, type BomReleaseTargetInput, type MapBomLinesInput, type ReleaseBomRevisionInput } from "@/lib/shared/schemas";
+import { bomReleaseTargetSchema, startBomRevisionSchema, mapBomLinesSchema, releaseBomRevisionSchema, type BomReleaseTargetInput, type StartBomRevisionInput, type MapBomLinesInput, type ReleaseBomRevisionInput } from "@/lib/shared/schemas";
 import { JOINT_TYPE_LABEL } from "@/lib/shared/weld-map";
 import { pickRouteTemplate } from "@/lib/shared/stage-mapping";
 import type { JointType } from "@/generated/prisma/client";
 import { flushRuleDecisions, LineRules } from "./config-rules";
 import { approvedComponentTypeIds, materializeComponentsFromBomItems } from "./component.service";
 import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
+import { ensureDraftRevisionTx } from "./bom.service";
 import { loadSkippedQcpItems } from "./assembly-qcp-match";
 import { buildReleaseWarnings, suggestPartFamily, type PartFamilySuggestion, type ReleaseWarning } from "./bom-release.rules";
 
@@ -288,6 +289,26 @@ export async function previewBomRelease(actor: Actor, input: BomReleaseTargetInp
     throw e;
   }
   throw new Error("unreachable");
+}
+
+/**
+ * J5b "Start revision N": the line's draft BOM revision, started if it has none, with the line's
+ * revision-less BOM items moved into it (audited). Safe to repeat: with a draft already there it
+ * only moves any loose lines. A line that already has floor rows, or a materialised revision,
+ * is refused like the release itself (existing jobs are never touched).
+ */
+export async function startBomRevision(actor: Actor, input: StartBomRevisionInput): Promise<{ bomRevisionId: number; revisionNo: number; created: boolean; moved: number }> {
+  const { equipmentId } = startBomRevisionSchema.parse(input);
+  guard(actor);
+  const jobId = await jobIdOf(actor, equipmentId);
+  return withJob(actor.tenantId, jobId, async (tx) => {
+    const r = await ensureDraftRevisionTx(tx, actor, equipmentId, jobId);
+    if (!r) {
+      const released = await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null } } });
+      throw new AppError(released > 0 ? ERROR_CODES.BOM_RELEASE_DIFF_NOT_BUILT : ERROR_CODES.BOM_ALREADY_MATERIALIZED, { equipmentId });
+    }
+    return { bomRevisionId: r.id, revisionNo: r.revisionNo, created: r.created, moved: r.moved };
+  });
 }
 
 /**

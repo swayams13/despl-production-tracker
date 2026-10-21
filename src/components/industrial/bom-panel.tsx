@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { StatusChip } from "./status-chip";
 import { STAGE_STATUS } from "./stage-status";
@@ -448,7 +449,16 @@ function ImportBomControl({ jobId, equipmentId }: { jobId: number; equipmentId: 
         toast.error(r.message);
         return;
       }
-      if (r.failures.length === 0) {
+      if (r.waitsForRelease) {
+        // J5b: the lines are in a draft revision. The parts and steps come from the release screen, not from the import.
+        toast.success(
+          <span>
+            Imported {r.createdCount} item{r.createdCount === 1 ? "" : "s"} into BOM revision {r.bomRevisionNo}. Release the BOM to create the parts and steps.{" "}
+            <Link href={`/jobs/${jobId}/release`} style={{ textDecoration: "underline" }}>Open the release screen</Link>
+          </span>,
+        );
+        if (r.failures.length > 0) toast.error(`${r.failures.length} row${r.failures.length === 1 ? "" : "s"} failed: ${r.failures.map((f) => `row ${f.row} (${f.error})`).join("; ")}`);
+      } else if (r.failures.length === 0) {
         const componentNote = r.componentCount > 0 ? ` (${r.componentCount} auto-routed)` : "";
         toast.success(`Imported ${r.createdCount} item${r.createdCount === 1 ? "" : "s"}${componentNote}.`);
       } else {
