@@ -300,10 +300,32 @@ export const createDrawingRevisionSchema = z
     // belongs to a different job in the same tenant.
     jobId: id,
     assemblyDrawingId: id,
-    revisionNo: z.number().int().positive(),
+    // JG1: drawings are normally first issued as Rev 0.
+    revisionNo: z.number().int().min(0),
     status: z.enum(["DRAFT", "RELEASED"]),
   })
   .strict();
+
+/** JG1: register a drawing on a job (its revisions are issued separately). */
+export const createAssemblyDrawingSchema = z
+  .object({
+    jobId: id,
+    drawingTypeId: id,
+    drawingNo: z.string().trim().min(1).max(100),
+    remarks: z.string().trim().min(1).max(500).optional(),
+  })
+  .strict();
+export type CreateAssemblyDrawingInput = z.infer<typeof createAssemblyDrawingSchema>;
+
+/** JG1: link many components to one drawing (all or nothing). */
+export const linkDrawingToComponentsSchema = z
+  .object({
+    jobId: id,
+    assemblyDrawingId: id,
+    componentIds: z.array(id).min(1).max(500),
+  })
+  .strict();
+export type LinkDrawingToComponentsInput = z.infer<typeof linkDrawingToComponentsSchema>;
 export type CreateDrawingRevisionInput = z.infer<typeof createDrawingRevisionSchema>;
 
 /**

@@ -1,5 +1,6 @@
 import { effectiveRequiresQc, pickRouteTemplate } from "@/lib/shared/stage-mapping";
-import { withTenant, type Tx } from "@/lib/db";
+import { withJob, withTenant, type Tx } from "@/lib/db";
+import { DRAWING_WRITE_ROLES } from "./drawing.service";
 import {
   type Actor,
   assertClientScope,
@@ -28,6 +29,7 @@ import {
   recordPaintRecordSchema,
   recordDftReadingSchema,
   linkGoverningDrawingSchema,
+  linkDrawingToComponentsSchema,
   type StartComponentOperationInput,
   type SubmitComponentOperationInput,
   type VerifyComponentOperationInput,
@@ -35,6 +37,7 @@ import {
   type RecordPaintRecordInput,
   type RecordDftReadingInput,
   type LinkGoverningDrawingInput,
+  type LinkDrawingToComponentsInput,
 } from "@/lib/shared/schemas";
 import type { Component, ComponentOperation, DftReading, PaintRecord } from "@/generated/prisma/client";
 import { OperationStatus } from "@/generated/prisma/enums";
@@ -821,7 +824,7 @@ export async function materializeComponentsFromBomItems(
 export async function linkGoverningDrawing(actor: Actor, input: LinkGoverningDrawingInput): Promise<Component> {
   const { componentId, assemblyDrawingId } = linkGoverningDrawingSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...DRAWING_WRITE_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     const component = await tx.component.findFirst({
@@ -857,5 +860,62 @@ export async function linkGoverningDrawing(actor: Actor, input: LinkGoverningDra
         },
       };
     });
+  });
+}
+
+/**
+ * JG1: link several components to one drawing in one go (the "pressure parts
+ * with no drawing" list on /jobs/[id]/drawings). Same checks as
+ * `linkGoverningDrawing`; all or nothing; one audit row per component. A part
+ * already linked to a different drawing is refused, never silently moved
+ * (re-pointing a part is the single-component action).
+ */
+export async function linkDrawingToComponents(actor: Actor, input: LinkDrawingToComponentsInput): Promise<{ linked: number }> {
+  const { jobId, assemblyDrawingId, componentIds } = linkDrawingToComponentsSchema.parse(input);
+  assertNotClientUser(actor);
+  requireRole(actor, ...DRAWING_WRITE_ROLES);
+  const ids = [...new Set(componentIds)];
+
+  return withJob(actor.tenantId, jobId, async (tx) => {
+    const job = await tx.job.findFirst({ where: { id: jobId, tenantId: actor.tenantId }, select: { clientId: true } });
+    if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
+    assertClientScope(actor, job.clientId);
+    const drawing = await tx.assemblyDrawing.findFirst({ where: { id: assemblyDrawingId, jobId }, select: { id: true, drawingNo: true } });
+    if (!drawing) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId });
+    const components = await tx.component.findMany({
+      where: { id: { in: ids }, jobId, tenantId: actor.tenantId },
+      select: { id: true, tag: true, governingDrawingId: true },
+    });
+    if (components.length !== ids.length) {
+      const found = new Set(components.map((c) => c.id));
+      throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentIds: ids.filter((i) => !found.has(i)) });
+    }
+    const elsewhere = components.filter((c) => c.governingDrawingId != null && c.governingDrawingId !== assemblyDrawingId);
+    if (elsewhere.length) {
+      throw new AppError(
+        ERROR_CODES.INVALID_STATE_TRANSITION,
+        { componentIds: elsewhere.map((c) => c.id) },
+        `${elsewhere.map((c) => c.tag).join(", ")} already ${elsewhere.length === 1 ? "has" : "have"} a different drawing. Unlink or relink ${elsewhere.length === 1 ? "it" : "them"} one by one.`,
+      );
+    }
+    const todo = components.filter((c) => c.governingDrawingId == null);
+    for (const c of todo) {
+      await audited(tx, actor, async () => {
+        await tx.component.update({ where: { id: c.id }, data: { governingDrawingId: assemblyDrawingId } });
+        return {
+          result: null,
+          audit: {
+            action: "component.linkGoverningDrawing",
+            entityType: "Component",
+            entityId: c.id,
+            before: { governingDrawingId: null },
+            after: { governingDrawingId: assemblyDrawingId },
+            eventType: "ComponentGoverningDrawingLinked",
+            eventPayload: { componentId: c.id, tag: c.tag, assemblyDrawingId, bulk: true },
+          },
+        };
+      });
+    }
+    return { linked: todo.length };
   });
 }
