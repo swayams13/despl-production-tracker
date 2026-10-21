@@ -1,6 +1,7 @@
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { getCurrentScheduleRun } from "./_shared";
+import { inRoute, loadJobRoutes } from "./line-route";
 import type { GanttBar, GanttUnit, JobGanttData } from "./gantt-layout";
 import { isOverdue } from "@/lib/shared/business-day";
 
@@ -36,7 +37,7 @@ export async function loadJobGantt(actor: Actor, jobId: number): Promise<JobGant
     const processes = await tx.jobProcess.findMany({
       where: { jobId },
       orderBy: { seq: "asc" },
-      select: { id: true, code: true, name: true, seq: true, workOrderStages: true, durationMaxDays: true, department: { select: { name: true } } },
+      select: { id: true, code: true, name: true, seq: true, equipmentId: true, grain: true, workOrderStages: true, durationMaxDays: true, department: { select: { name: true } } },
     });
     const processById = new Map(processes.map((p) => [p.id, p]));
 
@@ -73,12 +74,16 @@ export async function loadJobGantt(actor: Actor, jobId: number): Promise<JobGant
       }
     }
 
+    const { routes, keyOfUnit } = await loadJobRoutes(tx, jobId);
+    const multi = routes.length > 1;
     const ganttUnits: GanttUnit[] = units.map((u) => {
+      const key = keyOfUnit.get(u.id) ?? null;
+      const line = routes.find((r) => r.key === key)?.name;
       const unitPlans = plansByUnit.get(u.id) ?? [];
       const bars: GanttBar[] = unitPlans
         .map((p) => {
           const proc = processById.get(p.jobProcessId);
-          if (!proc) return null;
+          if (!proc || !inRoute(proc, key)) return null;
           const overdue = p.status !== "COMPLETE" && isOverdue(p.plannedFinish, now);
           const bar: GanttBar = {
             jobProcessId: proc.id,
@@ -94,12 +99,13 @@ export async function loadJobGantt(actor: Actor, jobId: number): Promise<JobGant
             actualStart: p.actualStart?.toISOString() ?? null,
             actualFinish: p.actualFinish?.toISOString() ?? null,
             standardDays: proc.durationMaxDays,
+            ...(multi ? { group: proc.grain === "JOB" ? "Whole order" : line } : {}),
           };
           return bar;
         })
         .filter((b): b is GanttBar => b != null)
         .sort((a, b) => a.seq - b.seq);
-      return { unitId: u.id, serialNo: u.serialNo, bars };
+      return { unitId: u.id, serialNo: u.serialNo, ...(multi ? { line } : {}), bars };
     });
 
     return {

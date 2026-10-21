@@ -1,3 +1,4 @@
+import { inRoute, loadJobRoutes } from "./line-route";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, assertNotClientUser, type Actor } from "@/lib/authz";
 import { fmtLongDay, planStatusWord } from "@/lib/shared/board";
@@ -30,10 +31,13 @@ export async function loadTrackerSheet(actor: Actor, jobId: number): Promise<Tra
       tx.jobProcess.findMany({
         where: { jobId },
         orderBy: { seq: "asc" },
-        select: { id: true, seq: true, name: true, included: true, department: { select: { name: true } } },
+        select: { id: true, seq: true, name: true, included: true, equipmentId: true, grain: true, department: { select: { name: true } } },
       }),
       tx.scheduleRun.findFirst({ where: { jobId, equipmentId: null, isCurrent: true }, select: { id: true } }),
     ]);
+    const { routes, keyOfUnit } = await loadJobRoutes(tx, jobId);
+    const multi = routes.length > 1;
+    const lineName = (equipmentId: number | null) => routes.find((x) => x.key === equipmentId)?.name;
     const plans = run
       ? await tx.processPlan.findMany({
           where: { scheduleRunId: run.id },
@@ -54,12 +58,12 @@ export async function loadTrackerSheet(actor: Actor, jobId: number): Promise<Tra
         const finishes = mine.map((x) => x.plannedFinish?.getTime()).filter((n): n is number => n != null);
         return {
           seq: p.seq,
-          name: p.name,
+          name: multi && p.equipmentId != null ? `${p.name} (${lineName(p.equipmentId) ?? "line"})` : p.name,
           department: p.department.name,
           startBy: starts.length ? fmtLongDay(new Date(Math.min(...starts)).toISOString()) : "",
           finishBy: finishes.length ? fmtLongDay(new Date(Math.max(...finishes)).toISOString()) : "",
           cells: units.map((u) => {
-            if (!p.included) return "-";
+            if (!p.included || !inRoute(p, keyOfUnit.get(u.id) ?? null)) return "-";
             const plan = byKey.get(`${p.id}:${u.id}`) ?? byKey.get(`${p.id}:job`);
             return plan ? planStatusWord(plan.status, plan.verifiedBy != null) : "-";
           }),

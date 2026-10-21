@@ -1,7 +1,8 @@
-import { withTenant } from "@/lib/db";
+import { inRoute, loadJobRoutes } from "./line-route";
+import { withTenant, type Tx } from "@/lib/db";
 import { assertClientScope, hasRole, ROLES, type Actor } from "@/lib/authz";
 import { computeCpm, workingDaysBetween } from "@/lib/schedule";
-import { loadJobSpine, getCurrentScheduleRun, computeOrRefuse } from "./_shared";
+import { loadJobSpine, getCurrentScheduleRun, computeOrRefuse, type JobSpine } from "./_shared";
 import { prioritize, type PlanState, type RankedPlan } from "./prioritizer";
 import type { Department, DelayCategoryRef, ProcessPlan } from "@/generated/prisma/client";
 import { isOnTime, istCalendarDayMarker } from "@/lib/shared/business-day";
@@ -17,6 +18,25 @@ const LEGACY_HOLD_LABEL: Record<HoldStatus, string> = {
   REINSPECT: "Reinspect",
   WAIVER_PENDING: "Waiver pending",
 };
+
+/**
+ * J3b: CPM per route, so a short line is not given float against another line's longer path. A JOB-grain
+ * process sits in every route and keeps its smallest float. One route = the whole spine, as before.
+ */
+async function floatPerRoute(tx: Tx, jobId: number, spine: JobSpine) {
+  const out = new Map<number, { totalFloat: number; isCritical: boolean }>();
+  for (const r of (await loadJobRoutes(tx, jobId)).routes) {
+    const ids = new Set(spine.rawProcesses.filter((p) => inRoute(p, r.key)).map((p) => p.id));
+    const cpm = computeOrRefuse(() =>
+      computeCpm(spine.processes.filter((p) => ids.has(p.id)), spine.edges.filter((e) => ids.has(e.processId) && ids.has(e.predecessorId))),
+    );
+    for (const n of cpm) {
+      const prev = out.get(n.processId);
+      if (!prev || n.totalFloat < prev.totalFloat) out.set(n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical });
+    }
+  }
+  return out;
+}
 
 /**
  * The current run's per-department prioritized view — the shared read behind
@@ -45,8 +65,7 @@ export async function loadPrioritizedJob(actor: Actor, jobId: number): Promise<P
     const spine = await loadJobSpine(tx, jobId);
     // Single-job read: a malformed spine surfaces as an explainable refusal
     // rather than a bare-Error 500 (audit 0.10).
-    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
-    const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
+    const floatByProcessId = await floatPerRoute(tx, jobId, spine);
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
 
     const rankedByDept = prioritize({
@@ -414,8 +433,7 @@ export async function loadWorkspaceView(
     const spine = await loadJobSpine(tx, jobId);
     // Single-job read: a malformed spine surfaces as an explainable refusal
     // rather than a bare-Error 500 (audit 0.10).
-    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
-    const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
+    const floatByProcessId = await floatPerRoute(tx, jobId, spine);
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
     const procMeta = new Map(
       spine.rawProcesses.map((p) => [p.id, { name: p.name, stageLabel: stageLabel(p.workOrderStages), deptId: p.departmentId }]),
@@ -739,8 +757,7 @@ export async function loadJobKpis(actor: Actor, jobId: number): Promise<JobKpis 
     const spine = await loadJobSpine(tx, jobId);
     // Single-job read: a malformed spine surfaces as an explainable refusal
     // rather than a bare-Error 500 (audit 0.10).
-    const cpm = computeOrRefuse(() => computeCpm(spine.processes, spine.edges));
-    const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
+    const floatByProcessId = await floatPerRoute(tx, jobId, spine);
     const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
     const durationMaxById = new Map(spine.rawProcesses.map((p) => [p.id, p.durationMaxDays]));
 

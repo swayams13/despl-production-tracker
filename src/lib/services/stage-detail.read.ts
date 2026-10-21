@@ -1,3 +1,4 @@
+import { loadJobRoutes, routeWhere } from "./line-route";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
@@ -112,7 +113,11 @@ export async function loadStageDetail(
     const unit = await tx.unit.findFirst({ where: { id: unitId, equipment: { jobId } }, select: { serialNo: true } });
     if (!unit) return null;
 
-    const stageNames = await loadWorkOrderStageNames(tx, actor.tenantId, job.familyId);
+    // J3b: a unit on a line with its own route reads that route's processes and stage names.
+    const { routes, keyOfUnit } = await loadJobRoutes(tx, jobId);
+    const key = keyOfUnit.get(unitId) ?? null;
+    const routeFamily = routes.find((r) => r.key === key)?.familyId ?? job.familyId;
+    const stageNames = await loadWorkOrderStageNames(tx, actor.tenantId, routeFamily);
 
     const viewRows = await tx.$queryRaw<ViewRow[]>`
       SELECT fill_status, is_overdue, is_rejected, governing_plan_id
@@ -123,7 +128,7 @@ export async function loadStageDetail(
     if (!view) return null;
 
     const backingProcesses = await tx.jobProcess.findMany({
-      where: { jobId, workOrderStages: { has: stageNo } },
+      where: { jobId, workOrderStages: { has: stageNo }, ...routeWhere(key) },
       orderBy: { seq: "asc" },
       select: {
         id: true,

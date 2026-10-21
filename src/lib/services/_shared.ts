@@ -8,6 +8,7 @@ import { istCalendarDayMarker } from "@/lib/shared/business-day";
 import { collapseUnitPlans, predecessorStatus, type Collapsed } from "@/lib/shared/job-grain";
 import { drawingStateOf } from "@/lib/shared/floor-rules";
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
+import { routeWhere, unitRouteKey } from "./line-route";
 import { explodeBomItem, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
 import type {
   ScheduleProcess,
@@ -1524,6 +1525,11 @@ async function rollupForSeq(
   seq: number | null | undefined,
 ): Promise<RollupChange | null> {
   if (jobId == null || unitId == null || seq == null) return null;
-  const jp = await tx.jobProcess.findFirst({ where: { jobId, code: String(seq) }, select: { id: true } });
+  // J3b: the unit's own route (a line's own row wins over the job's JOB-grain row of the same code).
+  const jp = await tx.jobProcess.findFirst({
+    where: { jobId, code: String(seq), ...routeWhere(await unitRouteKey(tx, unitId)) },
+    orderBy: { equipmentId: { sort: "desc", nulls: "last" } },
+    select: { id: true },
+  });
   return jp ? rollupProcessPlan(tx, actor, jp.id, unitId) : null;
 }

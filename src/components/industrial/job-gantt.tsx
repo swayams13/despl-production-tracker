@@ -84,10 +84,13 @@ export function JobGantt({
   const [groupByDept, setGroupByDept] = useState(false);
   const unit = data.units.find((u) => u.unitId === selectedUnitId) ?? data.units[0] ?? null;
   const bars = useMemo(() => unit?.bars ?? [], [unit]);
-  const rows = useMemo<GanttRowItem[]>(
-    () => (groupByDept ? groupBarsByDept(bars) : bars.map((bar) => ({ kind: "bar" as const, bar }))),
-    [bars, groupByDept],
-  );
+  const rows = useMemo<GanttRowItem[]>(() => {
+    const flat = (bs: GanttBar[]): GanttRowItem[] => (groupByDept ? groupBarsByDept(bs) : bs.map((bar) => ({ kind: "bar" as const, bar })));
+    if (!bars.some((b) => b.group)) return flat(bars);
+    // J3b: a multi-route job: the whole order first, then the unit's line.
+    const groups = [...new Set(bars.map((b) => b.group ?? ""))].sort((a, b) => Number(b === "Whole order") - Number(a === "Whole order"));
+    return groups.flatMap((g) => [{ kind: "header" as const, label: g }, ...flat(bars.filter((b) => (b.group ?? "") === g))]);
+  }, [bars, groupByDept]);
   const barRowIndexById = useMemo(() => {
     const m = new Map<number, number>();
     rows.forEach((r, i) => { if (r.kind === "bar") m.set(r.bar.jobProcessId, i); });
@@ -139,7 +142,7 @@ export function JobGantt({
             aria-label="Unit"
           >
             {data.units.map((u) => (
-              <option key={u.unitId} value={u.unitId}>Unit {u.serialNo}</option>
+              <option key={u.unitId} value={u.unitId}>Unit {u.serialNo}{u.line ? ` · ${u.line}` : ""}</option>
             ))}
           </select>
         </div>
