@@ -15,7 +15,7 @@ import {
   createProductFamily,
 } from "@/lib/services/admin.service";
 import { loadTemplateProcesses } from "@/lib/services/job-intake.read";
-import { generateSchedule } from "@/lib/services/schedule.service";
+import { generateSchedule, getSchedule } from "@/lib/services/schedule.service";
 import { withTenant } from "@/lib/db";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
 import { FEATURES } from "@/lib/shared/flags";
@@ -51,6 +51,8 @@ export async function createJobAction(input: CreateJobInput): Promise<CreateJobA
         throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "multiFamilyIntake", familyCode: family.code });
       }
     }
+    // Wizard path only: createJob itself stays date-optional for seeds, scripts and tests.
+    if (!input.committedDeliveryDate) throw new AppError(ERROR_CODES.DELIVERY_DATE_REQUIRED);
     const job = await createJob(actor, input);
     revalidatePath("/jobs");
     return { ok: true, job };
@@ -92,11 +94,13 @@ export async function scheduleNewJobAction(
   } catch (e) {
     if (isAppError(e)) {
       if (e.code === "SCHEDULE_DATA_MISSING") {
+        const noDate = e.detail?.missing === "committedDeliveryDate";
         return {
           kind: "DATA_MISSING",
-          message:
-            "The job was created, but dates cannot be computed yet — this process route has " +
-            "processes with no confirmed duration.",
+          message: noDate
+            ? "The job was created, but dates cannot be computed yet — it has no committed delivery date. Set one on the job page."
+            : "The job was created, but dates cannot be computed yet — this process route has " +
+              "processes with no confirmed duration.",
         };
       }
       return { kind: "FAILED", message: e.message };
@@ -106,7 +110,8 @@ export async function scheduleNewJobAction(
 }
 
 export type UpdateJobDatesActionResult = ActionResult & {
-  schedule?: ScheduleVerdict;
+  /** UNCHANGED: replan is frozen and a schedule exists, so the date was saved but planned dates were not recomputed. */
+  schedule?: ScheduleVerdict | { kind: "UNCHANGED" };
   detail?: Record<string, unknown>;
 };
 
@@ -119,16 +124,21 @@ export type UpdateJobDatesActionResult = ActionResult & {
  */
 export async function updateJobDatesAction(input: UpdateJobDatesInput): Promise<UpdateJobDatesActionResult> {
   try {
-    // Lean Core freeze: changing dates re-runs the scheduler (a replan).
-    if (!FEATURES.cpmReplanUi) throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "cpmReplanUi" });
+    if (!input.committedDeliveryDate) throw new AppError(ERROR_CODES.DELIVERY_DATE_REQUIRED);
     const actor = await requireActor();
     const job = await updateJobDates(actor, input);
     revalidatePath(`/jobs/${input.jobId}`);
     revalidatePath("/jobs");
 
-    const schedule = job.committedDeliveryDate
-      ? await scheduleNewJobAction(input.jobId, job.committedDeliveryDate)
-      : undefined;
+    // Lean Core freeze: saving the date is always allowed, but re-running the
+    // scheduler over an existing schedule is a replan. Frozen, it runs only for
+    // a job that has no schedule yet (the first one, as at intake).
+    const replan = FEATURES.cpmReplanUi || !(await getSchedule(actor, input.jobId));
+    const schedule: UpdateJobDatesActionResult["schedule"] = !replan
+      ? { kind: "UNCHANGED" }
+      : job.committedDeliveryDate
+        ? await scheduleNewJobAction(input.jobId, job.committedDeliveryDate)
+        : undefined;
 
     return { ok: true, schedule };
   } catch (e) {

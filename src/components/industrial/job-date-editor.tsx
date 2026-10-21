@@ -10,6 +10,8 @@ function toInputValue(iso: string | null): string {
 function scheduleMessage(schedule: Awaited<ReturnType<typeof updateJobDatesAction>>["schedule"]): string {
   if (!schedule) return "Dispatch date saved.";
   switch (schedule.kind) {
+    case "UNCHANGED":
+      return "Date saved. The planned dates were not recomputed.";
     case "FEASIBLE":
       return `Dispatch date saved — schedule generated (${schedule.planCount} process plans).`;
     case "INFEASIBLE":
@@ -86,7 +88,7 @@ export function JobDateEditor({
         disabled={pending}
         onChange={(e) => setDue(e.target.value)}
       />
-      <button className="btn btn-accent" disabled={pending} onClick={save}>Save</button>
+      <button className="btn btn-accent" disabled={pending || !due} onClick={save}>Save</button>
       <button className="btn" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
     </span>
   );
