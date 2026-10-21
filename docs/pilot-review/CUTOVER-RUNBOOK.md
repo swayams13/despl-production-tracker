@@ -53,6 +53,13 @@ Three jobs show "Unknown client — pending DESPL confirmation…" on the dashbo
 ## 7. DESPL-320 indent and PO
 Production Head enters the indent/PO under Materials (or loads I16). **Expect:** DESPL-320 now appears in Stores `/materials`. Without it Stores has nothing to receive.
 
+## 7b. Switch-over: tick what is already done (before the team starts)
+
+Found in the Chrome walk-through (21 Oct): on a unit where nothing upstream is recorded, **every** step reads "Out of usual order, N earlier steps still open" and needs a Start early reason. So before day one the Production Head ticks what Excel already shows as done.
+- Screen: `/jobs/<DESPL-320 id>/switch-over` (Production Head or Admin, needs `LEAN_FLOOR` on). Tick per unit, "Up to here", "Same on every unit". Each tick is a normal Done dated to the switch-over date, so the 72-working-hour window, hard rules and maker-checker still apply; QC items land in SUBMITTED for QC.
+- Input needed: DESPL-320's own tracker (I16). Only the DE0463/DE0467 sheets are on hand today. Without it, tick from what the shop says is finished.
+- Expect refusals on pressure cutting without a heat number and on weld steps without a joint: record the heat at cutting and the joint on the Floor screen first. Refusals say why.
+
 ## 8. Day one and after
 - **Adoption:** Portfolio, card **Same-day updates**: share of updates entered the same day per working day, and "N of 5 working days at 90% or more". Pilot gate: 90% for 5 working days in a row (Sundays skipped).
 - **Problems:** team members follow `docs/pilot-review/REPORT-A-PROBLEM.md` (full-screen screenshot with address bar, name, role, time, steps, exact message). Refusals are on purpose: the screenshot shows whether the rule or the data is wrong.
