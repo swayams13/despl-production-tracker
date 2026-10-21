@@ -1,3 +1,4 @@
+import { BACKDATE_WINDOW_HOURS } from "./floor-rules";
 /**
  * Stable error codes (CLAUDE.md invariant #12).
  *
@@ -293,7 +294,7 @@ export const SEQUENCE_OVERRIDE_OPERATOR_MESSAGE = "Ask your supervisor to start 
 /** REPORTED_AT_OUT_OF_WINDOW names its reason in `detail.reason`; say only the one that applies. */
 const REPORTED_AT_REASON_MESSAGES: Record<string, string> = {
   FUTURE: "That time is in the future. Choose now or an earlier time.",
-  TOO_OLD: "That time is more than 72 working hours ago. An administrator can correct older entries.",
+  TOO_OLD: `That time is more than ${BACKDATE_WINDOW_HOURS} working hours ago. An administrator can correct older entries.`,
   BEFORE_RELEASE: "That time is before the job was released to the floor. Choose a later time.",
   DONE_BEFORE_START: "Done cannot be earlier than when the work started. Choose a later time.",
 };

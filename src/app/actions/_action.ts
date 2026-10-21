@@ -1,7 +1,7 @@
 import { ZodError } from "zod";
 import { headers } from "next/headers";
 import { readSession } from "@/lib/auth/session";
-import { isAppError, ERROR_CODES, ERROR_MESSAGES, type ErrorCode } from "@/lib/shared/errors";
+import { isAppError, ERROR_CODES, messageFor, type ErrorCode } from "@/lib/shared/errors";
 
 /**
  * `detail` is the refusal's UI-safe context (which blockers, which step). For
@@ -120,7 +120,7 @@ function log(level: "info" | "error", tag: string, payload: Record<string, unkno
 }
 
 function result(code: ErrorCode, detail?: Record<string, unknown>): ActionResult {
-  const base = { ok: false as const, code, message: ERROR_MESSAGES[code] ?? "This action could not be completed." };
+  const base = { ok: false as const, code, message: messageFor(code, detail) ?? "This action could not be completed." };
   return detail ? { ...base, detail } : base;
 }
 

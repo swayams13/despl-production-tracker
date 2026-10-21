@@ -213,3 +213,17 @@ describe("toActionError — refusal detail and malformed input (M3-B)", () => {
     expect(r).toMatchObject({ ok: false, code: "VALIDATION_FAILED", detail: { issues: [{ path: "reason", message: "A reason is required" }] } });
   });
 });
+
+describe("toActionError — reportedAt refusal names only its own reason", () => {
+  it.each([
+    ["FUTURE", /in the future/, /72 working hours/],
+    ["TOO_OLD", /72 working hours/, /in the future/],
+    ["BEFORE_RELEASE", /before the job was released/, /in the future/],
+    ["DONE_BEFORE_START", /earlier than when the work started/, /in the future/],
+  ])("%s", (reason, yes, no) => {
+    const r = toActionError(new AppError(ERROR_CODES.REPORTED_AT_OUT_OF_WINDOW, { reason }));
+    expect(r).toMatchObject({ ok: false, code: "REPORTED_AT_OUT_OF_WINDOW" });
+    expect((r as { message: string }).message).toMatch(yes);
+    expect((r as { message: string }).message).not.toMatch(no);
+  });
+});

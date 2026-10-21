@@ -46,7 +46,7 @@ function RefusalNote({ refusal }: { refusal: { code: string; message: string } |
   if (!refusal) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: "var(--fs-xs, 11px)" }}>
-      <span style={{ color: "var(--muted)" }}>{refusal.message}</span>
+      <span role="alert" style={{ color: "var(--s-overdue)" }}>{refusal.message}</span>
     </div>
   );
 }
