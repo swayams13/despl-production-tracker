@@ -3,6 +3,7 @@
 // Client components on purpose: server-rendered, keyed list rows are streamed as many separate outlined Flight
 // rows, and a client-side navigation to a page with dozens of them never commits in the browser (found in the
 // L2.7-L2.9 integration run, 16 Oct 2026). As props they travel in one row.
+import { errorLabel } from "@/lib/shared/errors";
 import { PackingPanel } from "@/components/industrial/packing-panel";
 import { DispatchPanel } from "@/components/industrial/dispatch-panel";
 import type { PackingPanel as PackingPanelData } from "@/lib/services/packing.read";
@@ -50,7 +51,7 @@ export function DispatchTab({
                   <b>Unit <span className="mono">{u.serialNo}</span></b> cannot be released or dispatched yet
                   {u.blocks.map((b) => (
                     <small key={b.code}>
-                      <span className="chip c-overdue"><i /><span>{b.code}</span></span> {b.message}
+                      <span className="chip c-overdue"><i /><span>{errorLabel(b.code)}</span></span> {b.message}
                     </small>
                   ))}
                 </li>

@@ -88,6 +88,7 @@ export function JobDateEditor({
         disabled={pending}
         onChange={(e) => setDue(e.target.value)}
       />
+      {!due && <span className="emp-hint" role="status">Enter the committed delivery date to save</span>}
       <button className="btn btn-accent" disabled={pending || !due} onClick={save}>Save</button>
       <button className="btn" disabled={pending} onClick={() => setEditing(false)}>Cancel</button>
     </span>

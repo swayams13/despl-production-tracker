@@ -3,6 +3,7 @@ import { assertNotClientUser, ROLES, requireRole, type Actor } from "@/lib/authz
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { ConfigQuestionDef } from "@/lib/shared/config-questions";
 import { loadQuestionDefs } from "./config-rules";
+import { qcpAssemblyGaps } from "./assembly-qcp-match";
 
 /**
  * Everything the intake wizard's dropdowns need, in one round trip.
@@ -43,7 +44,18 @@ export interface IntakeOptions {
   }>;
   /** Active config questions of every family (J2); the client filters by family and the lines' equipment types. */
   questions: ConfigQuestionDef[];
-  qcpTemplates: Array<{ id: number; label: string; vessel: string; revision: number; itemCount: number }>;
+  /**
+   * `assemblyGaps[familyId]` lists the assembly checklist numbers (srNo) the template
+   * does not number, so createJob would refuse it for that family. Empty = usable.
+   */
+  qcpTemplates: Array<{
+    id: number;
+    label: string;
+    vessel: string;
+    revision: number;
+    itemCount: number;
+    assemblyGaps: Record<number, string[]>;
+  }>;
   bomSources: Array<{ equipmentId: number; label: string; itemCount: number }>;
 }
 
@@ -102,6 +114,13 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
       }),
     ]);
 
+    const qcpIds = qcpTemplates.map((q) => q.id);
+    const gapsByFamily = new Map<number, Record<number, string[]>>();
+    for (const f of families) {
+      const typeIds = equipmentTypes.filter((e) => e.familyId === f.id).map((e) => e.id);
+      gapsByFamily.set(f.id, await qcpAssemblyGaps(tx, actor.tenantId, f.id, typeIds, qcpIds));
+    }
+
     return {
       clients,
       families: families.map((f) => {
@@ -137,6 +156,7 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
         vessel: q.vessel,
         revision: q.revision,
         itemCount: q._count.items,
+        assemblyGaps: Object.fromEntries([...gapsByFamily].map(([familyId, g]) => [familyId, g[q.id] ?? []])),
       })),
       bomSources: equipments.map((e) => ({
         equipmentId: e.id,
