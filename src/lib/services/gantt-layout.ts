@@ -24,6 +24,8 @@ export interface GanttBar {
   actualStart: string | null;
   actualFinish: string | null;
   standardDays: number | null;
+  /** J3b: only on a job with more than one route: the line's name, or "Whole order" for a JOB-grain process. */
+  group?: string;
 }
 
 export interface GanttEdge {
@@ -35,6 +37,8 @@ export interface GanttEdge {
 export interface GanttUnit {
   unitId: number;
   serialNo: string;
+  /** J3b: the unit's line, only on a job with more than one route. */
+  line?: string;
   bars: GanttBar[];
 }
 

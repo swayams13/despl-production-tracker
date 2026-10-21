@@ -3,7 +3,8 @@ import { assertClientScope, assertNotClientUser, type Actor } from "@/lib/authz"
 import { deriveCell, type BoardStatus, type CellView } from "@/lib/shared/board";
 import { loadJobHeader, type JobHeader } from "./job-detail.read";
 import { loadJobSpines } from "./spine.read";
-import { loadOpSeqResolver } from "./_shared";
+import { loadOpSeqResolver, loadWorkOrderStageNames, workOrderStageName } from "./_shared";
+import { inRoute, loadJobRoutes } from "./line-route";
 
 /**
  * Lean Core L2.4: the Job board. One row per unit, one column per work-order
@@ -38,10 +39,19 @@ export interface BoardUnit {
   cells: Record<number, BoardCell>;
 }
 
+/** One line (route) of a job that has more than one: its own stage names, over its own units. */
+export interface BoardLine {
+  name: string;
+  stages: BoardStage[];
+  unitIds: number[];
+}
+
 export interface BoardView {
   header: JobHeader;
   stages: BoardStage[];
   units: BoardUnit[];
+  /** Present only when the job has more than one route (J3b); a single-route job has none. */
+  lines?: BoardLine[];
   departments: Array<{ id: number; name: string }>;
   counts: { openHolds: number; overdue: number; outOfSequence: number };
 }
@@ -63,7 +73,7 @@ export async function loadJobBoard(actor: Actor, jobId: number): Promise<BoardVi
     const processes = await tx.jobProcess.findMany({
       where: { jobId, included: true },
       orderBy: { seq: "asc" },
-      select: { id: true, seq: true, workOrderStages: true, departmentId: true, department: { select: { name: true } } },
+      select: { id: true, seq: true, equipmentId: true, grain: true, workOrderStages: true, departmentId: true, department: { select: { name: true } } },
     });
     const run = await tx.scheduleRun.findFirst({ where: { jobId, equipmentId: null, isCurrent: true }, select: { id: true } });
     const [plans, steps, ops, overrides, resolve, units] = await Promise.all([
@@ -85,22 +95,34 @@ export async function loadJobBoard(actor: Actor, jobId: number): Promise<BoardVi
       loadOpSeqResolver(tx, job.familyId),
       tx.unit.findMany({ where: { jobId }, select: { id: true, publicId: true } }),
     ]);
-    return { processes, plans, steps, ops, overrides, resolve, units };
+    const { routes, keyOfUnit } = await loadJobRoutes(tx, jobId);
+    const namesOf = new Map(
+      await Promise.all(routes.map(async (r) => [r.key, await loadWorkOrderStageNames(tx, actor.tenantId, r.familyId)] as const)),
+    );
+    return { processes, plans, steps, ops, overrides, resolve, units, routes, keyOfUnit, namesOf };
   });
   if (!data) return null;
 
-  const { processes, plans, steps, ops, overrides, resolve } = data;
+  const { processes, plans, steps, ops, overrides, resolve, routes, keyOfUnit, namesOf } = data;
   const publicIdOf = new Map(data.units.map((u) => [u.id, u.publicId]));
   const now = Date.now();
 
   // stage -> backing processes; process seq -> stages
   const stageNos = [...new Set(spines.flatMap((u) => u.segments.map((s) => s.stageNo)))].sort((a, b) => a - b);
-  const backing = new Map<number, typeof processes>();
-  const stagesOfSeq = new Map<number, number[]>();
-  for (const p of processes) {
-    stagesOfSeq.set(p.seq, p.workOrderStages);
-    for (const s of p.workOrderStages) backing.set(s, [...(backing.get(s) ?? []), p]);
+  // J3b: both lookups are per route, so a line's unit only ever sees its own route's processes.
+  const backingOf = new Map<number | null, Map<number, typeof processes>>();
+  const stagesOfSeqOf = new Map<number | null, Map<number, number[]>>();
+  for (const r of routes) {
+    const backing = new Map<number, typeof processes>();
+    const stagesOfSeq = new Map<number, number[]>();
+    for (const p of processes.filter((p) => inRoute(p, r.key))) {
+      stagesOfSeq.set(p.seq, p.workOrderStages);
+      for (const s of p.workOrderStages) backing.set(s, [...(backing.get(s) ?? []), p]);
+    }
+    backingOf.set(r.key, backing);
+    stagesOfSeqOf.set(r.key, stagesOfSeq);
   }
+  const stagesOfSeq = (unitId: number, seq: number) => stagesOfSeqOf.get(keyOfUnit.get(unitId) ?? null)?.get(seq) ?? [];
 
   const planAt = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId ?? "job"}`, p]));
   const seqOfProcess = new Map(processes.map((p) => [p.id, p.seq]));
@@ -110,7 +132,7 @@ export async function loadJobBoard(actor: Actor, jobId: number): Promise<BoardVi
   const itemCount = new Map<string, { done: number; total: number }>();
   const bump = (unitId: number | null, seq: number | null, status: string) => {
     if (unitId == null || seq == null) return;
-    for (const stage of stagesOfSeq.get(seq) ?? []) {
+    for (const stage of stagesOfSeq(unitId, seq)) {
       const k = `${unitId}:${stage}`;
       const c = itemCount.get(k) ?? { done: 0, total: 0 };
       c.total++;
@@ -140,27 +162,40 @@ export async function loadJobBoard(actor: Actor, jobId: number): Promise<BoardVi
           ? opSeq.get(o.targetId)
           : seqOfProcess.get(planById.get(o.targetId)?.jobProcessId ?? -1);
     if (o.unitId == null || seq == null) continue;
-    for (const stage of stagesOfSeq.get(seq) ?? []) oos.add(`${o.unitId}:${stage}`);
+    for (const stage of stagesOfSeq(o.unitId, seq)) oos.add(`${o.unitId}:${stage}`);
   }
 
-  const stageMeta = new Map<number, { name: string; departmentId: number | null; departmentName: string | null }>();
-  const names = new Map(spines[0]?.segments.map((s) => [s.stageNo, s.stageName]) ?? []);
+  type Meta = { name: string; departmentId: number | null; departmentName: string | null };
+  const metaOf = new Map<number | null, Map<number, Meta>>();
+  for (const r of routes) {
+    const m = new Map<number, Meta>();
+    for (const stageNo of stageNos) {
+      const first = backingOf.get(r.key)!.get(stageNo)?.[0];
+      m.set(stageNo, {
+        name: workOrderStageName(namesOf.get(r.key)!, stageNo),
+        departmentId: first?.departmentId ?? null,
+        departmentName: first?.department.name ?? null,
+      });
+    }
+    metaOf.set(r.key, m);
+  }
+  // Flat view: the first route that has a process at the stage names it.
+  const stageMeta = new Map<number, Meta>();
   for (const stageNo of stageNos) {
-    const first = backing.get(stageNo)?.[0];
-    stageMeta.set(stageNo, {
-      name: names.get(stageNo) ?? `Stage ${stageNo}`,
-      departmentId: first?.departmentId ?? null,
-      departmentName: first?.department.name ?? null,
-    });
+    const r = routes.find((r) => backingOf.get(r.key)!.has(stageNo)) ?? routes[0];
+    stageMeta.set(stageNo, metaOf.get(r.key)!.get(stageNo)!);
   }
 
   const counts = { openHolds: 0, overdue: 0, outOfSequence: overrides.length };
   const stageTotals = new Map<number, { done: number; total: number }>();
+  const lineTotals = new Map<number | null, Map<number, { done: number; total: number }>>(routes.map((r) => [r.key, new Map()]));
   const boardUnits: BoardUnit[] = spines.map((u) => {
     const cells: Record<number, BoardCell> = {};
     let current: BoardUnit["currentStage"] = null;
+    const key = keyOfUnit.get(u.unitId) ?? null;
+    const meta = metaOf.get(key)!;
     for (const seg of u.segments) {
-      const procs = backing.get(seg.stageNo) ?? [];
+      const procs = backingOf.get(key)!.get(seg.stageNo) ?? [];
       const found = procs
         .map((p) => planAt.get(`${p.id}:${u.unitId}`) ?? planAt.get(`${p.id}:job`))
         .filter((p): p is NonNullable<typeof p> => !!p);
@@ -188,7 +223,11 @@ export async function loadJobBoard(actor: Actor, jobId: number): Promise<BoardVi
         t.total++;
         if (status === "complete") t.done++;
         stageTotals.set(seg.stageNo, t);
-        if (status !== "complete" && !current) current = { stageNo: seg.stageNo, name: stageMeta.get(seg.stageNo)!.name };
+        const lt = lineTotals.get(key)!.get(seg.stageNo) ?? { done: 0, total: 0 };
+        lt.total++;
+        if (status === "complete") lt.done++;
+        lineTotals.get(key)!.set(seg.stageNo, lt);
+        if (status !== "complete" && !current) current = { stageNo: seg.stageNo, name: meta.get(seg.stageNo)!.name };
       }
       if (found.length > 0 && status === "hold") counts.openHolds++;
       if (found.length > 0 && status === "overdue") counts.overdue++;
@@ -196,15 +235,20 @@ export async function loadJobBoard(actor: Actor, jobId: number): Promise<BoardVi
     return { unitId: u.unitId, publicId: publicIdOf.get(u.unitId) ?? "", serialNo: u.serialNo, currentStage: current, cells };
   });
 
-  const stages: BoardStage[] = stageNos.map((stageNo) => ({
-    stageNo,
-    ...stageMeta.get(stageNo)!,
-    done: stageTotals.get(stageNo)?.done ?? 0,
-    total: stageTotals.get(stageNo)?.total ?? 0,
-  }));
+  const stagesFor = (meta: Map<number, Meta>, totals: Map<number, { done: number; total: number }>, nos: number[]): BoardStage[] =>
+    nos.map((stageNo) => ({ stageNo, ...meta.get(stageNo)!, done: totals.get(stageNo)?.done ?? 0, total: totals.get(stageNo)?.total ?? 0 }));
+  const stages = stagesFor(stageMeta, stageTotals, stageNos);
   const departments = [
     ...new Map(stages.filter((s) => s.departmentId != null).map((s) => [s.departmentId!, { id: s.departmentId!, name: s.departmentName! }])).values(),
   ];
 
-  return { header, stages, units: boardUnits, departments, counts };
+  const lines: BoardLine[] | undefined =
+    routes.length > 1
+      ? routes.map((r) => {
+          const nos = [...new Set(spines.filter((u) => r.unitIds.includes(u.unitId)).flatMap((u) => u.segments.map((s) => s.stageNo)))].sort((a, b) => a - b);
+          return { name: r.name, stages: stagesFor(metaOf.get(r.key)!, lineTotals.get(r.key)!, nos), unitIds: r.unitIds };
+        })
+      : undefined;
+
+  return { header, stages, units: boardUnits, ...(lines ? { lines } : {}), departments, counts };
 }

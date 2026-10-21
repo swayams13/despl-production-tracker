@@ -1,3 +1,4 @@
+import { routeWhere, unitRouteKey } from "./line-route";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, assertNotClientUser, hasRole, ROLES, type Actor } from "@/lib/authz";
 import { loadStageDetail, type StageDetail } from "./stage-detail.read";
@@ -69,7 +70,7 @@ export async function loadBoardCell(
 
     const seqs = (
       await tx.jobProcess.findMany({
-        where: { jobId, included: true, workOrderStages: { has: stageNo } },
+        where: { jobId, included: true, workOrderStages: { has: stageNo }, ...routeWhere(await unitRouteKey(tx, unitId)) },
         select: { seq: true },
       })
     ).map((p) => p.seq);

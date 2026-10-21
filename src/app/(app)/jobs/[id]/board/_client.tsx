@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, useTransition } from "react";
+import { Fragment, useCallback, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -71,6 +71,11 @@ export function BoardClient({
   const cols = collapsible ? shown.filter((s) => s.stageNo > 9) : shown;
   const showEarly = collapsible && shown.some((s) => s.stageNo <= 9);
   const units = view.units.filter((u) => unitIds.includes(u.unitId));
+  // J3b: a job with more than one route shows each line under its own header and stage names.
+  const groups = view.lines
+    ? view.lines.map((line) => ({ line, units: units.filter((u) => line.unitIds.includes(u.unitId)) })).filter((g) => g.units.length > 0)
+    : [{ line: null, units }];
+  let row = 0;
   const q = (f: Partial<BoardFilter>) => `/jobs/${jobId}/board${boardFilterQuery({ ...filter, ...f })}`;
 
   const openCell = useCallback(
@@ -191,13 +196,42 @@ export function BoardClient({
                 {cols.map((s) => (
                   <th key={s.stageNo} className="bd-stage" title={s.name}>
                     <span className="mono">{s.stageNo}</span>
-                    <small>{s.name}</small>
+                    <small>{view.lines ? "" : s.name}</small>
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {units.map((u, r) => {
+              {groups.map((g) => (
+                <Fragment key={g.line?.name ?? "all"}>
+                  {g.line && (
+                    <>
+                      <tr className="bd-bands">
+                        <th className="bd-unit" scope="colgroup">
+                          {g.line.name}
+                        </th>
+                        {showEarly && <th className="bd-band" />}
+                        {cols.map((s) => (
+                          <th key={s.stageNo} className="bd-band" />
+                        ))}
+                      </tr>
+                      <tr>
+                        <th className="bd-unit">Stage</th>
+                        {showEarly && <th className="bd-stage" />}
+                        {cols.map((s) => {
+                          const own = g.line!.stages.find((x) => x.stageNo === s.stageNo);
+                          return (
+                            <th key={s.stageNo} className="bd-stage" title={own?.name}>
+                              <span className="mono">{own ? s.stageNo : ""}</span>
+                              <small>{own?.name ?? ""}</small>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </>
+                  )}
+              {g.units.map((u) => {
+                const r = row++;
                 const earlyDone = early.filter((n) => u.cells[n]?.status === "complete").length;
                 return (
                   <tr key={u.unitId}>
@@ -240,6 +274,8 @@ export function BoardClient({
                   </tr>
                 );
               })}
+                </Fragment>
+              ))}
             </tbody>
             <tfoot>
               <tr>

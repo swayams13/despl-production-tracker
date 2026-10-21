@@ -1,3 +1,4 @@
+import { inRoute, routeKey } from "./line-route";
 import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import { derivePipeline, isShortThisWeek, materialStatus, type MaterialFacts, type MaterialStatus, type PipelineChip } from "@/lib/shared/job-materials";
@@ -51,12 +52,12 @@ export interface JobMaterials {
 
 export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = new Date()): Promise<JobMaterials | null> {
   return withTenant(actor.tenantId, async (tx) => {
-    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true, familyId: true } });
+    const job = await tx.job.findUnique({ where: { id: jobId }, select: { clientId: true, familyId: true, templateVersionId: true } });
     if (!job) return null;
     assertClientScope(actor, job.clientId);
 
     const [equipments, items, components, familySeqRows, stepSeqRows, run, jobProcesses] = await Promise.all([
-      tx.equipment.findMany({ where: { jobId }, select: { id: true, name: true, _count: { select: { units: true } } }, orderBy: { id: "asc" } }),
+      tx.equipment.findMany({ where: { jobId }, select: { id: true, name: true, templateVersionId: true, _count: { select: { units: true } } }, orderBy: { id: "asc" } }),
       tx.bomItem.findMany({
         where: { jobId },
         orderBy: [{ equipmentId: "asc" }, { itemNo: "asc" }],
@@ -91,7 +92,7 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
         select: { leadTimeProcessSeq: true, routeStep: { select: { routeVersionId: true, seq: true } } },
       }),
       getCurrentScheduleRun(tx, jobId),
-      tx.jobProcess.findMany({ where: { jobId }, select: { id: true, code: true, name: true } }),
+      tx.jobProcess.findMany({ where: { jobId }, select: { id: true, code: true, name: true, equipmentId: true, grain: true } }),
     ]);
 
     const seqByOperation = new Map(familySeqRows.map((r) => [r.operationRefId, r.leadTimeProcessSeq]));
@@ -99,20 +100,24 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
 
     // earliest planned start per process code on the current schedule
     const processById = new Map(jobProcesses.map((p) => [p.id, p]));
-    const startByCode = new Map<string, { at: Date; name: string }>();
+    // J3b: per route (codes repeat across a job's routes), so a component reads the start of its own line's process.
+    const startsOf = new Map<number, { at: Date; name: string; code: string; equipmentId: number | null; grain: string }>();
     for (const pl of run?.processPlans ?? []) {
       const jp = processById.get(pl.jobProcessId);
       if (!jp || !pl.plannedStart) continue;
-      const cur = startByCode.get(jp.code);
-      if (!cur || pl.plannedStart < cur.at) startByCode.set(jp.code, { at: pl.plannedStart, name: jp.name });
+      const cur = startsOf.get(jp.id);
+      if (!cur || pl.plannedStart < cur.at) startsOf.set(jp.id, { at: pl.plannedStart, name: jp.name, code: jp.code, equipmentId: jp.equipmentId, grain: jp.grain });
     }
+    const startForCode = (key: number | null, code: string) =>
+      [...startsOf.values()].filter((s) => s.code === code && inRoute(s, key)).sort((a, b) => a.at.getTime() - b.at.getTime())[0];
+    const keyOfEquipment = new Map(equipments.map((e) => [e.id, routeKey(job.templateVersionId, e)]));
 
     const firstUse = components.flatMap((c) => {
       const step = c.routeVersion?.steps[0];
       if (!step) return [];
       const seq = resolveProcessSeq({ operationId: step.operation.id, seq: step.seq, routeVersionId: c.routeVersion!.id }, seqByStep, seqByOperation);
-      const hit = seq == null ? undefined : startByCode.get(String(seq));
-      return hit ? [{ equipmentId: c.equipmentId, bomItemId: c.bomItemId, componentTypeId: c.componentTypeId, ...hit }] : [];
+      const hit = seq == null ? undefined : startForCode(keyOfEquipment.get(c.equipmentId) ?? null, String(seq));
+      return hit ? [{ equipmentId: c.equipmentId, bomItemId: c.bomItemId, componentTypeId: c.componentTypeId, at: hit.at, name: hit.name }] : [];
     });
 
     const equipmentById = new Map(equipments.map((e) => [e.id, e]));

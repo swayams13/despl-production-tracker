@@ -105,6 +105,36 @@ describe.skipIf(!RUN_DB)("tenant-scoped status views (AUD-002)", async () => {
     expect(rows.map((r) => r.unit_id)).toEqual([a.unitId]);
   });
 
+  it("v_unit_stage_status (J3b route filter): a line on its own route sees only its own rows, still only for its tenant", async () => {
+    const a = await makeTenant("A3");
+    const b = await makeTenant("B3");
+    const lineUnit = async (t: Awaited<ReturnType<typeof makeTenant>>) => {
+      const job = await owner.job.findUniqueOrThrow({ where: { id: t.jobId } });
+      const tv2 = await owner.processTemplateVersion.create({
+        data: { templateId: (await owner.processTemplateVersion.findUniqueOrThrow({ where: { id: job.templateVersionId } })).templateId, version: 2 },
+      });
+      const eq = await owner.equipment.create({ data: { jobId: t.jobId, name: "Line", templateVersionId: tv2.id } });
+      const unit = await owner.unit.create({ data: { jobId: t.jobId, equipmentId: eq.id, serialNo: "L1" } });
+      const dept = await owner.department.findFirstOrThrow({ where: { tenantId: t.tenantId } });
+      const own = await owner.jobProcess.create({
+        data: { jobId: t.jobId, equipmentId: eq.id, seq: 2, code: "2", name: "Line process", departmentId: dept.id, workOrderStages: [2] },
+      });
+      const run = await owner.scheduleRun.findFirstOrThrow({ where: { jobId: t.jobId } });
+      await owner.processPlan.create({ data: { jobId: t.jobId, scheduleRunId: run.id, jobProcessId: own.id, unitId: unit.id, ownerDepartmentId: dept.id, status: "NOT_STARTED" } });
+      return unit.id;
+    };
+    const ua = await lineUnit(a);
+    const ub = await lineUnit(b);
+    const rows = await asTenant(
+      a.tenantId,
+      (tx) => tx.$queryRaw<{ unit_id: number; stage_no: number }[]>`
+        SELECT unit_id, stage_no FROM v_unit_stage_status WHERE unit_id IN (${ua}, ${ub})
+      `,
+    );
+    // stage 2 only: the job-level process 1 (stage 1) belongs to the job's own route, not the line's
+    expect(rows).toEqual([{ unit_id: ua, stage_no: 2 }]);
+  });
+
   it("v_process_plan_percent: only tenant A's rows come back when app.tenant_id is set to A and app.job_id is unset", async () => {
     const a = await makeTenant("A2");
     const b = await makeTenant("B2");
