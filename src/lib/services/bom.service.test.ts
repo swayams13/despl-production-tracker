@@ -124,6 +124,24 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
     await expectCode(updateBomItem(qc, item.id, { partName: "x" }), ERROR_CODES.FORBIDDEN);
   });
 
+  // Only ADMIN and PRODUCTION_HEAD edit the BOM (BOM_EDIT_ROLES, which the Parts and stock screen also uses to hide
+  // the controls): every other role is refused on all four writes, Stores included, and nothing is written.
+  it.each(["STORES", "OPERATOR", "SUPERVISOR", "PLANNER", "ENGINEERING", "MANAGEMENT", "QC"] as const)("%s cannot add, edit, import or revise a BOM", async (role) => {
+    const { tenantId, equipment, user, job } = await fixture();
+    const admin: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
+    const item = await createBomItem(admin, { equipmentId: equipment.id, itemNo: 1, partName: "Shell", sourceQty: "1 NOS" });
+    const actor: Actor = { ...actorBase(tenantId, user.id), roles: [role] };
+
+    await expectCode(createBomItem(actor, { equipmentId: equipment.id, itemNo: 2, partName: "Head", sourceQty: "2 NOS" }), ERROR_CODES.FORBIDDEN);
+    await expectCode(updateBomItem(actor, item.id, { partName: "Changed" }), ERROR_CODES.FORBIDDEN);
+    await expectCode(importBomItems(actor, { equipmentId: equipment.id, rows: [{ itemNo: 3, partName: "Nozzle", sourceQty: "4 NOS" }] }), ERROR_CODES.FORBIDDEN);
+    await expectCode(createBomRevision(actor, { equipmentId: equipment.id, revisionNo: 1, status: "DRAFT" }), ERROR_CODES.FORBIDDEN);
+
+    expect(await owner.bomItem.count({ where: { jobId: job.id } })).toBe(1);
+    expect((await owner.bomItem.findUniqueOrThrow({ where: { id: item.id } })).partName).toBe("Shell");
+    expect(await owner.bomRevision.count({ where: { equipmentId: equipment.id } })).toBe(0);
+  });
+
   // ── S21: @@unique([bomRevisionId, itemNo]) ────────────────────────────────
 
   it("S21: a duplicate itemNo within the SAME bomRevisionId is refused at the DB (P2002)", async () => {

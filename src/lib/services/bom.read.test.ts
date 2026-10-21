@@ -85,13 +85,16 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     const lot1 = await owner.stockLot.create({
       data: { jobId, bomItemId: bomItem.id, heatNumber: "H-100", location: "Yard A", qty: 10, receivedAt: new Date("2026-08-01") },
     });
-    await owner.stockLot.create({
+    const lot2 = await owner.stockLot.create({
       data: { jobId, bomItemId: bomItem.id, heatNumber: null, location: "Yard B", qty: 5, receivedAt: new Date("2026-08-05") },
     });
     const scrapUser = await owner.user.create({
       data: { tenantId, email: `bomread-${Date.now()}@test.local`, username: `bomread-${Date.now()}`, passwordHash: "x", name: "Test User", themePreference: "SYSTEM" },
     });
     await owner.stockTxn.create({ data: { jobId, stockLotId: lot1.id, type: "SCRAP", qty: 2, by: scrapUser.id } });
+    // Lot 2: 3 issued and 1 returned, so 5 received but 3 on hand.
+    await owner.stockTxn.create({ data: { jobId, stockLotId: lot2.id, type: "ISSUE", qty: 3, by: scrapUser.id } });
+    await owner.stockTxn.create({ data: { jobId, stockLotId: lot2.id, type: "RETURN", qty: 1, by: scrapUser.id } });
     // Only the first route step has actually been tracked — Forming/Welding
     // have no ComponentOperation row yet, same as real live-CSV data where
     // future steps were never recorded.
@@ -150,12 +153,12 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("bom.read — component route project
     expect(ops.map((o) => o.status)).toEqual(["COMPLETE", "NOT_STARTED", "NOT_STARTED"]);
   });
 
-  it("exposes stockLots oldest-first, with the raw lot qty (not net of scrap)", async () => {
+  it("exposes stockLots oldest-first: the received qty, and what is still on hand (less issues and scrap, plus returns)", async () => {
     const tree = await loadBomTree(actor, jobId);
     const item = tree!.groups[0].items.find((i) => i.id === bomItemId)!;
     expect(item.stockLots).toEqual([
-      { id: expect.any(Number), heatNumber: "H-100", location: "Yard A", qty: 10, receivedAt: expect.any(String) },
-      { id: expect.any(Number), heatNumber: null, location: "Yard B", qty: 5, receivedAt: expect.any(String) },
+      { id: expect.any(Number), heatNumber: "H-100", location: "Yard A", qty: 10, onHand: 8, receivedAt: expect.any(String) },
+      { id: expect.any(Number), heatNumber: null, location: "Yard B", qty: 5, onHand: 3, receivedAt: expect.any(String) },
     ]);
     // availableQty nets out the SCRAP txn against lot1's raw qty (10 - 2 + 5 = 13) —
     // proves this list and the shortage arithmetic agree on the same underlying data.

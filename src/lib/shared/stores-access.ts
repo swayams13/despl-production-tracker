@@ -21,6 +21,8 @@ export const IDENTIFY_ROLES = ["QC", "ADMIN", "PRODUCTION_HEAD", "STORES"] as co
 export const PMI_DECIDE_ROLES = ["QC"] as const;
 /** Add the heat number to a lot that was received without one (once). */
 export const LOT_HEAT_ROLES = ["ADMIN", "PRODUCTION_HEAD", "STORES"] as const;
+/** Add, edit or import BOM lines (enforced by bom.service; the Parts and stock screen hides the controls from everyone else). */
+export const BOM_EDIT_ROLES = ["ADMIN", "PRODUCTION_HEAD"] as const;
 /** The cross-job Materials queue. Read only for the planner. */
 export const MATERIALS_QUEUE_ROLES = ["STORES", "ADMIN", "PRODUCTION_HEAD", "PLANNER"] as const;
 
@@ -35,6 +37,8 @@ export interface StoresAccess {
   identify: boolean;
   decidePmi: boolean;
   lotHeat: boolean;
+  /** Add, edit or import BOM lines. */
+  bomEdit: boolean;
 }
 
 const any = (held: readonly string[], allowed: readonly string[]) => held.some((r) => allowed.includes(r));
@@ -49,6 +53,7 @@ export function storesAccess(held: readonly string[]): StoresAccess {
     identify: any(held, IDENTIFY_ROLES),
     decidePmi: any(held, PMI_DECIDE_ROLES),
     lotHeat: any(held, LOT_HEAT_ROLES),
+    bomEdit: any(held, BOM_EDIT_ROLES),
   };
 }
 

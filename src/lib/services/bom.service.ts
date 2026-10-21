@@ -1,4 +1,5 @@
 import { withTenant, type Tx } from "@/lib/db";
+import { BOM_EDIT_ROLES } from "@/lib/shared/stores-access";
 import { audited } from "@/lib/audit";
 import { assertClientScope, assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -99,7 +100,7 @@ async function assertBomRevisionValid(tx: Tx, equipmentId: number, bomRevisionId
 export async function createBomItem(actor: Actor, input: CreateBomItemInput): Promise<BomItem> {
   const parsed = createBomItemSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...BOM_EDIT_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     const equipment = await loadEquipment(tx, actor, parsed.equipmentId);
@@ -126,7 +127,7 @@ export async function createBomItem(actor: Actor, input: CreateBomItemInput): Pr
 export async function updateBomItem(actor: Actor, bomItemId: number, input: UpdateBomItemInput): Promise<BomItem> {
   const parsed = updateBomItemSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...BOM_EDIT_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     const existing = await tx.bomItem.findFirst({
@@ -252,7 +253,7 @@ export interface ImportBomItemsResult {
 export async function importBomItems(actor: Actor, input: ImportBomItemsInput): Promise<ImportBomItemsResult> {
   const { equipmentId, bomRevisionId, rows } = importBomItemsSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...BOM_EDIT_ROLES);
 
   // Task review Important #4: refuse an oversized file upfront rather than
   // discovering the transaction timeout mid-import.
@@ -379,7 +380,7 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
 export async function createBomRevision(actor: Actor, input: CreateBomRevisionInput): Promise<BomRevision> {
   const { equipmentId, revisionNo, status } = createBomRevisionSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ...BOM_EDIT_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     const equipment = await loadEquipment(tx, actor, equipmentId);

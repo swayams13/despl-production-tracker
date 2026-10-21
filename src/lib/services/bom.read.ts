@@ -6,7 +6,7 @@ import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import type { PmiResult } from "@/generated/prisma/client";
 import { projectComponentRoute, computeComponentDisplayStatus, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
-import { explodeBomItem, computeAvailableForShortage, type ExplodableBomItem } from "./bom-explosion";
+import { explodeBomItem, computeAvailableForShortage, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
 
 /**
  * Job detail — BOM & Components tab (§4.3, §9.6).
@@ -115,7 +115,10 @@ export interface BomStockLot {
   id: number;
   heatNumber: string | null;
   location: string;
+  /** What was received into the lot. */
   qty: number;
+  /** What is still in it: received, less issues and scrap, plus returns. */
+  onHand: number;
   receivedAt: string;
 }
 
@@ -243,7 +246,7 @@ interface RawComponentForSummary {
   } | null;
   routeVersion: {
     id: number;
-    steps: { seq: number; operation: { id: number; name: string } }[];
+    steps: { seq: number; printed: string | null; operation: { id: number; name: string } }[];
   } | null;
   operations: {
     id: number;
@@ -280,6 +283,7 @@ function buildComponentSummary(
     seq: s.seq,
     operationId: s.operation.id,
     operationName: s.operation.name,
+    printed: s.printed,
     leadTimeProcessSeq: resolveProcessSeq(
       { operationId: s.operation.id, seq: s.seq, routeVersionId },
       familySeqByStep,
@@ -421,7 +425,7 @@ export async function loadBomTree(
                 id: true,
                 steps: {
                   orderBy: { seq: "asc" },
-                  select: { seq: true, operation: { select: { id: true, name: true } } },
+                  select: { seq: true, printed: true, operation: { select: { id: true, name: true } } },
                 },
               },
             },
@@ -476,7 +480,7 @@ export async function loadBomTree(
             id: true,
             steps: {
               orderBy: { seq: "asc" },
-              select: { seq: true, operation: { select: { id: true, name: true } } },
+              select: { seq: true, printed: true, operation: { select: { id: true, name: true } } },
             },
           },
         },
@@ -571,7 +575,14 @@ export async function loadBomTree(
         shortage: shortageVal?.toNumber() ?? null,
         stockLots: [...it.stockLots]
           .sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime())
-          .map((lot) => ({ id: lot.id, heatNumber: lot.heatNumber, location: lot.location, qty: lot.qty.toNumber(), receivedAt: lot.receivedAt.toISOString() })),
+          .map((lot) => ({
+            id: lot.id,
+            heatNumber: lot.heatNumber,
+            location: lot.location,
+            qty: lot.qty.toNumber(),
+            onHand: computeAvailableToIssue([lot])!.toNumber(),
+            receivedAt: lot.receivedAt.toISOString(),
+          })),
       };
       const list = byGroup.get(groupName) ?? [];
       list.push(row);

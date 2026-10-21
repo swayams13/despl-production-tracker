@@ -10,18 +10,18 @@ import type { WorkOrg } from "./work.test-util";
  */
 describe("L2.14 Stores access table (pure)", () => {
   const cases: Array<[string, Record<string, boolean>]> = [
-    ["STORES", { receive: true, issue: true, scrap: false, procurement: false, receiptEvent: true, identify: true, decidePmi: false, lotHeat: true }],
-    ["PRODUCTION_HEAD", { receive: true, issue: true, scrap: true, procurement: true, receiptEvent: true, identify: true, decidePmi: false, lotHeat: true }],
-    ["ADMIN", { receive: true, issue: true, scrap: true, procurement: true, receiptEvent: true, identify: true, decidePmi: false, lotHeat: true }],
-    ["QC", { receive: false, issue: false, scrap: false, procurement: false, receiptEvent: false, identify: true, decidePmi: true, lotHeat: false }],
+    ["STORES", { receive: true, issue: true, scrap: false, procurement: false, receiptEvent: true, identify: true, decidePmi: false, lotHeat: true, bomEdit: false }],
+    ["PRODUCTION_HEAD", { receive: true, issue: true, scrap: true, procurement: true, receiptEvent: true, identify: true, decidePmi: false, lotHeat: true, bomEdit: true }],
+    ["ADMIN", { receive: true, issue: true, scrap: true, procurement: true, receiptEvent: true, identify: true, decidePmi: false, lotHeat: true, bomEdit: true }],
+    ["QC", { receive: false, issue: false, scrap: false, procurement: false, receiptEvent: false, identify: true, decidePmi: true, lotHeat: false, bomEdit: false }],
     ...["SUPERVISOR", "OPERATOR", "PLANNER", "ENGINEERING", "MANAGEMENT"].map((r): [string, Record<string, boolean>] => [
       r,
-      { receive: false, issue: false, scrap: false, procurement: false, receiptEvent: false, identify: false, decidePmi: false, lotHeat: false },
+      { receive: false, issue: false, scrap: false, procurement: false, receiptEvent: false, identify: false, decidePmi: false, lotHeat: false, bomEdit: false },
     ]),
   ];
   it.each(cases)("%s", (role, expected) => expect({ ...storesAccess([role]) }).toEqual(expected));
   it("a user with two roles gets the union", () => {
-    expect(storesAccess(["QC", "STORES"])).toMatchObject({ receive: true, decidePmi: true, scrap: false });
+    expect(storesAccess(["QC", "STORES"])).toMatchObject({ receive: true, decidePmi: true, scrap: false, bomEdit: false });
     expect(storesAccess([])).toMatchObject({ receive: false, identify: false });
   });
 });
