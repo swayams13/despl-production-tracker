@@ -77,7 +77,7 @@ const START_ACTIONS: Record<WorkKind, string[]> = {
   PROCESS_PLAN: ["process.start", "work.start", "work.done"],
 };
 /** Who records floor work (review fix, 14 Oct). PLANNER: processes 1–11 only. */
-const FLOOR_ROLES = [ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN] as const;
+export const FLOOR_ROLES = [ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN] as const;
 const JOINT_REQUIRED =
   "This weld step needs a joint bound before it can be marked done. Pick an existing joint, or log it first.";
 

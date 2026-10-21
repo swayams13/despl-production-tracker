@@ -8,6 +8,7 @@ import { stageLabel } from "./workspace.read";
 import { isOnTime } from "@/lib/shared/business-day";
 import { pctOf } from "@/lib/shared/metrics";
 import { OFFICE_PROCESS_MAX_SEQ } from "@/lib/shared/floor-rules";
+import { FLOOR_ROLES } from "./work.service";
 
 /**
  * `/my-day` (personal dashboards v1, SPEC §6.1) — the personalized read every
@@ -140,8 +141,8 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   // A planner-only user records processes 1–11 and nothing else (work.service applyItem), so their
   // lists carry only those. Pool stays the existing own-department rule: recordWork's department
   // scope would refuse a planner outside the owner department anyway, so no wider rule is safe.
-  const officeOnly =
-    hasRole(actor, ROLES.PLANNER) && !isQcActor && !hasRole(actor, ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
+  // QC does not exempt: it only keeps the cross-department SUBMITTED rows (teamHeld) below.
+  const officeOnly = hasRole(actor, ROLES.PLANNER) && !hasRole(actor, ...FLOOR_ROLES);
 
   const mine: MyDayRow[] = [];
   const pool: MyDayRow[] = [];
@@ -252,7 +253,8 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       // only ever land in exactly one of mine/pool/teamHeld.
       for (const rows of rankedByDept.values()) {
         for (const r of rows) {
-          if (officeOnly && (seqById.get(r.plan.jobProcessId) ?? Infinity) > OFFICE_PROCESS_MAX_SEQ) continue;
+          const hidden = officeOnly && (seqById.get(r.plan.jobProcessId) ?? Infinity) > OFFICE_PROCESS_MAX_SEQ;
+          if (hidden && !(isQcActor && r.state === "SUBMITTED")) continue;
           const assignee = r.plan.assigneeUserId;
           if (r.state === "DONE") {
             // Completed history, not an actionable board — mine only (not
@@ -263,9 +265,9 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
             }
             continue;
           }
-          if (assignee === actor.userId) {
+          if (assignee === actor.userId && !hidden) {
             mine.push(toRow(r));
-          } else if (actor.departmentIds.includes(r.plan.ownerDepartmentId)) {
+          } else if (!hidden && actor.departmentIds.includes(r.plan.ownerDepartmentId)) {
             if (assignee == null) pool.push(toRow(r));
             else teamHeld.push(toRow(r));
           } else if (isQcActor && r.state === "SUBMITTED") {
