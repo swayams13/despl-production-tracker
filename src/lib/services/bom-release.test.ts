@@ -14,6 +14,9 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
   const { ROLES } = await import("@/lib/authz");
   const { createJob } = await import("./job-intake.service");
   const svc = await import("./bom-release.service");
+  const bomSvc = await import("./bom.service");
+  const read = await import("./bom-release.read");
+  const { releaseJobBoms } = await import("./bom-release.test-util");
   const { materializeComponentsFromBomItems } = await import("./component.service");
   const { materializeAssemblyStepsFromTemplate } = await import("./assembly.service");
   const { LineRules } = await import("./config-rules");
@@ -445,6 +448,130 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
       expect(a.ops.length).toBeGreaterThan(0);
       expect(a.steps.length).toBeGreaterThan(0);
       expect(a).toEqual(await shape(old));
+    });
+  });
+  // ── J5b: the release screen's start, import and view ─────────────────────
+  describe("J5b: start revision, import waits for release, release view", () => {
+    /** A job whose line has no BOM revision at all: the shape right after createJob without a copied BOM. */
+    async function bare(w: World) {
+      const j = await w.job();
+      await owner.bomRevision.delete({ where: { id: j.revisionId } });
+      return j;
+    }
+    const loose = (j: J, itemNo: number, partName: string, typeId: number | null = null) =>
+      owner.bomItem.create({ data: { jobId: j.jobId, equipmentId: j.equipmentId, bomRevisionId: null, itemNo, partName, sourceQty: "1 NOS.", qtyPer: 1, uom: "NOS.", componentTypeId: typeId } });
+
+    it.each([
+      ["SUPERVISOR", "sup"],
+      ["QC", "qc"],
+      ["PLANNER", "planner"],
+      ["a client user", "client"],
+    ] as const)("refuses %s starting a revision and writes nothing", async (_l, who) => {
+      const w = await world("STARTROLE");
+      const j = await bare(w);
+      await expect(svc.startBomRevision(w.actors[who], { equipmentId: j.equipmentId })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(await owner.bomRevision.count({ where: { equipmentId: j.equipmentId } })).toBe(0);
+    });
+
+    it("does not start a revision on another tenant's line", async () => {
+      const a = await world("STARTTA");
+      const b = await world("STARTTB");
+      const j = await bare(a);
+      await expect(svc.startBomRevision(b.actors.admin, { equipmentId: j.equipmentId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    });
+
+    it("starts revision 1 and moves the line's revision-less BOM lines into it; again it only moves any new loose line", async () => {
+      const w = await world("START");
+      const j = await bare(w);
+      await loose(j, 1, "Shell");
+      await loose(j, 2, "Plate");
+      const r = await svc.startBomRevision(w.actors.eng, { equipmentId: j.equipmentId });
+      expect(r).toMatchObject({ revisionNo: 1, created: true, moved: 2 });
+      expect(await owner.bomItem.count({ where: { equipmentId: j.equipmentId, bomRevisionId: r.bomRevisionId } })).toBe(2);
+      expect(await owner.auditLog.count({ where: { tenantId: w.tenantId, action: "bom.moveToRevision" } })).toBe(1);
+
+      await loose(j, 3, "Late addition");
+      const again = await svc.startBomRevision(w.actors.eng, { equipmentId: j.equipmentId });
+      expect(again).toMatchObject({ bomRevisionId: r.bomRevisionId, created: false, moved: 1 });
+      expect(await owner.bomRevision.count({ where: { equipmentId: j.equipmentId } })).toBe(1);
+      expect(await svc.startBomRevision(w.actors.eng, { equipmentId: j.equipmentId })).toMatchObject({ created: false, moved: 0 });
+    });
+
+    it("refuses to start a revision on a line that already has floor rows (BOM_ALREADY_MATERIALIZED) or a released revision (BOM_RELEASE_DIFF_NOT_BUILT)", async () => {
+      const w = await world("STARTREF");
+      const legacy = await bare(w);
+      await releaseJobBoms(owner, w.actors.admin, legacy.jobId); // floor rows exist now, the revision it made is materialised
+      await owner.bomRevision.updateMany({ where: { equipmentId: legacy.equipmentId }, data: { materializedAt: null } }); // the pre-J5a shape: floor rows, no revision released
+      await expect(svc.startBomRevision(w.actors.admin, { equipmentId: legacy.equipmentId })).rejects.toMatchObject({ code: "BOM_ALREADY_MATERIALIZED" });
+
+      const released = await w.job();
+      await svc.releaseBomRevision(w.actors.admin, ack(released));
+      await expect(svc.startBomRevision(w.actors.admin, { equipmentId: released.equipmentId })).rejects.toMatchObject({ code: "BOM_RELEASE_DIFF_NOT_BUILT" });
+    });
+
+    it("an import with no revision on a line with no floor rows waits in a draft revision and makes no components; the release then makes them", async () => {
+      const w = await world("IMPORTWAIT");
+      const j = await bare(w);
+      const r = await bomSvc.importBomItems(w.actors.admin, { equipmentId: j.equipmentId, rows: [{ itemNo: 1, partName: "Shell", sourceQty: "2 NOS.", componentType: "SHL" }, { itemNo: 2, partName: "Plate", sourceQty: "1 NOS." }] } as never);
+      expect(r).toMatchObject({ waitsForRelease: true, bomRevisionNo: 1, componentCount: 0 });
+      expect(r.created).toHaveLength(2);
+      const revision = await owner.bomRevision.findFirstOrThrow({ where: { equipmentId: j.equipmentId } });
+      expect(revision).toMatchObject({ revisionNo: 1, status: "DRAFT", materializedAt: null });
+      expect(r.created.every((i) => i.bomRevisionId === revision.id)).toBe(true);
+      expect(await owner.component.count({ where: { equipmentId: j.equipmentId } })).toBe(0);
+      expect(await owner.assemblyStep.count({ where: { jobId: j.jobId } })).toBe(0);
+
+      const res = await svc.releaseBomRevision(w.actors.admin, { equipmentId: j.equipmentId, bomRevisionId: revision.id, acknowledgeWarnings: true });
+      expect(res.counts.components).toBeGreaterThan(0);
+      // a second import joins the same draft only while nothing is released; here the line is on the floor now
+      const later = await bomSvc.importBomItems(w.actors.admin, { equipmentId: j.equipmentId, rows: [{ itemNo: 9, partName: "Extra", sourceQty: "1 NOS." }] } as never);
+      expect(later.waitsForRelease).toBe(false);
+    });
+
+    it("an import into a line that already has floor rows keeps today's behaviour: no revision, components made at once", async () => {
+      const w = await world("IMPORTLEGACY");
+      const j = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }] });
+      await svc.releaseBomRevision(w.actors.admin, ack(j));
+      const revisionsBefore = await owner.bomRevision.count({ where: { equipmentId: j.equipmentId } });
+      const r = await bomSvc.importBomItems(w.actors.admin, { equipmentId: j.equipmentId, rows: [{ itemNo: 5, partName: "Shell 2", sourceQty: "1 NOS.", componentType: "SHL" }] } as never);
+      expect(r).toMatchObject({ waitsForRelease: false });
+      expect(r.created[0].bomRevisionId).toBeNull();
+      expect(r.componentCount).toBeGreaterThan(0);
+      expect(await owner.bomRevision.count({ where: { equipmentId: j.equipmentId } })).toBe(revisionsBefore);
+    });
+
+    it("the seeded jobs (DESPL-320, DE0467, 12548) are untouched: their lines read as already on the floor and starting a revision is refused", async () => {
+      const seeded = await owner.job.findMany({ where: { jobNumber: { in: ["DESPL-320", "DE0467", "12548"] } }, select: { id: true, jobNumber: true, tenantId: true } });
+      for (const job of seeded) {
+        const admin = await owner.user.findFirstOrThrow({ where: { tenantId: job.tenantId, roles: { some: { role: { code: "ADMIN" } } } } });
+        const actor = { userId: admin.id, tenantId: job.tenantId, clientId: null, name: "x", email: admin.email, roles: ["ADMIN"], departmentIds: [], mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false } as never;
+        const view = await read.loadBomReleaseView(actor, job.id);
+        const withFloor = view.lines.filter((l) => l.legacy);
+        expect(withFloor.length, job.jobNumber).toBeGreaterThan(0);
+        const before = await owner.bomItem.count({ where: { jobId: job.id } });
+        for (const l of withFloor) {
+          await expect(svc.startBomRevision(actor, { equipmentId: l.id })).rejects.toMatchObject({ code: "BOM_ALREADY_MATERIALIZED" });
+          expect((await svc.previewBomRelease(actor, { equipmentId: l.id, bomRevisionId: (await owner.bomRevision.create({ data: { equipmentId: l.id, revisionNo: 99, status: "DRAFT", jobId: job.id } })).id })).state).toBe("LEGACY_MATERIALIZED");
+          await owner.bomRevision.deleteMany({ where: { equipmentId: l.id, revisionNo: 99 } });
+        }
+        expect(await owner.bomItem.count({ where: { jobId: job.id } })).toBe(before);
+      }
+    });
+
+    it("loadBomReleaseView: lines, revisions, loose lines and part families; only release roles can release; clients are refused", async () => {
+      const w = await world("VIEW");
+      const j = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }] });
+      await loose(j, 7, "Loose");
+      const v = await read.loadBomReleaseView(w.actors.planner, j.jobId);
+      expect(v.canRelease).toBe(false);
+      expect((await read.loadBomReleaseView(w.actors.eng, j.jobId)).canRelease).toBe(true);
+      expect(v.lines).toHaveLength(1);
+      expect(v.lines[0]).toMatchObject({ id: j.equipmentId, legacy: false, looseItems: 1, revisions: [{ id: j.revisionId, revisionNo: 1, status: "DRAFT", items: 1 }] });
+      const byCode = Object.fromEntries(v.families.map((f) => [f.code, f.approved]));
+      expect(byCode).toMatchObject({ SHL: true, DRF: false, PLT: true });
+      await expect(read.loadBomReleaseView(w.actors.client, j.jobId)).rejects.toMatchObject({ code: "FORBIDDEN" });
+      const other = await world("VIEWB");
+      await expect(read.loadBomReleaseView(other.actors.admin, j.jobId)).rejects.toMatchObject({ code: "NOT_FOUND" });
     });
   });
 });
