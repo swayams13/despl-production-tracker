@@ -51,7 +51,7 @@ test("the project table has six columns and the queue shows at most 15 rows", as
   await signIn(page, "sj@despl.local");
   await page.goto("/dashboard");
   const table = page.locator(".rt-table table.pf-table");
-  await expect(table.locator("thead th")).toHaveText(["Job", "Client", "Progress", "Committed → forecast", "Health", "Top blocker"]);
+  await expect(table.locator("thead th")).toHaveText(["Job", "Client", "Progress", "Milestone", "Committed → forecast", "Health", "Top blocker"]);
   await expect(table.locator("tbody tr").first()).toBeVisible();
   expect(await page.locator("ul.pf-queue > li").count()).toBeLessThanOrEqual(15);
 });
