@@ -348,7 +348,7 @@ function Body({
                 {result.counts.boundToQcp > 0 ? `, ${result.counts.boundToQcp} linked to the QC plan` : ""}.
               </p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Link className="btn btn-accent" href={`/jobs/${view.job.id}?tab=board`}>Open the board</Link>
+                <Link className="btn btn-accent" href={`/jobs/${view.job.id}/board`}>Open the board</Link>
                 <Link className="btn" href={`/jobs/${view.job.id}?tab=materials&view=parts`}>Back to Materials</Link>
               </div>
             </div>
