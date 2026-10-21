@@ -3,7 +3,7 @@ import { assertNotClientUser, ROLES, requireRole, type Actor } from "@/lib/authz
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { ConfigQuestionDef } from "@/lib/shared/config-questions";
 import { loadQuestionDefs } from "./config-rules";
-import { qcpAssemblyGaps } from "./assembly-qcp-match";
+import { loadQcpItemsByTemplate, qcpAssemblyGaps } from "./assembly-qcp-match";
 
 /**
  * Everything the intake wizard's dropdowns need, in one round trip.
@@ -115,10 +115,11 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
     ]);
 
     const qcpIds = qcpTemplates.map((q) => q.id);
+    const qcpItems = await loadQcpItemsByTemplate(tx, actor.tenantId, qcpIds);
     const gapsByFamily = new Map<number, Record<number, string[]>>();
     for (const f of families) {
       const typeIds = equipmentTypes.filter((e) => e.familyId === f.id).map((e) => e.id);
-      gapsByFamily.set(f.id, await qcpAssemblyGaps(tx, actor.tenantId, f.id, typeIds, qcpIds));
+      gapsByFamily.set(f.id, await qcpAssemblyGaps(tx, actor.tenantId, f.id, typeIds, qcpItems));
     }
 
     return {

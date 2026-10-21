@@ -772,17 +772,17 @@ function StepRoute({
           >
             <option value="">No QCP — attach later</option>
             {options.qcpTemplates.map((q) => {
-              const unusable = state.familyId != null && (q.assemblyGaps[state.familyId]?.length ?? 0) > 0;
+              const warn = state.familyId != null && (q.assemblyGaps[state.familyId]?.length ?? 0) > 0;
               return (
-                <option key={q.id} value={q.id} disabled={unusable}>
-                  {q.vessel} rev {q.revision} — {plural(q.itemCount, "item")} ({q.label}){unusable ? " — does not cover the assembly checklist" : ""}
+                <option key={q.id} value={q.id}>
+                  {q.vessel} rev {q.revision} — {plural(q.itemCount, "item")} ({q.label}){warn ? " — may not cover the assembly checklist" : ""}
                 </option>
               );
             })}
           </select>
           {state.familyId != null && options.qcpTemplates.some((q) => (q.assemblyGaps[state.familyId!]?.length ?? 0) > 0) && (
             <div className="emp-hint" style={{ marginTop: 6 }}>
-              Templates marked as not covering the assembly checklist cannot be used with this family&apos;s assembly template.
+              Templates marked as possibly not covering the assembly checklist may be refused when the job is created. If so, pick another QCP template.
             </div>
           )}
         </div>

@@ -9,6 +9,8 @@ export interface MatchStep {
   id: number;
   kind: string;
   srNo: string | null;
+  /** A step with a rule may be dropped per job, so it is not counted as unresolved here. */
+  includeWhen?: unknown;
 }
 /** id null = a checkpoint a rule dropped from the job's QCP; it keeps its place in the order. */
 export interface MatchQcpItem {
@@ -53,41 +55,55 @@ export function matchInspectionStep(
   return !match || match.id == null ? "MISSING" : match;
 }
 
-/** Inspection srNos of the template that the QCP items cannot satisfy. */
+/**
+ * Inspection srNos of the template that the QCP items cannot satisfy. Steps that
+ * carry an includeWhen rule are skipped (a job's answers may drop them), but
+ * still count toward occurrence numbering, exactly as createJob counts them.
+ */
 export function unresolvedInspectionSrNos(steps: MatchStep[], qcpItems: MatchQcpItem[]): string[] {
   const occ = srNoOccurrences(steps);
   const grouped = groupQcpBySrNo(qcpItems);
-  return [...new Set(steps.filter((st) => matchInspectionStep(st, occ, grouped) === "MISSING").map((st) => st.srNo!))];
+  return [...new Set(steps.filter((st) => st.includeWhen == null && matchInspectionStep(st, occ, grouped) === "MISSING").map((st) => st.srNo!))];
+}
+
+/** The items of each QCP template, loaded once for every family's check. */
+export async function loadQcpItemsByTemplate(
+  tx: Prisma.TransactionClient,
+  tenantId: number,
+  qcpTemplateIds: number[],
+): Promise<Map<number, MatchQcpItem[]>> {
+  const out = new Map<number, MatchQcpItem[]>(qcpTemplateIds.map((id) => [id, []]));
+  const items = await tx.qcpItem.findMany({
+    where: { tenantId, qcpTemplateId: { in: qcpTemplateIds } },
+    select: { id: true, srNo: true, sequence: true, qcpTemplateId: true },
+  });
+  for (const i of items) out.get(i.qcpTemplateId)?.push({ id: i.id, srNo: i.srNo, sequence: i.sequence });
+  return out;
 }
 
 /**
- * For each QCP template, the inspection srNos that some published assembly
- * template of the family (the family-level one, and each equipment type's) would
- * fail to bind. Empty list = compatible. A step a config rule later drops is still
- * counted, so this errs on the side of warning (createJob stays the authority).
+ * For each QCP template, the inspection srNos that an assembly template a line of
+ * this family can actually get would fail to bind: the template each equipment type
+ * resolves to (its own, else the family's), or the family's when no type exists.
+ * Empty list = no gap found. Steps with a rule are skipped, so this is a warning,
+ * not a verdict: createJob stays the authority.
  */
 export async function qcpAssemblyGaps(
   tx: Prisma.TransactionClient,
   tenantId: number,
   familyId: number,
   equipmentTypeIds: number[],
-  qcpTemplateIds: number[],
+  itemsByQcp: Map<number, MatchQcpItem[]>,
 ): Promise<Record<number, string[]>> {
-  const out: Record<number, string[]> = Object.fromEntries(qcpTemplateIds.map((id) => [id, []]));
-  const versions = new Map<number, Awaited<ReturnType<typeof resolveAssemblyTemplateVersion>>>();
-  for (const typeId of [null, ...equipmentTypeIds]) {
+  const versions = new Map<number, NonNullable<Awaited<ReturnType<typeof resolveAssemblyTemplateVersion>>>>();
+  for (const typeId of equipmentTypeIds.length > 0 ? equipmentTypeIds : [null]) {
     const v = await resolveAssemblyTemplateVersion(tx, tenantId, familyId, typeId);
     if (v) versions.set(v.id, v);
   }
-  if (versions.size === 0 || qcpTemplateIds.length === 0) return out;
-  const items = await tx.qcpItem.findMany({
-    where: { qcpTemplateId: { in: qcpTemplateIds } },
-    select: { id: true, srNo: true, sequence: true, qcpTemplateId: true },
-  });
-  for (const qcpId of qcpTemplateIds) {
-    const own = items.filter((i) => i.qcpTemplateId === qcpId);
+  const out: Record<number, string[]> = {};
+  for (const [qcpId, items] of itemsByQcp) {
     const gaps = new Set<string>();
-    for (const v of versions.values()) for (const s of unresolvedInspectionSrNos(v!.steps, own)) gaps.add(s);
+    for (const v of versions.values()) for (const s of unresolvedInspectionSrNos(v.steps, items)) gaps.add(s);
     out[qcpId] = [...gaps];
   }
   return out;
