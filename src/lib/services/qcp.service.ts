@@ -15,7 +15,7 @@ import {
   type AddQcpItemToLibraryTemplateInput,
 } from "@/lib/shared/schemas";
 import type { Prisma, QcpExecution, QcpExecutionResult, QcpItem, QcpTemplate } from "@/generated/prisma/client";
-import { evidenceNeeded } from "@/lib/shared/qc-queue";
+import { evidenceNeeded, QC_RECORD_ROLES } from "@/lib/shared/qc-queue";
 
 /**
  * Bare tx-level create, no audit of its own — same discipline as
@@ -88,7 +88,7 @@ export async function recordQcpExecution(
 ): Promise<QcpExecution> {
   const { qcpItemId, unitId, result, remarks, partyInspector, reportRef, testData } = recordQcpExecutionSchema.parse(input);
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.QC);
+  requireRole(actor, ...QC_RECORD_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
     // Neither `units` nor `qcp_items` carry tenant_id (audit C3), so a bare

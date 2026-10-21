@@ -63,6 +63,7 @@ export function JobDetailClient({
   canManagePacking,
   canManageDispatch,
   canApproveQcpWaiver,
+  canRecordQcp,
   storesAccess,
   canVerify,
   tab,
@@ -89,6 +90,7 @@ export function JobDetailClient({
   canManagePacking: boolean;
   canManageDispatch: boolean;
   canApproveQcpWaiver: boolean;
+  canRecordQcp: boolean;
   /** What the viewer's role may do to stock (L2.14). */
   storesAccess?: StoresAccess;
   /** QC only: Verify and Reject on a submitted route step in the BOM panel. */
@@ -211,7 +213,7 @@ export function JobDetailClient({
       ) : view === "assembly" ? (
         assembly ? <AssemblyPanel jobId={jobId} data={assembly} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
       ) : view === "qcp" ? (
-        qcp ? <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveQcpWaiver} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
+        qcp ? <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveQcpWaiver} canRecord={canRecordQcp} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
       ) : view === "packing" ? (
         packing ? (
           <PackingPanel jobId={jobId} data={packing} canManagePacking={canManagePacking} />

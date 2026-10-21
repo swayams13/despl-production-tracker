@@ -1,7 +1,10 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ROLES } from "@/lib/authz";
+import { ROLES, type Actor } from "@/lib/authz";
+import { MASTER_DATA_READ_ROLES } from "@/lib/services/master-data.service";
+import { resolveQcAccess } from "@/lib/services/qc-queue.read";
+import { MATERIALS_QUEUE_ROLES } from "./stores-access";
 import { NAV_ITEMS, activeItem, landingFor, navFor, sidebarJobs } from "./nav";
 
 const hrefs = (items: { href: string }[]) => items.map((i) => i.href);
@@ -186,5 +189,47 @@ describe("L2.14 Materials queue entry", () => {
       const all = navFor([r]);
       expect([...all.primary, ...all.more].map((i) => i.href), r).not.toContain("/materials");
     }
+  });
+});
+
+describe("no dead nav items: every item shown to a role is enterable by that role", () => {
+  const ADMIN_PH = ["ADMIN", "PRODUCTION_HEAD"];
+  // What each role-gated page does before it renders (the redirect / refusal at the top of its page.tsx).
+  // A route not listed here has no role gate. /qc: with leanFloor off the legacy cockpit is open.
+  const enterable = (role: string, href: string, leanFloor: boolean): boolean => {
+    const gates: Record<string, readonly string[]> = {
+      "/dashboard": ["MANAGEMENT", "PRODUCTION_HEAD", "ADMIN"],
+      "/jobs/new": ADMIN_PH,
+      "/admin": ["ADMIN", "MANAGEMENT"],
+      "/admin/templates": ADMIN_PH,
+      "/admin/families": ADMIN_PH,
+      "/admin/equipment-types": ADMIN_PH,
+      "/admin/routes": ADMIN_PH,
+      "/admin/qcp-templates": ADMIN_PH,
+      "/admin/master-data": MASTER_DATA_READ_ROLES,
+      "/materials": MATERIALS_QUEUE_ROLES,
+    };
+    if (href === "/qc") return !leanFloor || resolveQcAccess({ roles: [role], clientId: null } as unknown as Actor).view;
+    return !gates[href] || gates[href].includes(role);
+  };
+
+  const cases = Object.values(ROLES)
+    .filter((r) => r !== "CLIENT_VIEWER")
+    .flatMap((role) => [false, true].map((leanFloor) => [role, leanFloor] as const));
+
+  it.each(cases)("%s (leanFloor %s)", (role, leanFloor) => {
+    const { primary, more } = navFor([role], { leanFloor });
+    for (const item of [...primary, ...more]) {
+      expect(enterable(role, item.href, leanFloor), `${role} sees "${item.label}" -> ${item.href}`).toBe(true);
+    }
+  });
+
+  it("with the lean floor on, QC & hold points reaches only who can open the queue; off, the cockpit keeps its old audience", () => {
+    const holds = (role: string, leanFloor: boolean) => navFor([role], { leanFloor }).more.some((i) => i.id === "qc-holds");
+    for (const r of ["SUPERVISOR", "PLANNER"]) {
+      expect(holds(r, true), r).toBe(false);
+      expect(holds(r, false), r).toBe(true);
+    }
+    for (const r of ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"]) expect(holds(r, true), r).toBe(true);
   });
 });

@@ -20,11 +20,13 @@ export function QcTab({
   queue,
   qcp,
   canApproveWaiver,
+  canRecord,
 }: {
   jobId: number;
   queue: { counts: QcCounts; holds: HoldRow[]; ncrs: NcrQueueRow[] } | null;
   qcp: QcpGridData | null;
   canApproveWaiver: boolean;
+  canRecord: boolean;
 }) {
   return (
     <>
@@ -98,7 +100,7 @@ export function QcTab({
 
       <div className="jt-gap">
         {qcp ? (
-          <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveWaiver} tabHref={`/jobs/${jobId}?tab=qc`} />
+          <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveWaiver} canRecord={canRecord} tabHref={`/jobs/${jobId}?tab=qc`} />
         ) : (
           <p className="note">No QCP template for this job.</p>
         )}
