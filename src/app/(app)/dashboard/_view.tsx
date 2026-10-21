@@ -16,6 +16,7 @@ import {
   type PortfolioException,
   type PortfolioTile,
 } from "@/lib/shared/portfolio";
+import { portfolioMilestoneText } from "@/lib/shared/milestones";
 import type { JobHealth } from "@/lib/services/job-health";
 
 /** Lean Core L2.7: the Portfolio's four blocks. Links only: every control is a real destination. */
@@ -100,6 +101,7 @@ export function HealthTable({
               <th scope="col">Job</th>
               <th scope="col">Client</th>
               <th scope="col">Progress</th>
+              <th scope="col">Milestone</th>
               <th scope="col">Committed → forecast</th>
               <th scope="col">Health</th>
               <th scope="col">Top blocker</th>
@@ -121,6 +123,9 @@ export function HealthTable({
                     <span className="mono">{r.percentComplete}%</span>
                   </div>
                 </td>
+                <td style={{ color: r.currentMilestone?.late ? "var(--s-overdue)" : undefined }}>
+                  {portfolioMilestoneText(r) ?? <span title="No milestone list for this type of equipment yet">—</span>}
+                </td>
                 <td><Dates r={r} /></td>
                 <td><HealthChip health={r.health} /></td>
                 <td><Blocker e={topBlocker.get(r.id)} /></td>
@@ -139,6 +144,7 @@ export function HealthTable({
           {r.unitRollup.length > 0 && <StageSpine variant="mini" segments={r.unitRollup} />}
           <div className="rt-card-row">
             <span>Progress <b className="mono">{r.percentComplete}%</b></span>
+            {portfolioMilestoneText(r) && <span style={{ color: r.currentMilestone?.late ? "var(--s-overdue)" : undefined }}>{portfolioMilestoneText(r)}</span>}
             <Dates r={r} />
           </div>
           <div className="rt-card-row">
