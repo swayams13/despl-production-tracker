@@ -625,6 +625,40 @@ export async function inspectAssemblyStepTx(
  * checkpoint is a real data problem (the chosen QCP template doesn't cover
  * this assembly template), not something to silently skip.
  */
+export interface AssemblyMaterializeResult {
+  stepCount: number;
+  boundToQcp: number;
+  /** J5a: steps created per scope (PER_UNIT, PER_JOINT, PER_COMPONENT). */
+  byScope: Record<string, number>;
+  /** J5a: scoped steps that expanded to nothing: `joint:<type>` (no joints of that type) or `component:<typeId>` (no such component). */
+  emptyScopes: string[];
+}
+
+/**
+ * J4a/J5a: the joint types a route needs that the generator can plan from shell_courses and
+ * that the line does not have yet. Pure; createJob and the BOM release both call it.
+ */
+export function generatedJointTypesToPlan(
+  steps: readonly { scope: string; jointType: string | null }[],
+  joints: readonly { jointType: string }[],
+): string[] {
+  const needed = [...new Set(steps.filter((st) => st.scope === "PER_JOINT").map((st) => st.jointType!))];
+  return needed.filter((t) => (GENERATED_JOINT_TYPES as readonly string[]).includes(t) && !joints.some((j) => j.jointType === t));
+}
+
+/** J4a: seams follow the shell courses, so the answer has to be a whole number from 1 to 30 (same refusal at create and at release). */
+export function assertShellCoursesAnswered(jointTypes: string[], answers: Record<string, unknown>): void {
+  const courses = answers.shell_courses;
+  if (typeof courses !== "number" || !Number.isInteger(courses) || courses < 1 || courses > MAX_SHELL_COURSES) throw shellCoursesRefusal(jointTypes);
+}
+function shellCoursesRefusal(jointTypes: string[]): AppError {
+  return new AppError(
+    ERROR_CODES.VALIDATION_FAILED,
+    { answerKey: "shell_courses", jointTypes },
+    "This route has welds that follow the shell courses. Enter the number of shell courses (1 to 30) so the long and circumferential seams can be planned.",
+  );
+}
+
 export async function materializeAssemblyStepsFromTemplate(
   tx: Tx,
   tenantId: number,
@@ -641,12 +675,13 @@ export async function materializeAssemblyStepsFromTemplate(
   equipmentId: number | null = null,
   /** J4a: the line's answers (shell_courses plans its seams when the route has PER_JOINT steps). */
   answers: Record<string, unknown> = {},
-): Promise<{ stepCount: number; boundToQcp: number }> {
-  if (unitIds.length === 0) return { stepCount: 0, boundToQcp: 0 };
+): Promise<AssemblyMaterializeResult> {
+  const none: AssemblyMaterializeResult = { stepCount: 0, boundToQcp: 0, byScope: {}, emptyScopes: [] };
+  if (unitIds.length === 0) return none;
 
   // No assembly template authored for this family yet is a legitimate seam.
   const version = await resolveAssemblyTemplateVersion(tx, tenantId, familyId, equipmentTypeId);
-  if (!version) return { stepCount: 0, boundToQcp: 0 };
+  if (!version) return none;
   if (equipmentId != null) {
     await tx.equipment.update({ where: { id: equipmentId }, data: { assemblyTemplateVersionId: version.id } });
   }
@@ -654,7 +689,7 @@ export async function materializeAssemblyStepsFromTemplate(
   // drops one step never shifts which QCP item the later steps bind to (J2).
   const allSteps = version.steps;
   const steps = rules ? allSteps.filter((st) => rules.decide("ASSEMBLY_STEP", st.id, st.includeWhen)) : allSteps;
-  if (steps.length === 0) return { stepCount: 0, boundToQcp: 0 };
+  if (steps.length === 0) return none;
 
   // createJob only ever writes a brand-new Job, so the pin starts null. A job
   // with several equipment blocks calls this once per block: the first block's
@@ -702,19 +737,11 @@ export async function materializeAssemblyStepsFromTemplate(
       select: { id: true, jointNo: true, jointType: true },
     });
   }
-  const jointTypesNeeded = [...new Set(steps.filter((st) => st.scope === "PER_JOINT").map((st) => st.jointType!))];
-  const toGenerate = jointTypesNeeded.filter(
-    (t) => (GENERATED_JOINT_TYPES as readonly string[]).includes(t) && !joints.some((j) => j.jointType === t),
-  );
+  const toGenerate = generatedJointTypesToPlan(steps, joints);
   if (toGenerate.length > 0) {
-    const courses = answers.shell_courses;
-    if (equipmentId == null || typeof courses !== "number" || !Number.isInteger(courses) || courses < 1 || courses > MAX_SHELL_COURSES) {
-      throw new AppError(
-        ERROR_CODES.VALIDATION_FAILED,
-        { answerKey: "shell_courses", jointTypes: toGenerate },
-        "This route has welds that follow the shell courses. Enter the number of shell courses (1 to 30) so the long and circumferential seams can be planned.",
-      );
-    }
+    if (equipmentId == null) throw shellCoursesRefusal(toGenerate);
+    assertShellCoursesAnswered(toGenerate, answers);
+    const courses = answers.shell_courses as number;
     await tx.plannedJoint.createMany({
       data: generateShellJoints(courses)
         .filter((j) => toGenerate.includes(j.jointType))
@@ -742,6 +769,8 @@ export async function materializeAssemblyStepsFromTemplate(
 
   let stepCount = 0;
   let boundToQcp = 0;
+  const byScope: Record<string, number> = {};
+  const emptyScopes = new Set<string>();
   const rows: {
     unitId: number;
     templateStepId: number;
@@ -768,6 +797,7 @@ export async function materializeAssemblyStepsFromTemplate(
                 .filter((c) => c.componentTypeId === step.componentTypeId)
                 .map((c) => ({ plannedJointId: null, componentId: c.id, jointRef: step.jointRef }))
             : [{ plannedJointId: null, componentId: null, jointRef: step.jointRef }];
+      if (targets.length === 0) emptyScopes.add(step.scope === "PER_JOINT" ? `joint:${step.jointType}` : `component:${step.componentTypeId}`);
       for (const [i, target] of targets.entries()) {
         const qcpItemId = resolveQcpItemId(step);
         if (qcpItemId != null) boundToQcp++;
@@ -799,11 +829,12 @@ export async function materializeAssemblyStepsFromTemplate(
           jobId,
         });
         stepCount++;
+        byScope[step.scope] = (byScope[step.scope] ?? 0) + 1;
       }
       extra += Math.max(targets.length - 1, 0);
     }
   }
   await tx.assemblyStep.createMany({ data: rows });
 
-  return { stepCount, boundToQcp };
+  return { stepCount, boundToQcp, byScope, emptyScopes: [...emptyScopes] };
 }

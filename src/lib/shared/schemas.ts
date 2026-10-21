@@ -1033,6 +1033,30 @@ export const createBomRevisionSchema = z
   .strict();
 export type CreateBomRevisionInput = z.infer<typeof createBomRevisionSchema>;
 
+// ── BOM release (J5a) ───────────────────────────────────────────────────
+export const bomReleaseTargetSchema = z.object({ equipmentId: id, bomRevisionId: id }).strict();
+export type BomReleaseTargetInput = z.infer<typeof bomReleaseTargetSchema>;
+export const releaseBomRevisionSchema = bomReleaseTargetSchema.extend({ acknowledgeWarnings: z.boolean().default(false) }).strict();
+export type ReleaseBomRevisionInput = z.input<typeof releaseBomRevisionSchema>;
+export const mapBomLinesSchema = z
+  .object({
+    bomRevisionId: id,
+    lines: z
+      .array(
+        z
+          .object({
+            bomItemId: id,
+            componentTypeId: id.nullable(),
+            routeVariant: z.string().regex(/^[A-Z]$/, "A route variant is one capital letter, like A or B.").nullable().default(null),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(1000),
+  })
+  .strict();
+export type MapBomLinesInput = z.input<typeof mapBomLinesSchema>;
+
 // ── Packing / dispatch (Phase 5, D1/D2/D3) ──────────────────────────────
 
 /** D1 — creates a Package a Unit can later be assigned into. */

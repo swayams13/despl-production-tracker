@@ -175,3 +175,30 @@ export async function bindExistingInspectionSteps(
   }
   return { bound, leftUnbound };
 }
+
+/**
+ * J5a: the QCP items a rule dropped from the job's cloned plan, rebuilt from the rule ledger
+ * (cloneQcpTemplate puts srNo and sequence on each QCP_ITEM row). An item is dropped when every
+ * line of the job decided "not included". They keep their place in the numbering when steps bind.
+ */
+export async function loadSkippedQcpItems(tx: Prisma.TransactionClient, jobId: number): Promise<{ srNo: string; sequence: number }[]> {
+  const lines = await tx.equipment.count({ where: { jobId } });
+  const rows = await tx.configRuleDecision.findMany({
+    where: { jobId, entityType: "QCP_ITEM", included: false },
+    select: { entityId: true, equipmentId: true, reason: true },
+  });
+  const byItem = new Map<number, { lines: Set<number>; srNo?: string; sequence?: number }>();
+  for (const r of rows) {
+    const e = byItem.get(r.entityId) ?? { lines: new Set<number>() };
+    e.lines.add(r.equipmentId);
+    const reason = r.reason as { srNo?: string; sequence?: number } | null;
+    if (typeof reason?.srNo === "string" && typeof reason.sequence === "number") {
+      e.srNo = reason.srNo;
+      e.sequence = reason.sequence;
+    }
+    byItem.set(r.entityId, e);
+  }
+  return [...byItem.values()]
+    .filter((e) => lines > 0 && e.lines.size >= lines && e.srNo !== undefined && e.sequence !== undefined)
+    .map((e) => ({ srNo: e.srNo!, sequence: e.sequence! }));
+}
