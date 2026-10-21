@@ -359,6 +359,7 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
         thrown = e;
       }
       expect(isAppError(thrown) && thrown.code).toBe(ERROR_CODES.VALIDATION_FAILED);
+      expect(isAppError(thrown) && thrown.detail?.reason).toBe("NO_UNITS");
       expect((thrown as Error).message).toBe("Add at least one packed unit to this batch before approving release.");
 
       const after = await owner.dispatchBatch.findUniqueOrThrow({ where: { id: batch.id } });
@@ -385,6 +386,7 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
         thrown = e;
       }
       expect(isAppError(thrown) && thrown.code).toBe(ERROR_CODES.VALIDATION_FAILED);
+      expect(isAppError(thrown) && thrown.detail?.reason).toBe("NO_UNITS");
       expect((thrown as Error).message).toBe("Add at least one packed unit to this batch before recording dispatch.");
 
       const after = await owner.dispatchBatch.findUniqueOrThrow({ where: { id: batch.id } });

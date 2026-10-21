@@ -336,7 +336,11 @@ function BatchCard({
           </button>
         )}
         {canManageDispatch && action !== null && batch.units.length === 0 && (
-          <span className="note">Add at least one packed unit to this batch first.</span>
+          <span className="note">
+            {batch.status === "PLANNED"
+              ? "Add at least one packed unit to this batch first."
+              : "This batch has no units and cannot be dispatched. Ask an administrator."}
+          </span>
         )}
       </div>
     </div>
