@@ -16,6 +16,8 @@ import {
 import { inspectAction } from "@/app/actions/work";
 import { boardFilterQuery, fmtDay, type BoardFilter } from "@/lib/shared/board";
 import type { BoardView } from "@/lib/services/board.read";
+import type { JobMilestones } from "@/lib/shared/milestones";
+import { MilestoneStrip } from "@/components/industrial/milestone-strip";
 import type { BoardCellDetail, BoardItem } from "@/lib/services/board.cell.read";
 
 /**
@@ -43,6 +45,7 @@ export function BoardClient({
   stageNos,
   unitIds,
   leanFloor,
+  milestones = null,
 }: {
   jobId: number;
   view: BoardView;
@@ -50,6 +53,8 @@ export function BoardClient({
   stageNos: number[];
   unitIds: number[];
   leanFloor: boolean;
+  /** J8: only loaded when the job has no stage list. */
+  milestones?: JobMilestones | null;
 }) {
   const router = useRouter();
   const grid = useRef<HTMLDivElement>(null);
@@ -163,7 +168,12 @@ export function BoardClient({
 
       <FloorOutcomes outcomes={outcomes} dismiss={dismiss} />
 
-      {units.length === 0 || (cols.length === 0 && !showEarly) ? (
+      {view.stages.length === 0 ? (
+        <div className="fl-empty">
+          <b>No stage list for this type of equipment yet; milestones shown instead.</b>
+          {milestones && <MilestoneStrip milestones={milestones} />}
+        </div>
+      ) : units.length === 0 || (cols.length === 0 && !showEarly) ? (
         <div className="fl-empty">
           <b>Nothing matches these filters.</b>
           <Link className="btn" href={`/jobs/${jobId}/board`}>
