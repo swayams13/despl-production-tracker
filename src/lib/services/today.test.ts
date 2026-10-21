@@ -24,6 +24,8 @@ describe.skipIf(!RUN_DB)("L2.3 Today (DB)", async () => {
   let operator: Actor;
   let msOperator: Actor;
   let bOperator: Actor;
+  let planner: Actor;
+  let otherPlanner: Actor;
   beforeAll(async () => {
     o = await makeWorkOrg(owner, "TDY");
     b = await makeWorkOrg(owner, "TDB");
@@ -32,6 +34,8 @@ describe.skipIf(!RUN_DB)("L2.3 Today (DB)", async () => {
     operator = await o.user("op", ["OPERATOR"], [o.fab.id]);
     msOperator = await o.user("msop", ["OPERATOR"], [o.other.id]);
     bOperator = await b.user("bop", ["OPERATOR"], [b.fab.id]);
+    planner = await o.user("planner", ["PLANNER"], [o.fab.id]);
+    otherPlanner = await o.user("planner2", ["PLANNER"], [o.other.id]);
   });
   afterAll(async () => {
     await owner.$disconnect();
@@ -115,6 +119,49 @@ describe.skipIf(!RUN_DB)("L2.3 Today (DB)", async () => {
       expect(sv.canClaimNext).toBe(false);
       expect(sv.canAssign).toBe(true);
       expect(sv.pool.length).toBeGreaterThan(0);
+    });
+  });
+
+  // Pilot seat Planning/PPC: a PLANNER records processes 1-11 only (work.service applyItem),
+  // so Today shows them office plans only and nothing of the floor.
+  describe("PLANNER on Today (office processes 1-11 only)", () => {
+    const rowsOf = (v: Awaited<ReturnType<typeof loadToday>>) =>
+      [v.sections.doFirst, ...v.sections.today, ...v.sections.upcoming, ...v.sections.blocked].filter(Boolean);
+
+    it("mine: only office plans assigned to me; an assigned floor process is not listed", async () => {
+      const j = await o.job({ processes: [{ code: "3", grain: "JOB" }, { code: "22" }] });
+      await assign(j.plan("3"), planner.userId);
+      await assign(j.plan("22", 0), planner.userId);
+      const v = await loadToday(planner);
+      expect(rowsOf(v).filter((r) => r!.jobId === j.job.id).map((r) => r!.id)).toEqual([j.plan("3")]);
+    });
+
+    it("pool: unassigned office plans of my own department only; claim next never takes a floor plan", async () => {
+      const j = await o.job({ processes: [{ code: "4", grain: "JOB" }, { code: "22" }] });
+      const v = await loadToday(planner);
+      expect(v.canClaimNext).toBe(true);
+      expect(v.canAssign).toBe(false);
+      expect(v.pool).toEqual([]); // assigning is for supervisors; a planner claims
+      const r = await claimNext(planner);
+      const claimed = await owner.processPlan.findUniqueOrThrow({ where: { id: r.processPlanId }, include: { jobProcess: true } });
+      expect(claimed.jobProcess.seq).toBeLessThanOrEqual(11);
+      expect(claimed.assigneeUserId).toBe(planner.userId);
+      expect(await owner.processPlan.count({ where: { jobId: j.job.id, jobProcess: { seq: 22 }, assigneeUserId: { not: null } } })).toBe(0);
+    });
+
+    it("a planner in another department sees and claims nothing of Fabrication's office plans", async () => {
+      const j = await o.job({ processes: [{ code: "5", grain: "JOB" }] });
+      await assign(j.plan("5"), null);
+      const v = await loadToday(otherPlanner);
+      expect(v.canClaimNext).toBe(false);
+      expect(rowsOf(v).some((r) => r!.jobId === j.job.id)).toBe(false);
+      expect(await code(claimNext(otherPlanner))).toBe(ERROR_CODES.NOT_FOUND);
+    });
+
+    it("a supervisor still sees the floor plans in the pool (the filter is for planner-only users)", async () => {
+      await o.job({ processes: [{ code: "22" }] });
+      const sv = await loadToday(sup);
+      expect(sv.pool.some((p) => p.processName === "Process 22")).toBe(true);
     });
   });
 

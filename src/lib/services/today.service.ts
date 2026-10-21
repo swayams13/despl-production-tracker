@@ -8,14 +8,15 @@ import { loadMyDay } from "./myday.read";
  * unassigned plan in the operator's own departments (loadMyDay's pool, ranked
  * by the prioritizer, ready ones before schedule-blocked ones) through the
  * ordinary claimPlan, so its department check, audit row and ALREADY_ASSIGNED
- * race handling are the existing ones. Supervisors do not claim from Today
+ * race handling are the existing ones. A planner claims too, from a pool loadMyDay
+ * already narrows to processes 1–11. Supervisors do not claim from Today
  * (errata 15): they assign.
  */
 const TRIES = 5;
 
 export async function claimNext(actor: Actor): Promise<{ processPlanId: number }> {
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.OPERATOR);
+  requireRole(actor, ROLES.OPERATOR, ROLES.PLANNER);
   const { pool } = await loadMyDay(actor);
   const open = pool.filter((p) => p.ranked.state !== "DONE");
   const ranked = [...open.filter((p) => p.ranked.state !== "BLOCKED"), ...open.filter((p) => p.ranked.state === "BLOCKED")];

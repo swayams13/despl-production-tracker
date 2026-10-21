@@ -60,7 +60,7 @@ export interface TodayView {
   checkIn: { open: TodayRow[]; doneToday: DoneTodayRow[] };
   scoreboard: MyDayScoreboard;
   clearedToday: number;
-  /** OPERATOR only, and only while something is unassigned in their departments. */
+  /** OPERATOR or PLANNER (office pool) only, and only while something is unassigned in their departments. */
   canClaimNext: boolean;
   /** Supervisor and above: the interim "unassigned in my department" section. */
   pool: PoolItem[];
@@ -229,7 +229,7 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
   });
 
   const canAssign = hasRole(actor, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
-  const operator = hasRole(actor, ROLES.OPERATOR) && !canAssign;
+  const operator = hasRole(actor, ROLES.OPERATOR, ROLES.PLANNER) && !canAssign;
   const poolRows = my.pool.filter((p) => p.ranked.state !== "DONE");
   const eod = endOfIstDay(now);
   const open = [...(sections.doFirst ? [sections.doFirst] : []), ...sections.today].filter(

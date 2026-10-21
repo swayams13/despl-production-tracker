@@ -7,6 +7,7 @@ import { loadJobs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
 import { isOnTime } from "@/lib/shared/business-day";
 import { pctOf } from "@/lib/shared/metrics";
+import { OFFICE_PROCESS_MAX_SEQ } from "@/lib/shared/floor-rules";
 
 /**
  * `/my-day` (personal dashboards v1, SPEC §6.1) — the personalized read every
@@ -136,6 +137,11 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   // would come up empty for the exact maker-checker verification flow it
   // exists to surface.
   const isQcActor = hasRole(actor, ROLES.QC);
+  // A planner-only user records processes 1–11 and nothing else (work.service applyItem), so their
+  // lists carry only those. Pool stays the existing own-department rule: recordWork's department
+  // scope would refuse a planner outside the owner department anyway, so no wider rule is safe.
+  const officeOnly =
+    hasRole(actor, ROLES.PLANNER) && !isQcActor && !hasRole(actor, ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
 
   const mine: MyDayRow[] = [];
   const pool: MyDayRow[] = [];
@@ -203,6 +209,7 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       activeRunIds.push(run.id);
       const floatByProcessId = new Map(cpm.map((n) => [n.processId, { totalFloat: n.totalFloat, isCritical: n.isCritical }]));
       const processNameById = new Map(spine.rawProcesses.map((p) => [p.id, p.name]));
+      const seqById = new Map(spine.rawProcesses.map((p) => [p.id, p.seq]));
       const durationMaxById = new Map(spine.rawProcesses.map((p) => [p.id, p.durationMaxDays]));
       // Display metadata per process — same denormalization workspace.read.ts's
       // `procMeta` does, plus `stageNo` for the StageSheet launch key.
@@ -245,6 +252,7 @@ export async function loadMyDay(actor: Actor): Promise<MyDayView> {
       // only ever land in exactly one of mine/pool/teamHeld.
       for (const rows of rankedByDept.values()) {
         for (const r of rows) {
+          if (officeOnly && (seqById.get(r.plan.jobProcessId) ?? Infinity) > OFFICE_PROCESS_MAX_SEQ) continue;
           const assignee = r.plan.assigneeUserId;
           if (r.state === "DONE") {
             // Completed history, not an actionable board — mine only (not

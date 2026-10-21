@@ -11,10 +11,10 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     ["OPERATOR", ["/my-day", "/alerts"]],
     ["SUPERVISOR", ["/my-day", "/workspace", "/jobs"]],
     ["QC", ["/qc", "/jobs"]],
-    ["PLANNER", ["/jobs", "/jobs/new"]],
-    ["PRODUCTION_HEAD", ["/workspace", "/dashboard", "/jobs", "/admin/templates"]],
+    ["PLANNER", ["/jobs"]],
+    ["PRODUCTION_HEAD", ["/workspace", "/dashboard", "/jobs", "/jobs/new", "/admin/templates"]],
     ["MANAGEMENT", ["/dashboard", "/jobs", "/admin"]],
-    ["ADMIN", ["/dashboard", "/jobs", "/admin", "/admin/templates"]],
+    ["ADMIN", ["/dashboard", "/jobs", "/jobs/new", "/admin", "/admin/templates"]],
     ["ENGINEERING", ["/jobs"]],
     ["STORES", ["/materials", "/jobs"]],
   ];
@@ -40,6 +40,20 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
     expect(navFor(["SUPERVISOR"], { leanFloor: true }).primary.find((i) => i.href === "/today")?.badge).toBe("overdue");
     // a role without Today is untouched by the switch
     expect(hrefs(navFor(["QC"], { leanFloor: true }).primary)).not.toContain("/today");
+  });
+
+  it("New job is only for the roles that can create one (job-intake: ADMIN, PRODUCTION_HEAD); never a planner", () => {
+    for (const on of [{}, { leanFloor: true }]) {
+      expect(hrefs(navFor(["PLANNER"], on).primary)).not.toContain("/jobs/new");
+      for (const r of ["ADMIN", "PRODUCTION_HEAD"]) expect(hrefs(navFor([r], on).primary), r).toContain("/jobs/new");
+    }
+  });
+
+  it("Today reaches a planner only with leanFloor on (it is where processes 1-11 are recorded)", () => {
+    expect(hrefs(navFor(["PLANNER"]).primary)).toEqual(["/jobs"]);
+    expect(hrefs(navFor(["PLANNER"], { leanFloor: true }).primary)).toEqual(["/today", "/jobs"]);
+    // no duplicate when a user also holds a floor role
+    expect(hrefs(navFor(["PLANNER", "SUPERVISOR"], { leanFloor: true }).primary).filter((h) => h === "/today")).toHaveLength(1);
   });
 
   it("Team is /workspace until leanFloor is on, then /team, with the department overdue badge", () => {
@@ -139,7 +153,7 @@ describe("activeItem: longest segment-boundary prefix", () => {
   const { primary } = navFor(["PLANNER"]);
   it("distinguishes /jobs from /jobs/new", () => {
     expect(activeItem(primary, "/jobs")?.id).toBe("jobs");
-    expect(activeItem(primary, "/jobs/new")?.id).toBe("new-job");
+    expect(activeItem(navFor(["ADMIN"]).primary, "/jobs/new")?.id).toBe("new-job");
     expect(activeItem(primary, "/jobs/12/activity")?.id).toBe("jobs");
   });
   it("does not match a shared string prefix", () => {
