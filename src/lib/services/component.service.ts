@@ -688,14 +688,21 @@ export async function materializeComponentsFromBomItems(
   equipmentId: number,
   bomItemIds: number[],
   jobId: number,
-): Promise<{ componentCount: number; skippedNoRoute: number }> {
-  if (bomItemIds.length === 0) return { componentCount: 0, skippedNoRoute: 0 };
+  /** J5a: `release` = the BOM-release path (approved part families only, integer qtyPer becomes the operation's planned quantity). */
+  opts: { release?: boolean } = {},
+): Promise<{ componentCount: number; operationCount: number; skippedNoRoute: number; skippedUnapproved: number; pressureCount: number }> {
+  const none = { componentCount: 0, operationCount: 0, skippedNoRoute: 0, skippedUnapproved: 0, pressureCount: 0 };
+  if (bomItemIds.length === 0) return none;
 
-  const bomItems = await tx.bomItem.findMany({
+  const allBomItems = await tx.bomItem.findMany({
     where: { id: { in: bomItemIds }, componentTypeId: { not: null } },
-    select: { id: true, componentTypeId: true, partName: true, itemNo: true },
+    select: { id: true, componentTypeId: true, partName: true, itemNo: true, routeVariant: true, qtyPer: true },
   });
-  if (bomItems.length === 0) return { componentCount: 0, skippedNoRoute: 0 };
+  // J5a: the same filter importBomItems applies — a part family is only usable once approved (M3).
+  const approvedTypeIds = opts.release ? await approvedComponentTypeIds(tx, allBomItems.map((b) => b.componentTypeId!)) : null;
+  const bomItems = approvedTypeIds ? allBomItems.filter((b) => approvedTypeIds.has(b.componentTypeId!)) : allBomItems;
+  const skippedUnapproved = allBomItems.length - bomItems.length;
+  if (bomItems.length === 0) return { ...none, skippedUnapproved };
 
   const units = await tx.unit.findMany({ where: { equipmentId }, select: { id: true }, orderBy: { id: "asc" } });
 
@@ -716,18 +723,19 @@ export async function materializeComponentsFromBomItems(
     list.push(t);
     templatesByTypeId.set(t.componentTypeId, list);
   }
-  const templateByTypeId = new Map<number, (typeof templates)[number]>();
-  for (const [typeId, list] of templatesByTypeId) {
-    const picked = pickRouteTemplate(list);
-    if (picked) templateByTypeId.set(typeId, picked);
-  }
+  // J5a: a line that names a variant takes that variant's route (family-specific first);
+  // a line that names none takes pickRouteTemplate's choice, as before.
+  const routeFor = (b: { componentTypeId: number | null; routeVariant: string | null }) => {
+    const list = templatesByTypeId.get(b.componentTypeId!) ?? [];
+    return pickRouteTemplate(b.routeVariant ? list.filter((t) => t.variant === b.routeVariant) : list);
+  };
 
   // Lean Core L1.1 (D3): requiresQc is copied from OperationRef onto each
   // ComponentOperation at materialisation, so a later edit to the (unversioned)
   // OperationRef cannot change a running job (invariant 9). M1: the route step's
   // own requiresQc is ANDed in (effectiveRequiresQc) — either level can waive QC.
   const operationIds = [
-    ...new Set([...templateByTypeId.values()].flatMap((t) => t.versions[0]?.steps.map((st) => st.operationId) ?? [])),
+    ...new Set(templates.flatMap((t) => t.versions[0]?.steps.map((st) => st.operationId) ?? [])),
   ];
   const operationRefs =
     operationIds.length > 0
@@ -752,11 +760,13 @@ export async function materializeComponentsFromBomItems(
   const rules = await LineRules.load(tx, equipmentId);
 
   let componentCount = 0;
+  let operationCount = 0;
+  let pressureCount = 0;
   let skippedNoRoute = 0;
   const usedTags = new Set<string>();
 
   for (const b of bomItems) {
-    const routeVersion = templateByTypeId.get(b.componentTypeId!)?.versions[0];
+    const routeVersion = routeFor(b)?.versions[0];
     if (!routeVersion) {
       skippedNoRoute++;
       continue;
@@ -784,12 +794,14 @@ export async function materializeComponentsFromBomItems(
 
       const routeSteps = routeVersion.steps.filter((step) => rules.decide("ROUTE_STEP", step.id, step.includeWhen));
       if (routeSteps.length > 0) {
+        const qtyPer = b.qtyPer != null ? Number(b.qtyPer) : null;
         await tx.componentOperation.createMany({
           data: routeSteps.map((step) => ({
             componentId: component.id,
             seq: step.seq,
             operationId: step.operationId,
             status: OperationStatus.NOT_STARTED,
+            ...(opts.release && qtyPer != null && Number.isInteger(qtyPer) && qtyPer > 0 ? { qtyPlanned: qtyPer } : {}),
             requiresQc:
               effectiveRequiresQc(step.requiresQc, requiresQcByOperationId.get(step.operationId) ?? true) &&
               (!reviewedTypeIds.has(b.componentTypeId!) ||
@@ -804,11 +816,23 @@ export async function materializeComponentsFromBomItems(
         });
       }
       componentCount++;
+      operationCount += routeSteps.length;
+      if (pressureRetainingTypeIds.has(b.componentTypeId!)) pressureCount++;
     }
   }
 
   await flushRuleDecisions(tx, [rules]);
-  return { componentCount, skippedNoRoute };
+  return { componentCount, operationCount, skippedNoRoute, skippedUnapproved, pressureCount };
+}
+
+/** J5a: the component types usable on a BOM line: a raw form, or a part family that has been approved (M3, D15). */
+export async function approvedComponentTypeIds(tx: Tx, typeIds: number[]): Promise<Set<number>> {
+  if (typeIds.length === 0) return new Set();
+  const rows = await tx.componentTypeRef.findMany({
+    where: { id: { in: [...new Set(typeIds)] }, OR: [{ kind: "RAW_FORM" }, { partFamily: { status: "APPROVED" } }] },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
 }
 
 /**

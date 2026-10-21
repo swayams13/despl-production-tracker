@@ -1119,7 +1119,10 @@ function StepReview({
           <div className="hd"><h3>Job created</h3></div>
           <div style={{ padding: 16 }}>
             <p style={{ margin: "0 0 10px" }}>
-              <b>{state.jobNumber.trim()}</b> — {createdJob.unitCount} unit{createdJob.unitCount === 1 ? "" : "s"}, {createdJob.processCount} processes, {createdJob.qcpItemCount} QCP items, {createdJob.bomItemCount} BOM lines, {createdJob.componentCount} components, {createdJob.assemblyStepCount} assembly steps.
+              <b>{state.jobNumber.trim()}</b> — {createdJob.unitCount} unit{createdJob.unitCount === 1 ? "" : "s"}, {createdJob.processCount} processes, {createdJob.qcpItemCount} QCP items, {createdJob.bomItemCount} BOM lines.
+            </p>
+            <p className="note" style={{ textAlign: "left", margin: "0 0 10px" }}>
+              Floor steps are created when the BOM is released{createdJob.bomItemCount > 0 ? "; the copied BOM is waiting there as a draft" : ""}.
             </p>
             {createdJob.unmatchedQcpProcessCodes.length > 0 && (
               <p className="note" style={{ textAlign: "left", margin: "0 0 10px" }}>

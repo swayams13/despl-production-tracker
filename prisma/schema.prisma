@@ -1568,20 +1568,22 @@ model ProcessPlan {
 /// row per equipment (scripts/backfill-bom-revision.ts) — the write path for
 /// authoring a new revision belongs to a later, separately-dispatched task.
 model BomRevision {
-  id          Int               @id @default(autoincrement())
-  equipmentId Int               @map("equipment_id")
-  revisionNo  Int               @map("revision_no")
-  status      BomRevisionStatus @default(DRAFT)
-  releasedAt  DateTime?         @map("released_at")
-  createdBy   Int?              @map("created_by")
+  id             Int               @id @default(autoincrement())
+  equipmentId    Int               @map("equipment_id")
+  revisionNo     Int               @map("revision_no")
+  status         BomRevisionStatus @default(DRAFT)
+  releasedAt     DateTime?         @map("released_at")
+  /// J5a: set (server clock) when releaseBomRevision materialised this revision's floor rows. Idempotency is by revision.
+  materializedAt DateTime?         @map("materialized_at")
+  createdBy      Int?              @map("created_by")
   /// H1 job-level RLS backstop: denormalized from equipment.jobId.
-  jobId       Int               @map("job_id")
+  jobId          Int               @map("job_id")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
   /// any constraint check runs — 0 is never actually persisted.
-  tenantId    Int               @default(0) @map("tenant_id")
-  createdAt   DateTime          @default(now()) @map("created_at")
+  tenantId       Int               @default(0) @map("tenant_id")
+  createdAt      DateTime          @default(now()) @map("created_at")
 
   equipment Equipment    @relation(fields: [equipmentId], references: [id])
   creator   User?        @relation(fields: [createdBy], references: [id])
@@ -1616,6 +1618,8 @@ model BomItem {
   uom             String?  @map("uom")
   unit            String?
   componentTypeId Int?     @map("component_type_id")
+  /// J5a: the route variant letter (A, B…) this line is built to; null = the lowest letter with a published version.
+  routeVariant    String?  @map("route_variant")
   remarks         String?
   /// Multi-level BOM tree (B2, Phase 4). Nullable/additive — every existing
   /// row's parent stays null; no hierarchy inferred from the flat CSV

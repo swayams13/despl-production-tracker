@@ -23,6 +23,8 @@ export const PMI_DECIDE_ROLES = ["QC"] as const;
 export const LOT_HEAT_ROLES = ["ADMIN", "PRODUCTION_HEAD", "STORES"] as const;
 /** Add, edit or import BOM lines (enforced by bom.service; the Parts and stock screen hides the controls from everyone else). */
 export const BOM_EDIT_ROLES = ["ADMIN", "PRODUCTION_HEAD"] as const;
+/** J5a: preview, map and release a BOM revision (this is what creates the floor steps). The planner cannot. */
+export const BOM_RELEASE_ROLES = ["ADMIN", "PRODUCTION_HEAD", "ENGINEERING"] as const;
 /** The cross-job Materials queue. Read only for the planner. */
 export const MATERIALS_QUEUE_ROLES = ["STORES", "ADMIN", "PRODUCTION_HEAD", "PLANNER"] as const;
 

@@ -16,8 +16,8 @@ import {
 import type { RuleDecision } from "@/lib/shared/include-when";
 import { flushRuleDecisions, lineConfig, LineRules, loadQuestionDefs } from "./config-rules";
 import { notifyJobCreated } from "./notifications.service";
-import { materializeComponentsFromBomItems } from "./component.service";
-import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
+import { assertShellCoursesAnswered, generatedJointTypesToPlan } from "./assembly.service";
+import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
 import { bindExistingInspectionSteps, type BindExistingResult } from "./assembly-qcp-match";
 
 /**
@@ -41,10 +41,11 @@ export interface CreateJobResult {
   unitCount: number;
   qcpItemCount: number;
   bomItemCount: number;
-  /** Component rows materialised from the copied BOM's typed items — see materializeComponentsFromBomItems. */
-  componentCount: number;
-  /** AssemblyStep rows materialised per unit from the family's AssemblyTemplate — see materializeAssemblyStepsFromTemplate. 0 if the family has no AssemblyTemplate yet. */
-  assemblyStepCount: number;
+  /**
+   * J5a: a job is created without floor rows. Components, operations and assembly steps are
+   * generated when the line's BOM revision is released (bom-release.service.ts); a copied BOM
+   * waits there as DRAFT revision 1.
+   */
   /**
    * QCP source items whose linked process code has no counterpart in the new
    * job's route. Reported, never silently dropped — the wizard lists them.
@@ -225,6 +226,14 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
     const probes = parsed.equipments.map((b, i) =>
       LineRules.fromConfig(0, 0, lineQuestions[i], b.equipmentTypeId, blockConfigs[i]),
     );
+    // J4a/J5a: the seams follow the shell courses, so the answer is checked before the job exists
+    // even though the steps are only made at BOM release.
+    for (const [i, b] of parsed.equipments.entries()) {
+      const av = await resolveAssemblyTemplateVersion(tx, actor.tenantId, versionOf(b).template.familyId, b.equipmentTypeId ?? null);
+      if (!av) continue;
+      const seamTypes = generatedJointTypesToPlan(av.steps.filter((st) => probes[i].peek(st.includeWhen).included), []);
+      if (seamTypes.length > 0) assertShellCoursesAnswered(seamTypes, blockConfigs[i]);
+    }
     type ScopedProcess = {
       tp: (typeof version.processes)[number];
       /** Index into parsed.equipments for a line's own route; null = the job-level set. */
@@ -441,37 +450,12 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         ? await cloneQcpTemplate(tx, parsed.qcpTemplateSourceId, job.id, jpIdsByCode, actor.tenantId, blockUnits.map((b) => b.rules))
         : { qcpTemplateId: null, itemCount: 0, unmatchedProcessCodes: [] as string[], skipped: [] as { srNo: string; sequence: number }[] };
 
+      // J5a: the copied lines wait as DRAFT revision 1; BOM release makes the floor rows.
       const bom =
         parsed.copyBomFromEquipmentId != null && firstEquipmentId != null
-          ? await copyBom(tx, parsed.copyBomFromEquipmentId, firstEquipmentId, actor.tenantId, job.id)
+          ? await copyBom(tx, parsed.copyBomFromEquipmentId, firstEquipmentId, actor.tenantId, job.id, actor.userId)
           : { count: 0, createdIds: [] };
 
-      const components =
-        bom.createdIds.length > 0 && firstEquipmentId != null
-          ? await materializeComponentsFromBomItems(tx, blockUnits[0].familyId, firstEquipmentId, bom.createdIds, job.id)
-          : { componentCount: 0, skippedNoRoute: 0 };
-
-      // J1: each equipment block takes the template of its own equipment type.
-      const assembly = { stepCount: 0, boundToQcp: 0 };
-      for (const block of blockUnits) {
-        const r = await materializeAssemblyStepsFromTemplate(
-          tx,
-          actor.tenantId,
-          job.id,
-          block.familyId,
-          block.unitIds,
-          qcp.qcpTemplateId,
-          block.equipmentTypeId,
-          block.rules,
-          qcp.skipped,
-          block.equipmentId,
-          block.answers,
-        );
-        assembly.stepCount += r.stepCount;
-        assembly.boundToQcp += r.boundToQcp;
-      }
-
-      // The component step above flushed its own (route step) decisions for the first line; the rest go here.
       await flushRuleDecisions(tx, blockUnits.map((b) => b.rules));
       const ruleDecisionCount = await tx.configRuleDecision.count({ where: { jobId: job.id } });
       const flaggedRuleCount = await tx.configRuleDecision.count({ where: { jobId: job.id, flagged: true } });
@@ -484,8 +468,6 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         unitCount,
         qcpItemCount: qcp.itemCount,
         bomItemCount: bom.count,
-        componentCount: components.componentCount,
-        assemblyStepCount: assembly.stepCount,
         unmatchedQcpProcessCodes: qcp.unmatchedProcessCodes,
         ruleDecisionCount,
         flaggedRuleCount,
@@ -509,8 +491,6 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
             equipmentCount: parsed.equipments.length,
             unitCount: result.unitCount,
             bomItemCount: result.bomItemCount,
-            componentCount: result.componentCount,
-            assemblyStepCount: result.assemblyStepCount,
             ruleDecisionCount: result.ruleDecisionCount,
             flaggedRuleCount: result.flaggedRuleCount,
             droppedEdgeCount: result.droppedEdgeCount,
@@ -842,7 +822,8 @@ export async function cloneQcpTemplate(
     // J2: an item with a rule is kept when ANY line's answers keep it; each line's decision is on the ledger.
     if (item.includeWhen != null) {
       const decisions = lineRules.map((l) => l.peek(item.includeWhen));
-      decisions.forEach((d, i) => lineRules[i].record("QCP_ITEM", item.id, d));
+      // The srNo and sequence ride on the ledger row so the BOM release can rebuild `skipped` later (J5a).
+      decisions.forEach((d, i) => lineRules[i].record("QCP_ITEM", item.id, { ...d, reason: { ...d.reason, srNo: item.srNo, sequence: item.sequence } } as RuleDecision));
       if (lineRules.length > 0 && !decisions.some((d) => d.included)) {
         skipped.push({ srNo: item.srNo, sequence: item.sequence });
         continue;
@@ -912,8 +893,8 @@ export async function cloneQcpTemplate(
  * Component and ItemTest are execution records belonging to the source job —
  * heat numbers, MTC references, PO numbers. Copying them would fabricate
  * traceability, which is the opposite of what this system exists for.
- * `bomRevisionId` is also deliberately left null on the copy — a separate,
- * already-flagged gap (B3 create-path), not this fix's job.
+ * J5a: the copy lands in a new DRAFT BomRevision 1 on the target line, which is
+ * what `releaseBomRevision` materialises (components, operations, steps).
  *
  * Fix wave (Important #4): preserves `parentBomItemId` hierarchies, which
  * B4 (Dispatch 8) made the first real writer of. `createMany` can't point a
@@ -934,6 +915,7 @@ async function copyBom(
   targetEquipmentId: number,
   tenantId: number,
   jobId: number,
+  createdBy: number,
 ): Promise<{ count: number; createdIds: number[] }> {
   const source = await tx.equipment.findFirst({
     where: { id: sourceEquipmentId, job: { tenantId } },
@@ -944,9 +926,13 @@ async function copyBom(
   }
   if (source.bomItems.length === 0) return { count: 0, createdIds: [] };
 
+  const revision = await tx.bomRevision.create({
+    data: { equipmentId: targetEquipmentId, revisionNo: 1, status: "DRAFT", createdBy, jobId },
+  });
   const created = await tx.bomItem.createManyAndReturn({
     data: source.bomItems.map((b) => ({
       equipmentId: targetEquipmentId,
+      bomRevisionId: revision.id,
       jobId,
       itemNo: b.itemNo,
       blockNo: b.blockNo,
@@ -958,6 +944,7 @@ async function copyBom(
       uom: b.uom,
       unit: b.unit,
       componentTypeId: b.componentTypeId,
+      routeVariant: b.routeVariant,
       remarks: b.remarks,
     })),
     select: { id: true, itemNo: true },

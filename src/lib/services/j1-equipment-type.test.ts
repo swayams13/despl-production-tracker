@@ -18,6 +18,7 @@ describe.skipIf(!RUN_DB)("Lean Core J1 equipment type anchor (DB)", async () => 
   const { resolveAssemblyTemplateVersion } = await import("./assembly-template.resolve");
   const { ensurePvEquipmentTypes, SKIRT_TYPE_CODE } = await import("./equipment-type.setup");
   const { createJob } = await import("./job-intake.service");
+  const { releaseJobBoms } = await import("./bom-release.test-util");
   const { ROLES } = await import("@/lib/authz");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -263,8 +264,9 @@ describe.skipIf(!RUN_DB)("Lean Core J1 equipment type anchor (DB)", async () => 
     }
     type Refs = Awaited<ReturnType<typeof refs>>;
 
-    function make(r: Refs, jobNumber: string, blocks: { typeId: number | null; serials: string[] }[]) {
-      return createJob(actor, {
+    // J5a: createJob no longer makes floor rows; releasing each line's (empty) BOM does.
+    async function make(r: Refs, jobNumber: string, blocks: { typeId: number | null; serials: string[] }[]) {
+      const res = await createJob(actor, {
         clientId: r.client.id,
         familyId: r.familyId,
         templateVersionId: r.version.id,
@@ -289,10 +291,10 @@ describe.skipIf(!RUN_DB)("Lean Core J1 equipment type anchor (DB)", async () => 
         })),
         qcpTemplateSourceId: r.qcp.id,
         copyBomFromEquipmentId: null,
-      } as never).then((res) => {
-        createdJobs.push(res.jobId);
-        return res;
-      });
+      } as never);
+      createdJobs.push(res.jobId);
+      const released = await releaseJobBoms(owner, actor, res.jobId);
+      return { ...res, assemblyStepCount: released.steps };
     }
 
     /** Per-unit step content, with the QCP binding reduced to the bound item's position in its own template. */
@@ -328,6 +330,7 @@ describe.skipIf(!RUN_DB)("Lean Core J1 equipment type anchor (DB)", async () => 
         await owner.processPlan.deleteMany({ where: { scheduleRun: { jobId: id } } }).catch(() => {});
         await owner.scheduleRun.deleteMany({ where: { jobId: id } }).catch(() => {});
         await owner.unit.deleteMany({ where: { equipment: { jobId: id } } }).catch(() => {});
+        await owner.bomRevision.deleteMany({ where: { jobId: id } }).catch(() => {});
         await owner.equipment.deleteMany({ where: { jobId: id } }).catch(() => {});
         await owner.qcpTemplate.deleteMany({ where: { jobId: id } }).catch(() => {});
         await owner.job.delete({ where: { id } }).catch(() => {});

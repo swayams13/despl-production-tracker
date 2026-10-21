@@ -37,6 +37,7 @@ describe.skipIf(!RUN_DB)("Lean Core J4c assembly sequence (DB)", async () => {
   const { ROLES } = await import("@/lib/authz");
   const { ERROR_CODES } = await import("@/lib/shared/errors");
   const { createJob } = await import("./job-intake.service");
+  const { releaseJobBoms } = await import("./bom-release.test-util");
   const svc = await import("./assembly-template.service");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -75,14 +76,18 @@ describe.skipIf(!RUN_DB)("Lean Core J4c assembly sequence (DB)", async () => {
     await owner.partFamily.create({ data: { tenantId, componentTypeId: ct.id, status: "APPROVED", pressureRetaining: true, approvedById: sj.id, approvedAt: new Date() } });
     const client = await owner.client.create({ data: { tenantId, name: "ACME", code: uniq("ACME") } });
     const clientUser = await mkUser("ClientU");
-    const make = (actor: ReturnType<typeof actorOf>, courses: number) =>
-      createJob(actor, {
+    // J5a: createJob makes no assembly steps; the BOM release (an empty BOM here) does.
+    const make = async (actor: ReturnType<typeof actorOf>, courses: number) => {
+      const r = await createJob(actor, {
         clientId: client.id, familyId: family.id, templateVersionId: tv.id, calendarId: null, jobNumber: uniq("J4C"),
         clientOrderNo: null, projectName: null, poRef: null, designCode: null, orderDate: null, committedDeliveryDate: null,
         targetDispatchDate: null, priority: "NORMAL", remarks: null, excludedProcessCodes: [], exclusionReason: null,
         equipments: [{ equipmentTypeId: type.id, name: "Vessel", blockNo: 1, remarks: null, config: { shell_courses: courses }, serials: ["S1"] }],
         qcpTemplateSourceId: null, copyBomFromEquipmentId: null,
       } as never);
+      await releaseJobBoms(owner, actor, r.jobId);
+      return r;
+    };
     return {
       tenantId, org, type, family, famV, make,
       admin: actorOf(admin, [ROLES.ADMIN]),

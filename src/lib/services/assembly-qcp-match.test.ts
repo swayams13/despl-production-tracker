@@ -57,11 +57,12 @@ const pwht = { all: [{ key: "pwht", op: "truthy" }] };
  * The wizard's warning and createJob use one rule. Each case builds a real
  * tenant and runs BOTH on the same fixture.
  */
-describe.skipIf(!RUN_DB)("qcpAssemblyGaps vs createJob (DB)", async () => {
+describe.skipIf(!RUN_DB)("qcpAssemblyGaps vs the BOM release (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { withTenant } = await import("@/lib/db");
   const { ROLES } = await import("@/lib/authz");
   const { createJob } = await import("./job-intake.service");
+  const { releaseJobBoms } = await import("./bom-release.test-util");
   const { qcpAssemblyGaps, loadQcpItemsByTemplate } = await import("./assembly-qcp-match");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -123,15 +124,18 @@ describe.skipIf(!RUN_DB)("qcpAssemblyGaps vs createJob (DB)", async () => {
         const g = await qcpAssemblyGaps(tx, tenantId, family.id, typeCodes.map((c) => types.get(c)!), items);
         return g[qcpId];
       });
-    /** What createJob does with one line of the given type and answers. */
-    const create = (qcpId: number, typeCode: string | null, config: Record<string, unknown> | null = null) =>
-      createJob(actor, {
+    /** What createJob and the BOM release (J5a: the step is made there) do with one line of the given type and answers. */
+    const create = async (qcpId: number, typeCode: string | null, config: Record<string, unknown> | null = null) => {
+      const r = await createJob(actor, {
         clientId: client.id, familyId: family.id, templateVersionId: tv.id, calendarId: null, jobNumber: `GAP-${stamp}-${++n}`,
         clientOrderNo: null, projectName: null, poRef: null, designCode: null, orderDate: null, committedDeliveryDate: null,
         targetDispatchDate: null, priority: "NORMAL", remarks: null, excludedProcessCodes: [], exclusionReason: null,
         equipments: [{ equipmentTypeId: typeCode ? types.get(typeCode)! : null, name: "Line", blockNo: 1, remarks: null, config, serials: [`S-${n}`] }],
         qcpTemplateSourceId: qcpId, copyBomFromEquipmentId: null,
       } as never);
+      const released = await releaseJobBoms(owner, actor, r.jobId);
+      return { ...r, assemblyStepCount: released.steps };
+    };
     return { qcp, gaps, create };
   }
 
@@ -139,33 +143,33 @@ describe.skipIf(!RUN_DB)("qcpAssemblyGaps vs createJob (DB)", async () => {
     await owner.$disconnect();
   });
 
-  it("incompatible QCP: the wizard flags it and createJob refuses it", async () => {
+  it("incompatible QCP: the wizard flags it and the release refuses it", async () => {
     const w = await world([{ type: null, steps: [{ srNo: "1.1" }, { srNo: "1.2" }] }]);
     const bad = await w.qcp(["1", "2", "3"]);
     expect(await w.gaps(bad, [])).toEqual(["1.1", "1.2"]);
     await expect(w.create(bad, null)).rejects.toMatchObject({ code: "QCP_ITEM_UNRESOLVED" });
   });
 
-  it("srNo repeated more often than the QCP lists it: flagged and refused", async () => {
+  it("srNo repeated more often than the QCP lists it: flagged and the release refuses it", async () => {
     const w = await world([{ type: null, steps: [{ srNo: "5" }, { srNo: "5" }] }]);
     const short = await w.qcp(["5"]);
     expect(await w.gaps(short, [])).toEqual(["5"]);
     await expect(w.create(short, null)).rejects.toMatchObject({ code: "QCP_ITEM_UNRESOLVED" });
   });
 
-  it("compatible QCP: no gap and createJob binds every checkpoint", async () => {
+  it("compatible QCP: no gap and the release binds every checkpoint", async () => {
     const w = await world([{ type: null, steps: [{ srNo: "1.1" }, { srNo: "1.2" }] }]);
     const good = await w.qcp(["1.1", "1.2", "9"]);
     expect(await w.gaps(good, [])).toEqual([]);
     expect(await w.create(good, null)).toMatchObject({ assemblyStepCount: 2 });
   });
 
-  it("a step with a rule: no warning, createJob succeeds when its answer drops the step and refuses when it keeps it", async () => {
+  it("a step with a rule: no warning, the release succeeds when its answer drops the step and refuses when it keeps it", async () => {
     const w = await world([{ type: null, steps: [{ srNo: "1" }, { srNo: "2", includeWhen: pwht }] }]);
     const noTwo = await w.qcp(["1"]);
     expect(await w.gaps(noTwo, [])).toEqual([]);
     expect(await w.create(noTwo, null, { pwht: false })).toMatchObject({ assemblyStepCount: 1 });
-    // the warning is deliberately silent here; createJob (authoritative) still refuses
+    // the warning is deliberately silent here; the release (authoritative) still refuses
     await expect(w.create(noTwo, null, { pwht: true })).rejects.toMatchObject({ code: "QCP_ITEM_UNRESOLVED" });
   });
 

@@ -92,9 +92,10 @@ async function loadEquipment(tx: Tx, actor: Actor, equipmentId: number) {
   return equipment;
 }
 
-async function assertBomRevisionValid(tx: Tx, equipmentId: number, bomRevisionId: number): Promise<void> {
+async function assertBomRevisionValid(tx: Tx, equipmentId: number, bomRevisionId: number) {
   const revision = await tx.bomRevision.findFirst({ where: { id: bomRevisionId, equipmentId } });
   if (!revision) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomRevision", bomRevisionId });
+  return revision;
 }
 
 export async function createBomItem(actor: Actor, input: CreateBomItemInput): Promise<BomItem> {
@@ -266,7 +267,14 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
     actor.tenantId,
     async (tx) => {
       const equipment = await loadEquipment(tx, actor, equipmentId);
-      if (bomRevisionId != null) await assertBomRevisionValid(tx, equipmentId, bomRevisionId);
+      const targetRevision = bomRevisionId != null ? await assertBomRevisionValid(tx, equipmentId, bomRevisionId) : null;
+      // J5a: lines imported into a draft revision of a line with no floor rows yet wait for the BOM release,
+      // which makes the components and everything after them. Any other import routes at once, as before.
+      const waitsForRelease =
+        targetRevision != null &&
+        targetRevision.status === "DRAFT" &&
+        targetRevision.materializedAt == null &&
+        (await tx.component.count({ where: { equipmentId } })) + (await tx.assemblyStep.count({ where: { unit: { equipmentId } } })) === 0;
 
       // Every `componentType` code must resolve before anything is created —
       // unlike other row-level validation failures (which skip just that row
@@ -343,13 +351,9 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
         }
       }
 
-      const { componentCount } = await materializeComponentsFromBomItems(
-        tx,
-        equipment.job.familyId,
-        equipmentId,
-        created.map((c) => c.id),
-        equipment.job.id,
-      );
+      const { componentCount } = waitsForRelease
+        ? { componentCount: 0 }
+        : await materializeComponentsFromBomItems(tx, equipment.job.familyId, equipmentId, created.map((c) => c.id), equipment.job.id);
 
       return { created, failures, componentCount };
     },

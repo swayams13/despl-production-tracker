@@ -18,6 +18,7 @@ describe.skipIf(!RUN_DB)("Lean Core J4a planned joints (DB)", async () => {
   const { withTenant } = await import("@/lib/db");
   const { ROLES } = await import("@/lib/authz");
   const { createJob } = await import("./job-intake.service");
+  const { releaseJobBoms } = await import("./bom-release.test-util");
   const { verifyAssemblyStep, startAssemblyStep, submitAssemblyStep, materializeAssemblyStepsFromTemplate } = await import("./assembly.service");
   const { backfillPlannedJoints } = await import("./planned-joint.setup");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
@@ -106,8 +107,9 @@ describe.skipIf(!RUN_DB)("Lean Core J4a planned joints (DB)", async () => {
     });
     const actor = mkActor(user, [ROLES.ADMIN]);
     const qcActor = mkActor(qcUser, [ROLES.QC]);
-    const make = (opts: { courses?: number | null; serials?: string[]; jobNumber?: string } = {}) =>
-      createJob(actor, {
+    // J5a: createJob no longer makes floor rows; releasing the line's (empty) BOM does.
+    const make = async (opts: { courses?: number | null; serials?: string[]; jobNumber?: string } = {}) => {
+      const r = await createJob(actor, {
         clientId: client.id,
         familyId: family.id,
         templateVersionId: tv.id,
@@ -137,6 +139,9 @@ describe.skipIf(!RUN_DB)("Lean Core J4a planned joints (DB)", async () => {
         qcpTemplateSourceId: qcp.id,
         copyBomFromEquipmentId: null,
       } as never);
+      const released = await releaseJobBoms(owner, actor, r.jobId);
+      return { ...r, assemblyStepCount: released.steps };
+    };
     return { tenantId, org, dept, user, worker, qcUser, family, compType, qcp, actor, qcActor, make, addTemplate };
   }
 

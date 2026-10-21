@@ -114,6 +114,14 @@ export const ERROR_CODES = {
   QCP_ITEM_UNRESOLVED: "QCP_ITEM_UNRESOLVED",
   /** attachQcpTemplate (JG2): the job already has a QC plan; replacing one is not built. */
   QCP_ALREADY_ATTACHED: "QCP_ALREADY_ATTACHED",
+  /** releaseBomRevision (J5a): a BOM line is mapped to a part family that is not approved, or to a route variant with no published version. */
+  ROUTE_NOT_APPROVED: "ROUTE_NOT_APPROVED",
+  /** releaseBomRevision (J5a): the preview has warnings and the caller did not acknowledge them. */
+  BOM_RELEASE_WARNINGS_UNACKNOWLEDGED: "BOM_RELEASE_WARNINGS_UNACKNOWLEDGED",
+  /** releaseBomRevision (J5a): a different revision of this line is already materialised; re-release by diff is J5c. */
+  BOM_RELEASE_DIFF_NOT_BUILT: "BOM_RELEASE_DIFF_NOT_BUILT",
+  /** releaseBomRevision / mapBomLines (J5a): the line already has components or assembly steps (made at job creation, or by this release). */
+  BOM_ALREADY_MATERIALIZED: "BOM_ALREADY_MATERIALIZED",
   /** setJobStatus (S19): status COMPLETE was requested while a ProcessPlan on the job's current ScheduleRun is not yet COMPLETE. */
   JOB_HAS_INCOMPLETE_PLANS: "JOB_HAS_INCOMPLETE_PLANS",
   /** setOperationRefFamilySeq (C6): the given number is not among the family's own published TemplateProcess.seq values. */
@@ -244,6 +252,13 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
   QCP_ITEM_UNRESOLVED: "This QCP template does not cover the assembly checklist. Pick another QCP template.",
   QCP_ALREADY_ATTACHED: "This job already has a QC plan. Replacing it is not supported.",
+  ROUTE_NOT_APPROVED:
+    "A BOM line is mapped to a part family or route that is not approved yet. Ask the Production Head to approve it in master data, or map the line to another part family.",
+  BOM_RELEASE_WARNINGS_UNACKNOWLEDGED: "This release has warnings. Read them, then confirm that you have checked them to release.",
+  BOM_RELEASE_DIFF_NOT_BUILT:
+    "This line's floor steps were already generated from another BOM revision. Releasing a later revision on top of them is not available yet.",
+  BOM_ALREADY_MATERIALIZED:
+    "This line already has components or assembly steps, so its BOM cannot be released again. Existing jobs are never changed by a release.",
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
   ROUTE_STEP_SEQ_UNKNOWN:
     "This number does not match any process in the family's published route — check the template's process list.",
