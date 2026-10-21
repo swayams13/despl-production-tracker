@@ -42,13 +42,16 @@ const FLOOR_AND_OFFICE: readonly RoleCode[] = [
 // a role's primary label beats the "more" one (e.g. QC "Queue" over "QC & hold points").
 export const NAV_ITEMS: readonly NavItem[] = [
   { id: "today", href: "/my-day", hrefWhen: { leanFloor: "/today" }, label: "Today", icon: "navToday", roles: ["OPERATOR", "SUPERVISOR"], group: "primary", badge: "overdue" },
+  // Planning/PPC records processes 1-11 here (recordWork allows a planner nothing else); the floor
+  // Today only exists with leanFloor, so no /my-day fallback entry.
+  { id: "today-planner", href: "/today", label: "Today", icon: "navToday", roles: ["PLANNER"], group: "primary", needs: "leanFloor" },
   { id: "team", href: "/workspace", hrefWhen: { leanFloor: "/team" }, label: "Team", icon: "workspace", roles: ["SUPERVISOR", "PRODUCTION_HEAD"], group: "primary", badge: "team" },
   { id: "qc-queue", href: "/qc", label: "Queue", icon: "qc", roles: ["QC"], group: "primary", badge: "qc" },
   { id: "scan", href: "/scan", label: "Scan", icon: "scan", roles: ["OPERATOR", "SUPERVISOR", "QC"], group: "primary", needs: "leanFloor" },
   { id: "materials", href: "/materials", label: "Materials", icon: "jobs", roles: ["STORES"], group: "primary" },
   { id: "portfolio", href: "/dashboard", label: "Portfolio", icon: "dashboard", roles: ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"], group: "primary" },
   { id: "jobs", href: "/jobs", label: "Jobs", icon: "jobs", roles: ["SUPERVISOR", "QC", "PLANNER", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN", "ENGINEERING", "STORES"], group: "primary" },
-  { id: "new-job", href: "/jobs/new", label: "New job", icon: "newJob", roles: ["PLANNER"], group: "primary" },
+  { id: "new-job", href: "/jobs/new", label: "New job", icon: "newJob", roles: ["ADMIN", "PRODUCTION_HEAD"], group: "primary" },
   { id: "alerts", href: "/alerts", label: "Alerts", icon: "navAlerts", roles: ["OPERATOR"], group: "primary", badge: "unread" },
   { id: "admin-users", href: "/admin", label: "Users & departments", icon: "admin", roles: ["ADMIN", "MANAGEMENT"], group: "primary" },
   { id: "admin-templates", href: "/admin/templates", label: "Templates", icon: "admin", roles: ["ADMIN", "PRODUCTION_HEAD"], group: "primary" },

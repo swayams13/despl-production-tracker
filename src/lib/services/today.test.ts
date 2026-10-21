@@ -118,6 +118,84 @@ describe.skipIf(!RUN_DB)("L2.3 Today (DB)", async () => {
     });
   });
 
+  // Pilot seat Planning/PPC: a PLANNER records processes 1-11 only (work.service applyItem),
+  // so Today shows them office plans only and nothing of the floor. Own org per test group so
+  // "the plan I just created" is the only candidate (no leftovers from the shared one).
+  describe("PLANNER on Today (office processes 1-11 only)", () => {
+    const rowsOf = (v: Awaited<ReturnType<typeof loadToday>>) =>
+      [v.sections.doFirst, ...v.sections.today, ...v.sections.upcoming, ...v.sections.blocked].filter(Boolean);
+    let po: Org;
+    let pl: Actor; // PLANNER
+    let plQc: Actor; // PLANNER + QC
+    let plSup: Actor; // PLANNER + SUPERVISOR
+    let plElsewhere: Actor;
+    beforeAll(async () => {
+      po = await makeWorkOrg(owner, "TDP");
+      pl = await po.user("pl", ["PLANNER"], [po.fab.id]);
+      plQc = await po.user("plqc", ["PLANNER", "QC"], [po.fab.id]);
+      plSup = await po.user("plsup", ["PLANNER", "SUPERVISOR"], [po.fab.id]);
+      plElsewhere = await po.user("plx", ["PLANNER"], [po.other.id]);
+    });
+    const seqOf = async (planId: number) =>
+      (await owner.processPlan.findUniqueOrThrow({ where: { id: planId }, include: { jobProcess: true } })).jobProcess.seq;
+
+    it("mine: only office plans assigned to me; an assigned floor process is not listed", async () => {
+      const j = await po.job({ processes: [{ code: "3", grain: "JOB" }, { code: "22" }] });
+      await assign(j.plan("3"), pl.userId);
+      await assign(j.plan("22", 0), pl.userId);
+      const v = await loadToday(pl);
+      expect(rowsOf(v).filter((r) => r!.jobId === j.job.id).map((r) => r!.id)).toEqual([j.plan("3")]);
+    });
+
+    // Violation cases first: every planner-without-floor-write shape claims office plans only.
+    it.each<[string, () => Actor]>([
+      ["PLANNER", () => pl],
+      ["PLANNER + QC", () => plQc],
+    ])("%s: claim next takes the office plan I created, never the floor plan", async (_l, who) => {
+      const j = await po.job({ processes: [{ code: "4", grain: "JOB" }, { code: "22" }] });
+      const v = await loadToday(who());
+      expect(v.canClaimNext).toBe(true);
+      expect(v.canAssign).toBe(false);
+      expect(v.pool).toEqual([]);
+      const r = await claimNext(who());
+      expect(r.processPlanId).toBe(j.plan("4"));
+      expect(await seqOf(r.processPlanId)).toBeLessThanOrEqual(11);
+      expect(await owner.processPlan.count({ where: { jobId: j.job.id, jobProcess: { seq: 22 }, assigneeUserId: { not: null } } })).toBe(0);
+      // and with only the floor plan left, there is nothing to claim
+      expect(await code(claimNext(who()))).toBe(ERROR_CODES.NOT_FOUND);
+    });
+
+    it("a direct claim of a floor plan is refused FORBIDDEN for a planner and a planner + QC user, allowed for a planner + supervisor", async () => {
+      const { claimPlan } = await import("./assignment.service");
+      const j = await po.job({ processes: [{ code: "22" }] });
+      for (const who of [pl, plQc]) {
+        expect(await code(claimPlan(who, { processPlanId: j.plan("22", 0) }))).toBe(ERROR_CODES.FORBIDDEN);
+      }
+      expect(await code(claimPlan(plSup, { processPlanId: j.plan("22", 0) }))).toBeNull();
+    });
+
+    it("a planner in another department sees and claims nothing of Fabrication's office plans", async () => {
+      const j = await po.job({ processes: [{ code: "5", grain: "JOB" }] });
+      const v = await loadToday(plElsewhere);
+      expect(v.canClaimNext).toBe(false);
+      expect(rowsOf(v).some((r) => r!.jobId === j.job.id)).toBe(false);
+      expect(await code(claimNext(plElsewhere))).toBe(ERROR_CODES.NOT_FOUND);
+    });
+
+    it("PLANNER + SUPERVISOR keeps the unfiltered floor view (pool lists floor plans)", async () => {
+      await po.job({ processes: [{ code: "22" }] });
+      const sv = await loadToday(plSup);
+      expect(sv.canAssign).toBe(true);
+      expect(sv.pool.some((p) => p.processName === "Process 22")).toBe(true);
+    });
+
+    it("a supervisor still sees the floor plans in the pool", async () => {
+      await o.job({ processes: [{ code: "22" }] });
+      const sv = await loadToday(sup);
+      expect(sv.pool.some((p) => p.processName === "Process 22")).toBe(true);
+    });
+  });
+
   describe("claimNext", () => {
     it("claims the top unassigned plan in the operator's own department, audited", async () => {
       const j = await o.job({ processes: [{ code: "40" }] });
