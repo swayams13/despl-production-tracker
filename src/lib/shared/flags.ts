@@ -10,7 +10,7 @@
 export const FEATURES = {
   clientPortal: false,       // /portal, ProgressSnapshot publish/verify UI
   multiFamilyIntake: false,  // only PRESSURE_VESSEL selectable in /jobs/new
-  cpmReplanUi: false,        // feasibility / replan / duration-override screens
+  cpmReplanUi: false,        // replan/feasibility/duration-override screens; for date edits, only re-running the scheduler over an existing schedule
   analytics: false,          // the five unbuilt analytics screens stay unbuilt
   agents: false,             // planner agent / MOS layer
   /**

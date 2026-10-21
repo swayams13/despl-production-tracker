@@ -61,7 +61,6 @@ const intake = await import("./actions/job-intake");
 const { default: PortalPage } = await import("./portal/page");
 
 const createInput = (familyId = 7) => ({ familyId, committedDeliveryDate: new Date("2026-12-31") }) as unknown as Parameters<typeof intake.createJobAction>[0];
-const datesInput = { jobId: 1, orderDate: null, committedDeliveryDate: new Date("2026-12-31"), targetDispatchDate: null };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -145,12 +144,6 @@ describe("flipping a flag on restores the original path", () => {
     await expect(PortalPage()).rejects.toThrow("NEXT_REDIRECT"); // getActor() → null → /login
     expect(notFound).not.toHaveBeenCalled();
     expect(getActor).toHaveBeenCalledOnce();
-  });
-
-  it("cpmReplanUi: updateJobDatesAction reaches the service", async () => {
-    h.features.cpmReplanUi = true;
-    expect(await intake.updateJobDatesAction(datesInput)).toMatchObject({ ok: true });
-    expect(intakeSvc.updateJobDates).toHaveBeenCalledOnce();
   });
 
   it("multiFamilyIntake: a HEAT_EXCHANGER job reaches createJob", async () => {

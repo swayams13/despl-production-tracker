@@ -101,7 +101,7 @@ describe("updateJobDatesAction while CPM replan is frozen", () => {
   it("saves the date but never re-runs the scheduler over an existing schedule", async () => {
     h.hasSchedule = true;
     const r = await intake.updateJobDatesAction(datesInput(new Date("2026-12-31")));
-    expect(r).toMatchObject({ ok: true });
+    expect(r).toMatchObject({ ok: true, schedule: { kind: "UNCHANGED" } });
     expect(intakeSvc.updateJobDates).toHaveBeenCalledOnce();
     expect(scheduleSvc.generateSchedule).not.toHaveBeenCalled();
   });

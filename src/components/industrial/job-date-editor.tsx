@@ -10,6 +10,8 @@ function toInputValue(iso: string | null): string {
 function scheduleMessage(schedule: Awaited<ReturnType<typeof updateJobDatesAction>>["schedule"]): string {
   if (!schedule) return "Dispatch date saved.";
   switch (schedule.kind) {
+    case "UNCHANGED":
+      return "Date saved. The planned dates were not recomputed.";
     case "FEASIBLE":
       return `Dispatch date saved — schedule generated (${schedule.planCount} process plans).`;
     case "INFEASIBLE":

@@ -49,6 +49,8 @@ export default async function JobDetail({
   const canReviewClientUpdates = FEATURES.clientPortal && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.MANAGEMENT, ROLES.ADMIN);
   // Not behind cpmReplanUi: a missing or wrong delivery date must stay fixable.
   // The action only schedules a job that has no schedule yet while replan is frozen.
+  // The details editor stays behind the freeze, as before; only the date editor is open.
+  const canEditJobDetails = FEATURES.cpmReplanUi && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   const canEditJobDates = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
   // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
   // cosmetic, the server is authoritative either way.
@@ -150,6 +152,7 @@ export default async function JobDetail({
       clientPreview={clientPreview}
       canReviewClientUpdates={canReviewClientUpdates}
       canEditJobDates={canEditJobDates}
+      canEditJobDetails={canEditJobDetails}
       canManagePacking={canManagePacking}
       canManageDispatch={canManageDispatch}
       canApproveQcpWaiver={canApproveQcpWaiver}

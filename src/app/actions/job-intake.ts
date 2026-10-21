@@ -110,7 +110,8 @@ export async function scheduleNewJobAction(
 }
 
 export type UpdateJobDatesActionResult = ActionResult & {
-  schedule?: ScheduleVerdict;
+  /** UNCHANGED: replan is frozen and a schedule exists, so the date was saved but planned dates were not recomputed. */
+  schedule?: ScheduleVerdict | { kind: "UNCHANGED" };
   detail?: Record<string, unknown>;
 };
 
@@ -133,8 +134,9 @@ export async function updateJobDatesAction(input: UpdateJobDatesInput): Promise<
     // scheduler over an existing schedule is a replan. Frozen, it runs only for
     // a job that has no schedule yet (the first one, as at intake).
     const replan = FEATURES.cpmReplanUi || !(await getSchedule(actor, input.jobId));
-    const schedule =
-      replan && job.committedDeliveryDate
+    const schedule: UpdateJobDatesActionResult["schedule"] = !replan
+      ? { kind: "UNCHANGED" }
+      : job.committedDeliveryDate
         ? await scheduleNewJobAction(input.jobId, job.committedDeliveryDate)
         : undefined;
 

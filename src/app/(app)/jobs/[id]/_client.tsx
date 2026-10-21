@@ -60,6 +60,7 @@ export function JobDetailClient({
   clientPreview,
   canReviewClientUpdates,
   canEditJobDates,
+  canEditJobDetails,
   canManagePacking,
   canManageDispatch,
   canApproveQcpWaiver,
@@ -86,6 +87,7 @@ export function JobDetailClient({
   clientPreview: ClientPreview | null;
   canReviewClientUpdates: boolean;
   canEditJobDates: boolean;
+  canEditJobDetails: boolean;
   canManagePacking: boolean;
   canManageDispatch: boolean;
   canApproveQcpWaiver: boolean;
@@ -130,7 +132,7 @@ export function JobDetailClient({
         </span>
         <StatusChip status={header.displayStatus} />
         <TravellersLink jobId={jobId} />
-        {canEditJobDates && (
+        {canEditJobDetails && (
           <JobDetailsEditor
             jobId={jobId}
             clientOrderNo={header.clientOrderNo}
