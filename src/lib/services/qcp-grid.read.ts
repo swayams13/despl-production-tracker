@@ -119,11 +119,13 @@ export async function loadQcpGrid(actor: Actor, jobId: number, unitId?: number):
     const linkedProcessIds = [...new Set(items.map((i) => i.processLinks[0]?.jobProcess.id).filter((x): x is number => x != null))];
     const plans = linkedProcessIds.length
       ? await tx.processPlan.findMany({
-          where: { unitId: targetUnit.id, jobProcessId: { in: linkedProcessIds }, scheduleRun: { isCurrent: true } },
-          select: { jobProcessId: true, plannedStart: true },
+          // L1.3: or the job's unit-less plan, for a JOB-grain process.
+          where: { OR: [{ unitId: targetUnit.id }, { unitId: null }], jobProcessId: { in: linkedProcessIds }, scheduleRun: { isCurrent: true } },
+          select: { jobProcessId: true, unitId: true, plannedStart: true },
         })
       : [];
-    const plannedStartByProcess = new Map(plans.map((p) => [p.jobProcessId, p.plannedStart]));
+    // The unit's own plan wins over the job-level one (last write wins, unit plans last).
+    const plannedStartByProcess = new Map([...plans].sort((a, b) => Number(a.unitId != null) - Number(b.unitId != null)).map((p) => [p.jobProcessId, p.plannedStart]));
 
     const now = new Date();
     const rowsBySection = new Map<string, QcpGridRow[]>();

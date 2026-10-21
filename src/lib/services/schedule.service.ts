@@ -151,6 +151,12 @@ export async function generateSchedule(
     const feasOrder = { FEASIBLE: 0, TIGHT: 1, INFEASIBLE: 2 } as const;
     let feas: ReturnType<typeof checkFeasibility> | null = null;
     const plans: PlanInput[] = [];
+    // Lean Core L1.3 (D5): a JOB-grain process (office processes 1-11, MDR 33) is a job-level row (equipment_id
+    // NULL), so it sits in every route's subgraph. It gets ONE unit-less plan per job, from the first route
+    // that carries it, whatever the number of routes. The grain is data on the job's own process row, so a
+    // job whose rows are still UNIT (every job until the backfill or a re-published template) schedules as before.
+    const grainByProc = new Map(spine.rawProcesses.map((p) => [p.id, p.grain]));
+    const jobPlanned = new Set<number>();
     for (const r of routes) {
       // Layer 1 — authoritative planned dates. Throws SCHEDULE_DATA_MISSING for
       // any provisional/duration-less included process (let it surface).
@@ -175,8 +181,11 @@ export async function generateSchedule(
       // ponytail: all units share the route's envelope dates in v1 — per-serial
       // stagger is a Phase-2 sequencing concern, not modelled here.
       const unitIds: (number | null)[] = r.unitIds.length > 0 ? r.unitIds : [null];
-      for (const unitId of unitIds) {
-        for (const e of envelope) {
+      for (const e of envelope) {
+        const job = grainByProc.get(e.processId) === 'JOB';
+        if (job && jobPlanned.has(e.processId)) continue;
+        if (job) jobPlanned.add(e.processId);
+        for (const unitId of job ? [null] : unitIds) {
           plans.push({
             jobProcessId: e.processId,
             ownerDepartmentId: deptByProc.get(e.processId)!,

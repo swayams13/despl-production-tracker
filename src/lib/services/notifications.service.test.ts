@@ -44,19 +44,19 @@ describe.skipIf(!RUN_DB)("notifications (DB-backed)", async () => {
     const checker = actor(tenantId, 2, [ROLES.QC]);
 
     const seq1Id = await procId(jobId, 1);
-    const unit = (await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } }))[4];
+    // Process 1 is job-level since L1.3: its one plan has no unit.
 
     // Reset this test's own target plan on whatever run is currently current,
     // so a rerun against this no-cleanup seed DB starts from NOT_STARTED again
     // — persistScheduleRun now carries real work forward across a reschedule
     // (audit C1 fix) instead of resetting it.
     await owner.processPlan.updateMany({
-      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: seq1Id, unitId: unit.id },
+      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: seq1Id },
       data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
     });
 
     const run = await generateSchedule(planner, { jobId, mode: "FORWARD", projectStartDate: future });
-    const planId = run.processPlans.find((p) => p.jobProcessId === seq1Id && p.unitId === unit.id)!.id;
+    const planId = run.processPlans.find((p) => p.jobProcessId === seq1Id && p.unitId == null)!.id;
 
     const qcUserIds = (
       await owner.user.findMany({ where: { tenantId, active: true, roles: { some: { role: { code: "QC" } } } }, select: { id: true } })
