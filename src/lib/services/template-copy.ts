@@ -1,3 +1,4 @@
+import type { Prisma } from "@/generated/prisma/client";
 import type { Tx } from "@/lib/db";
 
 /**
@@ -56,6 +57,9 @@ export async function copyVersionContents(
         // silently reset them to the column defaults.
         grain: p.grain,
         requiresQc: p.requiresQc,
+        // Lean Core J4c: these two were dropped by every clone and edited draft.
+        evidenceKind: p.evidenceKind,
+        includeWhen: p.includeWhen == null ? undefined : (p.includeWhen as Prisma.InputJsonValue),
       },
     });
     oldToNewProcessId.set(p.id, copy.id);

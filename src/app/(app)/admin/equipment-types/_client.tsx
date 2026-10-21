@@ -12,6 +12,7 @@ import {
 import { questionsForLine, type ConfigQuestionDef } from "@/lib/shared/config-questions";
 import { ConfigAnswerFields } from "@/components/industrial/config-answer-fields";
 import type { EquipmentTypeAdminRow } from "@/lib/services/job-intake.read";
+import { AssemblySequenceSection, type AssemblyTypeOption } from "./_assembly-sequence";
 
 type Family = { id: number; code: string; name: string };
 
@@ -26,10 +27,12 @@ export function EquipmentTypesClient({
   rows,
   families,
   questions,
+  assembly,
 }: {
   rows: EquipmentTypeAdminRow[];
   families: Family[];
   questions: ConfigQuestionDef[];
+  assembly: { types: AssemblyTypeOption[]; isHead: boolean; currentUserId: number; departmentNames: Record<number, string> };
 }) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
@@ -102,6 +105,8 @@ export function EquipmentTypesClient({
           </table>
         </div>
       )}
+
+      <AssemblySequenceSection {...assembly} />
 
       {addOpen && (
         <EquipmentTypeDialog

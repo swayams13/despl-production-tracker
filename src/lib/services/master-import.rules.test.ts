@@ -265,7 +265,7 @@ describe("HE stages", () => {
 describe("report-only sheets", () => {
   it("assembly steps citing a part code that is not in the master are warned", () => {
     const r = run({
-      assembly: [{ row: 5, equipmentType: "PV", groupCode: "E", stepNo: "4.1", activity: "Fit shell", partsUsed: "SHL-01, GHO-09", jointRef: "", department: "", stage: "" }],
+      assembly: [{ row: 5, equipmentType: "PV", groupCode: "E", groupName: "", stepNo: "4.1", seq: "", activity: "Fit shell", kind: "Work", partsUsed: "SHL-01, GHO-09", result: "", jointRef: "", department: "", stage: "" }],
     });
     expect(r.issues.filter((i) => i.code === "ASSEMBLY_UNKNOWN_PART").map((i) => i.meta?.partCode)).toEqual(["GHO-09"]);
   });
