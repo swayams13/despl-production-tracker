@@ -7,7 +7,10 @@ Problems: see `REPORT-A-PROBLEM.md`. What is and is not built: see `WHAT-IS-READ
 
 ## Operator and Supervisor (Fabrication, Fabrication Prep, Machine Shop)
 
-- You land on **Today**: the steps your department can do next, for DESPL-320's units.
+- You land on **Today**: the steps **assigned to you**. A supervisor starts by assigning work from **Team** (tick the rows, choose a person). Until then Today says "Nothing is assigned to you": that is normal.
+- To work on a unit without waiting for an assignment: **Scan**, type the unit serial (for example 320SR05) and open it. The unit page lists the next steps for your department; tap **Start** or **Done** there.
+- **Done** can also be marked "for 320SR01 to 320SR08" in one tap when the same step is finished on several units.
+- A step marked "Out of usual order" means an earlier step is still open in the system. If it is really finished, tell your supervisor so it gets ticked; if you are doing this one first on purpose, use **Start early**.
 - **Start** when you begin a step. **Done** when it is finished. Both take the time from the server.
 - Forgot to tap yesterday? Done and Start accept the time it really happened, up to 72 working hours back. Beyond that, ask Swayam.
 - Finished late? The screen asks for a reason when you tap Done. Pick the closest one.
