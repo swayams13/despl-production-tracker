@@ -198,7 +198,10 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
         themePreference: "SYSTEM",
       },
     });
-    return { tenantId, job, equipment, unit, user, client, family };
+    // A unit with no plan on the current run is "no production record", not "complete".
+    const run = await createCurrentScheduleRun(job);
+    await addProcessPlan(tenantId, job, run, unit, "COMPLETE");
+    return { tenantId, job, equipment, unit, user, client, family, run };
   }
 
   /** S10 — opens an Ncr against the given unit via a real
@@ -267,6 +270,8 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
   /** AUD-005 — a ScheduleRun a unit's ProcessPlan rows can be pinned to, the
    * same grain assertUnitProductionComplete reads (`scheduleRun.isCurrent`). */
   async function createCurrentScheduleRun(job: { id: number }) {
+    const existing = await owner.scheduleRun.findFirst({ where: { jobId: job.id, isCurrent: true } });
+    if (existing) return existing;
     return owner.scheduleRun.create({
       data: { jobId: job.id, version: 1, mode: "FORWARD", projectStartDate: new Date(), isCurrent: true },
     });
@@ -736,6 +741,18 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
       await addProcessPlan(tenantId, job, run, unit, "NOT_STARTED");
 
       const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-INC-1" });
+      await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });
+
+      await expectCode(approveDispatchRelease(ph, { dispatchBatchId: batch.id }), ERROR_CODES.UNIT_NOT_COMPLETE);
+    });
+
+    it("approveDispatchRelease refuses a unit with no ProcessPlan at all (UNIT_NOT_COMPLETE)", async () => {
+      const { tenantId, job, unit, user } = await fixture();
+      await owner.processPlan.deleteMany({ where: { unitId: unit.id } });
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const pkg = await createPackage(ph, { jobId: job.id, packageNo: "PKG-AUD5-NOPLAN-1" });
       await assignUnitToPackage(ph, { packageId: pkg.id, unitId: unit.id });
       const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
       await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: unit.id });

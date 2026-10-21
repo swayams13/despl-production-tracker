@@ -983,6 +983,10 @@ export async function assertUnitProductionComplete(tx: Tx, unitId: number, jobId
     select: { id: true, jobProcess: { select: { templateProcess: { select: { evidenceKind: true } } } } },
   });
   const blocking = incomplete.filter((p) => p.jobProcess.templateProcess?.evidenceKind !== "DISPATCH_RECORDED");
+  // A unit with no plan on the current run has no production record at all:
+  // "nothing incomplete" must not read as "complete" (pilot review, 21 Oct).
+  const planned = incomplete.length > 0 || (await tx.processPlan.count({ where: { unitId, jobId, scheduleRun: { isCurrent: true } } })) > 0;
+  if (!planned) throw new AppError(ERROR_CODES.UNIT_NOT_COMPLETE, { unitId, jobId, incompleteProcessPlanIds: [], reason: "NO_SCHEDULE" });
   if (blocking.length > 0) {
     throw new AppError(ERROR_CODES.UNIT_NOT_COMPLETE, {
       unitId,

@@ -108,10 +108,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-materials.read / dispatch readin
     expect(await loadDispatchReadiness(a.actor, b.job.id)).toBeNull();
   });
 
-  it("dispatch readiness: a unit with no current schedule, NCR or hold point has no blocks and is not packed", async () => {
+  it("dispatch readiness: a unit with no current schedule is blocked (no production record), not packed", async () => {
     const { job, actor } = await fixture();
     const r = await loadDispatchReadiness(actor, job.id);
     expect(r?.map((u) => u.serialNo)).toEqual(["01", "02", "03"]);
-    expect(r?.every((u) => u.blocks.length === 0 && !u.packed && !u.batched)).toBe(true);
+    expect(r?.every((u) => u.blocks.map((b) => b.code).join() === "UNIT_NOT_COMPLETE" && !u.packed && !u.batched)).toBe(true);
   });
 });
