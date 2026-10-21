@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leastLoadedFirst, oldestLabel, sameDayRate, summarizeTeam, type TeamPlanFact } from "./team";
+import { adoptionStreak, leastLoadedFirst, oldestLabel, sameDayByDay, sameDayRate, summarizeTeam, type TeamPlanFact } from "./team";
 
 const NOW = new Date("2026-10-15T10:00:00+05:30");
 const plan = (id: number, over: Partial<TeamPlanFact> = {}): TeamPlanFact => ({
@@ -87,5 +87,33 @@ describe("sameDayRate (D4 refinement 3: recordedAt vs reportedAt)", () => {
   });
   it("no events is no rate, not zero", () => {
     expect(sameDayRate([])).toEqual({ rate: null, same: 0, total: 0 });
+  });
+});
+
+describe("sameDayByDay / adoptionStreak (L3.1)", () => {
+  const at = (day: string, reported?: string) => ({
+    recordedAt: new Date(`${day}T11:00:00+05:30`),
+    reportedAt: reported ? new Date(`${reported}T09:00:00+05:30`) : null,
+  });
+  // Mon 12 Oct 2026 .. Thu 15 Oct; Sunday is the 11th.
+  const now = new Date("2026-10-15T15:00:00+05:30");
+
+  it("groups by the IST day the update was recorded and counts back-dated ones as late", () => {
+    const s = sameDayByDay([at("2026-10-15"), at("2026-10-15", "2026-10-14"), at("2026-10-14")], now, 3);
+    expect(s.map((d) => [d.day, d.rate, d.total])).toEqual([
+      ["2026-10-13", null, 0],
+      ["2026-10-14", 100, 1],
+      ["2026-10-15", 50, 2],
+    ]);
+  });
+  it("counts consecutive working days at 90% or more, skipping Sunday", () => {
+    const ev = ["2026-10-10", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15"].map((d) => at(d));
+    expect(adoptionStreak(sameDayByDay(ev, now, 7))).toBe(5);
+  });
+  it("a miss or an empty working day ends the run; an empty today does not", () => {
+    const ev = ["2026-10-12", "2026-10-13"].map((d) => at(d));
+    expect(adoptionStreak(sameDayByDay(ev, now, 4))).toBe(0); // 14th had nothing
+    expect(adoptionStreak(sameDayByDay([...ev, at("2026-10-14")], now, 4))).toBe(3); // today empty, skipped
+    expect(adoptionStreak(sameDayByDay([...ev, at("2026-10-14", "2026-10-13")], now, 4))).toBe(0); // 14th was late
   });
 });
