@@ -5,6 +5,7 @@ import { StageSpine } from "@/components/industrial/stage-spine";
 import { ResponsiveTable } from "@/components/industrial/responsive-table";
 import { HEALTH_LABEL, HEALTH_ORDER, type JobHealth } from "@/lib/services/job-health";
 import type { Portfolio, PortfolioRow } from "@/lib/services/portfolio.read";
+import { portfolioMilestoneText } from "@/lib/shared/milestones";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -114,6 +115,7 @@ export function PortfolioBand({
                         <th style={{ minWidth: 100 }}>Health</th>
                         <th style={{ minWidth: 130 }}>Complete</th>
                         <th style={{ minWidth: 120 }}>Stages</th>
+                        <th style={{ minWidth: 130 }}>Milestone</th>
                         <th>Promised</th>
                         <th>Forecast</th>
                         <th>Variance</th>
@@ -174,6 +176,7 @@ function ProjectCard({ r }: { r: PortfolioRow }) {
       )}
       <div className="rt-card-row">
         <span>Complete <b className="mono">{r.percentComplete}%</b></span>
+        {portfolioMilestoneText(r) && <span style={{ color: r.currentMilestone?.late ? "var(--s-overdue)" : undefined }}>Milestone {portfolioMilestoneText(r)}</span>}
         <span>Promised <span className="mono">{fmtDate(r.committedDeliveryDate)}</span></span>
         <span>Forecast <span className="mono">{fmtDate(r.forecastDispatch)}</span></span>
         {v !== null && (
@@ -215,6 +218,9 @@ function Row({ r }: { r: PortfolioRow }) {
         ) : (
           <StageSpine variant="mini" segments={r.unitRollup} />
         )}
+      </td>
+      <td style={{ fontSize: "var(--fs-xs, 11px)", color: r.currentMilestone?.late ? "var(--s-overdue)" : undefined }}>
+        {portfolioMilestoneText(r) ?? <span style={{ color: "var(--muted)" }} title="No milestone list for this type of equipment yet">—</span>}
       </td>
       <td className="mono">{fmtDate(r.committedDeliveryDate)}</td>
       <td className="mono">{fmtDate(r.forecastDispatch)}</td>

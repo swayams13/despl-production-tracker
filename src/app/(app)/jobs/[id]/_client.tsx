@@ -31,6 +31,8 @@ import type { QcpGrid as QcpGridData } from "@/lib/services/qcp-grid.read";
 import type { PackingPanel as PackingPanelData } from "@/lib/services/packing.read";
 import type { DispatchPanel as DispatchPanelData } from "@/lib/services/dispatch.read";
 import type { ClientPreview } from "@/lib/services/client-snapshot.read";
+import type { JobMilestones } from "@/lib/shared/milestones";
+import { MilestoneStrip } from "@/components/industrial/milestone-strip";
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -49,6 +51,7 @@ export function JobDetailClient({
   jobId,
   header,
   unitSpines,
+  milestones = null,
   jobRollup,
   events,
   gantt,
@@ -77,6 +80,8 @@ export function JobDetailClient({
   jobId: number;
   header: JobHeader;
   unitSpines: UnitSpine[];
+  /** J8: null when not loaded (a tab other than Overview). */
+  milestones?: JobMilestones | null;
   jobRollup: StageSegment[];
   events: ActivityEvent[];
   gantt: JobGanttData | null;
@@ -254,10 +259,21 @@ export function JobDetailClient({
               {jobRollup.length > 0 ? (
                 <StageSpine segments={jobRollup} onSegmentClick={(seg) => openStageInJob(seg.unitId, seg.stageNo)} />
               ) : (
-                <p className="note" style={{ margin: 0 }}>No current schedule for this job.</p>
+                <p className="note" style={{ margin: 0 }}>
+                  {milestones?.noStageList ? "No stage list for this type of equipment yet; milestones shown instead." : "No current schedule for this job."}
+                </p>
               )}
             </div>
           </div>
+
+          {milestones && (milestones.milestones.length > 0 || milestones.noStageList) && (
+            <div className="card" style={{ marginBottom: 14 }}>
+              <div className="hd"><h3>Milestones</h3></div>
+              <div style={{ padding: 16 }}>
+                <MilestoneStrip milestones={milestones} />
+              </div>
+            </div>
+          )}
 
           <div className="grid-2">
             <div className="card">
@@ -266,7 +282,9 @@ export function JobDetailClient({
                 <span className="sub" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}>click a cell to open the stage panel</span>
               </div>
               {unitSpines.length === 0 ? (
-                <p className="note" style={{ margin: "16px 0" }}>No current schedule for this job.</p>
+                <p className="note" style={{ margin: "16px 0" }}>
+                  {milestones?.noStageList ? "No stage list for this type of equipment yet; milestones shown instead." : "No current schedule for this job."}
+                </p>
               ) : (
                 <div className="uxs">
                   <table>
