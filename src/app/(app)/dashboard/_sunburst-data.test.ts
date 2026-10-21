@@ -27,6 +27,8 @@ function row(overrides: Partial<PortfolioRow>): PortfolioRow {
     verifiedLast24h: 0,
     newlyOverdueLast24h: 0,
     holdsOpenedLast24h: 0,
+    currentMilestone: null,
+    milestonesComplete: false,
     ...overrides,
   };
 }

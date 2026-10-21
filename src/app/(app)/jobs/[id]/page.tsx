@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { loadJobHeader } from "@/lib/services/job-detail.read";
 import { loadJobSpines, rollupJobSpine } from "@/lib/services/spine.read";
+import { loadJobMilestones } from "@/lib/services/milestone.read";
 import { loadEvents } from "@/lib/services/events.read";
 import { loadJobGantt } from "@/lib/services/gantt.read";
 import { loadBomTree } from "@/lib/services/bom.read";
@@ -92,9 +93,10 @@ export default async function JobDetail({
   const leanDispatch = lean && tab === "dispatch";
   const qcQuery = (t: QcQuery["tab"]): QcQuery => ({ tab: t, jobId, unitId: null, page: 1 });
 
-  const [header, unitSpines, events, gantt, bom, assembly, qcp, packing, dispatch, clientPreview, materials, readiness, qcCounts, qcHolds, qcNcrs, qcpAttach] = await Promise.all([
+  const [header, unitSpines, milestones, events, gantt, bom, assembly, qcp, packing, dispatch, clientPreview, materials, readiness, qcCounts, qcHolds, qcNcrs, qcpAttach] = await Promise.all([
     loadJobHeader(actor, jobId),
     loadJobSpines(actor, jobId),
+    view === "overview" ? loadJobMilestones(actor, jobId) : Promise.resolve(null),
     loadEvents(actor, { jobId, limit: view === "activity" ? 100 : 5 }),
     view === "gantt" ? loadJobGantt(actor, jobId) : Promise.resolve(null),
     view === "bom" || (leanMaterials && matView === "parts") ? loadBomTree(actor, jobId, equipmentParam, unitParam) : Promise.resolve(null),
@@ -148,6 +150,7 @@ export default async function JobDetail({
       jobId={jobId}
       header={header}
       unitSpines={spines}
+      milestones={milestones}
       jobRollup={jobRollup}
       events={events}
       gantt={gantt}

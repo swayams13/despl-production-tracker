@@ -17,6 +17,8 @@ export interface DigestJobAtRisk {
   slipDays: number | null;
   percentComplete: number;
   topBlocker: string | null;
+  /** J8: "Fabrication 40%" plus its planned finish (ISO date); null when the job's family has no milestone map. */
+  milestone: { label: string; plannedFinish: string | null; late: boolean } | null;
 }
 
 export interface DigestDeptOverdue {
@@ -105,6 +107,9 @@ export function digestPreheader(p: DigestPayload): string {
   return parts.join(" · ");
 }
 
+const milestoneLine = (m: NonNullable<DigestJobAtRisk["milestone"]>) =>
+  `${m.label}${m.plannedFinish ? `, planned finish ${fmtShort(m.plannedFinish)}` : ""}${m.late ? " (late)" : ""}`;
+
 const C = { ink: "#0E1116", muted: "#4A5260", line: "#D5D9DF", bg: "#F6F7F9", red: "#C8202B", amber: "#9A5B00", accent: "#AE4B00" };
 const td = (s: string, extra = "") => `<td style="padding:6px 0;border-top:1px solid ${C.line};font-size:14px;line-height:20px;${extra}">${s}</td>`;
 const h2 = (s: string) =>
@@ -126,6 +131,7 @@ export function renderDigest(d: DigestPayload): RenderedDigest {
               `<b>${esc(j.jobNumber)}</b> <span style="color:${j.health === "DELAYED" ? C.red : C.amber};font-weight:600">${j.health === "DELAYED" ? "Delayed" : "At risk"}${j.slipDays ? ` · +${j.slipDays} d` : ""}</span>`,
             ) +
             p(`Forecast ${esc(fmtShort(j.forecast))} · committed ${esc(fmtShort(j.committed))} · ${j.percentComplete}% complete`, `color:${C.muted}`) +
+            (j.milestone ? p(`Milestone: ${esc(milestoneLine(j.milestone))}`, j.milestone.late ? `color:${C.red}` : "") : "") +
             (j.topBlocker ? p(`Top blocker: ${esc(j.topBlocker)}`) : "") +
             `</div>`,
         )
@@ -198,6 +204,7 @@ ${button}
       ? d.jobsAtRisk.flatMap((j) => [
           `${j.jobNumber} — ${j.health === "DELAYED" ? "Delayed" : "At risk"}${j.slipDays ? ` +${j.slipDays} d` : ""}`,
           `  Forecast ${fmtShort(j.forecast)}, committed ${fmtShort(j.committed)}, ${j.percentComplete}% complete`,
+          ...(j.milestone ? [`  Milestone: ${milestoneLine(j.milestone)}`] : []),
           ...(j.topBlocker ? [`  Top blocker: ${j.topBlocker}`] : []),
         ])
       : ["No job is at risk this morning."]),

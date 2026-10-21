@@ -3,6 +3,7 @@ import { getActor } from "@/lib/authz";
 import { FEATURES } from "@/lib/shared/flags";
 import { applyBoardFilter, parseBoardFilter } from "@/lib/shared/board";
 import { loadJobBoard } from "@/lib/services/board.read";
+import { loadJobMilestones } from "@/lib/services/milestone.read";
 import { BoardClient } from "./_client";
 
 /**
@@ -28,6 +29,9 @@ export default async function JobBoardPage({
   const view = await loadJobBoard(actor, jobId);
   if (!view) notFound();
 
+  // J8: a family with no stage list (an exchanger today) gets its milestones in place of the grid.
+  const milestones = view.stages.length === 0 ? await loadJobMilestones(actor, jobId) : null;
+
   const filter = parseBoardFilter(await searchParams);
   const { stageNos, unitIds } = applyBoardFilter(
     {
@@ -37,5 +41,5 @@ export default async function JobBoardPage({
     filter,
   );
 
-  return <BoardClient jobId={jobId} view={view} filter={filter} stageNos={stageNos} unitIds={unitIds} leanFloor={FEATURES.leanFloor} />;
+  return <BoardClient jobId={jobId} view={view} filter={filter} stageNos={stageNos} unitIds={unitIds} leanFloor={FEATURES.leanFloor} milestones={milestones} />;
 }

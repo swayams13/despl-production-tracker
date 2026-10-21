@@ -4,6 +4,7 @@ import { bottlenecks, buildExceptions, rankExceptions, topBlockerByJob } from "@
 import { sameDayRate, type UpdateEvent } from "@/lib/shared/team";
 import type { DigestPayload } from "@/lib/shared/digest-email";
 import { loadPortfolio, loadPortfolioFacts } from "./portfolio.read";
+import { milestoneLabel } from "@/lib/shared/milestones";
 
 /**
  * Lean Core L2.11: everything the 08:30 IST digest email says, as one JSON
@@ -47,6 +48,9 @@ export async function loadDigestPayload(
       slipDays: r.forecastVarianceDays != null && r.forecastVarianceDays > 0 ? r.forecastVarianceDays : null,
       percentComplete: r.percentComplete,
       topBlocker: topBlocker.get(r.id)?.what ?? null,
+      milestone: r.currentMilestone
+        ? { label: milestoneLabel(r.currentMilestone), plannedFinish: r.currentMilestone.plannedFinish, late: r.currentMilestone.late }
+        : null,
     }));
 
   const overduePlans = facts.plans.filter((p) => p.overdue);

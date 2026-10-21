@@ -5,6 +5,8 @@ import { classifyJobHealth, HEALTH_ORDER, type JobHealth } from "./job-health";
 import { computeCpmSafe, getCurrentScheduleRunsBatch, loadJobSpinesBatch } from "./_shared";
 import { prioritize } from "./prioritizer";
 import { loadQcLists } from "./qc-queue.read";
+import { loadMilestonesBatch } from "./milestone.read";
+import type { MilestoneProgress } from "@/lib/shared/milestones";
 import { ncrTenantScope } from "./ncr.service";
 import {
   bottlenecks,
@@ -41,6 +43,10 @@ export interface PortfolioRow extends JobListItem {
   verifiedLast24h: number;
   newlyOverdueLast24h: number;
   holdsOpenedLast24h: number;
+  /** J8: first milestone not yet complete; null when the family has no milestone map or every milestone is done. */
+  currentMilestone: MilestoneProgress | null;
+  /** J8: the family has a milestone map and every listed milestone is complete. */
+  milestonesComplete: boolean;
 }
 
 export interface Portfolio {
@@ -62,6 +68,7 @@ const DAY_MS = 86_400_000;
 export async function loadPortfolio(actor: Actor): Promise<Portfolio> {
   const jobs = await loadJobs(actor);
   const now = new Date();
+  const milestones = await loadMilestonesBatch(actor, jobs.map((j) => j.id));
 
   const extra = await withTenant(actor.tenantId, async (tx) => {
     const jobIds = jobs.map((j) => j.id);
@@ -152,6 +159,8 @@ export async function loadPortfolio(actor: Actor): Promise<Portfolio> {
       verifiedLast24h: c?.verified ?? 0,
       newlyOverdueLast24h: c?.newly_overdue ?? 0,
       holdsOpenedLast24h: c?.holds_opened ?? 0,
+      currentMilestone: milestones.get(j.id)?.current ?? null,
+      milestonesComplete: (milestones.get(j.id)?.milestones.length ?? 0) > 0 && milestones.get(j.id)?.current == null,
     });
   }
 
