@@ -308,7 +308,12 @@ function BatchCard({
             DISPATCHED order; the server (assertDispatchBatchTransition)
             remains authoritative regardless of what renders here. */}
         {canManageDispatch && action === "approveRelease" && !approving && (
-          <button className="btn btn-accent" style={{ justifySelf: "start" }} onClick={() => setApproving(true)}>
+          <button
+            className="btn btn-accent"
+            style={{ justifySelf: "start" }}
+            disabled={batch.units.length === 0}
+            onClick={() => setApproving(true)}
+          >
             Approve release
           </button>
         )}
@@ -326,9 +331,12 @@ function BatchCard({
           />
         )}
         {canManageDispatch && action === "recordDispatch" && (
-          <button className="btn btn-accent" style={{ justifySelf: "start" }} disabled={dispatchPending} onClick={recordDispatchNow}>
+          <button className="btn btn-accent" style={{ justifySelf: "start" }} disabled={dispatchPending || batch.units.length === 0} onClick={recordDispatchNow}>
             Record dispatch
           </button>
+        )}
+        {canManageDispatch && action !== null && batch.units.length === 0 && (
+          <span className="note">Add at least one packed unit to this batch first.</span>
         )}
       </div>
     </div>
