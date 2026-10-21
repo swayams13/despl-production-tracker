@@ -51,7 +51,7 @@ export async function planJobGrainBackfill(prisma: PrismaClient, opts: { jobNumb
   for (const job of jobs) {
     const run = await prisma.scheduleRun.findFirst({ where: { jobId: job.id, isCurrent: true }, include: { processPlans: true } });
     if (!run) continue;
-    const jps = await prisma.jobProcess.findMany({ where: { jobId: job.id, included: true, code: { in: [...JOB_GRAIN_PROCESS_CODES] } }, orderBy: { seq: "asc" } });
+    const jps = await prisma.jobProcess.findMany({ where: { jobId: job.id, included: true, equipmentId: null, code: { in: [...JOB_GRAIN_PROCESS_CODES] } }, orderBy: { seq: "asc" } });
     const processes: ProcessChange[] = [];
     const before = run.processPlans.length;
     let after = before;
