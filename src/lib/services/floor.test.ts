@@ -14,7 +14,7 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
   const { loadFloorUnit } = await import("./floor.read");
   const { notifyBlocker, ensureJointForStep, jointTypeOf } = await import("./floor.service");
   const { recordWork, inspect } = await import("./work.service");
-  const { makeWorkOrg } = await import("./work.test-util");
+  const { makeWorkOrg, attachPrintedRoute } = await import("./work.test-util");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   type Org = Awaited<ReturnType<typeof makeWorkOrg>>;
@@ -159,6 +159,22 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
       });
       const v = await view(head, j.units[0].publicId);
       expect(v.rows.map((r) => r.title).sort()).toEqual(["CUTTING", "FORMING (1 of 2)", "FORMING (2 of 2)", "NDT"]);
+    });
+
+    it("read as the route's own names when the part's route has them", async () => {
+      const j = await o.job({
+        components: [{ tag: "HEAD", ops: [{ code: "CUTTING" }, { code: "FORMING" }, { code: "FORMING" }, { code: "NDT" }] }],
+      });
+      await attachPrintedRoute(owner, o.tenantId, j.components.get("HEAD:0")!, ["Plate Cutting", "Pressing/Spinning", "Trimming", "NDT"]);
+      const v = await view(head, j.units[0].publicId);
+      expect(v.rows.map((r) => r.title).sort()).toEqual(["CUTTING", "FORMING (Pressing/Spinning)", "FORMING (Trimming)", "NDT"]);
+    });
+
+    it("keep the numbering when only some repeats have a route name", async () => {
+      const j = await o.job({ components: [{ tag: "HEAD", ops: [{ code: "FORMING" }, { code: "FORMING" }] }] });
+      await attachPrintedRoute(owner, o.tenantId, j.components.get("HEAD:0")!, ["Pressing/Spinning", null]);
+      const v = await view(head, j.units[0].publicId);
+      expect(v.rows.map((r) => r.title).sort()).toEqual(["FORMING (1 of 2)", "FORMING (2 of 2)"]);
     });
   });
 

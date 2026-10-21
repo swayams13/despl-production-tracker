@@ -286,14 +286,20 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
   // Lean Core L1.1: grain, requiresQc and enforcement are copied onto the job's
   // rows at intake (invariant 9 — a later template edit cannot change a running
   // job). Flip one template process and one template edge, restore in finally.
+  // (L1.3: the seeded template already says JOB / no QC for processes 1-11 and 33, so "others" are compared with
+  // the template's own values, and process 1 is flipped the other way round and restored to what it was.)
   it("L1.1: copies grain, requiresQc and enforcement from the template onto JobProcess and JobProcessEdge", async () => {
     const refs = await seedRefs();
     const tp = await owner.templateProcess.findFirstOrThrow({ where: { versionId: refs.version.id, seq: 1 } });
+    const wasGrain = tp.grain;
+    const wasRequiresQc = tp.requiresQc;
+    const flippedGrain = wasGrain === "JOB" ? "UNIT" : "JOB";
+    const templateByCode = new Map((await owner.templateProcess.findMany({ where: { versionId: refs.version.id } })).map((p) => [p.code, p]));
     const te = await owner.templateEdge.findFirstOrThrow({ where: { versionId: refs.version.id } });
     const tePred = await owner.templateProcess.findUniqueOrThrow({ where: { id: te.predecessorId } });
     const teProc = await owner.templateProcess.findUniqueOrThrow({ where: { id: te.processId } });
     try {
-      await owner.templateProcess.update({ where: { id: tp.id }, data: { grain: "JOB", requiresQc: false } });
+      await owner.templateProcess.update({ where: { id: tp.id }, data: { grain: flippedGrain, requiresQc: !wasRequiresQc } });
       await owner.templateEdge.update({ where: { id: te.id }, data: { enforcement: "SOFT" } });
 
       const r = await createJob(actor(), base({ jobNumber: "TEST-L11-COPY" }, refs));
@@ -301,12 +307,12 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
 
       const jps = await owner.jobProcess.findMany({ where: { jobId: r.jobId } });
       const flipped = jps.find((p) => p.code === tp.code)!;
-      expect(flipped.grain).toBe("JOB");
-      expect(flipped.requiresQc).toBe(false);
-      // Every other process keeps today's behaviour.
+      expect(flipped.grain).toBe(flippedGrain);
+      expect(flipped.requiresQc).toBe(!wasRequiresQc);
+      // Every other process takes the template's own values.
       for (const p of jps.filter((p) => p.code !== tp.code)) {
-        expect(p.grain).toBe("UNIT");
-        expect(p.requiresQc).toBe(true);
+        expect(p.grain).toBe(templateByCode.get(p.code)!.grain);
+        expect(p.requiresQc).toBe(templateByCode.get(p.code)!.requiresQc);
       }
 
       const jpByCode = new Map(jps.map((p) => [p.code, p.id]));
@@ -318,7 +324,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
       const total = await owner.jobProcessEdge.count({ where: { jobId: r.jobId } });
       expect(hard).toBe(total - 1);
     } finally {
-      await owner.templateProcess.update({ where: { id: tp.id }, data: { grain: "UNIT", requiresQc: true } });
+      await owner.templateProcess.update({ where: { id: tp.id }, data: { grain: wasGrain, requiresQc: wasRequiresQc } });
       await owner.templateEdge.update({ where: { id: te.id }, data: { enforcement: "HARD" } });
     }
   });

@@ -115,13 +115,15 @@ export function BomPanel({
             </select>
           )}
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 16px 0" }}>
-          <button className="btn" onClick={() => { setEditingId(null); setAddingItem((s) => !s); }}>
-            {addingItem ? "Cancel add" : "+ Add item…"}
-          </button>
-          <ImportBomControl jobId={jobId} equipmentId={bom.equipmentId} />
-        </div>
-        {addingItem && (
+        {access.bomEdit && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 16px 0" }}>
+            <button className="btn" onClick={() => { setEditingId(null); setAddingItem((s) => !s); }}>
+              {addingItem ? "Cancel add" : "+ Add item…"}
+            </button>
+            <ImportBomControl jobId={jobId} equipmentId={bom.equipmentId} />
+          </div>
+        )}
+        {access.bomEdit && addingItem && (
           <div style={{ padding: "10px 16px" }}>
             <BomItemForm
               jobId={jobId}
@@ -161,15 +163,17 @@ export function BomPanel({
                             ))}
                           </span>
                           <StatusChip status={comp?.displayStatus ?? "idle"} />
-                          <button
-                            className="btn btn-ghost"
-                            onClick={(e) => { e.stopPropagation(); setAddingItem(false); setEditingId((s) => (s === it.id ? null : it.id)); }}
-                          >
-                            {editingId === it.id ? "×" : "Edit"}
-                          </button>
+                          {access.bomEdit && (
+                            <button
+                              className="btn btn-ghost"
+                              onClick={(e) => { e.stopPropagation(); setAddingItem(false); setEditingId((s) => (s === it.id ? null : it.id)); }}
+                            >
+                              {editingId === it.id ? "×" : "Edit"}
+                            </button>
+                          )}
                           <button className="btn btn-ghost" onClick={(e) => { e.stopPropagation(); setSelectedId(it.id); }}>→</button>
                         </div>
-                        {editingId === it.id && (
+                        {access.bomEdit && editingId === it.id && (
                           <div style={{ padding: "10px 16px" }}>
                             <BomItemForm
                               jobId={jobId}
@@ -853,7 +857,7 @@ function StockSection({ jobId, item, componentId, access }: { jobId: number; ite
           {item.stockLots.map((lot) => (
             <li key={lot.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
               <span>
-                <span className="mono">{lot.qty}</span> at {lot.location}
+                <span className="mono">{lot.onHand === lot.qty ? lot.qty : `${lot.onHand} of ${lot.qty}`}</span> at {lot.location}
                 {lot.heatNumber ? ` · heat ${lot.heatNumber}` : " · no heat number"}
                 <span style={{ color: "var(--muted)", fontSize: "var(--fs-xs, 11px)" }}> · {new Date(lot.receivedAt).toLocaleDateString()}</span>
               </span>
@@ -955,9 +959,9 @@ function GoverningDrawingSection({ jobId, drawing }: { jobId: number; drawing: B
   );
 }
 
-/** " (1 of 2)" on a step whose operation the route uses more than once (a head's pressing and trimming are both Forming). */
+/** " (Trimming)", or " (1 of 2)" without route names, on a step whose operation the route uses more than once (a head's pressing and trimming are both Forming). */
 function repeatSuffixes(operations: BomComponentOp[]): Map<number, string> {
-  return repeatedOpSuffixes(operations.map((o) => ({ key: o.seq, group: 0, name: o.operationName, seq: o.seq })));
+  return repeatedOpSuffixes(operations.map((o) => ({ key: o.seq, group: 0, name: o.operationName, seq: o.seq, printed: o.printed })));
 }
 
 function RouteSteps({

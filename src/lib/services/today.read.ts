@@ -3,6 +3,7 @@ import { assertNotClientUser, hasRole, ROLES, type Actor } from "@/lib/authz";
 import { repeatedOpSuffixes } from "@/lib/shared/op-title";
 import { sectionize, endOfIstDay, type Sections } from "@/lib/shared/today";
 import { istDay, loadMyDay, type MyDayScoreboard } from "./myday.read";
+import { routeStepNames } from "./route-step-names";
 import { loadFloorUnit, type FloorRow, type FloorUnitView } from "./floor.read";
 import type { SheetContext } from "@/components/industrial/floor-actions";
 
@@ -202,10 +203,11 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
     const siblings = ops.length
       ? await tx.componentOperation.findMany({
           where: { componentId: { in: [...new Set(ops.map((o) => o.componentId))] } },
-          select: { id: true, componentId: true, seq: true, operation: { select: { name: true } } },
+          select: { id: true, componentId: true, seq: true, operation: { select: { name: true } }, component: { select: { routeVersionId: true } } },
         })
       : [];
-    const repeats = repeatedOpSuffixes(siblings.map((o) => ({ key: o.id, group: o.componentId, name: o.operation.name, seq: o.seq })));
+    const printed = await routeStepNames(tx, siblings.map((o) => ({ id: o.id, seq: o.seq, routeVersionId: o.component.routeVersionId })));
+    const repeats = repeatedOpSuffixes(siblings.map((o) => ({ key: o.id, group: o.componentId, name: o.operation.name, seq: o.seq, printed: printed.get(o.id) })));
     return [
       ...steps.map((s) => ({
         key: `ASSEMBLY_STEP:${s.id}`,

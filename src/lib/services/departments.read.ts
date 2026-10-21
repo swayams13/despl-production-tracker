@@ -213,18 +213,27 @@ export async function loadDepartmentDetail(actor: Actor, deptId: number): Promis
         actualStart: true,
         actualFinish: true,
         unit: { select: { id: true, serialNo: true } },
+        jobId: true,
         jobProcess: { select: { id: true, name: true, durationMaxDays: true, workOrderStages: true, job: { select: { id: true, jobNumber: true, calendarId: true } } } },
       },
     });
 
+    // L1.3: a JOB-grain plan has no unit of its own. It is listed as "Whole job", and its sheet opens on the
+    // job's first unit (stage detail shows a job-level plan on every unit).
+    const jobLevelJobIds = [...new Set(plans.filter((p) => p.unit == null && p.status !== "COMPLETE").map((p) => p.jobId))];
+    const firstUnit = new Map(
+      jobLevelJobIds.length
+        ? (await tx.unit.groupBy({ by: ["jobId"], where: { jobId: { in: jobLevelJobIds } }, _min: { id: true } })).map((g) => [g.jobId, g._min.id] as const)
+        : [],
+    );
     const openItems: DeptOpenItem[] = plans
-      .filter((p) => p.status !== "COMPLETE" && p.unit != null)
+      .filter((p) => p.status !== "COMPLETE" && (p.unit != null || firstUnit.get(p.jobId) != null))
       .map((p) => ({
         planId: p.id,
         jobId: p.jobProcess.job.id,
         jobNumber: p.jobProcess.job.jobNumber,
-        unitId: p.unit!.id,
-        serialNo: p.unit!.serialNo,
+        unitId: p.unit?.id ?? firstUnit.get(p.jobId)!,
+        serialNo: p.unit?.serialNo ?? "Whole job",
         stageNo: p.jobProcess.workOrderStages[0] ?? 0,
         processName: p.jobProcess.name,
         status: p.status,

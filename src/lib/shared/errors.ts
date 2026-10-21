@@ -98,6 +98,8 @@ export const ERROR_CODES = {
   DRAWING_NOT_RELEASED: "DRAWING_NOT_RELEASED",
   /** createDrawingRevision: revisionNo must be strictly greater than the drawing's current highest (B9, Phase 4). */
   DRAWING_REVISION_NOT_INCREASING: "DRAWING_REVISION_NOT_INCREASING",
+  /** createAssemblyDrawing: the job already has a drawing with this number (JG1). */
+  DRAWING_NUMBER_TAKEN: "DRAWING_NUMBER_TAKEN",
   /** createBomRevision: revisionNo must be strictly greater than the equipment's current highest (B4, Phase 4). */
   BOM_REVISION_NOT_INCREASING: "BOM_REVISION_NOT_INCREASING",
   /** createBomItem/updateBomItem: the chosen parentBomItemId is a descendant of the item being written — a normal user refusal, not malformed data (B4, Phase 4). */
@@ -110,6 +112,8 @@ export const ERROR_CODES = {
   CROSS_JOB_ASSIGNMENT: "CROSS_JOB_ASSIGNMENT",
   /** materialiseAssemblySteps (S17): an AssemblyTemplateStep's qcpSrNo has no corresponding QcpItem in the job's cloned QcpTemplate at the expected occurrence — refuses rather than leaving qcpItemId silently null. */
   QCP_ITEM_UNRESOLVED: "QCP_ITEM_UNRESOLVED",
+  /** attachQcpTemplate (JG2): the job already has a QC plan; replacing one is not built. */
+  QCP_ALREADY_ATTACHED: "QCP_ALREADY_ATTACHED",
   /** setJobStatus (S19): status COMPLETE was requested while a ProcessPlan on the job's current ScheduleRun is not yet COMPLETE. */
   JOB_HAS_INCOMPLETE_PLANS: "JOB_HAS_INCOMPLETE_PLANS",
   /** setOperationRefFamilySeq (C6): the given number is not among the family's own published TemplateProcess.seq values. */
@@ -230,6 +234,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   INSUFFICIENT_STOCK: "This would take the lot's available quantity below zero.",
   MATERIAL_NOT_AVAILABLE: "This part is recorded short. Resolve the shortage before starting this operation.",
   DRAWING_NOT_RELEASED: "This component's governing drawing is not released yet. Cutting cannot start until it is.",
+  DRAWING_NUMBER_TAKEN: "This job already has a drawing with that number. Open it and issue a revision instead.",
   DRAWING_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the drawing's current revision.",
   BOM_REVISION_NOT_INCREASING: "Revision numbers must increase. Enter a number higher than the equipment's current BOM revision.",
   BOM_PARENT_WOULD_CYCLE: "Can't set this parent: it would create a circular reference. Pick a different parent item.",
@@ -238,6 +243,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   UNIT_NOT_PACKED: "This unit has not been packed yet. Assign it to a package before adding it to a dispatch batch.",
   CROSS_JOB_ASSIGNMENT: "This unit and package belong to different jobs and cannot be linked.",
   QCP_ITEM_UNRESOLVED: "This QCP template does not cover the assembly checklist. Pick another QCP template.",
+  QCP_ALREADY_ATTACHED: "This job already has a QC plan. Replacing it is not supported.",
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
   ROUTE_STEP_SEQ_UNKNOWN:
     "This number does not match any process in the family's published route — check the template's process list.",

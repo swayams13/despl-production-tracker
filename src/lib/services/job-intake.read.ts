@@ -168,6 +168,50 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
   });
 }
 
+export interface QcpAttachOption {
+  id: number;
+  label: string;
+  vessel: string;
+  revision: number;
+  itemCount: number;
+  /** Assembly checklist numbers this plan does not number for the job's route: attaching may be refused. */
+  gaps: string[];
+}
+
+/**
+ * JG2: the QC plans a job without one can take (the intake wizard's list, with
+ * the same gap warning computed for this job's family and equipment types).
+ * Null when the job already has a plan: replacing one is not built.
+ */
+export async function loadQcpAttachOptions(actor: Actor, jobId: number): Promise<QcpAttachOption[] | null> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  return withTenant(actor.tenantId, async (tx) => {
+    const job = await tx.job.findFirst({
+      where: { id: jobId, tenantId: actor.tenantId },
+      select: { familyId: true, equipments: { select: { equipmentTypeId: true } } },
+    });
+    if (!job) return null;
+    if ((await tx.qcpTemplate.count({ where: { jobId } })) > 0) return null;
+    const templates = await tx.qcpTemplate.findMany({
+      where: { tenantId: actor.tenantId },
+      orderBy: { jobLabel: "asc" },
+      include: { _count: { select: { items: true } } },
+    });
+    const items = await loadQcpItemsByTemplate(tx, actor.tenantId, templates.map((t) => t.id));
+    const typeIds = [...new Set(job.equipments.flatMap((e) => (e.equipmentTypeId != null ? [e.equipmentTypeId] : [])))];
+    const gaps = await qcpAssemblyGaps(tx, actor.tenantId, job.familyId, typeIds, items);
+    return templates.map((t) => ({
+      id: t.id,
+      label: t.jobLabel,
+      vessel: t.vessel,
+      revision: t.revision,
+      itemCount: t._count.items,
+      gaps: gaps[t.id] ?? [],
+    }));
+  });
+}
+
 export interface EquipmentTypeAdminRow {
   id: number;
   familyId: number;

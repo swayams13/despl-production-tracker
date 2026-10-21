@@ -8,6 +8,7 @@ import { loadJobGantt } from "@/lib/services/gantt.read";
 import { loadBomTree } from "@/lib/services/bom.read";
 import { loadAssemblyGrid } from "@/lib/services/assembly.read";
 import { loadQcpGrid } from "@/lib/services/qcp-grid.read";
+import { loadQcpAttachOptions } from "@/lib/services/job-intake.read";
 import { loadClientPreview } from "@/lib/services/client-snapshot.read";
 import { loadPackingPanel } from "@/lib/services/packing.read";
 import { loadDispatchPanel, loadDispatchReadiness } from "@/lib/services/dispatch.read";
@@ -91,7 +92,7 @@ export default async function JobDetail({
   const leanDispatch = lean && tab === "dispatch";
   const qcQuery = (t: QcQuery["tab"]): QcQuery => ({ tab: t, jobId, unitId: null, page: 1 });
 
-  const [header, unitSpines, events, gantt, bom, assembly, qcp, packing, dispatch, clientPreview, materials, readiness, qcCounts, qcHolds, qcNcrs] = await Promise.all([
+  const [header, unitSpines, events, gantt, bom, assembly, qcp, packing, dispatch, clientPreview, materials, readiness, qcCounts, qcHolds, qcNcrs, qcpAttach] = await Promise.all([
     loadJobHeader(actor, jobId),
     loadJobSpines(actor, jobId),
     loadEvents(actor, { jobId, limit: view === "activity" ? 100 : 5 }),
@@ -108,6 +109,8 @@ export default async function JobDetail({
     qcView && (tab === "overview" || leanQc) ? loadQcCounts(actor, { jobId }) : Promise.resolve(null),
     qcView && leanQc ? loadQcQueue(actor, qcQuery("holds")) : Promise.resolve(null),
     qcView && leanQc ? loadQcQueue(actor, qcQuery("ncrs")) : Promise.resolve(null),
+    // JG2: the picker for a job with no QC plan; the loader returns null once one is attached.
+    leanQc && hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN) ? loadQcpAttachOptions(actor, jobId) : Promise.resolve(null),
   ]);
   if (!header) notFound();
 
@@ -133,6 +136,7 @@ export default async function JobDetail({
         qcp={qcp}
         canApproveWaiver={canApproveQcpWaiver}
         canRecord={canRecordQcp}
+        attachOptions={qcpAttach}
       />
     );
   } else if (leanDispatch) {

@@ -299,7 +299,8 @@ export async function loadFloorFacts(
       jobProcessId: p.jobProcessId,
       plannedFinish: p.plannedFinish,
       hasDelayReason: p._count.delayReasons > 0,
-      derived: p.unitId != null && processSeq != null && mappedSeqs.has(processSeq),
+      // L1.3: a JOB-grain (unit-less) plan is derived too, from the mapped items on every unit.
+      derived: processSeq != null && mappedSeqs.has(processSeq),
     };
     rows.set(rowKey(item.kind, item.id), row);
     // A unit plan wins over a job plan for the same seq (a process is one grain or the other).

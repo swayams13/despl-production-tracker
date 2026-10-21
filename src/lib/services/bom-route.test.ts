@@ -3,7 +3,7 @@ import { projectComponentRoute, groupProjectedRoute, computeComponentDisplayStat
 import type { RouteStepDef, ActualOp } from "./bom-route";
 
 function step(seq: number, operationId: number, operationName: string, leadTimeProcessSeq: number | null = null): RouteStepDef {
-  return { seq, operationId, operationName, leadTimeProcessSeq };
+  return { seq, operationId, operationName, printed: null, leadTimeProcessSeq };
 }
 
 function op(operationId: number, operationName: string, status: string, leadTimeProcessSeq: number | null = null, id: number = operationId): ActualOp {
@@ -148,4 +148,10 @@ test("computeComponentDisplayStatus: first step COMPLETE, rest NOT_STARTED, noth
       { status: "NOT_STARTED" },
     ]),
   ).toBe("progress");
+});
+
+test("projectComponentRoute carries the route step's printed name; an appended extra has none", () => {
+  const steps = [{ ...step(1, 7, "Forming"), printed: "Pressing/Spinning" }, { ...step(2, 7, "Forming"), printed: "Trimming" }];
+  const out = projectComponentRoute(steps, [op(7, "Forming", "COMPLETE", null, 1), op(7, "Forming", "NOT_STARTED", null, 2), op(9, "MTC", "NOT_STARTED", null, 3)]);
+  expect(out.map((p) => p.printed)).toEqual(["Pressing/Spinning", "Trimming", null]);
 });

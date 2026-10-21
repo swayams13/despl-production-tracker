@@ -359,7 +359,8 @@ async function buildHolds(tx: Tx, s: Scope, now: Date): Promise<HoldRow[]> {
 
   const linkedProcessIds = [...new Set(items.map((i) => i.processLinks[0]?.jobProcess.id).filter((x): x is number => x != null))];
   const plans = await tx.processPlan.findMany({
-    where: { unitId: { in: unitIds }, jobProcessId: { in: linkedProcessIds }, scheduleRun: { isCurrent: true } },
+    // L1.3: a JOB-grain process has one unit-less plan, which every unit's hold point reads.
+    where: { OR: [{ unitId: { in: unitIds } }, { unitId: null }], jobProcessId: { in: linkedProcessIds }, scheduleRun: { isCurrent: true } },
     select: { jobProcessId: true, unitId: true, plannedStart: true, status: true },
   });
   const planByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p]));
@@ -377,7 +378,7 @@ async function buildHolds(tx: Tx, s: Scope, now: Date): Promise<HoldRow[]> {
       const attempt = latest.get(`${item.id}:${u.id}`) ?? null;
       const status = resolveHoldPointStatus(attempt, requiresCall);
       if (status == null) continue; // cleared
-      const plan = planByKey.get(`${jp.id}:${u.id}`);
+      const plan = planByKey.get(`${jp.id}:${u.id}`) ?? planByKey.get(`${jp.id}:null`);
       if (!holdIsReached(attempt, plan, now)) continue; // upcoming, not a hold
       rows.push({
         key: `${item.id}:${u.id}`,

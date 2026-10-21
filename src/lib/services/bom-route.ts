@@ -10,6 +10,8 @@ export interface RouteStepDef {
   seq: number;
   operationId: number;
   operationName: string;
+  /** The route's own name for this step ("Trimming"); null when the route has none. */
+  printed: string | null;
   leadTimeProcessSeq: number | null;
 }
 
@@ -43,6 +45,8 @@ export interface ActualOp {
 export interface ProjectedOp {
   seq: number;
   operationName: string;
+  /** RouteStep.printed; null on an appended extra. */
+  printed: string | null;
   status: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -91,6 +95,7 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
       return {
         seq: s.seq,
         operationName: s.operationName,
+        printed: s.printed,
         status: actual?.status ?? "NOT_STARTED",
         startedAt: actual?.startedAt ?? null,
         finishedAt: actual?.finishedAt ?? null,
@@ -111,6 +116,7 @@ export function projectComponentRoute(routeSteps: RouteStepDef[], actualOps: Act
     .map((o, i) => ({
       seq: routeSteps.length + i + 1,
       operationName: o.operationName,
+      printed: null,
       status: o.status,
       startedAt: o.startedAt,
       finishedAt: o.finishedAt,

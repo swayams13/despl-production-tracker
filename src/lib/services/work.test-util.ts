@@ -298,3 +298,17 @@ export async function makeWorkOrg(owner: PrismaClient, label: string) {
 
 export type WorkOrg = Awaited<ReturnType<typeof makeWorkOrg>>;
 export type WorkJob = Awaited<ReturnType<WorkOrg["job"]>>;
+
+/**
+ * Pins a component to a route whose steps mirror its operations (same seq and operation) and carry the
+ * given printed names, as materialisation from a published RouteTemplateVersion leaves it.
+ */
+export async function attachPrintedRoute(owner: PrismaClient, tenantId: number, componentId: number, printed: Array<string | null>) {
+  const comp = await owner.component.findUniqueOrThrow({ where: { id: componentId }, include: { operations: { orderBy: { seq: "asc" } } } });
+  const route = await owner.routeTemplate.create({ data: { tenantId, componentTypeId: comp.componentTypeId, name: `R-${componentId}` } });
+  const version = await owner.routeTemplateVersion.create({ data: { routeId: route.id, version: 1 } });
+  for (const [i, op] of comp.operations.entries()) {
+    await owner.routeStep.create({ data: { routeVersionId: version.id, seq: op.seq, operationId: op.operationId, printed: printed[i] ?? null } });
+  }
+  await owner.component.update({ where: { id: componentId }, data: { routeVersionId: version.id } });
+}

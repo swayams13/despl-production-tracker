@@ -13,7 +13,7 @@ describe.skipIf(!RUN_DB)("L2.3 Today (DB)", async () => {
   const { loadToday } = await import("./today.read");
   const { claimNext } = await import("./today.service");
   const { recordWork } = await import("./work.service");
-  const { makeWorkOrg } = await import("./work.test-util");
+  const { makeWorkOrg, attachPrintedRoute } = await import("./work.test-util");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
   type Org = Awaited<ReturnType<typeof makeWorkOrg>>;
@@ -92,6 +92,14 @@ describe.skipIf(!RUN_DB)("L2.3 Today (DB)", async () => {
       await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: "COMPONENT_OP", id: j.op("HEAD", "FORMING") }] });
       const v = await loadToday(sup);
       expect(v.checkIn.doneToday.find((d) => d.id === j.op("HEAD", "FORMING"))).toMatchObject({ title: "FORMING (2 of 2)" });
+    });
+
+    it("a repeated operation reads as the route's own step name when the part's route has them", async () => {
+      const j = await o.job({ components: [{ tag: "HEAD", ops: [{ code: "FORMING", requiresQc: false }, { code: "FORMING", requiresQc: false }] }] });
+      await attachPrintedRoute(owner, o.tenantId, j.components.get("HEAD:0")!, ["Pressing/Spinning", "Trimming"]);
+      await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: "COMPONENT_OP", id: j.op("HEAD", "FORMING") }] });
+      const v = await loadToday(sup);
+      expect(v.checkIn.doneToday.find((d) => d.id === j.op("HEAD", "FORMING"))).toMatchObject({ title: "FORMING (Trimming)" });
     });
 
     it("another tenant's work never appears", async () => {

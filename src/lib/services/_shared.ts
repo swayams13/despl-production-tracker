@@ -5,6 +5,7 @@ import { recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
 import { DEFAULT_CALENDAR, computeCpm } from "@/lib/schedule";
 import { istCalendarDayMarker } from "@/lib/shared/business-day";
+import { collapseUnitPlans, predecessorStatus, type Collapsed } from "@/lib/shared/job-grain";
 import { drawingStateOf } from "@/lib/shared/floor-rules";
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
 import { explodeBomItem, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
@@ -342,9 +343,20 @@ export async function persistScheduleRun(
     where: { jobId, isCurrent: true },
     include: { processPlans: true },
   });
-  const priorByKey = new Map(
-    priorRuns.flatMap((r) => r.processPlans).map((p) => [priorActualsKey(p.jobProcessId, p.unitId), p]),
-  );
+  const priorPlans = priorRuns.flatMap((r) => r.processPlans);
+  const priorByKey = new Map(priorPlans.map((p) => [priorActualsKey(p.jobProcessId, p.unitId), p]));
+  // L1.3: a process that has just become JOB grain has no unit-less prior plan; its per-unit ones collapse into the new one.
+  const priorUnitPlansByProcess = new Map<number, ProcessPlan[]>();
+  for (const p of priorPlans) {
+    if (p.unitId == null) continue;
+    priorUnitPlansByProcess.set(p.jobProcessId, [...(priorUnitPlansByProcess.get(p.jobProcessId) ?? []), p]);
+  }
+  const carried = (p: PlanInput): (Collapsed & { assigneeUserId?: number | null }) | null => {
+    const exact = priorByKey.get(priorActualsKey(p.jobProcessId, p.unitId));
+    if (exact) return exact;
+    const unitPlans = p.unitId == null ? priorUnitPlansByProcess.get(p.jobProcessId) : undefined;
+    return unitPlans?.length ? collapseUnitPlans(unitPlans) : null;
+  };
 
   // Version is a single per-job sequence (AUD-034) — there is no longer a
   // second equipmentId grain to version independently.
@@ -374,7 +386,7 @@ export async function persistScheduleRun(
       createdBy: actor.userId,
       processPlans: {
         create: input.plans.map((p) => {
-          const prior = priorByKey.get(priorActualsKey(p.jobProcessId, p.unitId));
+          const prior = carried(p);
           return {
             jobId: input.jobId,
             jobProcessId: p.jobProcessId,
@@ -387,6 +399,10 @@ export async function persistScheduleRun(
             status: prior?.status ?? "NOT_STARTED",
             actualStart: prior?.actualStart ?? null,
             actualFinish: prior?.actualFinish ?? null,
+            reportedStartAt: prior?.reportedStartAt ?? null,
+            reportedFinishAt: prior?.reportedFinishAt ?? null,
+            // An assignment survives a reschedule (a collapsed JOB-grain plan has no single assignee to carry).
+            assigneeUserId: prior?.assigneeUserId ?? null,
             submittedBy: prior?.submittedBy ?? null,
             verifiedBy: prior?.verifiedBy ?? null,
           };
@@ -536,12 +552,26 @@ export async function assertNoOpenHoldPoint(
   }
 }
 
-/** Non-throwing form of `assertNoOpenHoldPoint` (L1.2 rollup): the open blocking QcpItem ids. */
+/** The job's unit ids (RLS-scoped through the transaction), ascending. */
+async function jobUnitIds(tx: Tx, jobId: number): Promise<number[]> {
+  return (await tx.unit.findMany({ where: { jobId }, select: { id: true }, orderBy: { id: "asc" } })).map((u) => u.id);
+}
+
+/**
+ * Non-throwing form of `assertNoOpenHoldPoint` (L1.2 rollup): the open blocking QcpItem ids. L1.3: for a
+ * unit-less (JOB-grain) plan, an H point open on ANY of the job's units counts (QC still records it per unit).
+ */
 export async function findOpenHoldPointItemIds(
   tx: Tx,
   args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<number[]> {
-  if (args.unitId == null) return [];
+  if (args.unitId == null) {
+    const open = new Set<number>();
+    for (const unitId of await jobUnitIds(tx, args.jobId)) {
+      for (const id of await findOpenHoldPointItemIds(tx, { ...args, unitId })) open.add(id);
+    }
+    return [...open];
+  }
   // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
   await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
@@ -688,7 +718,12 @@ export async function loadMappedOps(
   tx: Tx,
   args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<MappedOp[]> {
-  if (args.unitId == null) return [];
+  if (args.unitId == null) {
+    // L1.3: a unit-less (JOB-grain) plan is fed by its mapped items on every unit of the job.
+    const all: MappedOp[] = [];
+    for (const unitId of await jobUnitIds(tx, args.jobId)) all.push(...(await loadMappedOps(tx, { ...args, unitId })));
+    return all;
+  }
   // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment. A
   // unitId from a different job than jobId now returns zero rows (RLS),
   // instead of silently rolling up another job's operations.
@@ -780,12 +815,16 @@ export async function assertNoOpenNcr(
   }
 }
 
-/** Non-throwing form of `assertNoOpenNcr` (L1.2 rollup): the blocking operations' labels. */
+/** Non-throwing form of `assertNoOpenNcr` (L1.2 rollup): the blocking operations' labels. L1.3: a unit-less (JOB-grain) plan sees every unit's. */
 export async function findOpenNcrOperations(
   tx: Tx,
   args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<string[]> {
-  if (args.unitId == null) return [];
+  if (args.unitId == null) {
+    const labels: string[] = [];
+    for (const unitId of await jobUnitIds(tx, args.jobId)) labels.push(...(await findOpenNcrOperations(tx, { ...args, unitId })));
+    return labels;
+  }
   // H1 job-level RLS backstop — see lockProcessPlanForUpdate's comment.
   await tx.$executeRaw`SELECT set_config('app.job_id', ${String(args.jobId)}, true)`;
 
@@ -979,10 +1018,15 @@ export async function assertUnitHasNoOpenHoldPoint(tx: Tx, unitId: number, jobId
  */
 export async function assertUnitProductionComplete(tx: Tx, unitId: number, jobId: number): Promise<void> {
   const incomplete = await tx.processPlan.findMany({
-    where: { unitId, jobId, scheduleRun: { isCurrent: true }, status: { not: "COMPLETE" } },
+    // L1.3: a job-level (unit-less) plan, such as MDR (33), must be complete before any unit ships.
+    where: { OR: [{ unitId }, { unitId: null }], jobId, scheduleRun: { isCurrent: true }, status: { not: "COMPLETE" } },
     select: { id: true, jobProcess: { select: { templateProcess: { select: { evidenceKind: true } } } } },
   });
   const blocking = incomplete.filter((p) => p.jobProcess.templateProcess?.evidenceKind !== "DISPATCH_RECORDED");
+  // A unit with no plan on the current run has no production record at all:
+  // "nothing incomplete" must not read as "complete" (pilot review, 21 Oct).
+  const planned = incomplete.length > 0 || (await tx.processPlan.count({ where: { unitId, jobId, scheduleRun: { isCurrent: true } } })) > 0;
+  if (!planned) throw new AppError(ERROR_CODES.UNIT_NOT_COMPLETE, { unitId, jobId, incompleteProcessPlanIds: [], reason: "NO_SCHEDULE" });
   if (blocking.length > 0) {
     throw new AppError(ERROR_CODES.UNIT_NOT_COMPLETE, {
       unitId,
@@ -1310,15 +1354,18 @@ export async function loadPredecessorStates(
 ): Promise<PredecessorState[]> {
   if (predecessorIds.length === 0) return [];
 
+  // L1.3: either side of an edge can be JOB grain, so read every unit's plan and let predecessorStatus pick:
+  // a unit sees its own plan, else the job-level one; a job-level plan waits for the least advanced unit.
   const plans = await tx.processPlan.findMany({
-    where: { scheduleRunId, jobProcessId: { in: predecessorIds }, unitId: unitId ?? null },
-    select: { jobProcessId: true, status: true },
+    where: { scheduleRunId, jobProcessId: { in: predecessorIds } },
+    select: { jobProcessId: true, unitId: true, status: true },
   });
-  const statusByProc = new Map(plans.map((p) => [p.jobProcessId, p.status]));
+  const byProc = new Map<number, Array<{ unitId: number | null; status: ProcessPlan["status"] }>>();
+  for (const p of plans) byProc.set(p.jobProcessId, [...(byProc.get(p.jobProcessId) ?? []), p]);
 
   return predecessorIds.map((predecessorId) => ({
     predecessorId,
-    status: statusByProc.get(predecessorId) ?? "NOT_STARTED",
+    status: predecessorStatus(byProc.get(predecessorId) ?? [], unitId),
   }));
 }
 
@@ -1372,23 +1419,23 @@ export async function rollupProcessPlan(
   jobProcessId: number,
   unitId: number | null,
 ): Promise<RollupChange | null> {
-  if (unitId == null) return null;
-  const found = await tx.processPlan.findFirst({
-    where: { jobProcessId, unitId, scheduleRun: { isCurrent: true } },
-    select: { id: true },
-  });
+  // L1.3: a unit's item feeds its own plan or, for a JOB-grain process, the job's unit-less one.
+  const current = { jobProcessId, scheduleRun: { isCurrent: true } };
+  const found =
+    (unitId != null ? await tx.processPlan.findFirst({ where: { ...current, unitId }, select: { id: true, unitId: true } }) : null) ??
+    (await tx.processPlan.findFirst({ where: { ...current, unitId: null }, select: { id: true, unitId: true } }));
   if (!found) return null;
   await tx.$queryRaw`SELECT id FROM process_plans WHERE id = ${found.id} FOR UPDATE`;
   const plan = await tx.processPlan.findUniqueOrThrow({ where: { id: found.id } });
   if (plan.status === "ON_HOLD") return null;
 
-  const items = await loadMappedOps(tx, { jobProcessId, unitId, jobId: plan.jobId });
+  const items = await loadMappedOps(tx, { jobProcessId, unitId: plan.unitId, jobId: plan.jobId });
   if (items.length === 0) return null;
 
   const started = items.filter((i) => i.status !== "NOT_STARTED");
   let to: ProcessPlan["status"] = started.length === 0 ? "NOT_STARTED" : "IN_PROGRESS";
   if (items.every((i) => i.status === "COMPLETE")) {
-    const args = { jobProcessId, unitId, jobId: plan.jobId };
+    const args = { jobProcessId, unitId: plan.unitId, jobId: plan.jobId };
     const blocked =
       (await findOpenHoldPointItemIds(tx, args)).length > 0 ||
       (await findOpenNcrOperations(tx, args)).length > 0 ||
