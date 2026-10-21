@@ -522,6 +522,8 @@ model User {
   atRiskDrawingReleases          DrawingRevision[]             @relation("DrawingRevisionAtRiskReleasedBy")
   preparedPartFamilies           PartFamily[]                  @relation("PartFamilyPreparedBy")
   approvedPartFamilies           PartFamily[]                  @relation("PartFamilyApprovedBy")
+  preparedAssemblyVersions       AssemblyTemplateVersion[]     @relation("AssemblyVersionPreparedBy")
+  approvedAssemblyVersions       AssemblyTemplateVersion[]     @relation("AssemblyVersionApprovedBy")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -2566,14 +2568,20 @@ model AssemblyTemplate {
 }
 
 model AssemblyTemplateVersion {
-  id          Int            @id @default(autoincrement())
-  templateId  Int            @map("template_id")
-  version     Int
-  status      TemplateStatus @default(DRAFT)
-  publishedAt DateTime?      @map("published_at")
-  notes       String?
+  id           Int            @id @default(autoincrement())
+  templateId   Int            @map("template_id")
+  version      Int
+  status       TemplateStatus @default(DRAFT)
+  publishedAt  DateTime?      @map("published_at")
+  notes        String?
+  /// Lean Core J4c: who imported the sequence (the maker) and who published it (the checker;
+  /// never the same user). Null on versions that predate the import flow.
+  preparedById Int?           @map("prepared_by_id")
+  approvedById Int?           @map("approved_by_id")
 
   template   AssemblyTemplate       @relation(fields: [templateId], references: [id])
+  preparedBy User?                  @relation("AssemblyVersionPreparedBy", fields: [preparedById], references: [id], onDelete: Restrict)
+  approvedBy User?                  @relation("AssemblyVersionApprovedBy", fields: [approvedById], references: [id], onDelete: Restrict)
   steps      AssemblyTemplateStep[]
   jobs       Job[]
   equipments Equipment[]

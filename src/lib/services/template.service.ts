@@ -15,7 +15,7 @@ import {
 } from "@/lib/shared/schemas";
 import { copyVersionContents } from "./template-copy";
 import { analyzeGraph, computeEnvelope, DEFAULT_CALENDAR, type ScheduleProcess, type ScheduleEdge } from "@/lib/schedule";
-import type { ProcessTemplateVersion, TemplateProcess, TemplateEdge } from "@/generated/prisma/client";
+import type { Prisma, ProcessTemplateVersion, TemplateProcess, TemplateEdge } from "@/generated/prisma/client";
 
 /**
  * Process route authoring (docs/superpowers/specs/2026-08-22-route-authoring-design.md).
@@ -245,7 +245,7 @@ export async function saveDraftVersion(
     // does not send them. Remember the current values, keyed by process code.
     const existingProcesses = await tx.templateProcess.findMany({
       where: { versionId },
-      select: { id: true, code: true, grain: true, requiresQc: true },
+      select: { id: true, code: true, grain: true, requiresQc: true, evidenceKind: true, includeWhen: true, cumulativePrinted: true },
     });
     const existingByCode = new Map(existingProcesses.map((p) => [p.code, p]));
     const existingCodeById = new Map(existingProcesses.map((p) => [p.id, p.code]));
@@ -289,6 +289,13 @@ export async function saveDraftVersion(
             provisional: p.provisional,
             grain: p.grain ?? existingByCode.get(p.code)?.grain,
             requiresQc: p.requiresQc ?? existingByCode.get(p.code)?.requiresQc,
+            // Lean Core J4c: the editor schema does not carry these; the full replace must not drop them.
+            cumulativePrinted: existingByCode.get(p.code)?.cumulativePrinted,
+            evidenceKind: existingByCode.get(p.code)?.evidenceKind,
+            includeWhen:
+              existingByCode.get(p.code)?.includeWhen == null
+                ? undefined
+                : (existingByCode.get(p.code)!.includeWhen as Prisma.InputJsonValue),
           },
         });
         idByKey.set(p.key, row.id);
