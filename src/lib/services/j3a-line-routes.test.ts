@@ -231,7 +231,7 @@ describe.skipIf(!RUN_DB)("Lean Core J3a route per equipment line (DB)", async ()
       expect(lines.map((e) => e.templateVersionId)).toEqual([w.tvA.id, w.tvA.id]);
 
       const run = await generateSchedule(w.actor, { jobId: j.jobId, mode: "FORWARD" });
-      expect(run.processPlans).toHaveLength(3 * 3); // 3 processes x 3 units
+      expect(run.processPlans).toHaveLength(1 + 2 * 3); // 10 is JOB grain (one plan); 20 and 30 x 3 units
       const terminalFinish = run.processPlans.filter((p) => rows.find((r) => r.id === p.jobProcessId)!.code === "30")[0].plannedFinish!;
       expect(terminalFinish.toISOString().slice(0, 10)).toBe(due(25)); // route A: terminal 30 finishes by day 25
     });
@@ -280,17 +280,45 @@ describe.skipIf(!RUN_DB)("Lean Core J3a route per equipment line (DB)", async ()
         })!;
         return plan.plannedFinish!.toISOString().slice(0, 10);
       };
-      // vessel units: 3 plans each; exchanger unit: 3 plans (10, its 20, its 25)
-      expect(run.processPlans.filter((p) => units.find((u) => u.id === p.unitId)!.serialNo === "V1")).toHaveLength(3);
-      expect(run.processPlans.filter((p) => units.find((u) => u.id === p.unitId)!.serialNo === "E1")).toHaveLength(3);
+      // L1.3: the JOB-grain 10 is ONE unit-less plan; vessel units: 2 own plans each (20, 30); exchanger unit: 2 (its 20, its 25)
+      expect(run.processPlans.filter((p) => p.unitId == null)).toHaveLength(1);
+      expect(run.processPlans.filter((p) => units.find((u) => u.id === p.unitId)?.serialNo === "V1")).toHaveLength(2);
+      expect(run.processPlans.filter((p) => units.find((u) => u.id === p.unitId)?.serialNo === "E1")).toHaveLength(2);
       expect(finishOf("V1", "30")).toBe(due(25)); // route A: terminal 30, day 25
       expect(finishOf("E1", "25")).toBe(due(50)); // route B is longer: terminal 25 finishes by day 50
       expect(finishOf("E1", "20")).toBe(due(30)); // B's own 20 (finish by 30), not A's (finish by 15)
-      // the exchanger's plans point at the exchanger's own process rows
+      // the exchanger's plans point at the exchanger's own process rows (the job's 10 is the unit-less plan)
       const hePlanProcs = run.processPlans.filter((p) => p.unitId === units.find((u) => u.serialNo === "E1")!.id).map((p) => p.jobProcessId);
       expect(rows.filter((r) => hePlanProcs.includes(r.id)).map((r) => `${r.code}@${r.equipmentId ?? "job"}`).sort()).toEqual(
-        ["10@job", `20@${eqs[1].id}`, `25@${eqs[1].id}`].sort(),
+        [`20@${eqs[1].id}`, `25@${eqs[1].id}`].sort(),
       );
+    });
+
+    it("L1.3: a JOB-grain process gets exactly one unit-less plan across two routes, and every unit's spine shows it", async () => {
+      const w = await world("JOBGRAIN");
+      const j = await w.make([{ serials: ["V1", "V2"] }, { routeVersionId: w.tvB.id, typeId: w.eqB.id, serials: ["E1"] }]);
+      const rows = await procs(j.jobId);
+      const office = rows.find((r) => r.code === "10" && r.equipmentId == null)!;
+      expect(office.grain).toBe("JOB");
+      await owner.jobProcess.update({ where: { id: office.id }, data: { workOrderStages: [1] } });
+
+      const run = await generateSchedule(w.actor, { jobId: j.jobId, mode: "FORWARD" });
+      const officePlans = run.processPlans.filter((p) => p.jobProcessId === office.id);
+      expect(officePlans).toHaveLength(1);
+      expect(officePlans[0].unitId).toBeNull();
+      // a second reschedule keeps it at one (a new run version, not an accumulation)
+      const again = await generateSchedule(w.actor, { jobId: j.jobId, mode: "FORWARD" });
+      expect(again.processPlans.filter((p) => p.jobProcessId === office.id)).toHaveLength(1);
+      expect(again.processPlans.filter((p) => p.unitId == null)).toHaveLength(1);
+
+      // both routes' units (vessels and the exchanger) show stage 1 through the one plan
+      const spine = await withTenant(w.tenantId, (tx) =>
+        tx.$queryRaw<{ unit_id: number; governing_plan_id: number }[]>`
+          select unit_id, governing_plan_id from v_unit_stage_status where job_id = ${j.jobId} and stage_no = 1`,
+      );
+      expect(spine).toHaveLength(3);
+      const currentOfficePlan = again.processPlans.find((p) => p.jobProcessId === office.id)!;
+      expect(spine.map((r) => r.governing_plan_id)).toEqual([currentOfficePlan.id, currentOfficePlan.id, currentOfficePlan.id]);
     });
 
     it("an infeasible line makes the whole job infeasible; BACKWARD starts early enough for the longest line", async () => {

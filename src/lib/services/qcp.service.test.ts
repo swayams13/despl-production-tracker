@@ -88,31 +88,24 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
     const blocking = await blockingQcpItemIds(seq1Id);
     expect(blocking.length).toBeGreaterThan(0); // sanity: a real blocking checkpoint IS linked here
 
-    // Use a unit process.service.test.ts's DB block never touches (it clears
-    // QcpItem 4 for the FIRST unit only) — pick the third instead, so this
-    // test's own hold point is genuinely open, not already cleared by a
-    // sibling suite sharing this no-cleanup seed DB.
-    const unit = (
-      await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } })
-    )[2];
+    // Process 1 is job-level since L1.3: one plan for the whole job, so its hold point is cleared by recording the
+    // acceptance on EVERY unit of the job, and stays open while any unit is still open.
+    const units = await owner.unit.findMany({ where: { equipment: { jobId } }, orderBy: { id: "asc" } });
 
-    // Reset: QcpExecution is unit-scoped state with no end-of-suite cleanup
-    // (matches this file's "no cleanup, disposable test DB" convention) — but
-    // THIS test asserts a genuine before/after (HOLD_POINT_OPEN → cleared), so
-    // it resets its own precondition at the start to stay rerun-safe.
-    await owner.qcpExecution.deleteMany({ where: { unitId: unit.id, qcpItemId: { in: blocking } } });
+    // Reset: QcpExecution is unit-scoped state with no end-of-suite cleanup (matches this file's "no cleanup,
+    // disposable test DB" convention) — but THIS test asserts a genuine before/after (HOLD_POINT_OPEN -> cleared),
+    // so it resets its own precondition at the start to stay rerun-safe.
+    await owner.qcpExecution.deleteMany({ where: { unitId: { in: units.map((u) => u.id) }, qcpItemId: { in: blocking } } });
 
-    // Same reasoning for the ProcessPlan itself: persistScheduleRun now
-    // carries real work forward across a reschedule (audit C1 fix) instead of
-    // resetting it, so a rerun against this no-cleanup seed DB would otherwise
-    // find seq1/unit[2] already SUBMITTED or COMPLETE from the run before.
+    // Same reasoning for the ProcessPlan itself: persistScheduleRun carries real work forward across a reschedule
+    // (audit C1 fix), so a rerun against this no-cleanup seed DB would otherwise find it already SUBMITTED or COMPLETE.
     await owner.processPlan.updateMany({
-      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: seq1Id, unitId: unit.id },
+      where: { scheduleRun: { jobId, isCurrent: true }, jobProcessId: seq1Id },
       data: { status: "NOT_STARTED", actualStart: null, actualFinish: null, submittedBy: null, verifiedBy: null },
     });
 
     const run = await generateSchedule(a, { jobId, mode: "FORWARD", projectStartDate: future });
-    const planId = run.processPlans.find((p) => p.jobProcessId === seq1Id && p.unitId === unit.id)!.id;
+    const planId = run.processPlans.find((p) => p.jobProcessId === seq1Id && p.unitId == null)!.id;
 
     const maker: Actor = a;
     const checker: Actor = { ...a, userId: 2, roles: [ROLES.QC] };
@@ -120,24 +113,27 @@ describe.skipIf(!RUN_DB)("recordQcpExecution (DB-backed, clears a real hold poin
     await startProcess(maker, { processPlanId: planId });
     await submitProcess(maker, { processPlanId: planId });
 
-    // RED: no QcpExecution recorded yet for this unit → verify refuses.
+    // RED: no QcpExecution recorded yet on any unit -> verify refuses.
     await expectCode(verifyProcess(checker, { processPlanId: planId }), ERROR_CODES.HOLD_POINT_OPEN);
 
     const qcActor: Actor = { ...a, userId: 3, roles: [ROLES.QC] };
-    for (const qcpItemId of blocking) {
-      const exec = await recordQcpExecution(qcActor, {
-        qcpItemId,
-        unitId: unit.id,
-        result: "ACCEPTED",
-      });
-      expect(exec.result).toBe("ACCEPTED");
-      expect(exec.attemptNo).toBe(1);
-      expect(exec.clearedBy).toBe(qcActor.userId);
-      // H1: recordQcpExecution populates jobId from the unit's own jobId.
-      expect(exec.jobId).toBe(jobId);
-    }
+    const accept = async (unitId: number) => {
+      for (const qcpItemId of blocking) {
+        const exec = await recordQcpExecution(qcActor, { qcpItemId, unitId, result: "ACCEPTED" });
+        expect(exec.result).toBe("ACCEPTED");
+        expect(exec.attemptNo).toBe(1);
+        expect(exec.clearedBy).toBe(qcActor.userId);
+        // H1: recordQcpExecution populates jobId from the unit's own jobId.
+        expect(exec.jobId).toBe(jobId);
+      }
+    };
 
-    // GREEN: every blocking checkpoint is now ACCEPTED for this unit → verify succeeds.
+    // Still RED while one unit is open: the job-level plan waits for every unit.
+    for (const u of units.slice(0, -1)) await accept(u.id);
+    await expectCode(verifyProcess(checker, { processPlanId: planId }), ERROR_CODES.HOLD_POINT_OPEN);
+
+    // GREEN: every blocking checkpoint is now ACCEPTED on every unit -> verify succeeds.
+    await accept(units[units.length - 1].id);
     const verified = await verifyProcess(checker, { processPlanId: planId });
     expect(verified.status).toBe("COMPLETE");
   });

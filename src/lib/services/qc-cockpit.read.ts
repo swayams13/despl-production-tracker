@@ -111,14 +111,16 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
   return withTenant(actor.tenantId, async (tx) => {
     // ── Awaiting verification queue, oldest submission first ────────────────
     const queueRows = await tx.$queryRaw<QueueRow[]>`
-      SELECT pp.id AS plan_id, j.id AS job_id, j.job_number, u.id AS unit_id, u.serial_no,
+      SELECT pp.id AS plan_id, j.id AS job_id, j.job_number, u.id AS unit_id,
+             CASE WHEN pp.unit_id IS NULL THEN 'Whole job' ELSE u.serial_no END AS serial_no,
              jp.work_order_stages[1] AS stage_no, jp.name AS process_name, d.name AS dept_name,
              usr.name AS submitted_by_name,
              (SELECT max(de.at) FROM domain_events de WHERE de.aggregate_type = 'ProcessPlan' AND de.aggregate_id = pp.id::text AND de.type = 'ProcessSubmitted') AS submitted_at
       FROM process_plans pp
       JOIN job_processes jp ON jp.id = pp.job_process_id
       JOIN jobs j ON j.id = jp.job_id
-      JOIN units u ON u.id = pp.unit_id
+      -- L1.3: a JOB-grain plan (unit_id NULL) is listed as "Whole job" and opens on the job's first unit.
+      JOIN units u ON u.id = COALESCE(pp.unit_id, (SELECT min(u2.id) FROM units u2 WHERE u2.job_id = j.id))
       JOIN departments d ON d.id = pp.owner_department_id
       JOIN schedule_runs sr ON sr.id = pp.schedule_run_id
       LEFT JOIN users usr ON usr.id = pp.submitted_by

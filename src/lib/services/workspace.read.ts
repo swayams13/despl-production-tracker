@@ -139,7 +139,8 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
     // process's current-run plan, used as the age reference when no attempt exists.
     const linkedProcessId = new Map(blockingItems.map((i) => [i.id, i.processLinks[0]?.jobProcess.id ?? null]));
     const plans = await tx.processPlan.findMany({
-      where: { unitId: { in: unitIds }, jobProcessId: { in: [...linkedProcessId.values()].filter((x): x is number => x != null) }, scheduleRun: { isCurrent: true } },
+      // L1.3: a JOB-grain process has one unit-less plan, which every unit's hold point reads.
+      where: { OR: [{ unitId: { in: unitIds } }, { unitId: null }], jobProcessId: { in: [...linkedProcessId.values()].filter((x): x is number => x != null) }, scheduleRun: { isCurrent: true } },
       select: { jobProcessId: true, unitId: true, plannedStart: true, status: true },
     });
     const planByKey = new Map(plans.map((p) => [`${p.jobProcessId}:${p.unitId}`, p]));
@@ -160,7 +161,7 @@ export async function loadOpenHoldPoints(actor: Actor, jobId: number): Promise<O
         const attempt = latestByKey.get(`${itemId}:${unitId}`) ?? null;
         const resolved = resolveHoldPointStatus(attempt, requiresCall);
         if (resolved == null) continue; // cleared, by the gate's rule: an NA clears only once its waiver is approved
-        const plan = jpId != null ? planByKey.get(`${jpId}:${unitId}`) : undefined;
+        const plan = jpId != null ? (planByKey.get(`${jpId}:${unitId}`) ?? planByKey.get(`${jpId}:null`)) : undefined;
         // Lean floor: the same scope as /qc (a point nobody has reached is upcoming, not open).
         if (FEATURES.leanFloor && !holdIsReached(attempt, plan, now)) continue;
         const status = LEGACY_HOLD_LABEL[resolved];

@@ -211,7 +211,9 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
             submitted.set(row.unitId, list);
           }
           const plan = row.item.processSeq != null && it.kind !== "PROCESS_PLAN" ? facts.plansBySeq.get(row.item.processSeq) : undefined;
-          if (plan?.unitId != null) affectedPlans.set(plan.item.id, { jobProcessId: plan.jobProcessId!, unitId: plan.unitId });
+          // L1.3: a JOB-grain plan has no unit of its own; roll it up through the unit the item is on.
+          const planUnit = plan?.unitId ?? row.unitId;
+          if (plan && planUnit != null) affectedPlans.set(plan.item.id, { jobProcessId: plan.jobProcessId!, unitId: planUnit });
         } catch (e) {
           if (!isAppError(e)) throw e;
           result.refused.push({ kind: it.kind, id: it.id, code: e.code, message: e.message, meta: e.detail ?? {} });
