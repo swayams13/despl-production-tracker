@@ -123,7 +123,6 @@ function RefusalNote({ refusal }: { refusal: Refusal | null }) {
     // REASON_REQUIRED refusal rendered as an unreadable vertical word
     // stack).
     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 6, fontSize: "var(--fs-xs, 11px)" }} onClick={stop}>
-      <span className="chip c-overdue"><i />{refusal.code}</span>
       <span style={{ color: "var(--muted)", flex: "1 1 160px" }}>{refusal.message}</span>
     </div>
   );

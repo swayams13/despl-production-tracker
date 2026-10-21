@@ -46,7 +46,6 @@ function RefusalNote({ refusal }: { refusal: { code: string; message: string } |
   if (!refusal) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 6, marginTop: 8, fontSize: "var(--fs-xs, 11px)" }}>
-      <span className="chip c-overdue"><i />{refusal.code}</span>
       <span style={{ color: "var(--muted)" }}>{refusal.message}</span>
     </div>
   );
