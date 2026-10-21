@@ -150,6 +150,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
   // portfolio.read.test.ts / process.service.test.ts.
   const { PrismaClient } = await import("@/generated/prisma/client");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
+  const { releaseJobBoms } = await import("./bom-release.test-util");
 
   const created: number[] = [];
 
@@ -217,6 +218,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     await owner.processPlan.deleteMany({ where: { scheduleRun: { jobId: id } } });
     await owner.scheduleRun.deleteMany({ where: { jobId: id } });
     await owner.bomItem.deleteMany({ where: { equipment: { jobId: id } } });
+    await owner.bomRevision.deleteMany({ where: { jobId: id } });
     await owner.unit.deleteMany({ where: { equipment: { jobId: id } } });
     await owner.equipment.deleteMany({ where: { jobId: id } });
     await owner.qcpTemplate.deleteMany({ where: { jobId: id } });
@@ -651,9 +653,16 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     expect(
       await owner.materialIdentification.count({ where: { bomItem: { equipmentId: newEquipment.id } } }),
     ).toBe(0);
+    // J5a: the copy waits as DRAFT revision 1, and a job is created without floor rows.
+    const revisions = await owner.bomRevision.findMany({ where: { equipmentId: newEquipment.id } });
+    expect(revisions).toHaveLength(1);
+    expect(revisions[0]).toMatchObject({ revisionNo: 1, status: "DRAFT", materializedAt: null, releasedAt: null, jobId: r.jobId });
+    expect(newBomItems.every((b) => b.bomRevisionId === revisions[0].id)).toBe(true);
+    expect(await owner.component.count({ where: { equipmentId: newEquipment.id } })).toBe(0);
+    expect(await owner.assemblyStep.count({ where: { jobId: r.jobId } })).toBe(0);
   });
 
-  it("S16: materialises Component + ComponentOperation for typed BOM lines copied at intake", async () => {
+  it("S16 (J5a: at BOM release): materialises Component + ComponentOperation for typed BOM lines copied at intake", async () => {
     const refs = await seedRefs();
     // Any BomItem with a componentTypeId that has a PUBLISHED RouteTemplateVersion —
     // the seeded route library (prisma/seed.ts §8) applies to every family (familyId: null).
@@ -675,12 +684,14 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     created.push(r.jobId);
 
     const newEquipment = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+    expect(await owner.component.count({ where: { equipmentId: newEquipment.id } })).toBe(0); // createJob makes none
+    const released = await releaseJobBoms(owner, actor(), r.jobId);
     const newComponents = await owner.component.findMany({
       where: { equipmentId: newEquipment.id },
       include: { operations: true, bomItem: true },
     });
 
-    expect(newComponents.length).toBe(r.componentCount);
+    expect(newComponents.length).toBe(released.components);
     expect(newComponents.length).toBeGreaterThan(0);
     for (const c of newComponents) {
       expect(c.bomItemId).not.toBeNull();
@@ -695,7 +706,7 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     }
   });
 
-  it("S17: materialises AssemblyStep per unit and pins the job's AssemblyTemplateVersion", async () => {
+  it("S17 (J5a: at BOM release): materialises AssemblyStep per unit and pins the job's AssemblyTemplateVersion", async () => {
     const refs = await seedRefs();
     const qcpSource = await owner.qcpTemplate.findFirstOrThrow({ where: { job: { jobNumber: "DESPL-320" } } });
     const asmVersion = await owner.assemblyTemplateVersion.findFirstOrThrow({
@@ -718,7 +729,9 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("job-intake.service — createJob (DB
     created.push(r.jobId);
 
     const inspectionStepCount = asmVersion.steps.filter((s) => s.kind === "INSPECTION").length;
-    expect(r.assemblyStepCount).toBe(asmVersion.steps.length * 2);
+    expect((await owner.job.findUniqueOrThrow({ where: { id: r.jobId } })).assemblyTemplateVersionId).toBeNull(); // createJob pins nothing
+    const released = await releaseJobBoms(owner, actor(), r.jobId);
+    expect(released.steps).toBe(asmVersion.steps.length * 2);
 
     const job = await owner.job.findUniqueOrThrow({ where: { id: r.jobId } });
     expect(job.assemblyTemplateVersionId).toBe(asmVersion.id);

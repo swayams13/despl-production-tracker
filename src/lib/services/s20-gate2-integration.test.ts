@@ -31,6 +31,7 @@ describe.skipIf(!RUN_DB)("S20 — Gate 2 end-to-end integration (DB)", async () 
   const { createJob } = await import("./job-intake.service");
   const { generateSchedule } = await import("./schedule.service");
   const { importBomItems } = await import("./bom.service");
+  const { releaseBomRevision } = await import("./bom-release.service");
   const { recordProcurementEvent } = await import("./procurement.service");
   const { startProcess, submitProcess, verifyProcess } = await import("./process.service");
   const { startAssemblyStep, submitAssemblyStep, rejectAssemblyStep } = await import("./assembly.service");
@@ -65,6 +66,7 @@ describe.skipIf(!RUN_DB)("S20 — Gate 2 end-to-end integration (DB)", async () 
     await owner.processPlan.deleteMany({ where: { scheduleRun: { jobId: id } } });
     await owner.scheduleRun.deleteMany({ where: { jobId: id } });
     await owner.bomItem.deleteMany({ where: { equipment: { jobId: id } } });
+    await owner.bomRevision.deleteMany({ where: { jobId: id } });
     await owner.unit.deleteMany({ where: { equipment: { jobId: id } } });
     await owner.equipment.deleteMany({ where: { jobId: id } });
     await owner.qcpTemplate.deleteMany({ where: { jobId: id } });
@@ -113,7 +115,7 @@ describe.skipIf(!RUN_DB)("S20 — Gate 2 end-to-end integration (DB)", async () 
     });
     created.push(r.jobId);
     expect(r.processCount).toBeGreaterThan(0);
-    expect(r.assemblyStepCount).toBeGreaterThan(0); // S17: the real AssemblyTemplate materialised
+    // J5a: createJob makes no floor rows; the BOM release (step 3) materialises the real AssemblyTemplate.
 
     // ── 2. generateSchedule (schedule.service) ─────────────────────────
     // Start the plan "today" — a past projectStartDate would make the first
@@ -130,13 +132,18 @@ describe.skipIf(!RUN_DB)("S20 — Gate 2 end-to-end integration (DB)", async () 
     //      distinct from createJob's copyBom (S16's own test file already
     //      covers that path).
     const equipment = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+    const revision = await owner.bomRevision.create({ data: { equipmentId: equipment.id, revisionNo: 1, status: "DRAFT", jobId: r.jobId } });
     const imported = await importBomItems(admin, {
       equipmentId: equipment.id,
+      bomRevisionId: revision.id,
       rows: [{ itemNo: 1, partName: "Gasket, S20 Integration Test", sourceQty: "10 NOS.", uom: "NOS." }],
     });
     expect(imported.failures).toHaveLength(0);
     expect(imported.created).toHaveLength(1);
     const bomItemId = imported.created[0].id;
+    // The line has no part family: the release says so and the acknowledgement lets it through.
+    const released = await releaseBomRevision(admin, { equipmentId: equipment.id, bomRevisionId: revision.id, acknowledgeWarnings: true });
+    expect(released.counts.steps).toBeGreaterThan(0); // S17: the real AssemblyTemplate materialised
 
     // ── 4. procurement (procurement.service) ────────────────────────────
     const event = await recordProcurementEvent(admin, { bomItemId, type: "INDENT_RAISED" });

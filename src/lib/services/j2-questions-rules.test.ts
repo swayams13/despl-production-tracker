@@ -20,6 +20,7 @@ describe.skipIf(!RUN_DB)("Lean Core J2 questions and rules (DB)", async () => {
   const { withTenant } = await import("@/lib/db");
   const { ROLES } = await import("@/lib/authz");
   const { createJob } = await import("./job-intake.service");
+  const { releaseJobBoms } = await import("./bom-release.test-util");
   const { createEquipmentType } = await import("./admin.service");
   const { materializeComponentsFromBomItems } = await import("./component.service");
   const { flushRuleDecisions, LineRules } = await import("./config-rules");
@@ -158,7 +159,15 @@ describe.skipIf(!RUN_DB)("Lean Core J2 questions and rules (DB)", async () => {
         ...extraInput,
       } as never);
       jobs.push(res.jobId);
-      return res;
+      // J5a: the assembly steps (and their ledger rows) are made at BOM release, so release each line's empty BOM;
+      // the counts below are the ledger totals after it, as createJob used to report them.
+      const released = await releaseJobBoms(owner, actor, res.jobId);
+      return {
+        ...res,
+        assemblyStepCount: released.steps,
+        ruleDecisionCount: await owner.configRuleDecision.count({ where: { jobId: res.jobId } }),
+        flaggedRuleCount: await owner.configRuleDecision.count({ where: { jobId: res.jobId, flagged: true } }),
+      };
     };
     return { tenantId, org, dept, family, eqType, tv, p10, p20, p30, asmSteps, qcp, qA, qB, qC, actor, make, jobs };
   }
@@ -249,16 +258,18 @@ describe.skipIf(!RUN_DB)("Lean Core J2 questions and rules (DB)", async () => {
   });
 
   describe("createJob: a rule needs a readable answer, or it includes and flags", () => {
-    it("a step kept by its rule whose QCP checkpoint a rule dropped fails loudly and leaves no job behind", async () => {
+    it("a step kept by its rule whose QCP checkpoint a rule dropped fails loudly at BOM release and leaves no floor rows behind", async () => {
       const w = await world("DROPPED");
-      const before = await owner.job.count({ where: { tenantId: w.tenantId } });
       // extra=false drops checkpoint C (srNo 5) but step 5 has no rule: an authoring inconsistency, not something to guess around
       await expect(w.make([{ config: { pwht: true, extra: false } }])).rejects.toMatchObject({
         code: "QCP_ITEM_UNRESOLVED",
         detail: { srNo: "5", droppedByRule: true },
       });
-      expect(await owner.job.count({ where: { tenantId: w.tenantId } })).toBe(before);
-      expect(await owner.configRuleDecision.count({ where: { tenantId: w.tenantId } })).toBe(0);
+      // J5a: the job exists (createJob does not touch the assembly sequence); the release rolled back whole
+      const job = await owner.job.findFirstOrThrow({ where: { tenantId: w.tenantId } });
+      expect(await owner.assemblyStep.count({ where: { jobId: job.id } })).toBe(0);
+      expect(await owner.bomRevision.count({ where: { jobId: job.id, materializedAt: { not: null } } })).toBe(0);
+      expect(await owner.configRuleDecision.count({ where: { jobId: job.id, entityType: "ASSEMBLY_STEP" } })).toBe(0);
     });
 
     it("a rule on a MANDATORY process is ignored and flagged, never applied", async () => {
