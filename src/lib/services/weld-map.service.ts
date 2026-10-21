@@ -18,6 +18,7 @@ import {
   type WeldMapPlan,
 } from "@/lib/shared/weld-map";
 import { canonicalizeXlsx } from "./xlsx-canonical";
+import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
 
 /**
  * Lean Core J4b: a line's weld map and joint register. Joints are per line
@@ -89,12 +90,15 @@ export async function loadWeldMap(actor: Actor, jobId: number): Promise<WeldMapV
         id: true,
         jobNumber: true,
         projectName: true,
+        familyId: true,
         equipments: {
           orderBy: { id: "asc" },
           select: {
             id: true,
             name: true,
             assemblyTemplateVersionId: true,
+            equipmentTypeId: true,
+            templateVersion: { select: { template: { select: { familyId: true } } } },
             _count: { select: { units: true } },
             plannedJoints: {
               orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
@@ -109,7 +113,17 @@ export async function loadWeldMap(actor: Actor, jobId: number): Promise<WeldMapV
     });
     if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
 
-    const versionIds = [...new Set(job.equipments.flatMap((e) => (e.assemblyTemplateVersionId ? [e.assemblyTemplateVersionId] : [])))];
+    // J5a: a line's steps are only made at BOM release, so until then it has no pinned version: read the one it would get.
+    const versionOfLine = new Map<number, number | null>();
+    for (const e of job.equipments) {
+      versionOfLine.set(
+        e.id,
+        e.assemblyTemplateVersionId ??
+          (await resolveAssemblyTemplateVersion(tx, actor.tenantId, e.templateVersion?.template.familyId ?? job.familyId, e.equipmentTypeId))?.id ??
+          null,
+      );
+    }
+    const versionIds = [...new Set([...versionOfLine.values()].flatMap((v) => (v != null ? [v] : [])))];
     const needed = versionIds.length
       ? await tx.assemblyTemplateStep.findMany({
           where: { versionId: { in: versionIds }, scope: "PER_JOINT", jointType: { not: null } },
@@ -121,7 +135,7 @@ export async function loadWeldMap(actor: Actor, jobId: number): Promise<WeldMapV
     const lines: WeldMapLine[] = job.equipments.map((e) => {
       const have = new Set(e.plannedJoints.map((j) => j.jointType));
       const notices: string[] = [];
-      for (const n of needed.filter((x) => x.versionId === e.assemblyTemplateVersionId)) {
+      for (const n of needed.filter((x) => x.versionId === versionOfLine.get(e.id))) {
         const t = n.jointType as JointType;
         if (!have.has(t)) {
           const w = JOINT_TYPE_LABEL[t].toLowerCase();
