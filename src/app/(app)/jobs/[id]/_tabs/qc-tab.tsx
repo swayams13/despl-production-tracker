@@ -2,6 +2,8 @@ import Link from "next/link";
 import { QcpGrid } from "@/components/industrial/qcp-grid";
 import { HOLD_STATUS_LABEL, qcHref, type HoldRow, type NcrQueueRow, type QcCounts } from "@/lib/shared/qc-queue";
 import type { QcpGrid as QcpGridData } from "@/lib/services/qcp-grid.read";
+import type { QcpAttachOption } from "@/lib/services/job-intake.read";
+import { QcpAttach } from "./qcp-attach";
 
 const SHOW = 8;
 
@@ -21,12 +23,15 @@ export function QcTab({
   qcp,
   canApproveWaiver,
   canRecord,
+  attachOptions,
 }: {
   jobId: number;
   queue: { counts: QcCounts; holds: HoldRow[]; ncrs: NcrQueueRow[] } | null;
   qcp: QcpGridData | null;
   canApproveWaiver: boolean;
   canRecord: boolean;
+  /** QC plans this job could take; null when it has one or the role cannot attach. */
+  attachOptions: QcpAttachOption[] | null;
 }) {
   return (
     <>
@@ -99,10 +104,12 @@ export function QcTab({
       )}
 
       <div className="jt-gap">
-        {qcp ? (
+        {attachOptions ? (
+          <QcpAttach jobId={jobId} options={attachOptions} />
+        ) : qcp ? (
           <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveWaiver} canRecord={canRecord} tabHref={`/jobs/${jobId}?tab=qc`} />
         ) : (
-          <p className="note">No QCP template for this job.</p>
+          <p className="note">This job has no QC plan.</p>
         )}
       </div>
     </>

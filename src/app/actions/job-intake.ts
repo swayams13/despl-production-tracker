@@ -6,6 +6,8 @@ import {
   updateJobDates,
   updateJobDetails,
   setJobStatus,
+  attachQcpTemplate,
+  type AttachQcpResult,
   type CreateJobResult,
 } from "@/lib/services/job-intake.service";
 import {
@@ -253,6 +255,20 @@ export async function loadTemplateProcessesAction(versionId: number): Promise<Lo
   try {
     const processes = await loadTemplateProcesses(await requireActor(), versionId);
     return { ok: true, processes };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+export type AttachQcpActionResult = ActionResult & { attached?: AttachQcpResult };
+
+/** JG2: attach a QC plan to a job that has none. */
+export async function attachQcpTemplateAction(jobId: number, qcpTemplateSourceId: number): Promise<AttachQcpActionResult> {
+  try {
+    const actor = await requireActor();
+    const attached = await attachQcpTemplate(actor, { jobId, qcpTemplateSourceId });
+    revalidatePath(`/jobs/${jobId}`);
+    return { ok: true, attached };
   } catch (e) {
     return toActionError(e);
   }

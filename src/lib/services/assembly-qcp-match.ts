@@ -3,6 +3,7 @@
 // to: materialiseAssemblyStepsFromTemplate (createJob) and the wizard's
 // compatibility check (loadIntakeOptions) both call it, so they cannot drift.
 import type { Prisma } from "../../generated/prisma/client";
+import { AppError, ERROR_CODES } from "../shared/errors";
 import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
 
 export interface MatchStep {
@@ -107,4 +108,70 @@ export async function qcpAssemblyGaps(
     out[qcpId] = [...gaps];
   }
   return out;
+}
+
+export interface BindExistingResult {
+  /** Steps that took a QCP item. */
+  bound: number;
+  /** Unbound inspection steps already started or finished: left alone, listed for the caller. */
+  leftUnbound: { assemblyStepId: number; srNo: string; status: string }[];
+}
+
+/**
+ * JG2: bind a job's EXISTING unbound inspection steps to a freshly attached QCP
+ * with the same matcher createJob uses (srNo occurrence over the version's FULL
+ * template). Only NOT_STARTED steps are bound; started or finished ones stay as
+ * they are. A NOT_STARTED step the QCP cannot satisfy refuses, as at create.
+ */
+export async function bindExistingInspectionSteps(
+  tx: Prisma.TransactionClient,
+  jobId: number,
+  qcpTemplateId: number,
+  /** Items a rule dropped from the cloned QCP: they keep their place in the numbering. */
+  skipped: { srNo: string; sequence: number }[],
+): Promise<BindExistingResult> {
+  const steps = await tx.assemblyStep.findMany({
+    where: { jobId, qcpItemId: null, templateStep: { kind: "INSPECTION" } },
+    select: { id: true, status: true, templateStepId: true, templateStep: { select: { versionId: true, srNo: true } } },
+    orderBy: { id: "asc" },
+  });
+  const items = await tx.qcpItem.findMany({ where: { qcpTemplateId }, select: { id: true, srNo: true, sequence: true } });
+  const grouped = groupQcpBySrNo([...items, ...skipped.map((q) => ({ id: null, srNo: q.srNo, sequence: q.sequence }))]);
+
+  const occByVersion = new Map<number, Map<number, number>>();
+  for (const versionId of new Set(steps.map((st) => st.templateStep.versionId))) {
+    const full = await tx.assemblyTemplateStep.findMany({
+      where: { versionId },
+      select: { id: true, kind: true, srNo: true },
+      orderBy: [{ seq: "asc" }, { id: "asc" }],
+    });
+    occByVersion.set(versionId, srNoOccurrences(full));
+  }
+
+  const idsByItem = new Map<number, number[]>();
+  const leftUnbound: BindExistingResult["leftUnbound"] = [];
+  for (const st of steps) {
+    if (st.status !== "NOT_STARTED") {
+      leftUnbound.push({ assemblyStepId: st.id, srNo: st.templateStep.srNo, status: st.status });
+      continue;
+    }
+    const occ = occByVersion.get(st.templateStep.versionId)!;
+    const m = matchInspectionStep({ id: st.templateStepId, kind: "INSPECTION", srNo: st.templateStep.srNo }, occ, grouped);
+    if (m === "MISSING") {
+      throw new AppError(ERROR_CODES.QCP_ITEM_UNRESOLVED, {
+        templateStepId: st.templateStepId,
+        srNo: st.templateStep.srNo,
+        occurrence: occ.get(st.templateStepId) ?? 0,
+        qcpTemplateId,
+      });
+    }
+    if (m?.id != null) idsByItem.set(m.id, [...(idsByItem.get(m.id) ?? []), st.id]);
+  }
+  let bound = 0;
+  for (const [qcpItemId, ids] of idsByItem) {
+    // The status/qcpItemId guard keeps a step that started meanwhile untouched.
+    const r = await tx.assemblyStep.updateMany({ where: { id: { in: ids }, status: "NOT_STARTED", qcpItemId: null }, data: { qcpItemId } });
+    bound += r.count;
+  }
+  return { bound, leftUnbound };
 }
