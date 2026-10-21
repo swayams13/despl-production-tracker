@@ -6,15 +6,9 @@
 import type { Tx } from "@/lib/db";
 import type { JointType } from "@/generated/prisma/client";
 import { jointRefs } from "@/lib/shared/floor-rules";
+import { jointTypeFromNo } from "@/lib/shared/weld-map";
 
-/** Joint type from the printed weld-map prefix (LS, CS, NS-/NF-/N nozzles, anything else an attachment). */
-export function jointTypeFromNo(jointNo: string): JointType {
-  const n = jointNo.trim().toUpperCase();
-  if (n.startsWith("LS")) return "LONG_SEAM";
-  if (n.startsWith("CS")) return "CIRC_SEAM";
-  if (n.startsWith("NS") || n.startsWith("NF") || /^N\d/.test(n)) return "NOZZLE";
-  return "ATTACHMENT";
-}
+export { jointTypeFromNo };
 
 export interface PlannedJointBackfillReport {
   equipments: number;

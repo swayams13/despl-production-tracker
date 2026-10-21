@@ -49,6 +49,9 @@ export function MaterialsTab({
       <Link className="btn" href={`/jobs/${jobId}/drawings`}>
         Drawings
       </Link>
+      <Link className="btn" href={`/jobs/${jobId}/weld-map`}>
+        Weld map
+      </Link>
       {canImport && (
         <Link className="btn" href={`/jobs/${jobId}/import`}>
           Load tracker sheet
