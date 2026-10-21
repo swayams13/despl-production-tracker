@@ -43,13 +43,13 @@ export async function raiseRuleNcrAction(input: RaiseRuleNcrInput): Promise<With
 }
 
 /** L2.2: "Notify QC / Stores / ..." on a Floor refusal card. */
-export async function notifyBlockerAction(input: floor.NotifyBlockerInput): Promise<ActionResult> {
+export async function notifyBlockerAction(input: floor.NotifyBlockerInput): Promise<{ ok: true; recipients: number } | Exclude<ActionResult, { ok: true }>> {
   try {
     if (!FEATURES.leanFloor) throw new AppError(ERROR_CODES.FEATURE_FROZEN, { feature: "leanFloor" });
-    await floor.notifyBlocker(await requireActor(), input);
-    return { ok: true };
+    const { recipients } = await floor.notifyBlocker(await requireActor(), input);
+    return { ok: true, recipients };
   } catch (e) {
-    return toActionError(e);
+    return toActionError(e) as Exclude<ActionResult, { ok: true }>;
   }
 }
 

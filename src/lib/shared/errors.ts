@@ -1,3 +1,4 @@
+import { BACKDATE_WINDOW_HOURS } from "./floor-rules";
 /**
  * Stable error codes (CLAUDE.md invariant #12).
  *
@@ -294,6 +295,22 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
 /** D2: what an operator sees instead of SEQUENCE_OVERRIDE_REQUIRED's default, since they cannot override. */
 export const SEQUENCE_OVERRIDE_OPERATOR_MESSAGE = "Ask your supervisor to start this early.";
 
+/** REPORTED_AT_OUT_OF_WINDOW names its reason in `detail.reason`; say only the one that applies. */
+const REPORTED_AT_REASON_MESSAGES: Record<string, string> = {
+  FUTURE: "That time is in the future. Choose now or an earlier time.",
+  TOO_OLD: `That time is more than ${BACKDATE_WINDOW_HOURS} working hours ago. An administrator can correct older entries.`,
+  BEFORE_RELEASE: "That time is before the job was released to the floor. Choose a later time.",
+  DONE_BEFORE_START: "Done cannot be earlier than when the work started. Choose a later time.",
+};
+
+/** The default message for a refusal: the code's sentence, or the specific one its detail selects. */
+export function messageFor(code: ErrorCode, detail?: Record<string, unknown>): string {
+  if (code === ERROR_CODES.REPORTED_AT_OUT_OF_WINDOW && typeof detail?.reason === "string") {
+    return REPORTED_AT_REASON_MESSAGES[detail.reason] ?? ERROR_MESSAGES[code];
+  }
+  return ERROR_MESSAGES[code];
+}
+
 /**
  * A refusal the UI can explain. Throw this from the service layer — never a
  * bare Error — so the reason survives all the way to the screen.
@@ -304,7 +321,7 @@ export class AppError extends Error {
   readonly detail?: Record<string, unknown>;
 
   constructor(code: ErrorCode, detail?: Record<string, unknown>, message?: string) {
-    super(message ?? ERROR_MESSAGES[code]);
+    super(message ?? messageFor(code, detail));
     this.name = "AppError";
     this.code = code;
     this.detail = detail;

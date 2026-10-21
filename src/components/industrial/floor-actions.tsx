@@ -52,6 +52,8 @@ export interface PendingView {
   keys: string[];
 }
 export interface SendResult {
+  /** Replaces the queued label in the outcome card (e.g. a Done that went to QC says so). */
+  label?: string;
   applied: number;
   refused: Array<{ kind: Kind | "PROCESS_PLAN"; id: number; message: string }>;
   error?: string;
@@ -89,7 +91,7 @@ export function useFloorWrites(titleOf: Map<string, string>) {
       }
       const outcome: Outcome = {
         id,
-        label,
+        label: out.label ?? label,
         applied: out.applied,
         refused: out.refused.map((r) => ({
           title: titleOf.get(`${r.kind}:${r.id}`) ?? d.outcome.otherUnitStep,
@@ -219,6 +221,17 @@ export function FloorUndoStack({ pending, undo }: { pending: PendingView[]; undo
   );
 }
 
+/** The Done line: "sent to QC" when QC still has to verify it, "marked done" when it completed directly. */
+export function doneLabel(d: Dict, title: string, units: number, applied: Array<{ to: string }>): string {
+  const toQc = applied.length > 0 && applied.every((a) => a.to === "SUBMITTED");
+  return (toQc ? d.outcome.sentToQc : d.outcome.markedDone)(title, units);
+}
+
+/** What the nudge says: told, or plainly that nobody holds the role yet. */
+export function nudgeText(d: Dict, who: string, recipients: number): string {
+  return (recipients > 0 ? d.outcome.nudgeTold : d.outcome.nudgeNobody)(who);
+}
+
 /** "Notify QC / Stores / ..." for a blocked row; one tap, cooldown reported by the server. */
 export function NotifyBlockerButton({
   unitPublicId,
@@ -227,6 +240,7 @@ export function NotifyBlockerButton({
   unitPublicId: string;
   row: Pick<FloorRow, "id" | "refusal"> & { kind: "COMPONENT_OP" | "ASSEMBLY_STEP" };
 }) {
+  const d = useDict();
   const [nudge, setNudge] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const who = row.refusal?.clearedBy;
@@ -241,7 +255,7 @@ export function NotifyBlockerButton({
       role: who.role as "QC" | "STORES" | "ENGINEERING" | "PRODUCTION_HEAD",
     });
     setBusy(false);
-    setNudge(r.ok ? `${who.label} has been told.` : r.message);
+    setNudge(r.ok ? nudgeText(d, who.label, r.recipients) : r.message);
   };
   return (
     <button className="btn" disabled={busy || nudge != null} onClick={notify}>
@@ -405,6 +419,7 @@ export function ActionSheet({
       });
       if (!r.ok) return { applied: 0, refused: [], error: r.message };
       return {
+        ...(done ? { label: doneLabel(d, row.title, count, r.result.applied) } : {}),
         applied: r.result.applied.length,
         refused: r.result.refused.map((x) => ({ kind: x.kind, id: x.id, message: x.message })),
       };

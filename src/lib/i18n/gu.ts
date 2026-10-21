@@ -33,6 +33,9 @@ export const gu: Dict = {
     partial: (done, blocked) => `${done} પૂરા · ${blocked} અટક્યા`, // REVIEW: DESPL
     recorded: (label) => `${label} — નોંધાયું`, // REVIEW: DESPL
     markedDone: (title, units) => `${title} પૂરું થયું${units > 1 ? ` (${units} યુનિટ પર)` : ""}`, // REVIEW: DESPL
+    sentToQc: (title, units) => `${title} QC ને મોકલ્યું${units > 1 ? ` (${units} યુનિટ પર)` : ""}`, // REVIEW: DESPL
+    nudgeTold: (who) => `${who} ને જણાવી દીધું છે.`, // REVIEW: DESPL
+    nudgeNobody: (who) => `${who} માટે હજી કોઈ નક્કી નથી. પ્રોડક્શન હેડને પૂછો.`, // REVIEW: DESPL
     startedEarly: (title, units) => `${title} વહેલું શરૂ કર્યું${units > 1 ? ` (${units} યુનિટ પર)` : ""}`, // REVIEW: DESPL
     started: (title, units) => `${title} શરૂ કર્યું${units > 1 ? ` (${units} યુનિટ પર)` : ""}`, // REVIEW: DESPL
   },

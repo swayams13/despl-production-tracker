@@ -447,7 +447,7 @@ function ItemRow({
       const r = await inspectAction({ kind: item.kind, targetId: item.id, result, ...(result === "REJECT" ? { reason: reason.trim() } : {}) });
       if (!r.ok) toast.error(r.message);
       else {
-        toast.success(result === "ACCEPT" ? "Accepted." : "Rejected. Sent back for rework.");
+        toast.success(result === "ACCEPT" ? `${item.title} accepted.` : `${item.title} rejected. Sent back for rework.`);
         setReject(false);
         onChanged();
       }
