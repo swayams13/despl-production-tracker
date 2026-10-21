@@ -330,6 +330,79 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
     };
   }
 
+  /** A PLANNED batch holding one packed unit, so it can legitimately be approved. */
+  async function batchWithUnit(ph: Actor, fx: { job: { id: number }; unit: { id: number } }, packageNo: string) {
+    const pkg = await createPackage(ph, { jobId: fx.job.id, packageNo });
+    await assignUnitToPackage(ph, { packageId: pkg.id, unitId: fx.unit.id });
+    const batch = await createDispatchBatch(ph, { jobId: fx.job.id, seq: 1, plannedDate: new Date() });
+    await addUnitToBatch(ph, { dispatchBatchId: batch.id, unitId: fx.unit.id });
+    return batch;
+  }
+
+  async function batchAuditRows(tenantId: number, batchId: number) {
+    return owner.auditLog.findMany({
+      where: { tenantId, entityType: "DispatchBatch", entityId: String(batchId) },
+    });
+  }
+
+  describe("empty batch (zero units) is refused at release and dispatch", () => {
+    it("approveDispatchRelease refuses an empty batch (VALIDATION_FAILED), state unchanged, no audit row", async () => {
+      const { tenantId, job, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      const auditBefore = (await batchAuditRows(tenantId, batch.id)).length;
+
+      let thrown: unknown;
+      try {
+        await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(isAppError(thrown) && thrown.code).toBe(ERROR_CODES.VALIDATION_FAILED);
+      expect(isAppError(thrown) && thrown.detail?.reason).toBe("NO_UNITS");
+      expect((thrown as Error).message).toBe("Add at least one packed unit to this batch before approving release.");
+
+      const after = await owner.dispatchBatch.findUniqueOrThrow({ where: { id: batch.id } });
+      expect(after.releaseApprovedAt).toBeNull();
+      expect(after.releaseApprovedBy).toBeNull();
+      expect(await batchAuditRows(tenantId, batch.id)).toHaveLength(auditBefore);
+    });
+
+    it("recordDispatch refuses a RELEASED empty batch (VALIDATION_FAILED), state unchanged, no audit row", async () => {
+      const { tenantId, job, user } = await fixture();
+      const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
+      const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+      // Legacy shape: an empty batch released before this guard existed.
+      await owner.dispatchBatch.update({
+        where: { id: batch.id },
+        data: { releaseApprovedAt: new Date(), releaseApprovedBy: user.id },
+      });
+      const auditBefore = (await batchAuditRows(tenantId, batch.id)).length;
+
+      let thrown: unknown;
+      try {
+        await recordDispatch(ph, { dispatchBatchId: batch.id });
+      } catch (e) {
+        thrown = e;
+      }
+      expect(isAppError(thrown) && thrown.code).toBe(ERROR_CODES.VALIDATION_FAILED);
+      expect(isAppError(thrown) && thrown.detail?.reason).toBe("NO_UNITS");
+      expect((thrown as Error).message).toBe("Add at least one packed unit to this batch before recording dispatch.");
+
+      const after = await owner.dispatchBatch.findUniqueOrThrow({ where: { id: batch.id } });
+      expect(after.actualDispatchDate).toBeNull();
+      expect(await batchAuditRows(tenantId, batch.id)).toHaveLength(auditBefore);
+    });
+
+    it("a batch with a complete unit still releases and dispatches", async () => {
+      const fx = await fixture();
+      const ph = actorBase(fx.tenantId, fx.user.id, [ROLES.PRODUCTION_HEAD]);
+      const batch = await batchWithUnit(ph, fx, "PKG-NONEMPTY");
+      expect((await approveDispatchRelease(ph, { dispatchBatchId: batch.id })).releaseApprovedAt).not.toBeNull();
+      expect((await recordDispatch(ph, { dispatchBatchId: batch.id })).actualDispatchDate).not.toBeNull();
+    });
+  });
+
   it("packs a unit, batches it, releases (Production Head), and dispatches — full happy path", async () => {
     const { tenantId, job, unit, user } = await fixture();
     const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
@@ -401,9 +474,9 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
   });
 
   it("approveDispatchRelease twice is refused (INVALID_STATE_TRANSITION)", async () => {
-    const { tenantId, job, user } = await fixture();
-    const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
-    const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    const fx = await fixture();
+    const ph = actorBase(fx.tenantId, fx.user.id, [ROLES.PRODUCTION_HEAD]);
+    const batch = await batchWithUnit(ph, fx, "PKG-TWICE");
     await approveDispatchRelease(ph, { dispatchBatchId: batch.id });
     await expectCode(
       approveDispatchRelease(ph, { dispatchBatchId: batch.id }),
@@ -422,9 +495,9 @@ describe.skipIf(!RUN_DB)("dispatch.service + packing.service (DB-backed)", async
    * INVALID_STATE_TRANSITION instead of double-approving the release.
    */
   it("AUD-072: concurrent approveDispatchRelease race on the same batch — one wins, the other is cleanly refused", async () => {
-    const { tenantId, job, user } = await fixture();
-    const ph = actorBase(tenantId, user.id, [ROLES.PRODUCTION_HEAD]);
-    const batch = await createDispatchBatch(ph, { jobId: job.id, seq: 1, plannedDate: new Date() });
+    const fx = await fixture();
+    const ph = actorBase(fx.tenantId, fx.user.id, [ROLES.PRODUCTION_HEAD]);
+    const batch = await batchWithUnit(ph, fx, "PKG-RACE");
 
     const results = await Promise.allSettled([
       approveDispatchRelease(ph, { dispatchBatchId: batch.id }),
