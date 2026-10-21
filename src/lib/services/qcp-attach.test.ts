@@ -10,6 +10,7 @@ describe.skipIf(!RUN_DB)("attachQcpTemplate (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { ROLES } = await import("@/lib/authz");
   const { createJob, attachQcpTemplate } = await import("./job-intake.service");
+  const { releaseJobBoms } = await import("./bom-release.test-util");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   let n = 0;
@@ -53,14 +54,18 @@ describe.skipIf(!RUN_DB)("attachQcpTemplate (DB)", async () => {
       userId: user.id, tenantId, clientId: null, name: "Admin", email: user.email, roles, departmentIds: [],
       mustChangePassword: false, themePreference: "SYSTEM" as const, outdoorMode: false, ...over,
     }) as never;
-    const create = async (qcpTemplateSourceId: number | null) =>
-      createJob(actor(), {
+    // J5a: createJob makes no assembly steps; the BOM release does, so a created job is released (empty BOM) here.
+    const create = async (qcpTemplateSourceId: number | null) => {
+      const r = await createJob(actor(), {
         clientId: client.id, familyId: family.id, templateVersionId: tv.id, calendarId: null, jobNumber: `ATT-${stamp}-${++n}`,
         clientOrderNo: null, projectName: null, poRef: null, designCode: null, orderDate: null, committedDeliveryDate: null,
         targetDispatchDate: null, priority: "NORMAL", remarks: null, excludedProcessCodes: [], exclusionReason: null,
         equipments: [{ equipmentTypeId: null, name: "Line", blockNo: 1, remarks: null, config: null, serials: [`S-${n}`] }],
         qcpTemplateSourceId, copyBomFromEquipmentId: null,
       } as never);
+      await releaseJobBoms(owner, actor(), r.jobId);
+      return r;
+    };
     return { tenantId, qcp: qcp.id, actor, create };
   }
 
