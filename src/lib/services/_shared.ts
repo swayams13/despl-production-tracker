@@ -286,6 +286,16 @@ export interface PlanInput {
   plannedFinish: Date | null;
 }
 
+/** J6: unit id -> lot quantity, for the units of a LOT line only (a serial unit is absent: not quantity-tracked). */
+export async function lotQtyByUnit(tx: Tx, unitIds: number[]): Promise<Map<number, number>> {
+  if (unitIds.length === 0) return new Map();
+  const rows = await tx.unit.findMany({
+    where: { id: { in: unitIds }, equipment: { trackingMode: "LOT" } },
+    select: { id: true, qtyPlanned: true },
+  });
+  return new Map(rows.map((u) => [u.id, u.qtyPlanned]));
+}
+
 export interface PersistScheduleRunInput {
   jobId: number;
   equipmentId: number | null;
@@ -372,6 +382,9 @@ export async function persistScheduleRun(
     data: { isCurrent: false },
   });
 
+  // J6: a LOT unit's plans carry its quantity; the count done survives a reschedule like the status does.
+  const lotQty = await lotQtyByUnit(tx, [...new Set(input.plans.map((p) => p.unitId).filter((u): u is number => u != null))]);
+
   const run = await tx.scheduleRun.create({
     data: {
       jobId,
@@ -398,6 +411,8 @@ export async function persistScheduleRun(
             plannedFinish: p.plannedFinish,
             ownerDepartmentId: p.ownerDepartmentId,
             status: prior?.status ?? "NOT_STARTED",
+            qtyPlanned: p.unitId != null ? (lotQty.get(p.unitId) ?? null) : null,
+            qtyDone: p.unitId != null && lotQty.has(p.unitId) ? (priorByKey.get(priorActualsKey(p.jobProcessId, p.unitId))?.qtyDone ?? 0) : 0,
             actualStart: prior?.actualStart ?? null,
             actualFinish: prior?.actualFinish ?? null,
             reportedStartAt: prior?.reportedStartAt ?? null,
@@ -627,6 +642,8 @@ export interface MappedOp {
   finishedAt: Date | null;
   reportedStartAt: Date | null;
   reportedFinishAt: Date | null;
+  /** J6: pieces done (assembly: qtyDone, fabrication: qtyGood); only read for a lot's plan. */
+  qtyDone: number | null;
 }
 
 /**
@@ -687,6 +704,7 @@ async function loadComponentOpsForProcessSeq(
       finishedAt: true,
       reportedStartAt: true,
       reportedFinishAt: true,
+      qtyGood: true,
       operation: { select: { name: true } },
       component: { select: { routeVersionId: true } },
     },
@@ -701,6 +719,7 @@ async function loadComponentOpsForProcessSeq(
       finishedAt: o.finishedAt,
       reportedStartAt: o.reportedStartAt,
       reportedFinishAt: o.reportedFinishAt,
+      qtyDone: o.qtyGood,
     }));
 }
 
@@ -748,6 +767,7 @@ export async function loadMappedOps(
         finishedAt: true,
         reportedStartAt: true,
         reportedFinishAt: true,
+        qtyDone: true,
         templateStep: { select: { activity: true } },
       },
     }),
@@ -1445,7 +1465,13 @@ export async function rollupProcessPlan(
   }
 
   const complete = to === "COMPLETE";
+  // J6: a lot's plan has done what its slowest mapped item has done (a submitted or complete item has done it all).
+  const qtyDone =
+    plan.qtyPlanned != null
+      ? Math.min(plan.qtyPlanned, ...items.map((i) => (i.status === "COMPLETE" || i.status === "SUBMITTED" ? plan.qtyPlanned! : (i.qtyDone ?? 0))))
+      : plan.qtyDone;
   const next = {
+    qtyDone,
     status: to,
     actualStart: minDate(started.map((i) => i.startedAt)),
     actualFinish: complete ? (maxDate(items.map((i) => i.finishedAt)) ?? new Date()) : null,
@@ -1454,6 +1480,7 @@ export async function rollupProcessPlan(
   };
   if (
     next.status === plan.status &&
+    next.qtyDone === plan.qtyDone &&
     sameTime(next.actualStart, plan.actualStart) &&
     sameTime(next.actualFinish, plan.actualFinish) &&
     sameTime(next.reportedStartAt, plan.reportedStartAt) &&

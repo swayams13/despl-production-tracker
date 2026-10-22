@@ -8,7 +8,7 @@ import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
 import { assertPerformedByValid, createWeldJointTx, recordNdtResultTx } from "./welding.service";
 import { closeNcr, closeRuleNcrsOnRedo } from "./ncr.service";
-import { lockFloorUnits, rollupForAssemblyStep } from "./_shared";
+import { lockFloorUnits, lotQtyByUnit, rollupForAssemblyStep } from "./_shared";
 import { assertFloorHard } from "./work.facts";
 import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
 import { groupQcpBySrNo, matchInspectionStep, srNoOccurrences, type MatchQcpItem } from "./assembly-qcp-match";
@@ -767,6 +767,7 @@ export async function materializeAssemblyStepsFromTemplate(
     }
   }
 
+  const lotQty = await lotQtyByUnit(tx, unitIds);
   let stepCount = 0;
   let boundToQcp = 0;
   const byScope: Record<string, number> = {};
@@ -782,6 +783,7 @@ export async function materializeAssemblyStepsFromTemplate(
     pressurePart: boolean;
     plannedJointId: number | null;
     componentId: number | null;
+    qtyPlanned: number | null;
     jobId: number;
   }[] = [];
   for (const unitId of unitIds) {
@@ -826,6 +828,8 @@ export async function materializeAssemblyStepsFromTemplate(
           pressurePart: step.pressurePart,
           plannedJointId: target.plannedJointId,
           componentId: target.componentId,
+          // J6: a lot's step is done in pieces; null = counted as one (serial).
+          qtyPlanned: lotQty.get(unitId) ?? null,
           jobId,
         });
         stepCount++;

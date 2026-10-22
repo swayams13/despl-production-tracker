@@ -307,6 +307,25 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     if (reason) throw new AppError(ERROR_CODES.REPORTED_AT_OUT_OF_WINDOW, { reason });
   }
 
+  // J6: a lot is done in pieces. A Done that leaves some over is a partial write: the item stays
+  // IN_PROGRESS and none of the finish-time gates (late reason, QC, evidence, joint) apply until the last piece.
+  if (detail?.qty != null && (!row.qty || action !== "DONE")) {
+    throw new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "qty" }, "A quantity applies to marking a lot done, on a step that counts pieces.");
+  }
+  if (row.qty && detail?.qtyGood != null) {
+    throw new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "qtyGood" }, "This lot counts pieces done through the quantity, not the good quantity.");
+  }
+  let addQty = 0;
+  let partial = false;
+  if (action === "DONE" && row.qty) {
+    const left = row.qty.planned - row.qty.done;
+    addQty = detail?.qty ?? left;
+    if (addQty > left) {
+      throw new AppError(ERROR_CODES.QTY_EXCEEDS_PLANNED, { qtyPlanned: row.qty.planned, qtyDone: row.qty.done, qty: addQty });
+    }
+    partial = addQty < left;
+  }
+
   // D2: HARD then SOFT, at START — including the implicit START of a DONE on a NOT_STARTED item.
   let overridden: FloorItem[] = [];
   if (starting) {
@@ -328,7 +347,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
   // Invariant 7 as revised: a late Done carries its reason in the same action.
   let late = false;
   let fileLateOn: WorkRow | null = null;
-  if (action === "DONE") {
+  if (action === "DONE" && !partial) {
     const plan = item.kind === "PROCESS_PLAN" ? row : item.processSeq != null ? facts.plansBySeq.get(item.processSeq) : undefined;
     if (plan?.plannedFinish && plan.plannedFinish < istCalendarDayMarker(reportedAt ?? now)) {
       late = true;
@@ -371,11 +390,12 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     }
     await assertPerformedByValid(tx, actor, detail.performedByWelderId, detail.performedByUserId);
   }
-  if (action === "DONE" && row.templateJointRef != null && row.weldJointId == null && detail?.weldJointId == null) {
+  if (action === "DONE" && !partial && row.templateJointRef != null && row.weldJointId == null && detail?.weldJointId == null) {
     throw new AppError(ERROR_CODES.VALIDATION_FAILED, { assemblyStepId: item.id, jointRef: row.templateJointRef }, JOINT_REQUIRED);
   }
 
-  let to: "IN_PROGRESS" | "SUBMITTED" | "COMPLETE" = action === "START" ? "IN_PROGRESS" : row.requiresQc ? "SUBMITTED" : "COMPLETE";
+  let to: "IN_PROGRESS" | "SUBMITTED" | "COMPLETE" =
+    action === "START" || partial ? "IN_PROGRESS" : row.requiresQc ? "SUBMITTED" : "COMPLETE";
   // Invariant 4: a plan written straight to COMPLETE (no QC verify) passes what verifyProcess refuses on.
   if (item.kind === "PROCESS_PLAN" && to === "COMPLETE") {
     const args = { jobProcessId: row.jobProcessId!, unitId: row.unitId, jobId: ctx.job.id };
@@ -403,8 +423,9 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
   // ── Writes ──
   const times = {
     ...(starting ? { reportedStartAt: reportedAt ?? undefined } : {}),
-    ...(action === "DONE" ? { reportedFinishAt: reportedAt ?? undefined, submittedBy: actor.userId } : {}),
+    ...(action === "DONE" && !partial ? { reportedFinishAt: reportedAt ?? undefined, submittedBy: actor.userId } : {}),
   };
+  const qtyAfter = row.qty ? { planned: row.qty.planned, done: row.qty.done + addQty } : null;
   const who = {
     performedByWelderId: detail?.performedByWelderId,
     performedByUserId: detail?.performedByUserId,
@@ -418,6 +439,7 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
       data: {
         status: to,
         ...times,
+        ...(qtyAfter ? { qtyDone: qtyAfter.done } : {}),
         ...(starting ? { actualStart: now } : {}),
         ...(to === "COMPLETE" ? { actualFinish: now } : {}),
       },
@@ -434,10 +456,14 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     const select = { status: true, startedAt: true, finishedAt: true, reportedStartAt: true, reportedFinishAt: true, submittedBy: true } as const;
     written =
       item.kind === "ASSEMBLY_STEP"
-        ? await tx.assemblyStep.update({ where: { id: item.id }, data: { ...data, weldJointId: detail?.weldJointId }, select })
+        ? await tx.assemblyStep.update({
+            where: { id: item.id },
+            data: { ...data, weldJointId: detail?.weldJointId, ...(qtyAfter ? { qtyDone: qtyAfter.done } : {}) },
+            select,
+          })
         : await tx.componentOperation.update({
             where: { id: item.id },
-            data: { ...data, qtyGood: detail?.qtyGood, qtyRejected: detail?.qtyRejected },
+            data: { ...data, qtyGood: qtyAfter ? qtyAfter.done : detail?.qtyGood, qtyRejected: detail?.qtyRejected },
             select,
           });
     if (starting) {
@@ -488,11 +514,21 @@ async function applyItem(ctx: BatchContext, facts: FloorFacts, row: WorkRow, det
     entityType: ENTITY[item.kind],
     entityId: item.id,
     before: { status: from },
-    after: { ...written, builtToRevisionId, recordedAt: now, reportedAt, late, sequenceOverride, requestId: ctx.requestId ?? null },
+    after: {
+      ...written,
+      builtToRevisionId,
+      recordedAt: now,
+      reportedAt,
+      late,
+      sequenceOverride,
+      requestId: ctx.requestId ?? null,
+      ...(qtyAfter ? { qty: { added: addQty, done: qtyAfter.done, planned: qtyAfter.planned, partial } } : {}),
+    },
     eventType: action === "START" ? "WorkStarted" : "WorkDone",
     eventPayload: { kind: item.kind, id: item.id, from, to, unitId: row.unitId },
   });
 
+  if (qtyAfter && row.qty) row.qty.done = qtyAfter.done;
   if (fileLateOn) await fileLateReason(ctx, fileLateOn);
   if (item.kind === "ASSEMBLY_STEP" && to === "COMPLETE") {
     await closeRuleNcrsOnRedo(tx, actor, { unitId: row.unitId!, jobId: ctx.job.id, role: item.role });

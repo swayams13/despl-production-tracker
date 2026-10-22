@@ -13,7 +13,7 @@ import {
   type WorkKind,
   requiredJointRef,
 } from "@/lib/shared/floor-rules";
-import { loadOpSeqResolver, openQcpItemIdsForUnit } from "./_shared";
+import { loadOpSeqResolver, lotQtyByUnit, openQcpItemIdsForUnit } from "./_shared";
 
 /**
  * Lean Core L1.2: the per-unit snapshot floor-rules.ts evaluates, loaded once
@@ -45,6 +45,8 @@ export interface WorkRow {
   hasDelayReason?: boolean;
   /** PROCESS_PLAN only: has mapped steps/operations, so its status is derived. */
   derived?: boolean;
+  /** J6: set on a quantity-tracked row (a LOT unit's step, operation or plan); absent = counted as one. */
+  qty?: { planned: number; done: number };
 }
 
 export interface FloorFacts {
@@ -116,6 +118,8 @@ export async function loadFloorFacts(
             reportedStartAt: true,
             weldJointId: true,
             qcpItemId: true,
+            qtyPlanned: true,
+            qtyDone: true,
             templateStep: { select: { kind: true, jointRef: true, scope: true, leadTimeProcessSeq: true, defaultDepartmentId: true } },
           },
         }),
@@ -129,6 +133,8 @@ export async function loadFloorFacts(
         startedAt: true,
         reportedStartAt: true,
         operationId: true,
+        qtyPlanned: true,
+        qtyGood: true,
         operation: { select: { code: true, defaultDepartmentId: true, requiresDftGate: true } },
         component: { select: { id: true, routeVersionId: true, pressureRetaining: true, governingDrawingId: true } },
       },
@@ -149,6 +155,8 @@ export async function loadFloorFacts(
         actualStart: true,
         reportedStartAt: true,
         ownerDepartmentId: true,
+        qtyPlanned: true,
+        qtyDone: true,
         jobProcess: { select: { code: true, requiresQc: true } },
         _count: { select: { delayReasons: true } },
       },
@@ -244,9 +252,11 @@ export async function loadFloorFacts(
       stepKind: s.templateStep.kind,
       templateJointRef: requiredJointRef(s),
       weldJointId: s.weldJointId,
+      ...(s.qtyPlanned != null ? { qty: { planned: s.qtyPlanned, done: s.qtyDone } } : {}),
     });
   }
 
+  const isLot = unitId != null && (await lotQtyByUnit(tx, [unitId])).has(unitId);
   for (const o of ops) {
     const drawingId = o.component.governingDrawingId;
     const current = drawingId != null ? currentRevision.get(drawingId) : undefined;
@@ -276,6 +286,8 @@ export async function loadFloorFacts(
       componentId: o.component.id,
       requiresDftGate: o.operation.requiresDftGate,
       currentRevisionId: state === "RELEASED" || state === "AT_RISK" ? current!.id : null,
+      // J6: a serial operation's qtyPlanned (pieces per assembly) is not a lot count.
+      ...(isLot && o.qtyPlanned != null ? { qty: { planned: o.qtyPlanned, done: o.qtyGood ?? 0 } } : {}),
     });
   }
 
@@ -301,6 +313,7 @@ export async function loadFloorFacts(
       hasDelayReason: p._count.delayReasons > 0,
       // L1.3: a JOB-grain (unit-less) plan is derived too, from the mapped items on every unit.
       derived: processSeq != null && mappedSeqs.has(processSeq),
+      ...(p.qtyPlanned != null ? { qty: { planned: p.qtyPlanned, done: p.qtyDone } } : {}),
     };
     rows.set(rowKey(item.kind, item.id), row);
     // A unit plan wins over a job plan for the same seq (a process is one grain or the other).

@@ -13,7 +13,7 @@ import {
 import { audited } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { deriveRequiresQc } from "@/lib/shared/floor-rules";
-import { assertKitReady, assertDrawingReleased, lockFloorUnits, rollupForComponentOperation } from "./_shared";
+import { assertKitReady, assertDrawingReleased, lockFloorUnits, lotQtyByUnit, rollupForComponentOperation } from "./_shared";
 import { assertFloorHard } from "./work.facts";
 import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
@@ -705,6 +705,7 @@ export async function materializeComponentsFromBomItems(
   if (bomItems.length === 0) return { ...none, skippedUnapproved };
 
   const units = await tx.unit.findMany({ where: { equipmentId }, select: { id: true }, orderBy: { id: "asc" } });
+  const lotQty = await lotQtyByUnit(tx, units.map((u) => u.id));
 
   const typeIds = [...new Set(bomItems.map((b) => b.componentTypeId!))];
   const templates = await tx.routeTemplate.findMany({
@@ -801,7 +802,12 @@ export async function materializeComponentsFromBomItems(
             seq: step.seq,
             operationId: step.operationId,
             status: OperationStatus.NOT_STARTED,
-            ...(opts.release && qtyPer != null && Number.isInteger(qtyPer) && qtyPer > 0 ? { qtyPlanned: qtyPer } : {}),
+            // J6: a lot's operation counts pieces: pieces per assembly (1 if the line has none) times the lot size.
+            ...(unitId != null && lotQty.has(unitId)
+              ? { qtyPlanned: (qtyPer != null && Number.isInteger(qtyPer) && qtyPer > 0 ? qtyPer : 1) * lotQty.get(unitId)! }
+              : opts.release && qtyPer != null && Number.isInteger(qtyPer) && qtyPer > 0
+                ? { qtyPlanned: qtyPer }
+                : {}),
             requiresQc:
               effectiveRequiresQc(step.requiresQc, requiresQcByOperationId.get(step.operationId) ?? true) &&
               (!reviewedTypeIds.has(b.componentTypeId!) ||
