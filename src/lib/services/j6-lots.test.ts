@@ -171,7 +171,7 @@ describe.skipIf(!RUN_DB)("Lean Core J6 lots (DB)", async () => {
       await owner.componentOperation.updateMany({ where: { component: { unitId: j.units[0].id } }, data: { qtyPlanned: 10 } });
       return j;
     }
-    const done = (a: typeof sup, j: Awaited<ReturnType<typeof lotJob>>, id: number, qty?: number, kind = "ASSEMBLY_STEP" as const) =>
+    const done = (a: typeof sup, j: Awaited<ReturnType<typeof lotJob>>, id: number, qty?: number, kind: "ASSEMBLY_STEP" | "COMPONENT_OP" = "ASSEMBLY_STEP") =>
       recordWork(a, { jobId: j.job.id, action: "DONE", items: [{ kind, id, detail: qty == null ? undefined : { qty } }] });
     const step = (id: number) => owner.assemblyStep.findUniqueOrThrow({ where: { id } });
 
