@@ -479,8 +479,9 @@ export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput):
       let bomCount = 0;
       let weldMapJointCount = 0;
       for (const [i, block] of parsed.equipments.entries()) {
-        const bomSource = block.copyBomFromEquipmentId ?? (i === 0 ? parsed.copyBomFromEquipmentId : null);
+        const bomSource = block.copyBomFromEquipmentId ?? (block.bomFromKit ? null : i === 0 ? parsed.copyBomFromEquipmentId : null);
         if (bomSource != null) bomCount += (await copyBom(tx, bomSource, equipmentIds[i], actor.tenantId, job.id, actor.userId)).count;
+        if (block.bomFromKit) bomCount += await kitBom(tx, block, equipmentIds[i], actor.tenantId, job.id, actor.userId);
         if (block.copyWeldMapFromEquipmentId != null) {
           weldMapJointCount += await copyWeldMap(tx, block.copyWeldMapFromEquipmentId, equipmentIds[i], actor.tenantId, job.id);
         }
@@ -994,6 +995,49 @@ async function copyBom(
   }
 
   return { count: source.bomItems.length, createdIds: created.map((c) => c.id) };
+}
+
+/**
+ * J7b (Build from master): the line's BOM from its equipment type's kit (component type x default
+ * quantity) as DRAFT revision 1; Engineering checks it and releases it on the release screen.
+ * `ANSWER:<key>` quantities read the line's own numeric answer, anything else uses the default.
+ * ponytail: the kit names component TYPES, so these lines carry a type and no material or size; the
+ * release screen's mapping and the part-family rules do the rest. NOZZLE_SCHEDULE has no schedule here
+ * and uses the default quantity.
+ */
+async function kitBom(
+  tx: Tx,
+  block: { equipmentTypeId?: number | null; config?: Record<string, unknown> | null },
+  equipmentId: number,
+  tenantId: number,
+  jobId: number,
+  createdBy: number,
+): Promise<number> {
+  const kit = await tx.equipmentTypeComponent.findMany({
+    where: { equipmentTypeId: block.equipmentTypeId!, tenantId },
+    orderBy: { id: "asc" },
+    include: { componentType: { select: { id: true, name: true } } },
+  });
+  if (kit.length === 0) return 0;
+  const revision = await tx.bomRevision.create({ data: { equipmentId, revisionNo: 1, status: "DRAFT", createdBy, jobId } });
+  await tx.bomItem.createMany({
+    data: kit.map((k, i) => {
+      const answer = k.qtySource.startsWith("ANSWER:") ? Number(block.config?.[k.qtySource.slice(7)]) : NaN;
+      const qty = Number.isInteger(answer) && answer > 0 ? answer : k.defaultQty;
+      return {
+        equipmentId,
+        bomRevisionId: revision.id,
+        jobId,
+        itemNo: i + 1,
+        partName: k.componentType.name,
+        sourceQty: String(qty),
+        qtyPer: qty,
+        componentTypeId: k.componentType.id,
+        remarks: "From the equipment type's standard kit",
+      };
+    }),
+  });
+  return kit.length;
 }
 
 /**
