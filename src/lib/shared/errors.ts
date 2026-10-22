@@ -122,6 +122,10 @@ export const ERROR_CODES = {
   BOM_RELEASE_DIFF_NOT_BUILT: "BOM_RELEASE_DIFF_NOT_BUILT",
   /** releaseBomRevision / mapBomLines (J5a): the line already has components or assembly steps (made at job creation, or by this release). */
   BOM_ALREADY_MATERIALIZED: "BOM_ALREADY_MATERIALIZED",
+  /** releaseDraft (J7a): the draft was already turned into a job (once only). */
+  DRAFT_ALREADY_RELEASED: "DRAFT_ALREADY_RELEASED",
+  /** saveDraft / releaseDraft (J7a): the draft was discarded. */
+  DRAFT_DISCARDED: "DRAFT_DISCARDED",
   /** setJobStatus (S19): status COMPLETE was requested while a ProcessPlan on the job's current ScheduleRun is not yet COMPLETE. */
   JOB_HAS_INCOMPLETE_PLANS: "JOB_HAS_INCOMPLETE_PLANS",
   /** setOperationRefFamilySeq (C6): the given number is not among the family's own published TemplateProcess.seq values. */
@@ -259,6 +263,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This line's floor steps were already generated from another BOM revision. Releasing a later revision on top of them is not available yet.",
   BOM_ALREADY_MATERIALIZED:
     "This line already has components or assembly steps, so its BOM cannot be released again. Existing jobs are never changed by a release.",
+  DRAFT_ALREADY_RELEASED: "This draft was already turned into a job. Open that job instead.",
+  DRAFT_DISCARDED: "This draft was discarded. Copy a job or start a new one.",
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",
   ROUTE_STEP_SEQ_UNKNOWN:
     "This number does not match any process in the family's published route — check the template's process list.",

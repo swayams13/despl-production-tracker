@@ -124,6 +124,17 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("tenant RLS coverage (DB)", () => {
     ]);
   });
 
+  it("J7a: job_drafts is a tenant-root table with RLS, a tenant_isolation policy and no DELETE grant", async () => {
+    const rows = await prisma.$queryRaw<Array<{ relrowsecurity: boolean; policies: bigint; can_delete: boolean; can_insert: boolean }>>`
+      SELECT c.relrowsecurity,
+             (SELECT count(*) FROM pg_policy p WHERE p.polrelid = c.oid AND p.polname = 'tenant_isolation') AS policies,
+             has_table_privilege(current_user, c.oid, 'DELETE') AS can_delete,
+             has_table_privilege(current_user, c.oid, 'INSERT') AS can_insert
+      FROM pg_class c WHERE c.relname = 'job_drafts'
+    `;
+    expect(rows.map((r) => [r.relrowsecurity, Number(r.policies), r.can_delete, r.can_insert])).toEqual([[true, 1, false, true]]);
+  });
+
   it("includes equipment_type_refs in the protected set", async () => {
     const rows = await prisma.$queryRaw<Array<{ relrowsecurity: boolean }>>`
       SELECT relrowsecurity FROM pg_class WHERE relname = 'equipment_type_refs'
