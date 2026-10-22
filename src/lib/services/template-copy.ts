@@ -60,6 +60,7 @@ export async function copyVersionContents(
         // Lean Core J4c: these two were dropped by every clone and edited draft.
         evidenceKind: p.evidenceKind,
         includeWhen: p.includeWhen == null ? undefined : (p.includeWhen as Prisma.InputJsonValue),
+        qtyBands: p.qtyBands == null ? undefined : (p.qtyBands as Prisma.InputJsonValue),
       },
     });
     oldToNewProcessId.set(p.id, copy.id);

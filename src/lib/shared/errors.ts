@@ -160,6 +160,8 @@ export const ERROR_CODES = {
   REPORTED_AT_OUT_OF_WINDOW: "REPORTED_AT_OUT_OF_WINDOW",
   /** L1.2/L1.4: marking a late item Done needs a categorised late reason in the same action. */
   LATE_REASON_REQUIRED: "LATE_REASON_REQUIRED",
+  /** J6: a lot Done would take the quantity past what was planned. `detail` has qtyPlanned, qtyDone, qty. */
+  QTY_EXCEEDS_PLANNED: "QTY_EXCEEDS_PLANNED",
   /** L1.2: an INSPECTION step is recorded by QC through inspect, not by recordWork. */
   INSPECT_REQUIRED: "INSPECT_REQUIRED",
   /** L1.2 review: QC accepted an inspection whose preceding work steps (same group, same joint) are not done. */
@@ -295,6 +297,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "An earlier step in the sequence is still open. A supervisor can start this early by choosing a reason.",
   REPORTED_AT_OUT_OF_WINDOW:
     "That time is not allowed: it is in the future, before the job was released, before the work started, or more than 72 working hours ago. An administrator can correct older entries.",
+  QTY_EXCEEDS_PLANNED:
+    "That quantity is more than what is left on this lot. Enter at most the quantity still to do.",
   LATE_REASON_REQUIRED:
     "This work is past its planned finish. Choose a late reason to mark it done.",
   INSPECT_REQUIRED:

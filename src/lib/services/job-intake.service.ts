@@ -167,6 +167,15 @@ export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput):
     const versionOf = (b: { templateVersionId?: number | null }) => versionById.get(b.templateVersionId ?? version.id)!;
     const onJobRoute = parsed.equipments.map((b) => versionOf(b).id === version.id);
 
+    // J6 (D21): lot-then-serial waits for the decision on where serials begin.
+    if (parsed.equipments.some((b) => b.trackingMode === "LOT_THEN_SERIAL")) {
+      throw new AppError(
+        ERROR_CODES.VALIDATION_FAILED,
+        { field: "trackingMode" },
+        "Lot then serial is not available yet. Track this line as serial units, or as one lot.",
+      );
+    }
+
     const typeIds = parsed.equipments
       .map((e) => e.equipmentTypeId)
       .filter((x): x is number => x != null);
@@ -329,12 +338,17 @@ export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput):
             remarks: block.remarks,
             config: Object.keys(blockConfigs[i]).length > 0 ? (blockConfigs[i] as never) : undefined,
             templateVersionId: lineVersion.id,
+            trackingMode: block.trackingMode ?? "SERIAL",
           },
         });
         equipmentIds.push(equipment.id);
         const rules = LineRules.fromConfig(job.id, equipment.id, lineQuestions[i], block.equipmentTypeId ?? null, blockConfigs[i]);
         const units = await tx.unit.createManyAndReturn({
-          data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo, jobId: job.id })),
+          // J6: a lot is one unit carrying the line's quantity.
+          data:
+            block.trackingMode === "LOT"
+              ? [{ equipmentId: equipment.id, serialNo: `${job.jobNumber}-LOT${i + 1}`, jobId: job.id, qtyPlanned: block.lotQty! }]
+              : block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo, jobId: job.id })),
           select: { id: true },
         });
         blockUnits.push({
@@ -345,7 +359,7 @@ export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput):
           rules,
           answers: blockConfigs[i],
         });
-        unitCount += block.serials.length;
+        unitCount += units.length;
       }
 
       const excluded = new Set(parsed.excludedProcessCodes);
@@ -362,6 +376,7 @@ export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput):
             departmentId: tp.defaultDepartmentId,
             durationMinDays: tp.durationMinDays,
             durationMaxDays: tp.durationMaxDays,
+            qtyBands: tp.qtyBands ?? undefined,
             envelopeFinishByMinDays: tp.envelopeFinishByMinDays,
             envelopeFinishByMaxDays: tp.envelopeFinishByMaxDays,
             envelopeStartByMinDays: tp.envelopeStartByMinDays,

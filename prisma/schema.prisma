@@ -59,6 +59,14 @@ enum ThemePreference {
 
 /// Lean Core L1.1. JOB-grain processes (planning, PPC, procurement ...) get one
 /// plan per job; UNIT-grain processes get one plan per unit (today's behaviour).
+/// Lean Core J6 (D21): how a line is tracked. LOT = one unit carrying a quantity.
+/// LOT_THEN_SERIAL is reserved: createJob refuses it until D21 picks it.
+enum TrackingMode {
+  SERIAL
+  LOT
+  LOT_THEN_SERIAL
+}
+
 enum ProcessGrain {
   JOB
   UNIT
@@ -1083,6 +1091,8 @@ model TemplateProcess {
   /// Lean Core J2: {all|any:[{key,op,value}]}; null = always applies. Honoured
   /// only when `optional` is true: a rule never removes a mandatory process.
   includeWhen             Json?                @map("include_when")
+  /// Lean Core J6 (D17): [{maxQty, multiplier}], stored and shown as a warning only; never applied to dates.
+  qtyBands                Json?                @map("qty_bands")
 
   version            ProcessTemplateVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   defaultDepartment  Department             @relation(fields: [defaultDepartmentId], references: [id])
@@ -1244,6 +1254,8 @@ model Equipment {
   templateVersionId         Int?           @map("template_version_id")
   /// Lean Core J3a: the assembly template version this line's steps came from.
   assemblyTemplateVersionId Int?           @map("assembly_template_version_id")
+  /// Lean Core J6 (D21): SERIAL (default, today) | LOT (one unit carrying the line's quantity).
+  trackingMode              TrackingMode   @default(SERIAL) @map("tracking_mode")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
@@ -1282,6 +1294,8 @@ model Unit {
   /// H1 job-level RLS backstop: denormalized from equipment.jobId. Nullable
   /// during migration only — backfilled by scripts/h1-backfill-job-ids.ts.
   jobId       Int      @map("job_id")
+  /// Lean Core J6: pieces this unit stands for. 1 for a serial; the line quantity for a LOT unit.
+  qtyPlanned  Int      @default(1) @map("qty_planned")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
@@ -1384,6 +1398,8 @@ model JobProcess {
   /// CHECK: only UNIT-grain rows carry a line. The line must belong to the job
   /// (trigger job_processes_line_same_job_trg).
   equipmentId             Int?         @map("equipment_id")
+  /// Lean Core J6: copied from TemplateProcess at intake. Warning only, see there.
+  qtyBands                Json?        @map("qty_bands")
   /// AUD-080: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id, reused as-is by AUD-080) always overwrites it from job_id before
@@ -1534,6 +1550,9 @@ model ProcessPlan {
   /// docs/superpowers/plans/2026-09-05-h1-job-level-rls-backstop.md's
   /// dual-path note).
   jobId             Int               @map("job_id")
+  /// Lean Core J6: a LOT unit's plan carries the quantity; null for serial and JOB-grain plans.
+  qtyPlanned        Int?              @map("qty_planned")
+  qtyDone           Int               @default(0) @map("qty_done")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
@@ -2702,6 +2721,9 @@ model AssemblyStep {
   remarks             String?
   /// H1 job-level RLS backstop: denormalized from unit.equipment.jobId.
   jobId               Int               @map("job_id")
+  /// Lean Core J6: a LOT unit's step carries the quantity; null for serial units.
+  qtyPlanned          Int?              @map("qty_planned")
+  qtyDone             Int               @default(0) @map("qty_done")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before

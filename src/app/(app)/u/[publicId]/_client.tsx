@@ -157,6 +157,7 @@ function FloorRowView({
             {row.state === "NEEDS_OVERRIDE" && openEarlier > 0 ? ` · ${openEarlier} earlier step${openEarlier === 1 ? "" : "s"} still open` : ""}
             {row.state === "NEEDS_OVERRIDE" && !row.canOverride ? " · ask your supervisor to start it early" : ""}
             {row.startedAt ? d.floor.startedAt(new Date(row.startedAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })) : ""}
+            {row.qty ? ` · ${row.qty.done} of ${row.qty.planned} done` : ""}
             {others > 0 && (row.state === "READY" || row.state === "IN_PROGRESS") ? d.floor.alsoOnOthers(others) : ""}
           </span>
           {row.returnedNote != null && <span className="fl-returned">{d.floor.returnedByQc(row.returnedNote)}</span>}

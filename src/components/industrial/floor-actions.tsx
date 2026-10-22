@@ -36,6 +36,8 @@ type Kind = FloorRow["kind"] | "PROCESS_PLAN";
 /** What the sheet reads of a row; Today also passes plan-level rows (kind PROCESS_PLAN). */
 export type SheetRow = Pick<FloorRow, "key" | "id" | "title" | "group" | "state" | "canOverride" | "weld" | "siblings" | "lateReasonNeeded"> & {
   kind: Kind;
+  /** J6: a lot's row; the sheet then asks how many pieces were done. */
+  qty?: FloorRow["qty"];
 };
 export interface Outcome {
   id: string;
@@ -368,6 +370,10 @@ export function ActionSheet({
   const [welder, setWelder] = useState("");
   const [why, setWhy] = useState<string | null>(null);
   const [whyNote, setWhyNote] = useState("");
+  // J6: how many pieces of the lot this Done counts; starts at all that is left.
+  const lot = action === "DONE" && row.qty ? row.qty : null;
+  const left = lot ? lot.planned - lot.done : 0;
+  const [pieces, setPieces] = useState(String(left));
   const d = useDict();
   const sh = d.sheet;
 
@@ -381,7 +387,9 @@ export function ActionSheet({
     (lateRequired && category == null ? sh.pickHeldUp : null) ??
     (overriding && !why ? sh.pickWhyNow : null) ??
     (overriding && why === "OTHER" && !whyNote.trim() ? sh.sayWhy : null) ??
-    (when === "earlier" && !earlier ? sh.pickTime : null);
+    (when === "earlier" && !earlier ? sh.pickTime : null) ??
+    // English like the refusal copy: not translated until a DESPL speaker reviews it (L2.12).
+    (lot && !(Number.isInteger(Number(pieces)) && Number(pieces) >= 1 && Number(pieces) <= left) ? `Enter 1 to ${left} pieces` : null);
 
   const now = new Date();
   const min = localInput(new Date(now.getTime() - 72 * 3600_000));
@@ -395,16 +403,19 @@ export function ActionSheet({
     const reportedAt = when === "earlier" && earlier ? new Date(earlier).toISOString() : undefined;
     const chosen = sibs.filter((s) => units.has(s.id));
     const count = 1 + chosen.length;
-    const label = (done ? d.outcome.markedDone : overriding ? d.outcome.startedEarly : d.outcome.started)(row.title, count);
+    const qtyNow = lot ? Number(pieces) : 0;
+    const label = lot && Number(qtyNow) < left
+      ? `${row.title}: ${qtyNow} counted, ${left - Number(qtyNow)} left`
+      : (done ? d.outcome.markedDone : overriding ? d.outcome.startedEarly : d.outcome.started)(row.title, count);
     const send = async (): Promise<SendResult> => {
-      const items: Array<{ kind: Kind; id: number; detail?: { weldJointId?: number; performedByWelderId?: number } }> = [
-        { kind: row.kind, id: row.id },
+      const items: Array<{ kind: Kind; id: number; detail?: { weldJointId?: number; performedByWelderId?: number; qty?: number } }> = [
+        { kind: row.kind, id: row.id, ...(lot ? { detail: { qty: qtyNow } } : {}) },
         ...chosen.map((s) => ({ kind: row.kind, id: s.id })),
       ];
       if (needsWelder || (done && row.weld)) {
         const j = await ensureJointAction({ assemblyStepId: row.id, welderIds: welder ? [Number(welder)] : undefined });
         if (!j.ok) return { applied: 0, refused: [], error: j.message };
-        items[0].detail = { weldJointId: j.weldJointId, ...(welder ? { performedByWelderId: Number(welder) } : {}) };
+        items[0].detail = { ...items[0].detail, weldJointId: j.weldJointId, ...(welder ? { performedByWelderId: Number(welder) } : {}) };
       }
       const r = await recordWorkAction({
         requestId,
@@ -482,6 +493,36 @@ export function ActionSheet({
             </>
           )}
         </fieldset>
+
+        {lot && (
+          <fieldset>
+            <legend>How many pieces are done now?</legend>
+            <input
+              className="ws-detail mono"
+              type="number"
+              inputMode="numeric"
+              min={1}
+              max={left}
+              value={pieces}
+              aria-label="Pieces done now"
+              onChange={(e) => setPieces(e.target.value)}
+            />
+            <div className="fl-chips">
+              {[5, 10, 25].filter((n) => n < left).map((n) => (
+                <button key={n} type="button" className="fl-chip" onClick={() => setPieces(String(n))}>
+                  {n}
+                </button>
+              ))}
+              <button type="button" className={`fl-chip${Number(pieces) === left ? " on" : ""}`} onClick={() => setPieces(String(left))}>
+                All {left}
+              </button>
+            </div>
+            <p className="fl-sub">
+              After this: {lot.done + (Number(pieces) || 0)} of {lot.planned}
+              {Number(pieces) < left ? ` · ${left - Number(pieces)} left` : ""}
+            </p>
+          </fieldset>
+        )}
 
         {needsWelder && (
           <fieldset>
