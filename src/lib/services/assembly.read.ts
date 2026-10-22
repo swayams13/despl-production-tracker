@@ -3,6 +3,7 @@ import { withTenant } from "@/lib/db";
 import { assertClientScope, type Actor } from "@/lib/authz";
 import type { OperationStatus, TestResult } from "@/generated/prisma/client";
 import type { UnitOption, WelderOption, DelayCategoryOption } from "./bom.read";
+import { activeRow } from "./active-row";
 
 /**
  * Job detail — Assembly tab (Phase 2, A6). Same shape family as bom.read.ts's
@@ -117,7 +118,7 @@ export async function loadAssemblyGrid(actor: Actor, jobId: number, unitId?: num
     const targetUnitId = unitId != null && units.some((u) => u.id === unitId) ? unitId : units[0].id;
 
     const steps = await tx.assemblyStep.findMany({
-      where: { unitId: targetUnitId },
+      where: { ...activeRow, unitId: targetUnitId },
       orderBy: { seq: "asc" },
       select: {
         id: true,

@@ -77,6 +77,7 @@ export async function assertFloorHard(
       ? // j5c: history (lookup by id; the caller's lock already refused a retired row)
         await tx.assemblyStep.findUniqueOrThrow({ where: { id }, select: { unitId: true, job } })
       : await tx.componentOperation
+          // j5c: history
           .findUniqueOrThrow({ where: { id }, select: { component: { select: { unitId: true } }, job } })
           .then((o) => ({ unitId: o.component.unitId, job: o.job }));
   const facts = await loadFloorFacts(tx, src.job, src.unitId);

@@ -39,10 +39,10 @@ export async function notifyBlocker(actor: Actor, input: NotifyBlockerInput): Pr
     });
     if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit" });
 
-    // j5c: history (found, then refused if retired)
     const target =
       input.kind === "ASSEMBLY_STEP"
         ? await tx.assemblyStep
+            // j5c: history (found, then refused if retired)
             .findFirst({
               where: { id: input.id, unitId: unit.id },
               select: { retiredAt: true, templateStep: { select: { activity: true } } },

@@ -3,6 +3,7 @@ import { assertClientScope, assertNotClientUser, hasRole, ROLES, type Actor } fr
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { drawingStateOf, type DrawingState } from "@/lib/shared/floor-rules";
 import { DRAWING_WRITE_ROLES } from "./drawing.service";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core JG1: the job's drawing register for /jobs/[id]/drawings. Which
@@ -73,7 +74,7 @@ export async function loadJobDrawings(actor: Actor, jobId: number): Promise<Draw
       tx.drawingTypeRef.findMany({ where: { tenantId: actor.tenantId, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
       tx.equipment.findMany({ where: { jobId }, orderBy: { id: "asc" }, select: { id: true, name: true } }),
       tx.component.findMany({
-        where: { jobId, tenantId: actor.tenantId, pressureRetaining: true, governingDrawingId: null },
+        where: { ...activeRow, jobId, tenantId: actor.tenantId, pressureRetaining: true, governingDrawingId: null },
         orderBy: [{ equipmentId: "asc" }, { id: "asc" }],
         select: { id: true, tag: true, equipmentId: true, unit: { select: { serialNo: true } } },
       }),

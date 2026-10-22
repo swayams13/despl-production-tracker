@@ -105,10 +105,12 @@ export async function loadTeam(
       assigneeIds.length ? tx.user.findMany({ where: { id: { in: assigneeIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
       tx.department.findMany({ where: { tenantId: actor.tenantId }, orderBy: [{ isOfficeDept: "asc" }, { name: "asc" }], select: { id: true, code: true, name: true } }),
       Promise.all([
+        // j5c: history (events the department recorded)
         tx.assemblyStep.findMany({
           where: { templateStep: { defaultDepartmentId: department.id }, OR: [{ startedAt: { gte: since } }, { finishedAt: { gte: since } }] },
           select: { startedAt: true, reportedStartAt: true, finishedAt: true, reportedFinishAt: true },
         }),
+        // j5c: history (events the department recorded)
         tx.componentOperation.findMany({
           where: { operation: { defaultDepartmentId: department.id }, OR: [{ startedAt: { gte: since } }, { finishedAt: { gte: since } }] },
           select: { startedAt: true, reportedStartAt: true, finishedAt: true, reportedFinishAt: true },
@@ -137,12 +139,14 @@ export async function loadTeam(
     const opIds = overrides.filter((o) => o.targetKind === "COMPONENT_OP").map((o) => o.targetId);
     const [steps, ops] = await Promise.all([
       stepIds.length
+        // j5c: history (overridden items)
         ? tx.assemblyStep.findMany({
             where: { id: { in: stepIds }, templateStep: { defaultDepartmentId: department.id } },
             select: { id: true, templateStep: { select: { activity: true } } },
           })
         : Promise.resolve([]),
       opIds.length
+        // j5c: history (overridden items)
         ? tx.componentOperation.findMany({
             where: { id: { in: opIds }, operation: { defaultDepartmentId: department.id } },
             select: { id: true, operation: { select: { name: true } } },

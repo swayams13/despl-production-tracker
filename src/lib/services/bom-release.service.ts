@@ -14,6 +14,7 @@ import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
 import { ensureDraftRevisionTx } from "./bom.service";
 import { loadSkippedQcpItems } from "./assembly-qcp-match";
 import { buildReleaseWarnings, suggestPartFamily, type PartFamilySuggestion, type ReleaseWarning } from "./bom-release.rules";
+import { activeRow } from "./active-row";
 
 /**
  * J5a: floor steps are generated at BOM release (J-PHASE-PLAN-v1 §B.J5a).
@@ -101,9 +102,9 @@ async function jobIdOf(actor: Actor, equipmentId: number): Promise<number> {
 
 async function storedCounts(tx: Tx, equipmentId: number, unmappedLines: number): Promise<BomReleaseCounts> {
   const [components, operations, steps, ruleDecisions] = await Promise.all([
-    tx.component.count({ where: { equipmentId } }),
-    tx.componentOperation.count({ where: { component: { equipmentId } } }),
-    tx.assemblyStep.groupBy({ by: ["templateStepId"], where: { unit: { equipmentId } }, _count: true }),
+    tx.component.count({ where: { ...activeRow, equipmentId } }),
+    tx.componentOperation.count({ where: { ...activeRow, component: { equipmentId } } }),
+    tx.assemblyStep.groupBy({ by: ["templateStepId"], where: { ...activeRow, unit: { equipmentId } }, _count: true }),
     tx.configRuleDecision.count({ where: { equipmentId } }),
   ]);
   const scopes = steps.length
@@ -155,7 +156,9 @@ export async function runBomRelease(tx: Tx, actor: Actor, equipmentId: number, b
   else if ((await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null }, id: { not: revision.id } } })) > 0) early = "OTHER_REVISION_RELEASED";
   else {
     const [haveComponents, haveSteps] = await Promise.all([
+      // j5c: any row, retired or not, means this line has floor rows
       tx.component.count({ where: { equipmentId } }),
+      // j5c: any row, retired or not
       tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
     ]);
     if (haveComponents + haveSteps > 0) early = "LEGACY_MATERIALIZED";

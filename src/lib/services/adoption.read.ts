@@ -27,6 +27,7 @@ export async function loadAdoption(actor: Actor): Promise<AdoptionView> {
   const where = { tenantId: actor.tenantId, OR: [{ startedAt: { gte: since } }, { finishedAt: { gte: since } }] };
   const select = { startedAt: true, reportedStartAt: true, finishedAt: true, reportedFinishAt: true } as const;
   const [steps, ops] = await withTenant(actor.tenantId, (tx) =>
+    // j5c: history (events recorded, whether or not the row was since retired)
     Promise.all([tx.assemblyStep.findMany({ where, select }), tx.componentOperation.findMany({ where, select })]),
   );
   const events = [...steps, ...ops].flatMap((e) => [

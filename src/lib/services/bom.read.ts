@@ -7,6 +7,7 @@ import type { PmiResult } from "@/generated/prisma/client";
 import { projectComponentRoute, computeComponentDisplayStatus, type ActualOp, type ProjectedOp, type RouteStepDef } from "./bom-route";
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
 import { explodeBomItem, computeAvailableForShortage, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
+import { activeRow } from "./active-row";
 
 /**
  * Job detail — BOM & Components tab (§4.3, §9.6).
@@ -407,6 +408,7 @@ export async function loadBomTree(
           select: { id: true, heatNumber: true, location: true, qty: true, receivedAt: true, txns: { select: { type: true, qty: true } } },
         },
         components: {
+          where: activeRow,
           orderBy: { id: "asc" },
           select: {
             id: true,
@@ -430,6 +432,7 @@ export async function loadBomTree(
               },
             },
             operations: {
+              where: activeRow,
               orderBy: { seq: "asc" },
               select: {
                 id: true,
@@ -455,6 +458,17 @@ export async function loadBomTree(
         },
       },
     });
+    // J5c (open point 3): stock, heat picks and procurement recorded against a line in an earlier BOM revision
+    // belong to the same line (equipment + item number); show them on every revision's row of it.
+    const historyOfLine = new Map<number, { stockLots: typeof items[number]["stockLots"]; materialIdentifications: typeof items[number]["materialIdentifications"]; procurementEvents: typeof items[number]["procurementEvents"] }>();
+    for (const it of items) {
+      const h = historyOfLine.get(it.itemNo) ?? { stockLots: [], materialIdentifications: [], procurementEvents: [] };
+      h.stockLots.push(...it.stockLots);
+      h.materialIdentifications.push(...it.materialIdentifications);
+      h.procurementEvents.push(...it.procurementEvents);
+      historyOfLine.set(it.itemNo, h);
+    }
+    for (const it of items) Object.assign(it, historyOfLine.get(it.itemNo));
 
     // Component rows for this equipment with no BomItem (bomItemId: null) —
     // e.g. DESPL-320's seeded sub-assembly register, unreachable via
@@ -462,7 +476,7 @@ export async function loadBomTree(
     // Scoped to one unit once the equipment has any (targetUnitId) — without
     // this, DESPL-320's 99 rows across 9 units would render as one flat list.
     const bomlessComponents = await tx.component.findMany({
-      where: { equipmentId: targetId, bomItemId: null, ...(targetUnitId != null ? { unitId: targetUnitId } : {}) },
+      where: { ...activeRow, equipmentId: targetId, bomItemId: null, ...(targetUnitId != null ? { unitId: targetUnitId } : {}) },
       orderBy: { tag: "asc" },
       select: {
         id: true,
@@ -485,6 +499,7 @@ export async function loadBomTree(
           },
         },
         operations: {
+          where: activeRow,
           orderBy: { seq: "asc" },
           select: {
             id: true,
@@ -744,6 +759,7 @@ export async function heatTrace(actor: Actor, heatNumber: string): Promise<MtcTr
  */
 export async function componentHeats(actor: Actor, componentId: number): Promise<MtcTraceRow[]> {
   return withTenant(actor.tenantId, async (tx) => {
+    // j5c: history (traceability of a part, retired or not)
     const component = await tx.component.findFirst({
       where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
       select: { bomItemId: true, equipment: { select: { job: { select: { clientId: true } } } } },

@@ -5,6 +5,7 @@ import { derivePipeline, isShortThisWeek, materialStatus, type MaterialFacts, ty
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
 import { explodeBomItem, type ExplodableBomItem } from "./bom-explosion";
 import { getCurrentScheduleRun } from "./_shared";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L2.8 (frame 07B): the Materials tab's pipeline. One row per BOM
@@ -78,7 +79,7 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
         },
       }),
       tx.component.findMany({
-        where: { equipment: { jobId } },
+        where: { ...activeRow, equipment: { jobId } },
         select: {
           equipmentId: true,
           bomItemId: true,
@@ -119,6 +120,18 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
       const hit = seq == null ? undefined : startForCode(keyOfEquipment.get(c.equipmentId) ?? null, String(seq));
       return hit ? [{ equipmentId: c.equipmentId, bomItemId: c.bomItemId, componentTypeId: c.componentTypeId, at: hit.at, name: hit.name }] : [];
     });
+
+    // J5c (open point 3): a line keeps its stock, heat picks and procurement across BOM revisions (equipment + item number).
+    const lineHistory = new Map<string, Pick<(typeof items)[number], "materialIdentifications" | "procurementEvents" | "stockLots">>();
+    for (const it of items) {
+      const key = `${it.equipmentId}:${it.itemNo}`;
+      const h = lineHistory.get(key) ?? { materialIdentifications: [], procurementEvents: [], stockLots: [] };
+      h.materialIdentifications.push(...it.materialIdentifications);
+      h.procurementEvents.push(...it.procurementEvents);
+      h.stockLots.push(...it.stockLots);
+      lineHistory.set(key, h);
+    }
+    for (const it of items) Object.assign(it, lineHistory.get(`${it.equipmentId}:${it.itemNo}`));
 
     const equipmentById = new Map(equipments.map((e) => [e.id, e]));
     const itemsByEquipment = new Map<number, Map<number, ExplodableBomItem>>();

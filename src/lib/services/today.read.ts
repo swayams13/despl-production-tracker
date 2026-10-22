@@ -6,6 +6,7 @@ import { istDay, loadMyDay, type MyDayScoreboard } from "./myday.read";
 import { routeStepNames } from "./route-step-names";
 import { loadFloorUnit, type FloorRow, type FloorUnitView } from "./floor.read";
 import type { SheetContext } from "@/components/industrial/floor-actions";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L2.3: Today. Mine only: the floor steps and operations under the
@@ -182,12 +183,14 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
     const opIds = audit.filter((a) => a.entityType === "ComponentOperation").map((a) => Number(a.entityId));
     const [steps, ops] = await Promise.all([
       stepIds.length
+        // j5c: history (done-today labels)
         ? tx.assemblyStep.findMany({
             where: { id: { in: stepIds } },
             select: { id: true, jobId: true, templateStep: { select: { activity: true } }, unit: { select: { serialNo: true } } },
           })
         : Promise.resolve([]),
       opIds.length
+        // j5c: history (done-today labels)
         ? tx.componentOperation.findMany({
             where: { id: { in: opIds } },
             select: {
@@ -203,7 +206,7 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
     // A repeated operation on a route (a head's Forming twice) is numbered: that needs the part's other steps.
     const siblings = ops.length
       ? await tx.componentOperation.findMany({
-          where: { componentId: { in: [...new Set(ops.map((o) => o.componentId))] } },
+          where: { ...activeRow, componentId: { in: [...new Set(ops.map((o) => o.componentId))] } },
           select: { id: true, componentId: true, seq: true, operation: { select: { name: true } }, component: { select: { routeVersionId: true } } },
         })
       : [];

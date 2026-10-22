@@ -78,10 +78,12 @@ export async function loadDigestPayload(
           job: { select: { jobNumber: true } },
         },
       }),
+      // j5c: history (events recorded in the window)
       tx.assemblyStep.findMany({
         where: { OR: [{ startedAt: { gte: start, lt: end } }, { finishedAt: { gte: start, lt: end } }] },
         select: { startedAt: true, reportedStartAt: true, finishedAt: true, reportedFinishAt: true, templateStep: { select: { defaultDepartmentId: true } } },
       }),
+      // j5c: history (events recorded in the window)
       tx.componentOperation.findMany({
         where: { OR: [{ startedAt: { gte: start, lt: end } }, { finishedAt: { gte: start, lt: end } }] },
         select: { startedAt: true, reportedStartAt: true, finishedAt: true, reportedFinishAt: true, operation: { select: { defaultDepartmentId: true } } },
@@ -97,9 +99,11 @@ export async function loadDigestPayload(
     const ids = (k: string) => overrides.filter((o) => o.targetKind === k).map((o) => o.targetId);
     const [stepRows, opRows, planRows] = await Promise.all([
       ids("ASSEMBLY_STEP").length
+        // j5c: history (overridden items)
         ? tx.assemblyStep.findMany({ where: { id: { in: ids("ASSEMBLY_STEP") } }, select: { id: true, templateStep: { select: { activity: true } } } })
         : Promise.resolve([]),
       ids("COMPONENT_OP").length
+        // j5c: history (overridden items)
         ? tx.componentOperation.findMany({ where: { id: { in: ids("COMPONENT_OP") } }, select: { id: true, operation: { select: { name: true } } } })
         : Promise.resolve([]),
       ids("PROCESS_PLAN").length

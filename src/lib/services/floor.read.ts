@@ -9,6 +9,7 @@ import type { StageSegment } from "@/components/industrial/stage-status";
 import { loadFloorFacts, rowKey } from "./work.facts";
 import { loadUnitSpinesBatch } from "./spine.read";
 import { routeStepNames } from "./route-step-names";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L2.2: everything the Floor screen (/u/[publicId]) needs, for one
@@ -168,11 +169,11 @@ export async function loadFloorUnit(
 
     const [stepLabels, opLabels, departments, categories, welders] = await Promise.all([
       tx.assemblyStep.findMany({
-        where: { unitId: unit.id, jobId: unit.jobId },
+        where: { ...activeRow, unitId: unit.id, jobId: unit.jobId },
         select: { id: true, templateStepId: true, templateStep: { select: { activity: true, groupName: true } } },
       }),
       tx.componentOperation.findMany({
-        where: { jobId: unit.jobId, component: { unitId: unit.id } },
+        where: { ...activeRow, jobId: unit.jobId, component: { unitId: unit.id } },
         select: {
           id: true,
           operationId: true,
@@ -324,7 +325,7 @@ export async function loadFloorUnit(
     const [sibSteps, sibOps] = await Promise.all([
       stepTemplateIds.length
         ? tx.assemblyStep.findMany({
-            where: { jobId: unit.jobId, unitId: { not: unit.id }, templateStepId: { in: stepTemplateIds }, status: { in: ["NOT_STARTED", "IN_PROGRESS"] } },
+            where: { ...activeRow, jobId: unit.jobId, unitId: { not: unit.id }, templateStepId: { in: stepTemplateIds }, status: { in: ["NOT_STARTED", "IN_PROGRESS"] } },
             select: { id: true, unitId: true, templateStepId: true, status: true, unit: { select: { serialNo: true } } },
             orderBy: { unitId: "asc" },
           })
@@ -332,6 +333,7 @@ export async function loadFloorUnit(
       opIds.length
         ? tx.componentOperation.findMany({
             where: {
+              ...activeRow,
               jobId: unit.jobId,
               operationId: { in: opIds },
               status: { in: ["NOT_STARTED", "IN_PROGRESS"] },

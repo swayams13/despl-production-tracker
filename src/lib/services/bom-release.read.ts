@@ -64,6 +64,7 @@ export async function loadBomReleaseView(actor: Actor, jobId: number): Promise<B
     const equipmentIds = job.equipments.map((e) => e.id);
     const [loose, stepped, types] = await Promise.all([
       tx.bomItem.groupBy({ by: ["equipmentId"], where: { jobId, equipmentId: { in: equipmentIds }, bomRevisionId: null }, _count: true }),
+      // j5c: any row, retired or not, means this line has floor rows
       tx.assemblyStep.findMany({ where: { jobId }, distinct: ["unitId"], select: { unit: { select: { equipmentId: true } } } }),
       tx.componentTypeRef.findMany({
         where: { tenantId: actor.tenantId, active: true },

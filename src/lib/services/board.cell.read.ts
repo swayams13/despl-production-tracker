@@ -4,6 +4,7 @@ import { assertClientScope, assertNotClientUser, hasRole, ROLES, type Actor } fr
 import { loadStageDetail, type StageDetail } from "./stage-detail.read";
 import { loadFloorUnit, type FloorRow } from "./floor.read";
 import { loadOpSeqResolver } from "./_shared";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L2.4: what the Job board's Stage Sheet shows for one unit x stage.
@@ -78,7 +79,7 @@ export async function loadBoardCell(
 
     const [steps, allOps, overrides] = await Promise.all([
       tx.assemblyStep.findMany({
-        where: { jobId, unitId, templateStep: { leadTimeProcessSeq: { in: seqs } } },
+        where: { ...activeRow, jobId, unitId, templateStep: { leadTimeProcessSeq: { in: seqs } } },
         orderBy: { seq: "asc" },
         select: {
           id: true,
@@ -96,7 +97,7 @@ export async function loadBoardCell(
         },
       }),
       tx.componentOperation.findMany({
-        where: { jobId, component: { unitId } },
+        where: { ...activeRow, jobId, component: { unitId } },
         orderBy: [{ componentId: "asc" }, { seq: "asc" }],
         select: {
           id: true,
