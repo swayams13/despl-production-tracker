@@ -1,6 +1,8 @@
-// Route-level Suspense fallback while the server component awaits
-// loadIntakeOptions. Mirrors the wizard's final layout (header + step rail +
-// one card) rather than a full-page spinner — DESIGN_SPEC's loading-state rule.
+import { STEP_LABELS } from "./wizard-state";
+
+// Route-level Suspense fallback while the server component awaits the intake options.
+// Mirrors the wizard's final layout (header + step rail + one card) rather than a
+// full-page spinner, per the loading-state rule.
 export default function NewJobLoading() {
   return (
     <>
@@ -8,7 +10,7 @@ export default function NewJobLoading() {
         <h1>New job</h1>
       </div>
       <div className="wiz-steps">
-        {["Order", "Type & route", "Equipment", "Configuration", "Review"].map((label) => (
+        {STEP_LABELS.map((label) => (
           <div key={label} className="wiz-step">
             <span className="wiz-step-n skel" />
             <span className="skel" style={{ width: 60, height: 10 }} />
