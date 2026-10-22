@@ -2,6 +2,7 @@
 import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
 import { mapBomLines, releaseBomRevision, startBomRevision, type BomReleaseResult } from "@/lib/services/bom-release.service";
+import { resolveReviewRow } from "@/lib/services/bom-review.service";
 import { toActionError, type ActionResult } from "./_action";
 
 /**
@@ -13,12 +14,12 @@ function refresh(jobId: number) {
   revalidatePath(`/jobs/${jobId}`);
 }
 
-export type StartRevisionActionResult = ActionResult & { bomRevisionId?: number; revisionNo?: number; created?: boolean; moved?: number };
+export type StartRevisionActionResult = ActionResult & { bomRevisionId?: number; revisionNo?: number; created?: boolean; moved?: number; copied?: number };
 export async function startBomRevisionAction(jobId: number, equipmentId: number): Promise<StartRevisionActionResult> {
   try {
     const r = await startBomRevision(await requireActor(), { equipmentId });
     refresh(jobId);
-    return { ok: true, bomRevisionId: r.bomRevisionId, revisionNo: r.revisionNo, created: r.created, moved: r.moved };
+    return { ok: true, bomRevisionId: r.bomRevisionId, revisionNo: r.revisionNo, created: r.created, moved: r.moved, copied: r.copied };
   } catch (e) {
     return toActionError(e);
   }
@@ -49,6 +50,21 @@ export async function releaseBomRevisionAction(
     const release = await releaseBomRevision(await requireActor(), { equipmentId, bomRevisionId, acknowledgeWarnings });
     refresh(jobId);
     return { ok: true, release };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** J5c: Keep / Replace / Cancel a floor row a BOM re-release flagged. The rules (roles, reason, blocks) are the service's. */
+export async function resolveReviewRowAction(
+  jobId: number,
+  input: { kind: "ASSEMBLY_STEP" | "COMPONENT_OP"; id: number; action: "KEEP" | "REPLACE" | "CANCEL"; reason: string },
+): Promise<ActionResult> {
+  try {
+    await resolveReviewRow(await requireActor(), input);
+    refresh(jobId);
+    revalidatePath(`/jobs/${jobId}/board`);
+    return { ok: true };
   } catch (e) {
     return toActionError(e);
   }

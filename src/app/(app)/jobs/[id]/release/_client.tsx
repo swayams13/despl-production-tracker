@@ -10,6 +10,8 @@ import { mapBomLinesAction, releaseBomRevisionAction, startBomRevisionAction } f
 import type { BomReleaseView, ReleaseLine } from "@/lib/services/bom-release.read";
 import type { BomReleaseLine, BomReleasePreview, BomReleaseResult } from "@/lib/services/bom-release.service";
 import { ReleasePanel } from "./release-panel";
+import { DiffPanel } from "./diff-panel";
+import { ReviewPanel } from "./review-panel";
 
 /**
  * Lean Core J5b (frames 14A-14B). Pick a line and a BOM revision, map each BOM line to a part family
@@ -20,7 +22,7 @@ import { ReleasePanel } from "./release-panel";
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const reasonOf = (r: { message: string; detail?: Record<string, unknown> }) => (typeof r.detail?.reason === "string" ? r.detail.reason : r.message);
 const NOT_REVISION_STATE: Partial<Record<BomReleasePreview["state"], string>> = {
-  ALREADY_RELEASED: "This revision is released. Its parts and steps are on the floor; releasing again changes nothing.",
+  ALREADY_RELEASED: "This revision is released. Its parts and steps are on the floor and the weld map and answers match them.",
   LEGACY_MATERIALIZED: "This line already has parts or steps from before the BOM release existed, so its BOM cannot be released. Existing jobs are never changed by a release.",
   SUPERSEDED: "A later revision of this line is already released. This one is kept as history.",
 };
@@ -88,6 +90,7 @@ function LineSection({
   const router = useRouter();
   const [pending, start] = useTransition();
   const draft = [...line.revisions].reverse().find((r) => r.materializedAt == null && r.status === "DRAFT") ?? null;
+  const released = line.revisions.some((r) => r.materializedAt != null);
   const nextNo = (line.revisions[line.revisions.length - 1]?.revisionNo ?? 0) + 1;
   const [result, setResult] = useState<BomReleaseResult | null>(null);
 
@@ -95,7 +98,7 @@ function LineSection({
     start(async () => {
       const r = await startBomRevisionAction(view.job.id, line.id);
       if (!r.ok) return void toast.error(reasonOf(r));
-      toast.success(r.created ? `Started revision ${r.revisionNo}${r.moved ? `, ${plural(r.moved, "BOM line")} moved into it` : ""}.` : `${plural(r.moved ?? 0, "BOM line")} moved into revision ${r.revisionNo}.`);
+      toast.success(r.created ? `Started revision ${r.revisionNo}${r.copied ? `, ${plural(r.copied, "BOM line")} copied from the released revision` : ""}${r.moved ? `, ${plural(r.moved, "BOM line")} moved into it` : ""}.` : `${plural(r.moved ?? 0, "BOM line")} moved into revision ${r.revisionNo}.`);
       if (r.bomRevisionId) go(line.id, r.bomRevisionId);
       else router.refresh();
     });
@@ -128,8 +131,8 @@ function LineSection({
               </select>
             </label>
           )}
-          {view.canRelease && !draft && line.revisions.every((r) => r.materializedAt == null) && (
-            <button type="button" className="btn btn-accent" disabled={pending} onClick={startRevision}>
+          {view.canRelease && !draft && (
+            <button type="button" className={released ? "btn" : "btn btn-accent"} disabled={pending} onClick={startRevision}>
               {pending ? "Starting…" : `Start revision ${nextNo}`}
             </button>
           )}
@@ -161,6 +164,12 @@ function LineSection({
       ) : line.revisions.length > 0 ? (
         <p className="note" style={{ textAlign: "left" }}>Choose a BOM revision above.</p>
       ) : null}
+
+      {view.canReview && released && (
+        <div style={{ marginTop: 14 }}>
+          <ReviewPanel jobId={view.job.id} rows={line.review} />
+        </div>
+      )}
     </>
   );
 }
@@ -212,7 +221,7 @@ function Body({
       const r = await releaseBomRevisionAction(view.job.id, line.id, preview.revision.id, acknowledged);
       setConfirm(null);
       if (!r.ok) return void setBanner(reasonOf(r));
-      toast.success(r.release?.noop ? "Already released." : "BOM released. The floor steps are made.");
+      toast.success(r.release?.noop ? "Nothing to change: the floor already matches this revision." : r.release?.diff ? "Changes applied to the floor rows." : "BOM released. The floor steps are made.");
       if (r.release) onReleased(r.release);
       router.refresh();
     });
@@ -221,6 +230,7 @@ function Body({
   const stateNote = NOT_REVISION_STATE[preview.state];
 
   return (
+    <>
     <div className="grid-2">
       <div className="card">
         <div className="hd">
@@ -230,6 +240,12 @@ function Body({
         {stateNote && (
           <p role="status" className="note" style={{ textAlign: "left", padding: "0 16px 8px", margin: 0 }}>
             <span className="chip c-idle"><i />{preview.state === "ALREADY_RELEASED" ? "Released" : "Not releasable"}</span> {stateNote}
+            {preview.state === "ALREADY_RELEASED" && view.canRelease && (
+              <>
+                {" "}
+                <button type="button" className="btn" onClick={() => router.refresh()}>Check for changes</button>
+              </>
+            )}
           </p>
         )}
         {preview.state === "REFUSED" && (
@@ -360,17 +376,25 @@ function Body({
         <Modal
           open
           onOpenChange={(o) => !o && !releasing && setConfirm(null)}
-          title={`Release revision ${preview.revision.revisionNo}?`}
-          footer={<ModalConfirmFooter onCancel={() => setConfirm(null)} onConfirm={() => release(confirm)} confirmLabel={releasing ? "Releasing…" : "Release"} disabled={releasing} />}
+          title={preview.state === "DIFF" ? `Apply the changes of revision ${preview.revision.revisionNo}?` : `Release revision ${preview.revision.revisionNo}?`}
+          footer={<ModalConfirmFooter onCancel={() => setConfirm(null)} onConfirm={() => release(confirm)} confirmLabel={releasing ? "Working…" : preview.state === "DIFF" ? "Apply changes" : "Release"} disabled={releasing} />}
         >
           <div style={{ display: "grid", gap: 10 }}>
-            <p style={{ margin: 0 }}>
-              This makes {plural(preview.counts?.components ?? 0, "component")}, {plural(preview.counts?.operations ?? 0, "operation")} and {plural(preview.counts?.steps ?? 0, "assembly step")} on {line.name}, and sets the revision to released.
-            </p>
+            {preview.state === "DIFF" && preview.diff ? (
+              <p style={{ margin: 0 }}>
+                On {line.name}: {plural(preview.diff.counts.component.add + preview.diff.counts.operation.add + preview.diff.counts.step.add, "row")} added, {plural(preview.diff.counts.component.update + preview.diff.counts.operation.update + preview.diff.counts.step.update, "row")} updated, {plural(preview.diff.counts.component.retire + preview.diff.counts.operation.retire + preview.diff.counts.step.retire, "row")} retired, {plural(preview.diff.counts.component.review + preview.diff.counts.operation.review + preview.diff.counts.step.review, "started row")} flagged for review. Nothing is deleted.
+              </p>
+            ) : (
+              <p style={{ margin: 0 }}>
+                This makes {plural(preview.counts?.components ?? 0, "component")}, {plural(preview.counts?.operations ?? 0, "operation")} and {plural(preview.counts?.steps ?? 0, "assembly step")} on {line.name}, and sets the revision to released.
+              </p>
+            )}
             <p style={{ margin: 0, color: "var(--muted)" }}>It is written as you, in one step, and recorded in the audit log.</p>
           </div>
         </Modal>
       )}
     </div>
+    {preview.diff && <div style={{ marginTop: 14 }}><DiffPanel diff={preview.diff} /></div>}
+    </>
   );
 }
