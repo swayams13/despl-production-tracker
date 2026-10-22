@@ -671,32 +671,61 @@ export async function recordDftReading(actor: Actor, input: RecordDftReadingInpu
   });
 }
 
+/** J5c: one operation row a component should have (the builder's output; the writer inserts it). */
+export interface ComponentOpRow {
+  seq: number;
+  operationId: number;
+  requiresQc: boolean;
+  qtyPlanned: number | null;
+}
+/** J5c: one part (per unit) a BOM line should have, with its operations. */
+export interface ComponentRow {
+  unitId: number | null;
+  bomItemId: number;
+  itemNo: number;
+  tag: string;
+  componentTypeId: number;
+  routeVersionId: number;
+  routeId: number;
+  pressureRetaining: boolean;
+  ops: ComponentOpRow[];
+}
+export interface BuiltComponents {
+  rows: ComponentRow[];
+  skippedNoRoute: number;
+  skippedUnapproved: number;
+  pressureCount: number;
+}
+export const componentKey = (unitId: number | null, itemNo: number) => `${unitId ?? 0}:${itemNo}`;
+
+export interface BuildComponentOptions {
+  /** J5a: `release` = the BOM-release path (approved part families only, integer qtyPer becomes the operation's planned quantity). */
+  release?: boolean;
+  /** J5c: the line's answers, shared with the caller (who flushes the ledger). Absent = loaded here and flushed by the wrapper. */
+  rules?: LineRules;
+  /** J5c invariant 9: `componentKey(unit, itemNo)` -> the route version an existing part was built on; the build keeps it. */
+  pinnedRoutes?: Map<string, number>;
+  /** J5c: tags already taken per unit by parts that stay, so a new one still gets the `(#itemNo)` suffix. */
+  takenTags?: Map<number | null, Set<string>>;
+}
+
 /**
- * S16 (Gate 2): materialise Component + ComponentOperation rows for BomItem
- * rows created inside job-intake.service.ts's createJob (the copyBom path —
- * the only place createJob itself writes typed BomItem rows today; a BOM
- * imported afterward via bom.service.ts's importBomItems never carries
- * componentTypeId at all, and linking it via updateBomItem is a separate,
- * un-materialised follow-on, not this item's scope). Mirrors
- * scripts/seed-despl320-components.ts's loop instead of inventing a new
- * mechanism — same `(unitId, tag)` scoping, same "no route version → skip,
- * don't error" behaviour, `createMany` for the operations batch.
+ * S16 (Gate 2) / J5a / J5c: what Component + ComponentOperation rows the given BOM lines should have, per unit.
+ * Pure of writes (it only reads and records rule decisions on `opts.rules`); `writeComponentRows` inserts them.
+ * Mirrors scripts/seed-despl320-components.ts's loop: same `(unitId, tag)` scoping, same "no route version ->
+ * skip, don't error" behaviour.
  *
- * A BomItem with no `componentTypeId`, or a `componentTypeId` with no
- * PUBLISHED `RouteTemplateVersion` for the job's family, is skipped — not an
- * error. Neither is malformed data; both mean "this part isn't separately
+ * A BomItem with no `componentTypeId`, or a `componentTypeId` with no PUBLISHED `RouteTemplateVersion` for the
+ * job's family, is skipped — not an error. Neither is malformed data; both mean "this part isn't separately
  * routed yet."
  */
-export async function materializeComponentsFromBomItems(
+export async function buildComponentRows(
   tx: Tx,
-  familyId: number,
-  equipmentId: number,
-  bomItemIds: number[],
-  jobId: number,
-  /** J5a: `release` = the BOM-release path (approved part families only, integer qtyPer becomes the operation's planned quantity). */
-  opts: { release?: boolean } = {},
-): Promise<{ componentCount: number; operationCount: number; skippedNoRoute: number; skippedUnapproved: number; pressureCount: number }> {
-  const none = { componentCount: 0, operationCount: 0, skippedNoRoute: 0, skippedUnapproved: 0, pressureCount: 0 };
+  args: { familyId: number; equipmentId: number; bomItemIds: number[]; jobId: number; opts?: BuildComponentOptions },
+): Promise<BuiltComponents> {
+  const { familyId, equipmentId, bomItemIds } = args;
+  const opts = args.opts ?? {};
+  const none: BuiltComponents = { rows: [], skippedNoRoute: 0, skippedUnapproved: 0, pressureCount: 0 };
   if (bomItemIds.length === 0) return none;
 
   const allBomItems = await tx.bomItem.findMany({
@@ -735,13 +764,25 @@ export async function materializeComponentsFromBomItems(
     const list = templatesByTypeId.get(b.componentTypeId!) ?? [];
     return pickRouteTemplate(b.routeVariant ? list.filter((t) => t.variant === b.routeVariant) : list);
   };
+  // J5c (invariant 9): a part that already exists keeps the route version it was built on, whatever has been
+  // published since; the pinned versions are read by id (any status).
+  const pinnedIds = [...new Set(opts.pinnedRoutes?.values() ?? [])];
+  const pinnedVersions = new Map(
+    (pinnedIds.length
+      ? await tx.routeTemplateVersion.findMany({ where: { id: { in: pinnedIds } }, include: { steps: { orderBy: { seq: "asc" } } } })
+      : []
+    ).map((v) => [v.id, v] as const),
+  );
+  const pinnedRouteIds = new Map(
+    (pinnedIds.length ? await tx.routeTemplateVersion.findMany({ where: { id: { in: pinnedIds } }, select: { id: true, routeId: true } }) : []).map((v) => [v.id, v.routeId] as const),
+  );
 
   // Lean Core L1.1 (D3): requiresQc is copied from OperationRef onto each
   // ComponentOperation at materialisation, so a later edit to the (unversioned)
   // OperationRef cannot change a running job (invariant 9). M1: the route step's
   // own requiresQc is ANDed in (effectiveRequiresQc) — either level can waive QC.
   const operationIds = [
-    ...new Set(templates.flatMap((t) => t.versions[0]?.steps.map((st) => st.operationId) ?? [])),
+    ...new Set([...templates.flatMap((t) => t.versions[0]?.steps.map((st) => st.operationId) ?? []), ...[...pinnedVersions.values()].flatMap((v) => v.steps.map((st) => st.operationId))]),
   ];
   const operationRefs =
     operationIds.length > 0
@@ -763,77 +804,136 @@ export async function materializeComponentsFromBomItems(
 
   // J2: this line's answers decide which route steps become operations; one
   // ledger row per rule-bearing step and line (not per component).
-  const rules = await LineRules.load(tx, equipmentId);
+  const rules = opts.rules ?? (await LineRules.load(tx, equipmentId));
 
-  let componentCount = 0;
-  let operationCount = 0;
+  const rows: ComponentRow[] = [];
   let pressureCount = 0;
   let skippedNoRoute = 0;
-  const usedTags = new Set<string>();
+  const usedTags = new Set<string>(
+    [...(opts.takenTags ?? new Map<number | null, Set<string>>())].flatMap(([unitId, tags]) => [...tags].map((t) => `${unitId}:${t}`)),
+  );
 
   for (const b of bomItems) {
-    const routeVersion = routeFor(b)?.versions[0];
-    if (!routeVersion) {
-      skippedNoRoute++;
-      continue;
-    }
-
     const scopes: (number | null)[] = units.length > 0 ? units.map((u) => u.id) : [null];
+    let missing = false;
     for (const unitId of scopes) {
+      const pinnedId = opts.pinnedRoutes?.get(componentKey(unitId, b.itemNo));
+      const route = pinnedId != null ? null : routeFor(b);
+      const routeVersion = pinnedId != null ? pinnedVersions.get(pinnedId) : route?.versions[0];
+      const routeId = pinnedId != null ? pinnedRouteIds.get(pinnedId) : route?.id;
+      if (!routeVersion || routeId == null) {
+        missing = true;
+        continue;
+      }
       let tag = b.partName;
       const tagKey = `${unitId}:${tag}`;
       if (usedTags.has(tagKey)) tag = `${b.partName} (#${b.itemNo})`;
       usedTags.add(`${unitId}:${tag}`);
 
-      const component = await tx.component.create({
-        data: {
-          equipmentId,
-          unitId,
-          bomItemId: b.id,
-          tag,
-          componentTypeId: b.componentTypeId!,
-          routeVersionId: routeVersion.id,
-          pressureRetaining: pressureRetainingTypeIds.has(b.componentTypeId!),
-          jobId,
-        },
-      });
-
+      const qtyPer = b.qtyPer != null ? Number(b.qtyPer) : null;
       const routeSteps = routeVersion.steps.filter((step) => rules.decide("ROUTE_STEP", step.id, step.includeWhen));
-      if (routeSteps.length > 0) {
-        const qtyPer = b.qtyPer != null ? Number(b.qtyPer) : null;
-        await tx.componentOperation.createMany({
-          data: routeSteps.map((step) => ({
-            componentId: component.id,
-            seq: step.seq,
-            operationId: step.operationId,
-            status: OperationStatus.NOT_STARTED,
-            // J6: a lot's operation counts pieces: pieces per assembly (1 if the line has none) times the lot size.
-            ...(unitId != null && lotQty.has(unitId)
-              ? { qtyPlanned: (qtyPer != null && Number.isInteger(qtyPer) && qtyPer > 0 ? qtyPer : 1) * lotQty.get(unitId)! }
+      rows.push({
+        unitId,
+        bomItemId: b.id,
+        itemNo: b.itemNo,
+        tag,
+        componentTypeId: b.componentTypeId!,
+        routeVersionId: routeVersion.id,
+        routeId,
+        pressureRetaining: pressureRetainingTypeIds.has(b.componentTypeId!),
+        ops: routeSteps.map((step) => ({
+          seq: step.seq,
+          operationId: step.operationId,
+          // J6: a lot's operation counts pieces: pieces per assembly (1 if the line has none) times the lot size.
+          qtyPlanned:
+            unitId != null && lotQty.has(unitId)
+              ? (qtyPer != null && Number.isInteger(qtyPer) && qtyPer > 0 ? qtyPer : 1) * lotQty.get(unitId)!
               : opts.release && qtyPer != null && Number.isInteger(qtyPer) && qtyPer > 0
-                ? { qtyPlanned: qtyPer }
-                : {}),
-            requiresQc:
-              effectiveRequiresQc(step.requiresQc, requiresQcByOperationId.get(step.operationId) ?? true) &&
-              (!reviewedTypeIds.has(b.componentTypeId!) ||
-                deriveRequiresQc({
-                  kind: "COMPONENT_OP",
-                  opCode: codeByOperationId.get(step.operationId),
-                  pressure: pressureRetainingTypeIds.has(b.componentTypeId!),
-                  qcpLinked: false,
-                }).requiresQc),
-            jobId,
-          })),
-        });
-      }
-      componentCount++;
-      operationCount += routeSteps.length;
+                ? qtyPer
+                : null,
+          requiresQc:
+            effectiveRequiresQc(step.requiresQc, requiresQcByOperationId.get(step.operationId) ?? true) &&
+            (!reviewedTypeIds.has(b.componentTypeId!) ||
+              deriveRequiresQc({
+                kind: "COMPONENT_OP",
+                opCode: codeByOperationId.get(step.operationId),
+                pressure: pressureRetainingTypeIds.has(b.componentTypeId!),
+                qcpLinked: false,
+              }).requiresQc),
+        })),
+      });
       if (pressureRetainingTypeIds.has(b.componentTypeId!)) pressureCount++;
     }
+    if (missing) skippedNoRoute++;
   }
 
-  await flushRuleDecisions(tx, [rules]);
-  return { componentCount, operationCount, skippedNoRoute, skippedUnapproved, pressureCount };
+  if (!opts.rules) await flushRuleDecisions(tx, [rules]);
+  return { rows, skippedNoRoute, skippedUnapproved, pressureCount };
+}
+
+/** J5c: insert the built parts and their operations; returns the new part ids in row order. */
+export async function writeComponentRows(
+  tx: Tx,
+  jobId: number,
+  equipmentId: number,
+  rows: ComponentRow[],
+): Promise<{ componentIds: number[]; componentCount: number; operationCount: number }> {
+  const componentIds: number[] = [];
+  let operationCount = 0;
+  for (const r of rows) {
+    const component = await tx.component.create({
+      data: {
+        equipmentId,
+        unitId: r.unitId,
+        bomItemId: r.bomItemId,
+        tag: r.tag,
+        componentTypeId: r.componentTypeId,
+        routeVersionId: r.routeVersionId,
+        pressureRetaining: r.pressureRetaining,
+        jobId,
+      },
+    });
+    componentIds.push(component.id);
+    if (r.ops.length > 0) {
+      await tx.componentOperation.createMany({
+        data: r.ops.map((o) => ({
+          componentId: component.id,
+          seq: o.seq,
+          operationId: o.operationId,
+          status: OperationStatus.NOT_STARTED,
+          ...(o.qtyPlanned != null ? { qtyPlanned: o.qtyPlanned } : {}),
+          requiresQc: o.requiresQc,
+          jobId,
+        })),
+      });
+      operationCount += r.ops.length;
+    }
+  }
+  return { componentIds, componentCount: rows.length, operationCount };
+}
+
+/**
+ * S16 (Gate 2) / J5a: materialise Component + ComponentOperation rows for BOM lines (build, then write).
+ * The old signature stays for createJob's callers and the BOM release's first run.
+ */
+export async function materializeComponentsFromBomItems(
+  tx: Tx,
+  familyId: number,
+  equipmentId: number,
+  bomItemIds: number[],
+  jobId: number,
+  /** J5a: `release` = the BOM-release path (approved part families only, integer qtyPer becomes the operation's planned quantity). */
+  opts: { release?: boolean } = {},
+): Promise<{ componentCount: number; operationCount: number; skippedNoRoute: number; skippedUnapproved: number; pressureCount: number }> {
+  const built = await buildComponentRows(tx, { familyId, equipmentId, bomItemIds, jobId, opts });
+  const written = await writeComponentRows(tx, jobId, equipmentId, built.rows);
+  return {
+    componentCount: written.componentCount,
+    operationCount: written.operationCount,
+    skippedNoRoute: built.skippedNoRoute,
+    skippedUnapproved: built.skippedUnapproved,
+    pressureCount: built.pressureCount,
+  };
 }
 
 /** J5a: the component types usable on a BOM line: a raw form, or a part family that has been approved (M3, D15). */

@@ -18,6 +18,8 @@ const preview = (over: Partial<BomReleasePreview> = {}): BomReleasePreview => ({
   refusals: [],
   warnings: [],
   counts,
+  diff: null,
+  currentRevisionNo: null,
   ...over,
 });
 const button = () => screen.queryByRole("button", { name: /Release revision 1/ }) as HTMLButtonElement | null;

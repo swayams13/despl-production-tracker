@@ -237,6 +237,7 @@ function RowCard({ row, first, busy, onAct }: { row: TodayRow; first?: boolean; 
             {row.stage !== row.title ? ` · ${row.stage}` : ""} · {d.today.due} {fmtDue(d, row.dueAt)}
           </span>
           {row.returnedNote != null && <span className="fl-returned">{d.floor.returnedByQc(row.returnedNote)}</span>}
+          {row.needsReview && <span className="fl-returned">{d.floor.needsReview(null)}</span>}
         </div>
         {!stopped && (
           <div className="fl-actions">

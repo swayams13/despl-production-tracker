@@ -14,7 +14,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /** Why the Release button is off, or null when it can be pressed. Exported for the tests. */
 export function releaseBlocker(p: { state: BomReleasePreview["state"]; dirty: boolean; warnings: number; acknowledged: boolean }): string | null {
-  if (p.state !== "READY") return "This revision cannot be released as it is.";
+  if (p.state !== "READY" && p.state !== "DIFF") return "This revision cannot be released as it is.";
   if (p.dirty) return "Save the mapping first. The release uses the saved mapping.";
   if (p.warnings > 0 && !p.acknowledged) return "Tick the box to confirm you have checked the warnings.";
   return null;
@@ -39,7 +39,15 @@ export function ReleasePanel({
   return (
     <div className="card" aria-label="Release">
       <div className="hd">
-        <h3>{state === "ALREADY_RELEASED" ? `Revision ${revision.revisionNo} is released` : `Release revision ${revision.revisionNo} will make`}</h3>
+        <h3>
+          {state === "ALREADY_RELEASED"
+            ? `Revision ${revision.revisionNo} is released`
+            : state === "DIFF"
+              ? revision.materializedAt
+                ? `Changes found on revision ${revision.revisionNo}`
+                : `Releasing revision ${revision.revisionNo} changes`
+              : `Release revision ${revision.revisionNo} will make`}
+        </h3>
       </div>
       <div style={{ padding: "0 16px 16px", display: "grid", gap: 12, fontSize: "var(--fs-md, 13px)" }}>
         {counts ? (
@@ -59,7 +67,7 @@ export function ReleasePanel({
           <p className="note" style={{ textAlign: "left", margin: 0 }}>Nothing to show until the revision can be released.</p>
         )}
 
-        {state === "READY" && warnings.length > 0 && (
+        {(state === "READY" || state === "DIFF") && warnings.length > 0 && (
           <div role="group" aria-label="Warnings" style={{ display: "grid", gap: 8 }}>
             {warnings.map((w) => (
               <div key={w.code} role="status">
@@ -74,18 +82,21 @@ export function ReleasePanel({
           </div>
         )}
 
-        {canRelease && state === "READY" && (
+        {canRelease && (state === "READY" || state === "DIFF") && (
           <div style={{ display: "grid", gap: 6 }}>
             <div>
               <button type="button" className="btn btn-accent" disabled={blocker !== null || busy} onClick={() => onRelease(acknowledged)}>
-                {busy ? "Releasing…" : `Release revision ${revision.revisionNo}`}
+                {busy ? (state === "DIFF" ? "Applying…" : "Releasing…") : state === "DIFF" ? "Apply changes" : `Release revision ${revision.revisionNo}`}
               </button>
             </div>
             {blocker && <span className="note" style={{ textAlign: "left", margin: 0 }}>{blocker}</span>}
-            {!blocker && (
+            {!blocker && state === "READY" && (
               <span className="note" style={{ textAlign: "left", margin: 0 }}>
                 Makes {plural(counts?.components ?? 0, "component")} and {plural(counts?.steps ?? 0, "step")} for {plural(preview.equipment.units, "unit")}. It cannot be undone here.
               </span>
+            )}
+            {!blocker && state === "DIFF" && (
+              <span className="note" style={{ textAlign: "left", margin: 0 }}>Rows that have not started change; started rows are only flagged. Nothing is deleted.</span>
             )}
           </div>
         )}

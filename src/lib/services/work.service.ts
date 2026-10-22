@@ -153,7 +153,7 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
       });
       if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
 
-      const { unitOf, retired } = await resolveUnits(tx, job.id, items);
+      const { unitOf } = await resolveUnits(tx, job.id, items);
       await lockFloorUnits(tx, job.id, unitOf.values());
 
       // After the lock: a concurrent duplicate of this request has committed by now.
@@ -175,6 +175,8 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
       }
 
       await lockItemRows(tx, job.id, items, unitOf);
+      // J5c: a release that held the lock may have retired a row after the first look; judge it again.
+      const { retired } = await resolveUnits(tx, job.id, items);
 
       const factsByUnit = new Map<number | null, FloorFacts>();
       for (const unitId of new Set(unitOf.values())) factsByUnit.set(unitId, await loadFloorFacts(tx, job, unitId));

@@ -69,6 +69,8 @@ export interface FloorRow {
   returnedNote: string | null;
   /** J6: a lot's row counts pieces ("6 of 10 done"); null = serial, done as one. */
   qty: { planned: number; done: number } | null;
+  /** J5c: a BOM re-release changed this started row's line; it stays workable and waits for the planner's Keep / Replace / Cancel. */
+  needsReview: boolean;
 }
 
 export interface FloorUnitView {
@@ -79,6 +81,8 @@ export interface FloorUnitView {
   /** Department names the rows were filtered to; empty = all (Production Head, Admin). */
   departments: string[];
   rows: FloorRow[];
+  /** J5c: the line's current BOM revision number, named on the "changed in BOM rev N" chip. */
+  bomRevisionNo: number | null;
   lateCategories: Array<{ id: number; name: string }>;
   welders: Array<{ id: number; name: string; employeeCode: string }>;
   overrideCategories: readonly string[];
@@ -152,6 +156,7 @@ export async function loadFloorUnit(
       where: typeof ref === "string" ? { publicId: ref } : { id: ref.unitId },
       select: {
         id: true,
+        equipmentId: true,
         publicId: true,
         serialNo: true,
         jobId: true,
@@ -170,7 +175,7 @@ export async function loadFloorUnit(
     const [stepLabels, opLabels, departments, categories, welders] = await Promise.all([
       tx.assemblyStep.findMany({
         where: { ...activeRow, unitId: unit.id, jobId: unit.jobId },
-        select: { id: true, templateStepId: true, templateStep: { select: { activity: true, groupName: true } } },
+        select: { id: true, templateStepId: true, needsReview: true, templateStep: { select: { activity: true, groupName: true } } },
       }),
       tx.componentOperation.findMany({
         where: { ...activeRow, jobId: unit.jobId, component: { unitId: unit.id } },
@@ -179,6 +184,7 @@ export async function loadFloorUnit(
           operationId: true,
           seq: true,
           componentId: true,
+          needsReview: true,
           operation: { select: { name: true } },
           component: { select: { tag: true, routeVersionId: true, componentType: { select: { name: true } } } },
         },
@@ -196,12 +202,13 @@ export async function loadFloorUnit(
       }),
     ]);
 
-    const label = new Map<string, { title: string; group: string; templateStepId?: number; operationId?: number; tag?: string }>();
+    const label = new Map<string, { title: string; group: string; templateStepId?: number; operationId?: number; tag?: string; needsReview: boolean }>();
     for (const s of stepLabels) {
       label.set(rowKey("ASSEMBLY_STEP", s.id), {
         title: s.templateStep.activity,
         group: s.templateStep.groupName,
         templateStepId: s.templateStepId,
+        needsReview: s.needsReview,
       });
     }
     const printed = await routeStepNames(tx, opLabels.map((o) => ({ id: o.id, seq: o.seq, routeVersionId: o.component.routeVersionId })));
@@ -213,6 +220,7 @@ export async function loadFloorUnit(
         group: o.component.tag.toLowerCase().includes(type.toLowerCase()) ? o.component.tag : `${type} · ${o.component.tag}`,
         operationId: o.operationId,
         tag: o.component.tag,
+        needsReview: o.needsReview,
       });
     }
     const titles = new Map([...label].map(([k, v]) => [k, v.title]));
@@ -284,6 +292,7 @@ export async function loadFloorUnit(
         siblings: [],
         returnedNote: null,
         qty: row.qty ?? null,
+        needsReview: lab.needsReview,
       });
     }
 
@@ -368,7 +377,11 @@ export async function loadFloorUnit(
     }
 
     const derivedPlanIds = [...factRows.values()].filter((r) => r.item.kind === "PROCESS_PLAN" && r.derived).map((r) => r.item.id);
-    return { unit, shown, doneCount, derivedPlanIds, departments: departments.map((d) => d.name), categories, welders };
+    // J5c: the revision the "changed in BOM rev N" chip names (the line's newest materialised one).
+    const bomRevisionNo = shown.some((r) => r.needsReview)
+      ? ((await tx.bomRevision.findFirst({ where: { equipmentId: unit.equipmentId, materializedAt: { not: null } }, orderBy: { revisionNo: "desc" }, select: { revisionNo: true } }))?.revisionNo ?? null)
+      : null;
+    return { unit, shown, doneCount, derivedPlanIds, bomRevisionNo, departments: departments.map((d) => d.name), categories, welders };
   });
   if (!seen) return null;
 
@@ -391,6 +404,7 @@ export async function loadFloorUnit(
     canRecord: hasRole(actor, ...FLOOR_RECORD_ROLES),
     departments: seen.departments,
     rows: seen.shown,
+    bomRevisionNo: seen.bomRevisionNo,
     lateCategories: seen.categories,
     welders: seen.welders,
     overrideCategories: OVERRIDE_CATEGORIES,

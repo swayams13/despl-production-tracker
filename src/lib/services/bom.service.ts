@@ -1,6 +1,6 @@
 import { withTenant, type Tx } from "@/lib/db";
 import { BOM_EDIT_ROLES } from "@/lib/shared/stores-access";
-import { audited } from "@/lib/audit";
+import { audited, recordAudit } from "@/lib/audit";
 import { assertClientScope, assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import {
@@ -98,6 +98,13 @@ async function assertBomRevisionValid(tx: Tx, equipmentId: number, bomRevisionId
   return revision;
 }
 
+/** J5c: a revision whose floor rows were generated (materialized_at) takes no more edits; start a new revision. */
+async function assertBomRevisionEditable(tx: Tx, equipmentId: number, bomRevisionId: number) {
+  const revision = await assertBomRevisionValid(tx, equipmentId, bomRevisionId);
+  if (revision.materializedAt) throw new AppError(ERROR_CODES.BOM_ALREADY_MATERIALIZED, { equipmentId, bomRevisionId });
+  return revision;
+}
+
 export async function createBomItem(actor: Actor, input: CreateBomItemInput): Promise<BomItem> {
   const parsed = createBomItemSchema.parse(input);
   assertNotClientUser(actor);
@@ -105,7 +112,7 @@ export async function createBomItem(actor: Actor, input: CreateBomItemInput): Pr
 
   return withTenant(actor.tenantId, async (tx) => {
     const equipment = await loadEquipment(tx, actor, parsed.equipmentId);
-    if (parsed.bomRevisionId != null) await assertBomRevisionValid(tx, parsed.equipmentId, parsed.bomRevisionId);
+    if (parsed.bomRevisionId != null) await assertBomRevisionEditable(tx, parsed.equipmentId, parsed.bomRevisionId);
     if (parsed.parentBomItemId != null) await assertParentValid(tx, parsed.equipmentId, null, parsed.parentBomItemId);
 
     return audited(tx, actor, async () => {
@@ -154,7 +161,9 @@ export async function updateBomItem(actor: Actor, bomItemId: number, input: Upda
     if (!existing) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId });
     assertClientScope(actor, existing.equipment.job.clientId);
 
-    if (parsed.bomRevisionId != null) await assertBomRevisionValid(tx, existing.equipmentId, parsed.bomRevisionId);
+    // J5c: the lines of a released revision are what the floor rows were made from; a change goes into a new revision.
+    if (existing.bomRevisionId != null) await assertBomRevisionEditable(tx, existing.equipmentId, existing.bomRevisionId);
+    if (parsed.bomRevisionId != null) await assertBomRevisionEditable(tx, existing.equipmentId, parsed.bomRevisionId);
     if (parsed.parentBomItemId != null) {
       await assertParentValid(tx, existing.equipmentId, bomItemId, parsed.parentBomItemId);
     }
@@ -244,7 +253,7 @@ export async function ensureDraftRevisionTx(
   actor: Actor,
   equipmentId: number,
   jobId: number,
-): Promise<{ id: number; revisionNo: number; status: "DRAFT" | "RELEASED"; materializedAt: Date | null; created: boolean; moved: number } | null> {
+): Promise<{ id: number; revisionNo: number; status: "DRAFT" | "RELEASED"; materializedAt: Date | null; created: boolean; moved: number; copied: number } | null> {
   await tx.$queryRaw`SELECT id FROM equipments WHERE id = ${equipmentId} FOR UPDATE`;
   const [haveComponents, haveSteps, materialised] = await Promise.all([
     // j5c: any row, retired or not, means this line has floor rows
@@ -253,11 +262,14 @@ export async function ensureDraftRevisionTx(
     tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
     tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null } } }),
   ]);
-  if (haveComponents + haveSteps + materialised > 0) return null;
+  // Floor rows with no materialised revision = the line predates the BOM release (existing jobs are never touched).
+  if (haveComponents + haveSteps > 0 && materialised === 0) return null;
   const revisions = await tx.bomRevision.findMany({ where: { equipmentId }, orderBy: { revisionNo: "desc" }, select: { id: true, revisionNo: true, status: true, materializedAt: true } });
-  let target = revisions.find((r) => r.status === "DRAFT") ?? null;
+  // J5c: a revision J5a stepped down to DRAFT after a later release is still a released one (materialized_at), not a draft to edit.
+  let target = revisions.find((r) => r.status === "DRAFT" && r.materializedAt == null) ?? null;
   const loose = await tx.bomItem.count({ where: { equipmentId, bomRevisionId: null } });
   let created = false;
+  let copied = 0;
   if (!target) {
     const revisionNo = (revisions[0]?.revisionNo ?? 0) + 1;
     target = await audited(tx, actor, async () => {
@@ -275,6 +287,9 @@ export async function ensureDraftRevisionTx(
       };
     });
     created = true;
+    // J5c: revision N+1 of a released line starts as a copy of the released one, so nothing the floor rows were
+    // made from vanishes unless someone removes it on purpose; the diff at release then shows only the changes.
+    if (materialised > 0) copied = await copyReleasedLines(tx, actor, equipmentId, jobId, target.id, target.revisionNo);
   }
   let moved = 0;
   if (loose > 0) {
@@ -294,7 +309,52 @@ export async function ensureDraftRevisionTx(
       };
     });
   }
-  return { ...target, created, moved };
+  return { ...target, created, moved, copied };
+}
+
+/** J5c: copy the newest materialised revision's lines into `toRevisionId` (parent links remapped), audited. */
+async function copyReleasedLines(tx: Tx, actor: Actor, equipmentId: number, jobId: number, toRevisionId: number, toRevisionNo: number): Promise<number> {
+  const from = await tx.bomRevision.findFirst({ where: { equipmentId, materializedAt: { not: null } }, orderBy: { revisionNo: "desc" }, select: { id: true, revisionNo: true } });
+  if (!from) return 0;
+  const items = await tx.bomItem.findMany({ where: { equipmentId, bomRevisionId: from.id }, orderBy: { id: "asc" } });
+  const newIdOf = new Map<number, number>();
+  for (const it of items) {
+    const row = await tx.bomItem.create({
+      data: {
+        equipmentId,
+        jobId,
+        bomRevisionId: toRevisionId,
+        itemNo: it.itemNo,
+        blockNo: it.blockNo,
+        partName: it.partName,
+        description: it.description,
+        material: it.material,
+        sourceQty: it.sourceQty,
+        qtyPer: it.qtyPer,
+        uom: it.uom,
+        unit: it.unit,
+        componentTypeId: it.componentTypeId,
+        routeVariant: it.routeVariant,
+        remarks: it.remarks,
+      },
+      select: { id: true },
+    });
+    newIdOf.set(it.id, row.id);
+  }
+  for (const it of items) {
+    if (it.parentBomItemId != null && newIdOf.has(it.parentBomItemId)) {
+      await tx.bomItem.update({ where: { id: newIdOf.get(it.id)! }, data: { parentBomItemId: newIdOf.get(it.parentBomItemId)! } });
+    }
+  }
+  await recordAudit(tx, actor, {
+    action: "bom.startRevision",
+    entityType: "BomRevision",
+    entityId: toRevisionId,
+    after: { equipmentId, revisionNo: toRevisionNo, copiedFromRevisionNo: from.revisionNo, lines: items.length },
+    eventType: "BomRevisionStarted",
+    eventPayload: { equipmentId, revisionNo: toRevisionNo, copiedFrom: from.revisionNo, lines: items.length },
+  });
+  return items.length;
 }
 
 export interface BomImportFailure {
@@ -340,18 +400,20 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
       // revision (started if needed), never straight to floor rows: that would skip the release screen.
       // Lines that already have floor rows (DESPL-320, DE0467, 12548, ...) import exactly as before.
       const started = bomRevisionId == null ? await ensureDraftRevisionTx(tx, actor, equipmentId, equipment.job.id) : null;
-      const targetRevision = bomRevisionId != null ? await assertBomRevisionValid(tx, equipmentId, bomRevisionId) : started;
+      const targetRevision = bomRevisionId != null ? await assertBomRevisionEditable(tx, equipmentId, bomRevisionId) : started;
       // J5a: lines imported into a draft revision of a line with no floor rows yet wait for the BOM release,
       // which makes the components and everything after them. Any other import routes at once, as before.
       const waitsForRelease =
         targetRevision != null &&
         targetRevision.status === "DRAFT" &&
         targetRevision.materializedAt == null &&
-        // j5c: any row, retired or not, means this line has floor rows
-        (await tx.component.count({ where: { equipmentId } })) +
-          // j5c: any row, retired or not
-          (await tx.assemblyStep.count({ where: { unit: { equipmentId } } })) ===
-          0;
+        // J5c: a line with a materialised revision always waits: its next release is a diff, never a direct write.
+        ((await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null } } })) > 0 ||
+          // j5c: any row, retired or not, means this line has floor rows
+          (await tx.component.count({ where: { equipmentId } })) +
+            // j5c: any row, retired or not
+            (await tx.assemblyStep.count({ where: { unit: { equipmentId } } })) ===
+            0);
       const importRevisionId = bomRevisionId ?? started?.id ?? null;
 
       // Every `componentType` code must resolve before anything is created —

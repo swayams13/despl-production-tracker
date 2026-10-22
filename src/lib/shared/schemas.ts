@@ -1060,6 +1060,16 @@ export const bomReleaseTargetSchema = z.object({ equipmentId: id, bomRevisionId:
 export type BomReleaseTargetInput = z.infer<typeof bomReleaseTargetSchema>;
 export const startBomRevisionSchema = z.object({ equipmentId: id }).strict();
 export type StartBomRevisionInput = z.infer<typeof startBomRevisionSchema>;
+/** J5c: Keep, Replace or Cancel a floor row a BOM re-release flagged; the reason is checked in the service (trimmed, 5+ characters). */
+export const resolveReviewRowSchema = z
+  .object({
+    kind: z.enum(["ASSEMBLY_STEP", "COMPONENT_OP"]),
+    id,
+    action: z.enum(["KEEP", "REPLACE", "CANCEL"]),
+    reason: z.string().max(1000).default(""),
+  })
+  .strict();
+export type ResolveReviewRowInput = z.input<typeof resolveReviewRowSchema>;
 export const releaseBomRevisionSchema = bomReleaseTargetSchema.extend({ acknowledgeWarnings: z.boolean().default(false) }).strict();
 export type ReleaseBomRevisionInput = z.input<typeof releaseBomRevisionSchema>;
 export const mapBomLinesSchema = z

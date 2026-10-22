@@ -228,14 +228,14 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
       await expect(svc.releaseBomRevision(w.actors.admin, ack(j))).rejects.toMatchObject({ code: "BOM_ALREADY_MATERIALIZED" });
     });
 
-    it("refuses a second revision once one is materialised (BOM_RELEASE_DIFF_NOT_BUILT)", async () => {
+    it("releases a second revision as a diff once one is materialised (J5c; the diff classes are in bom-release-diff.test.ts)", async () => {
       const w = await world("DIFF");
       const j = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }] });
       await svc.releaseBomRevision(w.actors.admin, ack(j));
       const rev2 = await owner.bomRevision.create({ data: { equipmentId: j.equipmentId, revisionNo: 2, status: "DRAFT", jobId: j.jobId } });
-      const before = await counts(j);
-      await expect(svc.releaseBomRevision(w.actors.admin, { equipmentId: j.equipmentId, bomRevisionId: rev2.id, acknowledgeWarnings: true })).rejects.toMatchObject({ code: "BOM_RELEASE_DIFF_NOT_BUILT" });
-      expect(await counts(j)).toEqual(before);
+      const res = await svc.releaseBomRevision(w.actors.admin, { equipmentId: j.equipmentId, bomRevisionId: rev2.id, acknowledgeWarnings: true });
+      expect(res.noop).toBe(false);
+      expect((await owner.bomRevision.findUniqueOrThrow({ where: { id: rev2.id } })).materializedAt).not.toBeNull();
     });
 
     it("mapBomLines: draft only, this revision's lines only, a variant needs a family", async () => {
@@ -497,16 +497,18 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
       expect(await svc.startBomRevision(w.actors.eng, { equipmentId: j.equipmentId })).toMatchObject({ created: false, moved: 0 });
     });
 
-    it("refuses to start a revision on a line that already has floor rows (BOM_ALREADY_MATERIALIZED) or a released revision (BOM_RELEASE_DIFF_NOT_BUILT)", async () => {
+    it("refuses to start a revision on a legacy line (BOM_ALREADY_MATERIALIZED); on a released line it starts revision 2 as a copy (J5c)", async () => {
       const w = await world("STARTREF");
       const legacy = await bare(w);
       await releaseJobBoms(owner, w.actors.admin, legacy.jobId); // floor rows exist now, the revision it made is materialised
       await owner.bomRevision.updateMany({ where: { equipmentId: legacy.equipmentId }, data: { materializedAt: null } }); // the pre-J5a shape: floor rows, no revision released
       await expect(svc.startBomRevision(w.actors.admin, { equipmentId: legacy.equipmentId })).rejects.toMatchObject({ code: "BOM_ALREADY_MATERIALIZED" });
 
-      const released = await w.job();
+      const released = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }] });
       await svc.releaseBomRevision(w.actors.admin, ack(released));
-      await expect(svc.startBomRevision(w.actors.admin, { equipmentId: released.equipmentId })).rejects.toMatchObject({ code: "BOM_RELEASE_DIFF_NOT_BUILT" });
+      const next = await svc.startBomRevision(w.actors.admin, { equipmentId: released.equipmentId });
+      expect(next).toMatchObject({ revisionNo: 2, created: true });
+      expect(next.copied).toBeGreaterThan(0);
     });
 
     it("the preview of a released revision still lists its lines, with the stored counts", async () => {
@@ -533,15 +535,29 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
 
       const res = await svc.releaseBomRevision(w.actors.admin, { equipmentId: j.equipmentId, bomRevisionId: revision.id, acknowledgeWarnings: true });
       expect(res.counts.components).toBeGreaterThan(0);
-      // a second import joins the same draft only while nothing is released; here the line is on the floor now
+      // J5c: the line is released now, so a later import goes into a new draft revision 2 and waits for its release (a diff)
       const later = await bomSvc.importBomItems(w.actors.admin, { equipmentId: j.equipmentId, rows: [{ itemNo: 9, partName: "Extra", sourceQty: "1 NOS." }] } as never);
-      expect(later.waitsForRelease).toBe(false);
+      expect(later).toMatchObject({ waitsForRelease: true, bomRevisionNo: 2 });
     });
 
-    it("an import into a line that already has floor rows keeps today's behaviour: no revision, components made at once", async () => {
+    it("an import into a released line waits in a new draft revision and makes no components until it is released (J5c)", async () => {
+      const w = await world("IMPORTRELEASED");
+      const j = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }] });
+      await svc.releaseBomRevision(w.actors.admin, ack(j));
+      const componentsBefore = await owner.component.count({ where: { equipmentId: j.equipmentId } });
+      const r = await bomSvc.importBomItems(w.actors.admin, { equipmentId: j.equipmentId, rows: [{ itemNo: 5, partName: "Shell 2", sourceQty: "1 NOS.", componentType: "SHL" }] } as never);
+      expect(r).toMatchObject({ waitsForRelease: true, bomRevisionNo: 2, componentCount: 0 });
+      expect(await owner.component.count({ where: { equipmentId: j.equipmentId } })).toBe(componentsBefore);
+    });
+
+    it("an import into a legacy line (floor rows, no released revision) keeps today's behaviour: no revision, components made at once", async () => {
       const w = await world("IMPORTLEGACY");
       const j = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }] });
       await svc.releaseBomRevision(w.actors.admin, ack(j));
+      // make it legacy: the floor rows stay, the line has no materialised revision (as DESPL-320 and every job before J5a)
+      await owner.bomRevision.updateMany({ where: { equipmentId: j.equipmentId }, data: { materializedAt: null } });
+      await owner.bomItem.updateMany({ where: { equipmentId: j.equipmentId }, data: { bomRevisionId: null } });
+      await owner.bomRevision.deleteMany({ where: { equipmentId: j.equipmentId } });
       const revisionsBefore = await owner.bomRevision.count({ where: { equipmentId: j.equipmentId } });
       const r = await bomSvc.importBomItems(w.actors.admin, { equipmentId: j.equipmentId, rows: [{ itemNo: 5, partName: "Shell 2", sourceQty: "1 NOS.", componentType: "SHL" }] } as never);
       expect(r).toMatchObject({ waitsForRelease: false });
