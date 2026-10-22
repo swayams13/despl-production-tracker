@@ -66,6 +66,8 @@ export interface FloorRow {
   siblings: FloorSibling[];
   /** A step QC sent back and that is in progress again: QC's reason ("Returned by QC"), else an empty string; null = not returned. */
   returnedNote: string | null;
+  /** J6: a lot's row counts pieces ("6 of 10 done"); null = serial, done as one. */
+  qty: { planned: number; done: number } | null;
 }
 
 export interface FloorUnitView {
@@ -280,6 +282,7 @@ export async function loadFloorUnit(
         heatComponentId: refusal?.code === ERROR_CODES.HEAT_NUMBER_NOT_PICKED && item.kind === "COMPONENT_OP" ? (row.componentId ?? null) : null,
         siblings: [],
         returnedNote: null,
+        qty: row.qty ?? null,
       });
     }
 
