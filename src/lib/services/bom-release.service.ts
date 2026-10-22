@@ -120,8 +120,8 @@ async function storedCounts(tx: Tx, equipmentId: number, unmappedLines: number):
   return { components, operations, steps: total, stepsByScope, boundToQcp: 0, unmappedLines, ruleDecisions };
 }
 
-/** Everything the preview and the release share. Writes the floor rows only when state is READY. */
-async function run(tx: Tx, actor: Actor, equipmentId: number, bomRevisionId: number): Promise<BomReleasePreview> {
+/** Everything the preview and the release share. Writes the floor rows only when state is READY. J7a: also run by previewJob inside its own rolled-back transaction. */
+export async function runBomRelease(tx: Tx, actor: Actor, equipmentId: number, bomRevisionId: number): Promise<BomReleasePreview> {
   const equipment = await tx.equipment.findFirst({
     where: { id: equipmentId, job: { tenantId: actor.tenantId } },
     select: {
@@ -286,7 +286,7 @@ export async function previewBomRelease(actor: Actor, input: BomReleaseTargetInp
   const jobId = await jobIdOf(actor, equipmentId);
   try {
     await withJob(actor.tenantId, jobId, async (tx) => {
-      throw new DryRun(await run(tx, actor, equipmentId, bomRevisionId));
+      throw new DryRun(await runBomRelease(tx, actor, equipmentId, bomRevisionId));
     });
   } catch (e) {
     if (e instanceof DryRun) return e.preview;
@@ -383,7 +383,7 @@ export async function releaseBomRevision(actor: Actor, input: ReleaseBomRevision
   const jobId = await jobIdOf(actor, equipmentId);
 
   return withJob(actor.tenantId, jobId, async (tx) => {
-    const out = await run(tx, actor, equipmentId, bomRevisionId);
+    const out = await runBomRelease(tx, actor, equipmentId, bomRevisionId);
     const target = { equipmentId, bomRevisionId };
     switch (out.state) {
       case "ALREADY_RELEASED":

@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { ROLES, type Actor } from "@/lib/authz";
 import { ERROR_CODES } from "@/lib/shared/errors";
 import { createJob, updateJobDetails, setJobStatus } from "./job-intake.service";
-import type { CreateJobInput } from "@/lib/shared/schemas";
+import { createJobSchema, type CreateJobInput } from "@/lib/shared/schemas";
 
 function actor(over: Partial<Actor> = {}): Actor {
   return {
@@ -95,6 +95,16 @@ describe("job-intake.service — pure refusals", () => {
       // @ts-expect-error — .strict() schema; no actual_* field exists on this input
       createJob(actor(), { ...input(), actualStart: new Date() }),
     ).rejects.toThrow();
+  });
+
+  it("J7a: a line takes its own BOM and weld-map sources, and nothing else smuggled in", async () => {
+    const line = { equipmentTypeId: null, name: "V", blockNo: 1, remarks: null, serials: ["A"] };
+    const ok = createJobSchema.safeParse(input({ equipments: [{ ...line, copyBomFromEquipmentId: 4, copyWeldMapFromEquipmentId: 4 }] }));
+    expect(ok.success).toBe(true);
+    for (const bad of [{ copyBomFromEquipmentId: 0 }, { copyWeldMapFromEquipmentId: "x" }, { copyQcpFromEquipmentId: 1 }]) {
+      expect(createJobSchema.safeParse(input({ equipments: [{ ...line, ...bad }] as never })).success).toBe(false);
+    }
+    await expect(createJob(actor({ roles: [ROLES.PLANNER] }), input())).rejects.toMatchObject({ code: ERROR_CODES.FORBIDDEN });
   });
 });
 

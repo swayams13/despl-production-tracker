@@ -826,6 +826,10 @@ export const createJobSchema = z
             remarks: z.string().trim().min(1).nullable().default(null),
             /** Answers to the family's / equipment type's config questions (J2). Filtered through ConfigQuestion in the service. */
             config: z.record(z.string(), z.unknown()).nullable().optional(),
+            /** J7a: copy this equipment's BOM lines into this line as DRAFT revision 1. Wins over the job-level `copyBomFromEquipmentId` (which feeds the first line). */
+            copyBomFromEquipmentId: id.nullish(),
+            /** J7a: copy this equipment's IMPORTED weld-map joints into this line, all unconfirmed. */
+            copyWeldMapFromEquipmentId: id.nullish(),
             /** J6 (D21): SERIAL (or omitted) = one unit per serial. LOT = one unit carrying `lotQty`. LOT_THEN_SERIAL is refused by the service until D21 picks it. */
             trackingMode: z.enum(["SERIAL", "LOT", "LOT_THEN_SERIAL"]).optional(),
             lotQty: z.number().int().positive().nullish(),
@@ -853,7 +857,7 @@ export const createJobSchema = z
       .min(1, "A job needs at least one equipment block"),
     /** Clone this QCP template's items onto the new job. */
     qcpTemplateSourceId: id.nullable().default(null),
-    /** Copy this equipment's BOM lines into the first equipment block. */
+    /** Copy this equipment's BOM lines into the first equipment block (a line's own `copyBomFromEquipmentId` wins). */
     copyBomFromEquipmentId: id.nullable().default(null),
   })
   .strict()
