@@ -424,6 +424,8 @@ describe.skipIf(!RUN_DB)("bom.service (DB-backed)", async () => {
     const { tenantId, job, equipment, user } = await fixture();
     const actor: Actor = { ...actorBase(tenantId, user.id), roles: [ROLES.ADMIN] };
     const componentType = await seedRoute(tenantId, job.familyId, "NOZZLE");
+    // J5b: a line with no floor rows waits for the BOM release; this test is about a line that is already on the floor.
+    await owner.component.create({ data: { equipmentId: equipment.id, tag: "EXISTING", componentTypeId: componentType.id, jobId: job.id } });
 
     const { created, failures, componentCount } = await importBomItems(actor, {
       equipmentId: equipment.id,

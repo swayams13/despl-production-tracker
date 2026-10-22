@@ -1130,9 +1130,14 @@ function StepReview({
               </p>
             )}
             {verdict ? <VerdictPanel verdict={verdict} /> : <div className="chip c-idle"><i />Computing schedule…</div>}
-            <button className="btn btn-accent" style={{ marginTop: 14 }} onClick={onOpenJob} disabled={!verdict}>
-              Open job →
-            </button>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 14 }}>
+              <Link className="btn btn-accent" href={`/jobs/${createdJob.jobId}/release`}>
+                Next: release the BOM →
+              </Link>
+              <button className="btn" onClick={onOpenJob} disabled={!verdict}>
+                Open job →
+              </button>
+            </div>
           </div>
         </div>
       )}

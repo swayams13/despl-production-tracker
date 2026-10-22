@@ -231,6 +231,70 @@ function normalizeImportRow(raw: unknown): Record<string, unknown> {
  * genuinely larger single import shows up. */
 const IMPORT_MAX_ROWS = 1000;
 
+/**
+ * J5b: the BOM revision a line's lines wait in until the BOM is released. A line is "release-bound"
+ * while it has no floor rows (components or assembly steps) and no materialised revision: its BOM
+ * must go through the release screen, never straight to floor rows. Returns null for any other line
+ * (existing jobs keep today's behaviour exactly). Otherwise returns the line's newest unreleased
+ * DRAFT revision, creating revision N+1 if there is none, and moves the line's revision-less BOM
+ * items into it. Caller holds the transaction; role checks are the caller's.
+ */
+export async function ensureDraftRevisionTx(
+  tx: Tx,
+  actor: Actor,
+  equipmentId: number,
+  jobId: number,
+): Promise<{ id: number; revisionNo: number; status: "DRAFT" | "RELEASED"; materializedAt: Date | null; created: boolean; moved: number } | null> {
+  await tx.$queryRaw`SELECT id FROM equipments WHERE id = ${equipmentId} FOR UPDATE`;
+  const [haveComponents, haveSteps, materialised] = await Promise.all([
+    tx.component.count({ where: { equipmentId } }),
+    tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
+    tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null } } }),
+  ]);
+  if (haveComponents + haveSteps + materialised > 0) return null;
+  const revisions = await tx.bomRevision.findMany({ where: { equipmentId }, orderBy: { revisionNo: "desc" }, select: { id: true, revisionNo: true, status: true, materializedAt: true } });
+  let target = revisions.find((r) => r.status === "DRAFT") ?? null;
+  const loose = await tx.bomItem.count({ where: { equipmentId, bomRevisionId: null } });
+  let created = false;
+  if (!target) {
+    const revisionNo = (revisions[0]?.revisionNo ?? 0) + 1;
+    target = await audited(tx, actor, async () => {
+      const rev = await tx.bomRevision.create({ data: { equipmentId, revisionNo, status: "DRAFT", createdBy: actor.userId, jobId } });
+      return {
+        result: { id: rev.id, revisionNo: rev.revisionNo, status: rev.status, materializedAt: rev.materializedAt },
+        audit: {
+          action: "bom.createRevision",
+          entityType: "BomRevision",
+          entityId: rev.id,
+          after: { equipmentId, revisionNo, status: "DRAFT", releasedAt: null },
+          eventType: "BomRevisionCreated",
+          eventPayload: { equipmentId, revisionNo, status: "DRAFT" },
+        },
+      };
+    });
+    created = true;
+  }
+  let moved = 0;
+  if (loose > 0) {
+    const t = target;
+    moved = await audited(tx, actor, async () => {
+      const r = await tx.bomItem.updateMany({ where: { equipmentId, bomRevisionId: null }, data: { bomRevisionId: t.id } });
+      return {
+        result: r.count,
+        audit: {
+          action: "bom.moveToRevision",
+          entityType: "BomRevision",
+          entityId: t.id,
+          after: { equipmentId, bomRevisionId: t.id, revisionNo: t.revisionNo, moved: r.count },
+          eventType: "BomLinesMoved",
+          eventPayload: { equipmentId, bomRevisionId: t.id, moved: r.count },
+        },
+      };
+    });
+  }
+  return { ...target, created, moved };
+}
+
 export interface BomImportFailure {
   row: number;
   error: string;
@@ -241,6 +305,9 @@ export interface ImportBomItemsResult {
   failures: BomImportFailure[];
   /** Components auto-materialised from rows carrying a resolvable `componentType` code. */
   componentCount: number;
+  /** J5b: the lines are in a draft revision and make no parts or steps until the BOM is released. */
+  waitsForRelease: boolean;
+  bomRevisionNo: number | null;
 }
 
 /**
@@ -267,7 +334,11 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
     actor.tenantId,
     async (tx) => {
       const equipment = await loadEquipment(tx, actor, equipmentId);
-      const targetRevision = bomRevisionId != null ? await assertBomRevisionValid(tx, equipmentId, bomRevisionId) : null;
+      // J5b: an import with no revision on a line that has no floor rows yet goes into the line's draft
+      // revision (started if needed), never straight to floor rows: that would skip the release screen.
+      // Lines that already have floor rows (DESPL-320, DE0467, 12548, ...) import exactly as before.
+      const started = bomRevisionId == null ? await ensureDraftRevisionTx(tx, actor, equipmentId, equipment.job.id) : null;
+      const targetRevision = bomRevisionId != null ? await assertBomRevisionValid(tx, equipmentId, bomRevisionId) : started;
       // J5a: lines imported into a draft revision of a line with no floor rows yet wait for the BOM release,
       // which makes the components and everything after them. Any other import routes at once, as before.
       const waitsForRelease =
@@ -275,6 +346,7 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
         targetRevision.status === "DRAFT" &&
         targetRevision.materializedAt == null &&
         (await tx.component.count({ where: { equipmentId } })) + (await tx.assemblyStep.count({ where: { unit: { equipmentId } } })) === 0;
+      const importRevisionId = bomRevisionId ?? started?.id ?? null;
 
       // Every `componentType` code must resolve before anything is created —
       // unlike other row-level validation failures (which skip just that row
@@ -322,7 +394,7 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
         const data = {
           ...rowFields,
           equipmentId,
-          bomRevisionId: bomRevisionId ?? null,
+          bomRevisionId: importRevisionId,
           jobId: equipment.job.id,
           componentTypeId: componentType != null ? (componentTypesByCode.get(componentType) ?? null) : null,
         };
@@ -355,7 +427,7 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
         ? { componentCount: 0 }
         : await materializeComponentsFromBomItems(tx, equipment.job.familyId, equipmentId, created.map((c) => c.id), equipment.job.id);
 
-      return { created, failures, componentCount };
+      return { created, failures, componentCount, waitsForRelease, bomRevisionNo: waitsForRelease ? (targetRevision?.revisionNo ?? null) : null };
     },
     // Task review Important #4: a real 200-300 row import (2 round-trips per
     // row: create + audit insert, plus a findMany for any row with a parent)

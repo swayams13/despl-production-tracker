@@ -1036,6 +1036,8 @@ export type CreateBomRevisionInput = z.infer<typeof createBomRevisionSchema>;
 // ── BOM release (J5a) ───────────────────────────────────────────────────
 export const bomReleaseTargetSchema = z.object({ equipmentId: id, bomRevisionId: id }).strict();
 export type BomReleaseTargetInput = z.infer<typeof bomReleaseTargetSchema>;
+export const startBomRevisionSchema = z.object({ equipmentId: id }).strict();
+export type StartBomRevisionInput = z.infer<typeof startBomRevisionSchema>;
 export const releaseBomRevisionSchema = bomReleaseTargetSchema.extend({ acknowledgeWarnings: z.boolean().default(false) }).strict();
 export type ReleaseBomRevisionInput = z.input<typeof releaseBomRevisionSchema>;
 export const mapBomLinesSchema = z

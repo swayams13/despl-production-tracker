@@ -4,13 +4,14 @@ import { audited } from "@/lib/audit";
 import { assertNotClientUser, requireRole, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { BOM_RELEASE_ROLES } from "@/lib/shared/stores-access";
-import { bomReleaseTargetSchema, mapBomLinesSchema, releaseBomRevisionSchema, type BomReleaseTargetInput, type MapBomLinesInput, type ReleaseBomRevisionInput } from "@/lib/shared/schemas";
+import { bomReleaseTargetSchema, startBomRevisionSchema, mapBomLinesSchema, releaseBomRevisionSchema, type BomReleaseTargetInput, type StartBomRevisionInput, type MapBomLinesInput, type ReleaseBomRevisionInput } from "@/lib/shared/schemas";
 import { JOINT_TYPE_LABEL } from "@/lib/shared/weld-map";
 import { pickRouteTemplate } from "@/lib/shared/stage-mapping";
 import type { JointType } from "@/generated/prisma/client";
 import { flushRuleDecisions, LineRules } from "./config-rules";
 import { approvedComponentTypeIds, materializeComponentsFromBomItems } from "./component.service";
 import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
+import { ensureDraftRevisionTx } from "./bom.service";
 import { loadSkippedQcpItems } from "./assembly-qcp-match";
 import { buildReleaseWarnings, suggestPartFamily, type PartFamilySuggestion, type ReleaseWarning } from "./bom-release.rules";
 
@@ -148,14 +149,17 @@ async function run(tx: Tx, actor: Actor, equipmentId: number, bomRevisionId: num
     warnings: [] as ReleaseWarning[],
   };
 
-  if (revision.materializedAt) return { ...base, state: "ALREADY_RELEASED", counts: await storedCounts(tx, equipmentId, 0) };
-  const other = await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null }, id: { not: revision.id } } });
-  if (other > 0) return { ...base, state: "OTHER_REVISION_RELEASED", counts: null };
-  const [haveComponents, haveSteps] = await Promise.all([
-    tx.component.count({ where: { equipmentId } }),
-    tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
-  ]);
-  if (haveComponents + haveSteps > 0) return { ...base, state: "LEGACY_MATERIALIZED", counts: null };
+  // Whatever the state, the lines are listed (read only unless READY); only READY writes floor rows.
+  let early: Exclude<BomReleaseState, "READY" | "REFUSED"> | null = null;
+  if (revision.materializedAt) early = "ALREADY_RELEASED";
+  else if ((await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null }, id: { not: revision.id } } })) > 0) early = "OTHER_REVISION_RELEASED";
+  else {
+    const [haveComponents, haveSteps] = await Promise.all([
+      tx.component.count({ where: { equipmentId } }),
+      tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
+    ]);
+    if (haveComponents + haveSteps > 0) early = "LEGACY_MATERIALIZED";
+  }
 
   // ── Lines ────────────────────────────────────────────────────────────
   const familyId = equipment.templateVersion?.template.familyId ?? equipment.job.familyId;
@@ -221,6 +225,7 @@ async function run(tx: Tx, actor: Actor, equipmentId: number, bomRevisionId: num
     };
   });
   const refusals = lines.flatMap((l) => (l.issue ? [{ code: l.issue.code, bomItemId: l.bomItemId, itemNo: l.itemNo, message: l.issue.message }] : []));
+  if (early) return { ...base, lines, state: early, counts: early === "ALREADY_RELEASED" ? await storedCounts(tx, equipmentId, lines.filter((l) => l.componentTypeId == null).length) : null };
   if (refusals.length > 0) return { ...base, lines, refusals, state: "REFUSED", counts: null };
 
   // ── Write the floor rows ─────────────────────────────────────────────
@@ -288,6 +293,26 @@ export async function previewBomRelease(actor: Actor, input: BomReleaseTargetInp
     throw e;
   }
   throw new Error("unreachable");
+}
+
+/**
+ * J5b "Start revision N": the line's draft BOM revision, started if it has none, with the line's
+ * revision-less BOM items moved into it (audited). Safe to repeat: with a draft already there it
+ * only moves any loose lines. A line that already has floor rows, or a materialised revision,
+ * is refused like the release itself (existing jobs are never touched).
+ */
+export async function startBomRevision(actor: Actor, input: StartBomRevisionInput): Promise<{ bomRevisionId: number; revisionNo: number; created: boolean; moved: number }> {
+  const { equipmentId } = startBomRevisionSchema.parse(input);
+  guard(actor);
+  const jobId = await jobIdOf(actor, equipmentId);
+  return withJob(actor.tenantId, jobId, async (tx) => {
+    const r = await ensureDraftRevisionTx(tx, actor, equipmentId, jobId);
+    if (!r) {
+      const released = await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null } } });
+      throw new AppError(released > 0 ? ERROR_CODES.BOM_RELEASE_DIFF_NOT_BUILT : ERROR_CODES.BOM_ALREADY_MATERIALIZED, { equipmentId });
+    }
+    return { bomRevisionId: r.id, revisionNo: r.revisionNo, created: r.created, moved: r.moved };
+  });
 }
 
 /**

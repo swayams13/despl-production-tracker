@@ -74,7 +74,7 @@ export async function updateBomItemAction(
 }
 
 export type ImportBomItemsActionResult =
-  | { ok: true; createdCount: number; failures: BomImportFailure[]; componentCount: number }
+  | { ok: true; createdCount: number; failures: BomImportFailure[]; componentCount: number; waitsForRelease: boolean; bomRevisionNo: number | null }
   | { ok: false; code: string; message: string };
 
 /**
@@ -91,9 +91,9 @@ export async function importBomItemsAction(
   bomRevisionId?: number,
 ): Promise<ImportBomItemsActionResult> {
   try {
-    const { created, failures, componentCount } = await importBomItems(await requireActor(), { equipmentId, bomRevisionId, rows });
+    const { created, failures, componentCount, waitsForRelease, bomRevisionNo } = await importBomItems(await requireActor(), { equipmentId, bomRevisionId, rows });
     revalidatePath(`/jobs/${jobId}`);
-    return { ok: true, createdCount: created.length, failures, componentCount };
+    return { ok: true, createdCount: created.length, failures, componentCount, waitsForRelease, bomRevisionNo };
   } catch (e) {
     const result = toActionError(e); // never actually returns ok:true — non-AppError is rethrown inside
     if (result.ok) throw e;
