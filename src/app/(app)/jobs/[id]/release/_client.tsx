@@ -22,7 +22,7 @@ const reasonOf = (r: { message: string; detail?: Record<string, unknown> }) => (
 const NOT_REVISION_STATE: Partial<Record<BomReleasePreview["state"], string>> = {
   ALREADY_RELEASED: "This revision is released. Its parts and steps are on the floor; releasing again changes nothing.",
   LEGACY_MATERIALIZED: "This line already has parts or steps from before the BOM release existed, so its BOM cannot be released. Existing jobs are never changed by a release.",
-  OTHER_REVISION_RELEASED: "Another revision of this line is already released. Releasing a later revision on top of it is not available yet.",
+  SUPERSEDED: "A later revision of this line is already released. This one is kept as history.",
 };
 
 type Edit = { componentTypeId: number | null; routeVariant: string | null };
@@ -184,7 +184,7 @@ function Body({
   const [releasing, startReleasing] = useTransition();
   const [confirm, setConfirm] = useState<boolean | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
-  const editable = preview.state !== "ALREADY_RELEASED" && preview.state !== "LEGACY_MATERIALIZED" && preview.state !== "OTHER_REVISION_RELEASED" && preview.revision.status === "DRAFT";
+  const editable = preview.state !== "ALREADY_RELEASED" && preview.state !== "LEGACY_MATERIALIZED" && preview.state !== "SUPERSEDED" && preview.revision.materializedAt == null;
   const families = view.families;
 
   const current = (l: BomReleaseLine): Edit => edits.get(l.bomItemId) ?? { componentTypeId: l.componentTypeId, routeVariant: l.routeVariant };

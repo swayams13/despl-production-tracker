@@ -12,6 +12,7 @@ import { flushRuleDecisions, LineRules } from "./config-rules";
 import { approvedComponentTypeIds, materializeComponentsFromBomItems } from "./component.service";
 import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
 import { ensureDraftRevisionTx } from "./bom.service";
+import { applyReleaseDiff, diffIsEmpty, previewDiff, type ReleaseDiff } from "./bom-release-diff";
 import { loadSkippedQcpItems } from "./assembly-qcp-match";
 import { buildReleaseWarnings, suggestPartFamily, type PartFamilySuggestion, type ReleaseWarning } from "./bom-release.rules";
 import { activeRow } from "./active-row";
@@ -25,14 +26,16 @@ import { activeRow } from "./active-row";
  * planned joints x units, per-component over the components just made) and their QCP links.
  *
  *  - Idempotent by revision: `bom_revisions.materialized_at`. The same revision again is a no-op.
- *  - Another revision after one is materialised: refused (BOM_RELEASE_DIFF_NOT_BUILT, J5c).
+ *  - Another revision after one is materialised (J5c): a DIFF. Floor rows not started are updated or retired,
+ *    started ones are flagged for review, nothing is deleted. The current revision again is a weld-map / answer
+ *    resync by the same diff; an empty diff is a no-op. An older revision is refused (BOM_REVISION_NOT_INCREASING).
  *  - A line that already has components or steps from the old createJob path is refused
  *    (BOM_ALREADY_MATERIALIZED): existing jobs are never touched.
  *  - The preview IS the release run inside a transaction that is rolled back, so what it
  *    reports is what a release would do (ponytail: it consumes sequence ids, harmless).
  */
 
-export type BomReleaseState = "READY" | "REFUSED" | "ALREADY_RELEASED" | "LEGACY_MATERIALIZED" | "OTHER_REVISION_RELEASED";
+export type BomReleaseState = "READY" | "REFUSED" | "ALREADY_RELEASED" | "LEGACY_MATERIALIZED" | "DIFF" | "SUPERSEDED";
 
 export interface BomReleaseLine {
   bomItemId: number;
@@ -75,12 +78,18 @@ export interface BomReleasePreview {
   warnings: ReleaseWarning[];
   /** What a release would make (READY), or what the earlier release made (ALREADY_RELEASED). */
   counts: BomReleaseCounts | null;
+  /** J5c: the changes a re-release (state DIFF) would make to the floor rows; the preview trims `rows`. */
+  diff: ReleaseDiff | null;
+  /** J5c: the line's current materialised revision number (null before the first release). */
+  currentRevisionNo: number | null;
 }
 
 export interface BomReleaseResult {
   noop: boolean;
   counts: BomReleaseCounts;
   warnings: ReleaseWarning[];
+  /** J5c: counts of what a re-release changed. */
+  diff?: ReleaseDiff["counts"];
 }
 
 const aliasWords: Record<string, string> = Object.fromEntries(
@@ -131,9 +140,10 @@ export async function runBomRelease(tx: Tx, actor: Actor, equipmentId: number, b
       jobId: true,
       equipmentTypeId: true,
       config: true,
+      assemblyTemplateVersionId: true,
       job: { select: { familyId: true } },
       templateVersion: { select: { template: { select: { familyId: true } } } },
-      units: { select: { id: true }, orderBy: { id: "asc" } },
+      units: { select: { id: true, serialNo: true }, orderBy: { id: "asc" } },
     },
   });
   if (!equipment) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Equipment", equipmentId });
@@ -148,13 +158,19 @@ export async function runBomRelease(tx: Tx, actor: Actor, equipmentId: number, b
     lines: [] as BomReleaseLine[],
     refusals: [] as BomReleasePreview["refusals"],
     warnings: [] as ReleaseWarning[],
+    diff: null as ReleaseDiff | null,
+    currentRevisionNo: null as number | null,
   };
 
-  // Whatever the state, the lines are listed (read only unless READY); only READY writes floor rows.
-  let early: Exclude<BomReleaseState, "READY" | "REFUSED"> | null = null;
-  if (revision.materializedAt) early = "ALREADY_RELEASED";
-  else if ((await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null }, id: { not: revision.id } } })) > 0) early = "OTHER_REVISION_RELEASED";
-  else {
+  // J5c: the line's current materialised revision decides what kind of release this is.
+  const current = await tx.bomRevision.findFirst({ where: { equipmentId, materializedAt: { not: null } }, orderBy: { revisionNo: "desc" }, select: { id: true, revisionNo: true } });
+  base.currentRevisionNo = current?.revisionNo ?? null;
+
+  // Whatever the state, the lines are listed (read only unless READY or DIFF); only those two write floor rows.
+  let early: Exclude<BomReleaseState, "READY" | "REFUSED" | "DIFF" | "ALREADY_RELEASED"> | null = null;
+  if (current) {
+    if (revision.revisionNo < current.revisionNo) early = "SUPERSEDED";
+  } else {
     const [haveComponents, haveSteps] = await Promise.all([
       // j5c: any row, retired or not, means this line has floor rows
       tx.component.count({ where: { equipmentId } }),
@@ -228,26 +244,55 @@ export async function runBomRelease(tx: Tx, actor: Actor, equipmentId: number, b
     };
   });
   const refusals = lines.flatMap((l) => (l.issue ? [{ code: l.issue.code, bomItemId: l.bomItemId, itemNo: l.itemNo, message: l.issue.message }] : []));
-  if (early) return { ...base, lines, state: early, counts: early === "ALREADY_RELEASED" ? await storedCounts(tx, equipmentId, lines.filter((l) => l.componentTypeId == null).length) : null };
+  const unmappedLines = lines.filter((l) => l.componentTypeId == null).length;
+  if (early) return { ...base, lines, state: early, counts: early === "SUPERSEDED" ? await storedCounts(tx, equipmentId, unmappedLines) : null };
   if (refusals.length > 0) return { ...base, lines, refusals, state: "REFUSED", counts: null };
 
   // ── Write the floor rows ─────────────────────────────────────────────
   const mapped = items.filter((b) => b.componentTypeId != null).map((b) => b.id);
-  const comps = await materializeComponentsFromBomItems(tx, familyId, equipmentId, mapped, equipment.jobId, { release: true });
   const qcp = await tx.qcpTemplate.findFirst({ where: { jobId: equipment.jobId }, select: { id: true } });
-  const asm = await materializeAssemblyStepsFromTemplate(
-    tx,
-    actor.tenantId,
-    equipment.jobId,
-    familyId,
-    equipment.units.map((u) => u.id),
-    qcp?.id ?? null,
-    equipment.equipmentTypeId,
-    rules,
-    qcp ? await loadSkippedQcpItems(tx, equipment.jobId) : [],
-    equipmentId,
-    (equipment.config as Record<string, unknown> | null) ?? {},
-  );
+  const skippedQcp = qcp ? await loadSkippedQcpItems(tx, equipment.jobId) : [];
+  let pressureCount: number;
+  let boundToQcp: number;
+  let emptyScopes: string[];
+  let diff: ReleaseDiff | null = null;
+  if (current) {
+    // J5c: a re-release reconciles the floor rows with this revision instead of generating them.
+    const res = await applyReleaseDiff(tx, actor, {
+      equipment: { ...equipment, familyId },
+      tenantId: actor.tenantId,
+      targetRevisionId: revision.id,
+      targetRevisionNo: revision.revisionNo,
+      qcpTemplateId: qcp?.id ?? null,
+      skippedQcp,
+      rules,
+    });
+    if (diffIsEmpty(res.diff) && revision.id === current.id) {
+      return { ...base, lines, state: "ALREADY_RELEASED", currentRevisionNo: current.revisionNo, counts: await storedCounts(tx, equipmentId, unmappedLines) };
+    }
+    diff = res.diff;
+    pressureCount = res.pressureCount;
+    boundToQcp = res.boundToQcp;
+    emptyScopes = res.emptyScopes;
+  } else {
+    const comps = await materializeComponentsFromBomItems(tx, familyId, equipmentId, mapped, equipment.jobId, { release: true });
+    const asm = await materializeAssemblyStepsFromTemplate(
+      tx,
+      actor.tenantId,
+      equipment.jobId,
+      familyId,
+      equipment.units.map((u) => u.id),
+      qcp?.id ?? null,
+      equipment.equipmentTypeId,
+      rules,
+      skippedQcp,
+      equipmentId,
+      (equipment.config as Record<string, unknown> | null) ?? {},
+    );
+    pressureCount = comps.pressureCount;
+    boundToQcp = asm.boundToQcp;
+    emptyScopes = asm.emptyScopes;
+  }
   await flushRuleDecisions(tx, [rules]);
 
   // ── Warnings ─────────────────────────────────────────────────────────
@@ -262,17 +307,18 @@ export async function runBomRelease(tx: Tx, actor: Actor, equipmentId: number, b
     unmappedKitCodes: kit.filter((k) => !mappedTypeIds.has(k.componentType.id)).map((k) => k.componentType.code),
     hasQcp: qcp != null,
     unconfirmedJoints: await tx.plannedJoint.count({ where: { equipmentId, confirmed: false, source: { not: "GENERATED" } } }),
-    emptyJointTypes: asm.emptyScopes.filter((s) => s.startsWith("joint:")).map((s) => JOINT_TYPE_LABEL[s.slice(6) as JointType].toLowerCase()),
-    pressureParts: comps.pressureCount,
+    emptyJointTypes: emptyScopes.filter((s) => s.startsWith("joint:")).map((s) => JOINT_TYPE_LABEL[s.slice(6) as JointType].toLowerCase()),
+    pressureParts: pressureCount,
   });
 
-  const stored = await storedCounts(tx, equipmentId, lines.filter((l) => l.componentTypeId == null).length);
+  const stored = await storedCounts(tx, equipmentId, unmappedLines);
   return {
     ...base,
     lines,
     warnings,
-    state: "READY",
-    counts: { ...stored, boundToQcp: asm.boundToQcp },
+    diff,
+    state: diff ? "DIFF" : "READY",
+    counts: { ...stored, boundToQcp },
   };
 }
 
@@ -292,7 +338,7 @@ export async function previewBomRelease(actor: Actor, input: BomReleaseTargetInp
       throw new DryRun(await runBomRelease(tx, actor, equipmentId, bomRevisionId));
     });
   } catch (e) {
-    if (e instanceof DryRun) return e.preview;
+    if (e instanceof DryRun) return e.preview.diff ? { ...e.preview, diff: previewDiff(e.preview.diff) } : e.preview;
     throw e;
   }
   throw new Error("unreachable");
@@ -304,17 +350,15 @@ export async function previewBomRelease(actor: Actor, input: BomReleaseTargetInp
  * only moves any loose lines. A line that already has floor rows, or a materialised revision,
  * is refused like the release itself (existing jobs are never touched).
  */
-export async function startBomRevision(actor: Actor, input: StartBomRevisionInput): Promise<{ bomRevisionId: number; revisionNo: number; created: boolean; moved: number }> {
+export async function startBomRevision(actor: Actor, input: StartBomRevisionInput): Promise<{ bomRevisionId: number; revisionNo: number; created: boolean; moved: number; copied: number }> {
   const { equipmentId } = startBomRevisionSchema.parse(input);
   guard(actor);
   const jobId = await jobIdOf(actor, equipmentId);
   return withJob(actor.tenantId, jobId, async (tx) => {
     const r = await ensureDraftRevisionTx(tx, actor, equipmentId, jobId);
-    if (!r) {
-      const released = await tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null } } });
-      throw new AppError(released > 0 ? ERROR_CODES.BOM_RELEASE_DIFF_NOT_BUILT : ERROR_CODES.BOM_ALREADY_MATERIALIZED, { equipmentId });
-    }
-    return { bomRevisionId: r.id, revisionNo: r.revisionNo, created: r.created, moved: r.moved };
+    // Only a line that predates the BOM release (floor rows, no materialised revision) is refused.
+    if (!r) throw new AppError(ERROR_CODES.BOM_ALREADY_MATERIALIZED, { equipmentId });
+    return { bomRevisionId: r.id, revisionNo: r.revisionNo, created: r.created, moved: r.moved, copied: r.copied };
   });
 }
 
@@ -394,13 +438,14 @@ export async function releaseBomRevision(actor: Actor, input: ReleaseBomRevision
           result: { noop: true, counts: out.counts!, warnings: [] } satisfies BomReleaseResult,
           audit: { action: "bom.release.noop", entityType: "BomRevision", entityId: bomRevisionId, after: { ...target, counts: out.counts } },
         }));
-      case "OTHER_REVISION_RELEASED":
-        throw new AppError(ERROR_CODES.BOM_RELEASE_DIFF_NOT_BUILT, target);
+      case "SUPERSEDED":
+        throw new AppError(ERROR_CODES.BOM_REVISION_NOT_INCREASING, { ...target, revisionNo: out.revision.revisionNo, currentHighestRevisionNo: out.currentRevisionNo });
       case "LEGACY_MATERIALIZED":
         throw new AppError(ERROR_CODES.BOM_ALREADY_MATERIALIZED, target);
       case "REFUSED":
         throw new AppError(ERROR_CODES.ROUTE_NOT_APPROVED, { ...target, lines: out.refusals }, out.refusals[0].message);
       case "READY":
+      case "DIFF":
         break;
     }
     // Throwing here rolls the floor rows run() just wrote back.
@@ -410,10 +455,13 @@ export async function releaseBomRevision(actor: Actor, input: ReleaseBomRevision
     const counts = out.counts!;
     return audited(tx, actor, async () => {
       // Invariant 1: the clock is the database's. A revision released some other way keeps its released_at.
-      await tx.bomRevision.updateMany({ where: { equipmentId, status: "RELEASED", id: { not: bomRevisionId } }, data: { status: "DRAFT" } });
-      await tx.$executeRaw`UPDATE bom_revisions SET status = 'RELEASED', released_at = COALESCE(released_at, now()), materialized_at = now() WHERE id = ${bomRevisionId}`;
+      // J5c: a resync of the current revision (weld map, answers) keeps its stamp.
+      if (out.revision.materializedAt == null) {
+        await tx.bomRevision.updateMany({ where: { equipmentId, status: "RELEASED", id: { not: bomRevisionId } }, data: { status: "DRAFT" } });
+        await tx.$executeRaw`UPDATE bom_revisions SET status = 'RELEASED', released_at = COALESCE(released_at, now()), materialized_at = now() WHERE id = ${bomRevisionId}`;
+      }
       return {
-        result: { noop: false, counts, warnings: out.warnings } satisfies BomReleaseResult,
+        result: { noop: false, counts, warnings: out.warnings, ...(out.diff ? { diff: out.diff.counts } : {}) } satisfies BomReleaseResult,
         audit: {
           action: "bom.release",
           entityType: "BomRevision",
@@ -431,6 +479,8 @@ export async function releaseBomRevision(actor: Actor, input: ReleaseBomRevision
             unmappedLines: counts.unmappedLines,
             ruleDecisions: counts.ruleDecisions,
             warningsAcknowledged: out.warnings.map((w) => w.code),
+            // J5c: every changed row with its before/after fields (the preview showed the first 200).
+            ...(out.diff ? { diff: out.diff, resync: out.revision.materializedAt != null, previousRevisionNo: out.currentRevisionNo } : {}),
           },
           eventType: "BomReleased",
           eventPayload: { equipmentId, bomRevisionId },

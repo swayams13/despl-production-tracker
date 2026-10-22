@@ -25,6 +25,8 @@ export const LOT_HEAT_ROLES = ["ADMIN", "PRODUCTION_HEAD", "STORES"] as const;
 export const BOM_EDIT_ROLES = ["ADMIN", "PRODUCTION_HEAD"] as const;
 /** J5a: preview, map and release a BOM revision (this is what creates the floor steps). The planner cannot. */
 export const BOM_RELEASE_ROLES = ["ADMIN", "PRODUCTION_HEAD", "ENGINEERING"] as const;
+/** J5c: settle a started floor row a BOM re-release flagged (Keep / Replace / Cancel). Not Admin: it decides what the floor builds. */
+export const BOM_REVIEW_ROLES = ["PRODUCTION_HEAD", "ENGINEERING"] as const;
 /** The cross-job Materials queue. Read only for the planner. */
 export const MATERIALS_QUEUE_ROLES = ["STORES", "ADMIN", "PRODUCTION_HEAD", "PLANNER"] as const;
 

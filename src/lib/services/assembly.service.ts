@@ -666,6 +666,47 @@ function shellCoursesRefusal(jointTypes: string[]): AppError {
   );
 }
 
+/** J5c: one assembly step row the sequence wants for a unit (the builder's output; the writer inserts it). */
+export interface AssemblyStepRow {
+  unitId: number;
+  templateStepId: number;
+  seq: number;
+  qcpItemId: number | null;
+  requiresQc: boolean;
+  role: AssemblyStepRole | null;
+  jointRef: string | null;
+  pressurePart: boolean;
+  plannedJointId: number | null;
+  componentId: number | null;
+  qtyPlanned: number | null;
+  jobId: number;
+}
+export interface BuiltAssemblySteps extends AssemblyMaterializeResult {
+  rows: AssemblyStepRow[];
+  /** The template version the rows come from (null: no template for this family, or no units). */
+  version: { id: number } | null;
+  /** The version had at least one step after the line's rules. */
+  hasSteps: boolean;
+}
+export interface BuildAssemblyStepArgs {
+  tenantId: number;
+  jobId: number;
+  familyId: number;
+  unitIds: number[];
+  qcpTemplateId: number | null;
+  equipmentTypeId?: number | null;
+  /** J2: this line's answers. Absent = no rules evaluated (every step materialised, as before). */
+  rules?: LineRules | null;
+  /** J2: QCP source items a rule dropped; their position still counts when steps bind to items. */
+  skippedQcp?: { srNo: string; sequence: number }[];
+  /** J3a: the line these units belong to; it records the assembly template version its steps came from. */
+  equipmentId?: number | null;
+  /** J4a: the line's answers (shell_courses plans its seams when the route has PER_JOINT steps). */
+  answers?: Record<string, unknown>;
+  /** J5c (invariant 9): build from the version the line was pinned to, never re-resolve. */
+  pinnedVersionId?: number | null;
+}
+
 export async function materializeAssemblyStepsFromTemplate(
   tx: Tx,
   tenantId: number,
@@ -684,25 +725,51 @@ export async function materializeAssemblyStepsFromTemplate(
   answers: Record<string, unknown> = {},
 ): Promise<AssemblyMaterializeResult> {
   const none: AssemblyMaterializeResult = { stepCount: 0, boundToQcp: 0, byScope: {}, emptyScopes: [] };
+  const built = await buildAssemblyStepRows(tx, { tenantId, jobId, familyId, unitIds, qcpTemplateId, equipmentTypeId, rules, skippedQcp, equipmentId, answers });
+  if (!built.version) return none;
+  if (equipmentId != null) {
+    await tx.equipment.update({ where: { id: equipmentId }, data: { assemblyTemplateVersionId: built.version.id } });
+  }
+  if (!built.hasSteps) return none;
+  // createJob only ever writes a brand-new Job, so the pin starts null. A job with several equipment blocks
+  // calls this once per block: the first block's version stays the job-level pin (J3 makes it per-equipment),
+  // later calls must not overwrite it.
+  await tx.job.updateMany({ where: { id: jobId, assemblyTemplateVersionId: null }, data: { assemblyTemplateVersionId: built.version.id } });
+  await writeAssemblyStepRows(tx, built.rows);
+  const { rows: _rows, version: _version, hasSteps: _hasSteps, ...result } = built;
+  return result;
+}
+
+/** J5c: insert built step rows. */
+export async function writeAssemblyStepRows(tx: Tx, rows: AssemblyStepRow[]): Promise<void> {
+  await tx.assemblyStep.createMany({ data: rows });
+}
+
+/**
+ * S17 / J5a / J5c: what assembly steps the sequence wants for these units, without writing any step. It may
+ * plan the shell seams (planned joints) when the line has none yet, exactly as the materialiser always did.
+ */
+export async function buildAssemblyStepRows(tx: Tx, args: BuildAssemblyStepArgs): Promise<BuiltAssemblySteps> {
+  const { tenantId, familyId, unitIds, qcpTemplateId, jobId } = args;
+  const equipmentTypeId = args.equipmentTypeId ?? null;
+  const rules = args.rules ?? null;
+  const skippedQcp = args.skippedQcp ?? [];
+  const equipmentId = args.equipmentId ?? null;
+  const answers = args.answers ?? {};
+  const none: BuiltAssemblySteps = { stepCount: 0, boundToQcp: 0, byScope: {}, emptyScopes: [], rows: [], version: null, hasSteps: false };
   if (unitIds.length === 0) return none;
 
   // No assembly template authored for this family yet is a legitimate seam.
-  const version = await resolveAssemblyTemplateVersion(tx, tenantId, familyId, equipmentTypeId);
+  const version =
+    args.pinnedVersionId != null
+      ? await tx.assemblyTemplateVersion.findUnique({ where: { id: args.pinnedVersionId }, include: { steps: { orderBy: { seq: "asc" } } } })
+      : await resolveAssemblyTemplateVersion(tx, tenantId, familyId, equipmentTypeId);
   if (!version) return none;
-  if (equipmentId != null) {
-    await tx.equipment.update({ where: { id: equipmentId }, data: { assemblyTemplateVersionId: version.id } });
-  }
   // Occurrence indices below are counted over the FULL template, so a rule that
   // drops one step never shifts which QCP item the later steps bind to (J2).
   const allSteps = version.steps;
   const steps = rules ? allSteps.filter((st) => rules.decide("ASSEMBLY_STEP", st.id, st.includeWhen)) : allSteps;
-  if (steps.length === 0) return none;
-
-  // createJob only ever writes a brand-new Job, so the pin starts null. A job
-  // with several equipment blocks calls this once per block: the first block's
-  // version stays the job-level pin (J3 makes it per-equipment), later calls
-  // must not overwrite it.
-  await tx.job.updateMany({ where: { id: jobId, assemblyTemplateVersionId: null }, data: { assemblyTemplateVersionId: version.id } });
+  if (steps.length === 0) return { ...none, version: { id: version.id } };
 
   const srNoOccurrence = srNoOccurrences(allSteps);
 
@@ -779,20 +846,7 @@ export async function materializeAssemblyStepsFromTemplate(
   let boundToQcp = 0;
   const byScope: Record<string, number> = {};
   const emptyScopes = new Set<string>();
-  const rows: {
-    unitId: number;
-    templateStepId: number;
-    seq: number;
-    qcpItemId: number | null;
-    requiresQc: boolean;
-    role: AssemblyStepRole | null;
-    jointRef: string | null;
-    pressurePart: boolean;
-    plannedJointId: number | null;
-    componentId: number | null;
-    qtyPlanned: number | null;
-    jobId: number;
-  }[] = [];
+  const rows: AssemblyStepRow[] = [];
   for (const unitId of unitIds) {
     // Rows an expansion adds shift every later template step by that many seqs (a step that
     // expands to nothing leaves a gap). A route with no scoped step is unchanged: extra stays 0.
@@ -845,7 +899,5 @@ export async function materializeAssemblyStepsFromTemplate(
       extra += Math.max(targets.length - 1, 0);
     }
   }
-  await tx.assemblyStep.createMany({ data: rows });
-
-  return { stepCount, boundToQcp, byScope, emptyScopes: [...emptyScopes] };
+  return { stepCount, boundToQcp, byScope, emptyScopes: [...emptyScopes], rows, version: { id: version.id }, hasSteps: true };
 }
