@@ -1191,15 +1191,31 @@ function StepReview({
 // multi-value discriminant ("FEASIBLE" | "INFEASIBLE" sharing one union
 // member) doesn't survive a chain of ternaries, but does survive an if/else
 // in its own function body.
+/** J6: quantity bands are stored for these processes but not applied; say so. */
+function BandWarning({ warning }: { warning?: { lots: Array<{ name: string; qty: number }>; processes: string[] } | null }) {
+  if (!warning) return null;
+  return (
+    <p className="note" style={{ textAlign: "left", margin: "8px 0 0" }}>
+      Warning: {warning.lots.map((l) => `${l.name} is a lot of ${l.qty}`).join("; ")}. Quantity bands are recorded for {warning.processes.join(", ")} but are not used for these dates, so they assume the normal quantity. Check them against the lot size.
+    </p>
+  );
+}
+
 function VerdictPanel({ verdict }: { verdict: ScheduleVerdict }) {
   switch (verdict.kind) {
     case "FEASIBLE":
-      return <div className="chip c-complete"><i />Schedule feasible — {verdict.planCount} process plans generated</div>;
+      return (
+        <>
+          <div className="chip c-complete"><i />Schedule feasible — {verdict.planCount} process plans generated</div>
+          <BandWarning warning={verdict.qtyBandWarning} />
+        </>
+      );
     case "INFEASIBLE":
       return (
         <>
           <div className="chip c-overdue"><i />Infeasible by {verdict.shortfallDays ?? "?"} day{verdict.shortfallDays === 1 ? "" : "s"}</div>
           <p className="note" style={{ textAlign: "left", margin: "8px 0 0" }}>The schedule was still saved, so the gap is visible on the job page.</p>
+          <BandWarning warning={verdict.qtyBandWarning} />
         </>
       );
     case "DATA_MISSING":

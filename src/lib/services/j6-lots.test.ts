@@ -56,6 +56,7 @@ describe.skipIf(!RUN_DB)("Lean Core J6 lots (DB)", async () => {
   const { recordWork } = await import("./work.service");
   const { inspect } = await import("./work.service");
   const { makeWorkOrg } = await import("./work.test-util");
+  const { qtyBandWarning } = await import("./job-intake.read");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   let n = 0;
@@ -124,6 +125,22 @@ describe.skipIf(!RUN_DB)("Lean Core J6 lots (DB)", async () => {
       // bands are copied to the job's processes
       const jp = await owner.jobProcess.findMany({ where: { jobId: r.jobId, code: "20" } });
       expect(jp[0].qtyBands).toEqual(w.bands);
+    });
+
+    it("warns about stored quantity bands for a lot, and for nothing else; the dates do not change", async () => {
+      const w = await world();
+      const serial = await w.make([{ ...base, name: "Receiver", blockNo: 1, serials: ["SR01"] }]);
+      expect(await qtyBandWarning(w.actor, serial.jobId)).toBeNull();
+      const lot = await w.make([{ ...base, name: "Tank", blockNo: 1, trackingMode: "LOT", lotQty: 40 }]);
+      expect(await qtyBandWarning(w.actor, lot.jobId)).toEqual({ lots: [{ name: "Tank", qty: 40 }], processes: ["20 P2"] });
+      // invariant 10: same envelope for the same route, lot or not
+      const finish = async (jobId: number) => {
+        await generateSchedule(w.actor, { jobId, mode: "FORWARD" });
+        return (await owner.processPlan.findMany({ where: { jobId, scheduleRun: { isCurrent: true } }, orderBy: { jobProcessId: "asc" } })).map(
+          (p) => p.plannedFinish?.toISOString(),
+        );
+      };
+      expect(await finish(lot.jobId)).toEqual(await finish(serial.jobId));
     });
 
     it("gives a lot's plans its quantity and a serial unit's none; a reschedule keeps the count done", async () => {

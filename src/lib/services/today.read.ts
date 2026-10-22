@@ -151,7 +151,7 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
       weld: null,
       heatComponentId: null,
       returnedNote: null,
-      qty: null, // ponytail: a lot's plan-level count is entered on its unit screen; Today only lists direct plans as one
+      qty: p.qtyPlanned != null ? { planned: p.qtyPlanned, done: p.qtyDone } : null,
       siblings: [],
       jobId: m.jobId,
       jobNumber: m.jobNumber,
