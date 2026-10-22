@@ -352,7 +352,7 @@ describe.skipIf(!RUN_DB)("Lean Core J7a job drafts (DB)", async () => {
       const src = await w.sourceJob();
       const d = await copyJobToDraft(w.actors.planner, { jobId: src.jobId });
       expect(d.sourceJobId).toBe(src.jobId);
-      const p = d.payload as Record<string, any>;
+      const p = d.payload as { equipments: Record<string, unknown>[] } & Record<string, unknown>;
       expect(p).toMatchObject({ clientId: w.client.id, familyId: w.family.id, templateVersionId: w.tv.id, excludedProcessCodes: ["20"], exclusionReason: "No client request" });
       expect(p.qcpTemplateSourceId).toBeTypeOf("number");
       expect(p).not.toHaveProperty("jobNumber");
@@ -368,7 +368,7 @@ describe.skipIf(!RUN_DB)("Lean Core J7a job drafts (DB)", async () => {
       const w = await world("COPYREL");
       const src = await w.sourceJob();
       const d = await copyJobToDraft(w.actors.planner, { jobId: src.jobId });
-      const p = d.payload as Record<string, any>;
+      const p = d.payload as { equipments: Record<string, unknown>[] } & Record<string, unknown>;
       const filled = {
         ...p,
         jobNumber: uniq("NEW"),
