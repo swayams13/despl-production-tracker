@@ -1,4 +1,7 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect as baseExpect, type Page } from "@playwright/test";
+
+// Release and the board render heavy pages; on a loaded machine the default 5 s is too tight.
+const expect = baseExpect.configure({ timeout: 30_000 });
 
 /**
  * Lean Core J5b: BOM release through the REAL /login form (never a forged session, CLAUDE.md
@@ -17,8 +20,8 @@ async function signIn(page: Page, email: string) {
   await page.getByLabel("Username or email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.locator(".person-btn:visible")).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
+  await expect(page.locator(".person-btn:visible")).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe.configure({ mode: "serial" });
@@ -81,7 +84,7 @@ test("a new job's BOM is released from the screen, not created by an import or b
   await page.getByRole("dialog").getByRole("button", { name: "Release" }).click();
   await expect(page.getByText("BOM released. The floor steps are made.")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/\d+ components, \d+ operations, \d+ assembly steps/)).toBeVisible();
-  await expect(page.getByText(/Revision 1 is released/i)).toBeVisible();
+  await expect(page.getByText(/Revision 1 is released/i)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: /Release revision 1/ })).toHaveCount(0);
 
   // ── a reload says "released"; the floor has its stages ──

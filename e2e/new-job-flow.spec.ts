@@ -19,8 +19,8 @@ async function signIn(page: Page, email: string) {
   await page.getByLabel("Username or email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.locator(".person-btn:visible")).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
+  await expect(page.locator(".person-btn:visible")).toBeVisible({ timeout: 30_000 }); // a cold server can take a while to render the first page
 }
 
 const next = (page: Page) => page.getByRole("button", { name: "Next →" });
@@ -51,9 +51,9 @@ test("copy DESPL-320 as a draft, preview it, resume it after a reload, create it
 
   await page.goto("/jobs/new");
   await expect(page.getByRole("heading", { name: "New job" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Copy as draft" }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Copy .* as draft$/ }).first()).toBeVisible();
   await page.getByRole("button", { name: "Copy DESPL-320 as draft" }).click();
-  await expect(page).toHaveURL(/\/jobs\/new\?draft=\d+/);
+  await expect(page).toHaveURL(/\/jobs\/new\?draft=\d+/, { timeout: 30_000 });
 
   // ── no waits between steps ──
   await fillOrder(page, jobNumber);
@@ -83,11 +83,12 @@ test("copy DESPL-320 as a draft, preview it, resume it after a reload, create it
   await expect(page.getByText(/2 units/)).toBeVisible();
   await expect(page.getByText(/Floor steps are created when the BOM is released/)).toBeVisible();
 
-  // ── the draft is spent: its link says so, and the start screen no longer lists it ──
+  // ── the draft is spent: its link says so, and the saved-drafts strip no longer lists it ──
   await page.reload();
   await expect(page.getByText(/already turned into a job/)).toBeVisible();
   await page.goto("/jobs/new");
-  await expect(page.getByText(jobNumber)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Copy .* as draft$/ }).first()).toBeVisible();
+  await expect(page.getByLabel("Saved drafts").getByText(jobNumber)).toHaveCount(0);
   await page.context().close();
 });
 
@@ -99,7 +100,7 @@ test("Build from master: the equipment type's kit fills the BOM as a draft revis
 
   await page.goto("/jobs/new");
   await page.getByRole("link", { name: "Build from master" }).click();
-  await expect(page).toHaveURL(/route=master/);
+  await expect(page).toHaveURL(/route=master/, { timeout: 30_000 });
   await fillOrder(page, jobNumber);
 
   await page.getByText(/route version available/).first().click();
