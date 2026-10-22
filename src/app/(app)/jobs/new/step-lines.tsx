@@ -231,7 +231,7 @@ export function StepLines({
                 />
               ))}
             </div>
-            {new Set(b.serials.map((s) => s.trim())).size !== b.serials.map((s) => s.trim()).filter(Boolean).length && (
+            {new Set(b.serials.map((s) => s.trim()).filter(Boolean)).size !== b.serials.map((s) => s.trim()).filter(Boolean).length && (
               <div className="ws-err">Serial numbers must be unique within this block.</div>
             )}
             </>)}

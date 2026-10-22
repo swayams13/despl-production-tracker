@@ -35,7 +35,7 @@ const SAVE_DELAY_MS = 800;
 const PREVIEW_DELAY_MS = 700;
 
 function clock(d: Date): string {
-  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" });
+  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Asia/Kolkata" });
 }
 
 /**
