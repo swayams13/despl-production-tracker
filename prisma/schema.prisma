@@ -2151,7 +2151,7 @@ model Component {
   /// Not representable in Prisma's schema DSL (no filtered-index syntax), so
   /// it has no `@@` counterpart here — do not let a future `prisma migrate
   /// dev` diff propose dropping it as drift; that migration is authoritative.
-  /// J5c (20261028101000): `components_unit_id_tag_active_key (unit_id, tag) WHERE retired_at IS NULL` replaced the
+  /// J5c (20261030100000): `components_unit_id_tag_active_key (unit_id, tag) WHERE retired_at IS NULL` replaced the
   /// full @@unique([unitId, tag]); the equipment-grain index above gained `AND retired_at IS NULL`. No compound key.
   @@index([equipmentId])
   @@index([unitId])
@@ -2228,7 +2228,7 @@ model ComponentOperation {
   paintRecord       PaintRecord?
   dftReadings       DftReading[]
 
-  // J5c (20261028101000): component_operations_component_id_seq_key is now partial, (component_id, seq) WHERE retired_at IS NULL.
+  // J5c (20261030100000): component_operations_component_id_seq_key is now partial, (component_id, seq) WHERE retired_at IS NULL.
   @@index([componentId])
   @@index([operationId])
   @@index([status])
@@ -2760,7 +2760,7 @@ model AssemblyStep {
   rejections        AssemblyStepRejection[]
   ruleNcrs          Ncr[]
 
-  // J5c (20261028101000): assembly_steps_unit_id_seq_key is now partial, (unit_id, seq) WHERE retired_at IS NULL.
+  // J5c (20261030100000): assembly_steps_unit_id_seq_key is now partial, (unit_id, seq) WHERE retired_at IS NULL.
   @@index([unitId])
   @@index([templateStepId])
   @@index([status])
