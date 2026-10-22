@@ -50,6 +50,9 @@ interface EquipBlockState {
   serialPad: string;
   serialCount: string;
   serials: string[];
+  /** J6: SERIAL = one unit per serial; LOT = one unit carrying `lotQty` pieces. */
+  tracking: "SERIAL" | "LOT";
+  lotQty: string;
 }
 
 interface WizardState {
@@ -100,6 +103,8 @@ function emptyBlock(): EquipBlockState {
     serialPad: "2",
     serialCount: "1",
     serials: [""],
+    tracking: "SERIAL",
+    lotQty: "",
   };
 }
 
@@ -188,6 +193,7 @@ function step2Valid(s: WizardState, families: IntakeFamily[]): boolean {
 function step3Valid(s: WizardState): boolean {
   if (s.equipments.length === 0) return false;
   return s.equipments.every((e) => {
+    if (e.tracking === "LOT") return e.name.trim().length > 0 && Number.isInteger(Number(e.lotQty)) && Number(e.lotQty) > 0;
     const serials = e.serials.map((x) => x.trim()).filter(Boolean);
     return e.name.trim().length > 0 && serials.length > 0 && new Set(serials).size === serials.length;
   });
@@ -278,7 +284,9 @@ export function NewJobWizard({ options }: { options: IntakeOptions }) {
         blockNo: e.blockNo.trim() ? Number(e.blockNo) : null,
         remarks: e.remarks.trim() || null,
         config: Object.keys(state.answers).length ? state.answers : null,
-        serials: e.serials.map((x) => x.trim()).filter(Boolean),
+        ...(e.tracking === "LOT"
+          ? { trackingMode: "LOT" as const, lotQty: Number(e.lotQty), serials: [] }
+          : { serials: e.serials.map((x) => x.trim()).filter(Boolean) }),
       })),
       qcpTemplateSourceId: state.qcpTemplateSourceId,
       copyBomFromEquipmentId: state.copyBomFromEquipmentId,
@@ -863,6 +871,33 @@ function StepEquipment({
               </div>
             </div>
 
+            <div className="sh-sec">How it is tracked</div>
+            <div className="emp-grid" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 10 }}>
+              <div>
+                <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Tracking</label>
+                <select
+                  className="ws-detail"
+                  value={b.tracking}
+                  onChange={(e) => updateBlock(b.key, (x) => ({ ...x, tracking: e.target.value as "SERIAL" | "LOT" }))}
+                >
+                  <option value="SERIAL">Serial units: each one has its own serial number</option>
+                  <option value="LOT">One lot: counted, not serialised</option>
+                </select>
+              </div>
+              {b.tracking === "LOT" && (
+                <div>
+                  <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Pieces in the lot *</label>
+                  <input
+                    className="ws-detail"
+                    type="number"
+                    min={1}
+                    value={b.lotQty}
+                    onChange={(e) => updateBlock(b.key, (x) => ({ ...x, lotQty: e.target.value }))}
+                  />
+                </div>
+              )}
+            </div>
+            {b.tracking === "SERIAL" && (<>
             <div className="sh-sec">Serial scheme</div>
             <div className="emp-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
               <div>
@@ -927,6 +962,7 @@ function StepEquipment({
             {new Set(b.serials.map((s) => s.trim())).size !== b.serials.map((s) => s.trim()).filter(Boolean).length && (
               <div className="ws-err">Serial numbers must be unique within this block.</div>
             )}
+            </>)}
           </div>
         </div>
       ))}
@@ -1075,8 +1111,8 @@ function StepReview({
             {state.equipments.map((b) => (
               <tr className="row" key={b.key}>
                 <td>{b.name || "—"}</td>
-                <td className="num mono">{b.serials.filter((s) => s.trim()).length}</td>
-                <td className="mono" style={{ color: "var(--muted)" }}>{b.serials.filter((s) => s.trim()).join(", ")}</td>
+                <td className="num mono">{b.tracking === "LOT" ? b.lotQty : b.serials.filter((s) => s.trim()).length}</td>
+                <td className="mono" style={{ color: "var(--muted)" }}>{b.tracking === "LOT" ? "One lot, counted" : b.serials.filter((s) => s.trim()).join(", ")}</td>
               </tr>
             ))}
           </tbody>
@@ -1155,15 +1191,31 @@ function StepReview({
 // multi-value discriminant ("FEASIBLE" | "INFEASIBLE" sharing one union
 // member) doesn't survive a chain of ternaries, but does survive an if/else
 // in its own function body.
+/** J6: quantity bands are stored for these processes but not applied; say so. */
+function BandWarning({ warning }: { warning?: { lots: Array<{ name: string; qty: number }>; processes: string[] } | null }) {
+  if (!warning) return null;
+  return (
+    <p className="note" style={{ textAlign: "left", margin: "8px 0 0" }}>
+      Warning: {warning.lots.map((l) => `${l.name} is a lot of ${l.qty}`).join("; ")}. Quantity bands are recorded for {warning.processes.join(", ")} but are not used for these dates, so they assume the normal quantity. Check them against the lot size.
+    </p>
+  );
+}
+
 function VerdictPanel({ verdict }: { verdict: ScheduleVerdict }) {
   switch (verdict.kind) {
     case "FEASIBLE":
-      return <div className="chip c-complete"><i />Schedule feasible — {verdict.planCount} process plans generated</div>;
+      return (
+        <>
+          <div className="chip c-complete"><i />Schedule feasible — {verdict.planCount} process plans generated</div>
+          <BandWarning warning={verdict.qtyBandWarning} />
+        </>
+      );
     case "INFEASIBLE":
       return (
         <>
           <div className="chip c-overdue"><i />Infeasible by {verdict.shortfallDays ?? "?"} day{verdict.shortfallDays === 1 ? "" : "s"}</div>
           <p className="note" style={{ textAlign: "left", margin: "8px 0 0" }}>The schedule was still saved, so the gap is visible on the job page.</p>
+          <BandWarning warning={verdict.qtyBandWarning} />
         </>
       );
     case "DATA_MISSING":

@@ -1,3 +1,4 @@
+import { Prisma } from "@/generated/prisma/client";
 import { withTenant } from "@/lib/db";
 import { assertNotClientUser, ROLES, requireRole, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -603,5 +604,36 @@ export async function loadQcpCodeRefOptions(actor: Actor): Promise<QcpCodeRefOpt
       orderBy: { code: "asc" },
     });
     return rows.map((r) => ({ code: r.code, label: r.label, blocksCompletion: r.blocksCompletion, waivable: r.waivable }));
+  });
+}
+
+/**
+ * J6 (D17 default): quantity bands are stored on a process and shown, never applied to dates. The
+ * schedule preview warns when a lot is larger than the first band, so the planner knows the
+ * envelope was not scaled for it. Null = nothing to warn about.
+ */
+export interface QtyBandWarning {
+  lots: Array<{ name: string; qty: number }>;
+  processes: string[];
+}
+export async function qtyBandWarning(actor: Actor, jobId: number): Promise<QtyBandWarning | null> {
+  assertNotClientUser(actor);
+  return withTenant(actor.tenantId, async (tx) => {
+    const lots = await tx.unit.findMany({
+      where: { jobId, equipment: { trackingMode: "LOT" } },
+      select: { qtyPlanned: true, equipment: { select: { name: true } } },
+    });
+    if (lots.length === 0) return null;
+    const banded = await tx.jobProcess.findMany({
+      where: { jobId, included: true, NOT: { qtyBands: { equals: Prisma.DbNull } } },
+      select: { code: true, name: true, qtyBands: true },
+      orderBy: { seq: "asc" },
+    });
+    const processes = banded
+      .filter((p) => Array.isArray(p.qtyBands) && p.qtyBands.length > 0)
+      .map((p) => `${p.code} ${p.name}`);
+    return processes.length > 0
+      ? { lots: lots.map((l) => ({ name: l.equipment.name, qty: l.qtyPlanned })), processes }
+      : null;
   });
 }

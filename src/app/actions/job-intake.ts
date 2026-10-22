@@ -16,7 +16,7 @@ import {
   updateEquipmentType,
   createProductFamily,
 } from "@/lib/services/admin.service";
-import { loadTemplateProcesses } from "@/lib/services/job-intake.read";
+import { loadTemplateProcesses, qtyBandWarning, type QtyBandWarning } from "@/lib/services/job-intake.read";
 import { generateSchedule, getSchedule } from "@/lib/services/schedule.service";
 import { withTenant } from "@/lib/db";
 import { AppError, ERROR_CODES, isAppError } from "@/lib/shared/errors";
@@ -66,7 +66,7 @@ export async function createJobAction(input: CreateJobInput): Promise<CreateJobA
 }
 
 export type ScheduleVerdict =
-  | { kind: "FEASIBLE" | "INFEASIBLE"; shortfallDays: number | null; planCount: number }
+  | { kind: "FEASIBLE" | "INFEASIBLE"; shortfallDays: number | null; planCount: number; qtyBandWarning?: QtyBandWarning | null }
   | { kind: "DATA_MISSING"; message: string }
   | { kind: "FAILED"; message: string };
 
@@ -92,6 +92,7 @@ export async function scheduleNewJobAction(
       kind: run.feasibility === "INFEASIBLE" ? "INFEASIBLE" : "FEASIBLE",
       shortfallDays: run.shortfallDays,
       planCount: run.processPlans.length,
+      qtyBandWarning: await qtyBandWarning(await requireActor(), jobId),
     };
   } catch (e) {
     if (isAppError(e)) {

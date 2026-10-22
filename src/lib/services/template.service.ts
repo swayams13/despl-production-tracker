@@ -245,7 +245,7 @@ export async function saveDraftVersion(
     // does not send them. Remember the current values, keyed by process code.
     const existingProcesses = await tx.templateProcess.findMany({
       where: { versionId },
-      select: { id: true, code: true, grain: true, requiresQc: true, evidenceKind: true, includeWhen: true, cumulativePrinted: true },
+      select: { id: true, code: true, grain: true, requiresQc: true, evidenceKind: true, includeWhen: true, qtyBands: true, cumulativePrinted: true },
     });
     const existingByCode = new Map(existingProcesses.map((p) => [p.code, p]));
     const existingCodeById = new Map(existingProcesses.map((p) => [p.id, p.code]));
@@ -296,6 +296,11 @@ export async function saveDraftVersion(
               existingByCode.get(p.code)?.includeWhen == null
                 ? undefined
                 : (existingByCode.get(p.code)!.includeWhen as Prisma.InputJsonValue),
+            // J6: quantity bands are not in the editor either; keep them.
+            qtyBands:
+              existingByCode.get(p.code)?.qtyBands == null
+                ? undefined
+                : (existingByCode.get(p.code)!.qtyBands as Prisma.InputJsonValue),
           },
         });
         idByKey.set(p.key, row.id);

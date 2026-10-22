@@ -40,7 +40,7 @@ describe.skipIf(!RUN_DB)("template clone fidelity (DB)", async () => {
           durationMinDays: 3 + seq, durationMaxDays: 9 + seq, cumulativePrinted: `${seq} wk`, defaultDepartmentId: dept.id,
           workOrderStages: [seq, seq + 1], envelopeFinishByMinDays: 10 + seq, envelopeFinishByMaxDays: 20 + seq,
           envelopeStartByMinDays: 1 + seq, envelopeStartByMaxDays: 2 + seq, optional: true, provisional: true,
-          evidenceKind, grain: "JOB", requiresQc: false, includeWhen,
+          evidenceKind, grain: "JOB", requiresQc: false, includeWhen, qtyBands: [{ maxQty: 10 + seq, multiplier: 1 }],
         },
       });
     const p1 = await mk(1, "MDR_COMPILED", { all: [{ key: "pwht", op: "eq", value: true }] });

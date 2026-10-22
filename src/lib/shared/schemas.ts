@@ -826,14 +826,28 @@ export const createJobSchema = z
             remarks: z.string().trim().min(1).nullable().default(null),
             /** Answers to the family's / equipment type's config questions (J2). Filtered through ConfigQuestion in the service. */
             config: z.record(z.string(), z.unknown()).nullable().optional(),
-            serials: z
-              .array(z.string().trim().min(1))
-              .min(1, "Each equipment block needs at least one serial number"),
+            /** J6 (D21): SERIAL (or omitted) = one unit per serial. LOT = one unit carrying `lotQty`. LOT_THEN_SERIAL is refused by the service until D21 picks it. */
+            trackingMode: z.enum(["SERIAL", "LOT", "LOT_THEN_SERIAL"]).optional(),
+            lotQty: z.number().int().positive().nullish(),
+            serials: z.array(z.string().trim().min(1)).default([]),
           })
           .strict()
-          .refine((b) => new Set(b.serials).size === b.serials.length, {
-            message: "Serial numbers must be unique within an equipment block",
-            path: ["serials"],
+          .superRefine((b, ctx) => {
+            const mode = b.trackingMode ?? "SERIAL";
+            if (mode === "SERIAL" || mode === "LOT_THEN_SERIAL") {
+              if (mode === "SERIAL" && b.serials.length === 0) {
+                ctx.addIssue({ code: "custom", path: ["serials"], message: "Each equipment block needs at least one serial number" });
+              }
+              if (new Set(b.serials).size !== b.serials.length) {
+                ctx.addIssue({ code: "custom", path: ["serials"], message: "Serial numbers must be unique within an equipment block" });
+              }
+              if (mode === "SERIAL" && b.lotQty != null) {
+                ctx.addIssue({ code: "custom", path: ["lotQty"], message: "A lot quantity applies to a lot line only" });
+              }
+            } else {
+              if (b.lotQty == null) ctx.addIssue({ code: "custom", path: ["lotQty"], message: "A lot line needs its quantity" });
+              if (b.serials.length > 0) ctx.addIssue({ code: "custom", path: ["serials"], message: "A lot line has no serial numbers; it is counted, not serialised" });
+            }
           }),
       )
       .min(1, "A job needs at least one equipment block"),
@@ -1373,6 +1387,8 @@ export const recordWorkSchema = z
                 remarks: z.string().trim().max(1000).optional(),
                 qtyGood: z.number().int().nonnegative().optional(),
                 qtyRejected: z.number().int().nonnegative().optional(),
+                /** J6: pieces done in this write on a lot. Omitted on a lot = all that is left. */
+                qty: z.number().int().positive().optional(),
               })
               .strict()
               .optional(),
