@@ -423,4 +423,82 @@ describe.skipIf(!RUN_DB)("Lean Core J7a job drafts (DB)", async () => {
       expect(rows.every((r) => r.actorId != null)).toBe(true);
     });
   });
+  // ── J7b: Build from master (the equipment type's kit fills a line's BOM) ────────
+  describe("Build from master", () => {
+    /** A type with a three-line kit: a fixed plate, a ring count read from the shell_courses answer, and 3 couplings. */
+    async function typeWithKit(w: Awaited<ReturnType<typeof world>>, kit = true) {
+      const type = await owner.equipmentTypeRef.create({ data: { tenantId: w.tenantId, familyId: w.family.id, code: uniq("T"), name: "Kit vessel" } });
+      if (kit) {
+        const ct = async (name: string) => owner.componentTypeRef.create({ data: { tenantId: w.tenantId, code: uniq("CT"), name } });
+        const [plate, ring, coupling] = [await ct("Plate"), await ct("Shell ring"), await ct("Coupling")];
+        for (const [c, qty, src] of [[plate, 1, "FIXED"], [ring, 1, "ANSWER:shell_courses"], [coupling, 3, "FIXED"]] as const) {
+          await owner.equipmentTypeComponent.create({ data: { tenantId: w.tenantId, equipmentTypeId: type.id, componentTypeId: c.id, defaultQty: qty, qtySource: src } });
+        }
+      }
+      return type;
+    }
+
+    it("refuses a kit fill with no equipment type, and together with a copied BOM", async () => {
+      const w = await world("KITREFUSE");
+      const src = await w.sourceJob();
+      await expect(createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomFromKit: true })] }))).rejects.toThrow(/equipment type/);
+      const type = await typeWithKit(w);
+      await expect(
+        createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomFromKit: true, equipmentTypeId: type.id, copyBomFromEquipmentId: src.eqs[0].id })] })),
+      ).rejects.toThrow(/not both/);
+    });
+
+    it("fills a DRAFT revision 1 from the kit (answer-driven quantity), makes no floor rows, and the preview sees the same lines without writing", async () => {
+      const w = await world("KITFILL");
+      const type = await typeWithKit(w);
+      const input = w.input({ equipments: [w.line("V", ["S1", "S2"], { bomFromKit: true, equipmentTypeId: type.id })] });
+      const before = await tally(w.tenantId);
+      const pv = await previewJob(w.actors.planner, input);
+      expect(pv.result.bomItemCount).toBe(3);
+      expect(await tally(w.tenantId)).toEqual(before);
+
+      const r = await createJob(w.actors.admin, input);
+      expect(r.bomItemCount).toBe(3);
+      const eq = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+      const revs = await owner.bomRevision.findMany({ where: { equipmentId: eq.id } });
+      expect(revs.map((x) => [x.revisionNo, x.status])).toEqual([[1, "DRAFT"]]);
+      const items = await owner.bomItem.findMany({ where: { equipmentId: eq.id }, orderBy: { itemNo: "asc" }, include: { componentType: true } });
+      expect(items.map((i) => [i.itemNo, i.componentType?.name, Number(i.qtyPer), i.bomRevisionId === revs[0].id])).toEqual([
+        [1, "Plate", 1, true], [2, "Shell ring", 2, true], [3, "Coupling", 3, true],
+      ]);
+      expect(await owner.component.count({ where: { equipmentId: eq.id } })).toBe(0);
+      expect(await owner.assemblyStep.count({ where: { unit: { equipmentId: eq.id } } })).toBe(0);
+    });
+
+    it("a type with no kit makes no revision; a saved draft carries the flag through release", async () => {
+      const w = await world("KITDRAFT");
+      const empty = await typeWithKit(w, false);
+      const r0 = await createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomFromKit: true, equipmentTypeId: empty.id })] }));
+      expect(r0.bomItemCount).toBe(0);
+      expect(await owner.bomRevision.count({ where: { jobId: r0.jobId } })).toBe(0);
+
+      const type = await typeWithKit(w);
+      const d = await saveDraft(w.actors.planner, { payload: w.input({ equipments: [w.line("V", ["K1"], { bomFromKit: true, equipmentTypeId: type.id })] }) });
+      const { job } = await releaseDraft(w.actors.head, { draftId: d.id });
+      expect(job.bomItemCount).toBe(3);
+    });
+
+    it("the wizard's reads: a planner gets the options with each type's kit, and the previous-job list is tenant-scoped", async () => {
+      const w = await world("KITREAD");
+      const other = await world("KITREAD2");
+      const type = await typeWithKit(w);
+      await createJob(w.actors.admin, w.input());
+      await createJob(other.actors.admin, other.input());
+      const { loadIntakeOptions, loadCopyableJobs } = await import("./job-intake.read");
+      const opts = await loadIntakeOptions(w.actors.planner);
+      expect(opts.equipmentTypes.find((t) => t.id === type.id)?.kit).toEqual([
+        { name: "Plate", qty: 1, qtySource: "FIXED" }, { name: "Shell ring", qty: 1, qtySource: "ANSWER:shell_courses" }, { name: "Coupling", qty: 3, qtySource: "FIXED" },
+      ]);
+      const jobs = await loadCopyableJobs(w.actors.planner);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject({ clientName: "ACME", product: "Vessel × 2", units: 2 });
+      await expect(loadCopyableJobs(w.actors.supervisor)).rejects.toMatchObject({ code: "FORBIDDEN" });
+      await expect(loadIntakeOptions(w.actors.qc)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+  });
 });

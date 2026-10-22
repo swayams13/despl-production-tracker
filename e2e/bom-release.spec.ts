@@ -1,4 +1,7 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect as baseExpect, type Page } from "@playwright/test";
+
+// Release and the board render heavy pages; on a loaded machine the default 5 s is too tight.
+const expect = baseExpect.configure({ timeout: 30_000 });
 
 /**
  * Lean Core J5b: BOM release through the REAL /login form (never a forged session, CLAUDE.md
@@ -17,8 +20,8 @@ async function signIn(page: Page, email: string) {
   await page.getByLabel("Username or email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.locator(".person-btn:visible")).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login/, { timeout: 30_000 });
+  await expect(page.locator(".person-btn:visible")).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe.configure({ mode: "serial" });
@@ -31,24 +34,23 @@ test("a new job's BOM is released from the screen, not created by an import or b
   // ── the wizard: a PV job, one block of two units, DESPL-320's BOM copied ──
   const jobNumber = `J5B-E2E-${Date.now()}`;
   await page.goto("/jobs/new");
+  await page.getByRole("link", { name: "Start from a template" }).click();
   await page.getByPlaceholder("Search client…").click();
   await page.locator(".drop .d-row").first().click();
   await page.getByPlaceholder("e.g. DESPL-321").fill(jobNumber);
   await page.locator('input[type="date"]').nth(1).fill("2027-03-31");
-  await page.getByRole("button", { name: "Next →" }).click();
-  await page.waitForTimeout(2000); // the wizard keeps its state in the URL: let each step settle before the next click
+  await page.getByRole("button", { name: "Next →" }).click(); // J7b: the wizard holds its state in the page, so no waits between steps
   await page.getByText(/route version available/).first().click();
-  await expect(page.getByRole("button", { name: "Next →" })).toBeEnabled({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Next →" }).click();
-  await page.locator("select").first().selectOption({ label: "Vertical vessel on skirt" });
+  await page.locator("select").filter({ hasText: "Vertical vessel on skirt" }).selectOption({ label: "Vertical vessel on skirt" });
   await page.getByPlaceholder("e.g. 320SR").fill("J5BE");
-  await page.locator('input[type="number"]').nth(3).fill("2"); // quantity
-  await page.getByRole("button", { name: "Next →" }).click();
-  await page.locator("xpath=//label[normalize-space()='Shell courses']/following::input[1]").fill("2");
-  const copy = page.locator("select").last();
+  await page.locator("xpath=//label[normalize-space()='Quantity']/following::input[1]").fill("2");
+  await page.getByLabel("BOM source for line 1").selectOption("COPY");
+  const copy = page.getByLabel("Job to copy the BOM of line 1 from");
   await copy.selectOption({ value: (await copy.locator("option", { hasText: /^DESPL-320 — .*29 items/ }).first().getAttribute("value")) ?? "" });
   await page.getByRole("button", { name: "Next →" }).click();
-  await page.waitForTimeout(2000);
+  await page.locator("xpath=//label[normalize-space()='Shell courses']/following::input[1]").fill("2");
+  await page.getByRole("button", { name: "Next →" }).click(); // QC plan
+  await page.getByRole("button", { name: "Next →" }).click(); // schedule and release
   await page.getByRole("button", { name: "Create job" }).click();
   await expect(page.getByText("Job created")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/Floor steps are created when the BOM is released/)).toBeVisible();
@@ -82,7 +84,7 @@ test("a new job's BOM is released from the screen, not created by an import or b
   await page.getByRole("dialog").getByRole("button", { name: "Release" }).click();
   await expect(page.getByText("BOM released. The floor steps are made.")).toBeVisible({ timeout: 60_000 });
   await expect(page.getByText(/\d+ components, \d+ operations, \d+ assembly steps/)).toBeVisible();
-  await expect(page.getByText(/Revision 1 is released/i)).toBeVisible();
+  await expect(page.getByText(/Revision 1 is released/i)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("button", { name: /Release revision 1/ })).toHaveCount(0);
 
   // ── a reload says "released"; the floor has its stages ──

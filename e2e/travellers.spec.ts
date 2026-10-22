@@ -18,7 +18,7 @@ async function signIn(page: Page, identifier: string) {
 test("the job page links to nine travellers with serial, inline QR and a /u/ link", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
   await page.goto("/jobs");
-  await page.getByRole("link", { name: "DESPL-320" }).first().click();
+  await page.getByRole("cell", { name: "DESPL-320", exact: true }).click();
   await page.getByRole("link", { name: "Print travellers" }).click();
   await expect(page).toHaveURL(/\/jobs\/\d+\/travellers$/);
 
@@ -45,7 +45,7 @@ test("the job page links to nine travellers with serial, inline QR and a /u/ lin
 test("print media hides the app shell", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
   await page.goto("/jobs");
-  await page.getByRole("link", { name: "DESPL-320" }).first().click();
+  await page.getByRole("cell", { name: "DESPL-320", exact: true }).click();
   await page.getByRole("link", { name: "Print travellers" }).click();
   await expect(page.getByTestId("traveller")).toHaveCount(9);
   await page.emulateMedia({ media: "print" });

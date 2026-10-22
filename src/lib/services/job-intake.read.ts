@@ -42,6 +42,8 @@ export interface IntakeOptions {
     name: string;
     defaultDesignCode: string | null;
     defaultSpecs: Record<string, unknown> | null;
+    /** J7b: the standard kit (component type x quantity) "Build from master" fills a line's BOM from. */
+    kit: Array<{ name: string; qty: number; qtySource: string }>;
   }>;
   /** Active config questions of every family (J2); the client filters by family and the lines' equipment types. */
   questions: ConfigQuestionDef[];
@@ -62,7 +64,7 @@ export interface IntakeOptions {
 
 export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.PLANNER); // J7b: a planner fills drafts in the wizard
 
   return withTenant(actor.tenantId, async (tx) => {
     const [clients, families, calendars, equipmentTypes, qcpTemplates, equipments] = await Promise.all([
@@ -101,6 +103,7 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
           name: true,
           defaultDesignCode: true,
           defaultSpecs: true,
+          components: { orderBy: { id: "asc" }, select: { defaultQty: true, qtySource: true, componentType: { select: { name: true } } } },
         },
       }),
       tx.qcpTemplate.findMany({
@@ -148,9 +151,10 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
       }),
       calendars,
       questions: await loadQuestionDefs(tx, actor.tenantId),
-      equipmentTypes: equipmentTypes.map((e) => ({
+      equipmentTypes: equipmentTypes.map(({ components, ...e }) => ({
         ...e,
         defaultSpecs: (e.defaultSpecs as Record<string, unknown> | null) ?? null,
+        kit: components.map((c) => ({ name: c.componentType.name, qty: c.defaultQty, qtySource: c.qtySource })),
       })),
       qcpTemplates: qcpTemplates.map((q) => ({
         id: q.id,
@@ -166,6 +170,46 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
         itemCount: e._count.bomItems,
       })),
     };
+  });
+}
+
+export interface CopyableJob {
+  id: number;
+  jobNumber: string;
+  clientName: string;
+  /** "Vertical vessel on skirt x 9" per line, joined. */
+  product: string;
+  units: number;
+  /** ISO date of the committed delivery date, else the order date, else null. */
+  date: string | null;
+}
+
+/** J7b: the previous jobs "Copy a previous job" can start from, newest first. */
+export async function loadCopyableJobs(actor: Actor, limit = 100): Promise<CopyableJob[]> {
+  assertNotClientUser(actor);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.PLANNER);
+  return withTenant(actor.tenantId, async (tx) => {
+    const jobs = await tx.job.findMany({
+      where: { tenantId: actor.tenantId },
+      orderBy: { id: "desc" },
+      take: limit,
+      select: {
+        id: true,
+        jobNumber: true,
+        orderDate: true,
+        committedDeliveryDate: true,
+        client: { select: { name: true } },
+        equipments: { orderBy: { id: "asc" }, select: { name: true, _count: { select: { units: true } } } },
+      },
+    });
+    return jobs.map((j) => ({
+      id: j.id,
+      jobNumber: j.jobNumber,
+      clientName: j.client.name,
+      product: j.equipments.map((e) => `${e.name} × ${e._count.units}`).join(", ") || "No equipment",
+      units: j.equipments.reduce((n, e) => n + e._count.units, 0),
+      date: (j.committedDeliveryDate ?? j.orderDate)?.toISOString().slice(0, 10) ?? null,
+    }));
   });
 }
 
@@ -299,7 +343,7 @@ export async function loadTemplateProcesses(
   }>
 > {
   assertNotClientUser(actor);
-  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+  requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.PLANNER);
 
   return withTenant(actor.tenantId, async (tx) => {
     const version = await tx.processTemplateVersion.findFirst({

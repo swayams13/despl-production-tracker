@@ -830,6 +830,8 @@ export const createJobSchema = z
             copyBomFromEquipmentId: id.nullish(),
             /** J7a: copy this equipment's IMPORTED weld-map joints into this line, all unconfirmed. */
             copyWeldMapFromEquipmentId: id.nullish(),
+            /** J7b (Build from master): fill this line's BOM from its equipment type's kit as DRAFT revision 1. Needs a type; not together with a copied BOM. */
+            bomFromKit: z.boolean().optional(),
             /** J6 (D21): SERIAL (or omitted) = one unit per serial. LOT = one unit carrying `lotQty`. LOT_THEN_SERIAL is refused by the service until D21 picks it. */
             trackingMode: z.enum(["SERIAL", "LOT", "LOT_THEN_SERIAL"]).optional(),
             lotQty: z.number().int().positive().nullish(),
@@ -837,6 +839,8 @@ export const createJobSchema = z
           })
           .strict()
           .superRefine((b, ctx) => {
+            if (b.bomFromKit && b.equipmentTypeId == null) ctx.addIssue({ code: "custom", path: ["bomFromKit"], message: "Choose the equipment type to fill the BOM from its kit" });
+            if (b.bomFromKit && b.copyBomFromEquipmentId != null) ctx.addIssue({ code: "custom", path: ["bomFromKit"], message: "Fill the BOM from the kit or copy another job's BOM, not both" });
             const mode = b.trackingMode ?? "SERIAL";
             if (mode === "SERIAL" || mode === "LOT_THEN_SERIAL") {
               if (mode === "SERIAL" && b.serials.length === 0) {
