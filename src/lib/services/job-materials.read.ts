@@ -57,7 +57,7 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
     if (!job) return null;
     assertClientScope(actor, job.clientId);
 
-    const [equipments, items, components, familySeqRows, stepSeqRows, run, jobProcesses] = await Promise.all([
+    const [equipments, allItems, components, familySeqRows, stepSeqRows, run, jobProcesses, releasedRevisions] = await Promise.all([
       tx.equipment.findMany({ where: { jobId }, select: { id: true, name: true, templateVersionId: true, _count: { select: { units: true } } }, orderBy: { id: "asc" } }),
       tx.bomItem.findMany({
         where: { jobId },
@@ -73,6 +73,7 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
           qtyPer: true,
           parentBomItemId: true,
           componentTypeId: true,
+          bomRevisionId: true,
           materialIdentifications: { select: { heatNumber: true } },
           procurementEvents: { select: { type: true, qty: true, refNo: true, at: true } },
           stockLots: { select: { qty: true, txns: { select: { type: true, qty: true } } } },
@@ -94,6 +95,7 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
       }),
       getCurrentScheduleRun(tx, jobId),
       tx.jobProcess.findMany({ where: { jobId }, select: { id: true, code: true, name: true, equipmentId: true, grain: true } }),
+      tx.bomRevision.findMany({ where: { jobId, materializedAt: { not: null } }, orderBy: { revisionNo: "desc" }, select: { id: true, equipmentId: true } }),
     ]);
 
     const seqByOperation = new Map(familySeqRows.map((r) => [r.operationRefId, r.leadTimeProcessSeq]));
@@ -122,8 +124,8 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
     });
 
     // J5c (open point 3): a line keeps its stock, heat picks and procurement across BOM revisions (equipment + item number).
-    const lineHistory = new Map<string, Pick<(typeof items)[number], "materialIdentifications" | "procurementEvents" | "stockLots">>();
-    for (const it of items) {
+    const lineHistory = new Map<string, Pick<(typeof allItems)[number], "materialIdentifications" | "procurementEvents" | "stockLots">>();
+    for (const it of allItems) {
       const key = `${it.equipmentId}:${it.itemNo}`;
       const h = lineHistory.get(key) ?? { materialIdentifications: [], procurementEvents: [], stockLots: [] };
       h.materialIdentifications.push(...it.materialIdentifications);
@@ -131,7 +133,11 @@ export async function loadJobMaterials(actor: Actor, jobId: number, now: Date = 
       h.stockLots.push(...it.stockLots);
       lineHistory.set(key, h);
     }
-    for (const it of items) Object.assign(it, lineHistory.get(`${it.equipmentId}:${it.itemNo}`));
+    for (const it of allItems) Object.assign(it, lineHistory.get(`${it.equipmentId}:${it.itemNo}`));
+    // J5c: a line with a released revision shows that revision's lines; others show every line, as before.
+    const releasedRev = new Map<number, number>();
+    for (const rv of releasedRevisions) if (!releasedRev.has(rv.equipmentId)) releasedRev.set(rv.equipmentId, rv.id);
+    const items = allItems.filter((it) => !releasedRev.has(it.equipmentId) || it.bomRevisionId === releasedRev.get(it.equipmentId));
 
     const equipmentById = new Map(equipments.map((e) => [e.id, e]));
     const itemsByEquipment = new Map<number, Map<number, ExplodableBomItem>>();

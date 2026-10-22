@@ -11,7 +11,7 @@ import {
   type ComponentOpRow,
   type ComponentRow,
 } from "./component.service";
-import { buildAssemblyStepRows, writeAssemblyStepRows, type AssemblyStepRow } from "./assembly.service";
+import { buildAssemblyStepRows, type AssemblyStepRow } from "./assembly.service";
 import { lockFloorUnits, rollupForAssemblyStep, rollupForComponentOperation } from "./_shared";
 
 /**

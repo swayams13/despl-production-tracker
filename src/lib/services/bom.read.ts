@@ -386,12 +386,13 @@ export async function loadBomTree(
     const targetUnitId =
       units.length === 0 ? null : unitId != null && units.some((u) => u.id === unitId) ? unitId : units[0].id;
 
-    const items = await tx.bomItem.findMany({
+    const allItems = await tx.bomItem.findMany({
       where: { equipmentId: targetId },
       orderBy: { itemNo: "asc" },
       select: {
         id: true,
         itemNo: true,
+        bomRevisionId: true,
         partName: true,
         description: true,
         material: true,
@@ -460,15 +461,19 @@ export async function loadBomTree(
     });
     // J5c (open point 3): stock, heat picks and procurement recorded against a line in an earlier BOM revision
     // belong to the same line (equipment + item number); show them on every revision's row of it.
-    const historyOfLine = new Map<number, { stockLots: typeof items[number]["stockLots"]; materialIdentifications: typeof items[number]["materialIdentifications"]; procurementEvents: typeof items[number]["procurementEvents"] }>();
-    for (const it of items) {
+    const historyOfLine = new Map<number, { stockLots: typeof allItems[number]["stockLots"]; materialIdentifications: typeof allItems[number]["materialIdentifications"]; procurementEvents: typeof allItems[number]["procurementEvents"] }>();
+    for (const it of allItems) {
       const h = historyOfLine.get(it.itemNo) ?? { stockLots: [], materialIdentifications: [], procurementEvents: [] };
       h.stockLots.push(...it.stockLots);
       h.materialIdentifications.push(...it.materialIdentifications);
       h.procurementEvents.push(...it.procurementEvents);
       historyOfLine.set(it.itemNo, h);
     }
-    for (const it of items) Object.assign(it, historyOfLine.get(it.itemNo));
+    for (const it of allItems) Object.assign(it, historyOfLine.get(it.itemNo));
+    // J5c: once a revision has been released, the parts view shows that revision's lines (the newest released one);
+    // a line with no released revision keeps showing every line, as before.
+    const currentRevision = await tx.bomRevision.findFirst({ where: { equipmentId: targetId, materializedAt: { not: null } }, orderBy: { revisionNo: "desc" }, select: { id: true } });
+    const items = currentRevision ? allItems.filter((it) => it.bomRevisionId === currentRevision.id) : allItems;
 
     // Component rows for this equipment with no BomItem (bomItemId: null) —
     // e.g. DESPL-320's seeded sub-assembly register, unreachable via
