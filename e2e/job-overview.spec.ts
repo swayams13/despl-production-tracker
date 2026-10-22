@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Locator } from "@playwright/test";
 
 /**
  * Lean Core L2.8: the job page's tabs. Needs LEAN_FLOOR=on (the `lean` project /
@@ -26,6 +26,14 @@ async function openJob(page: Page): Promise<number> {
   return Number(page.url().match(/\/jobs\/(\d+)/)![1]);
 }
 
+/** Clicks until the URL matches: a click before the page hydrates does nothing, and Playwright does not retry a click. */
+async function clickUntilUrl(page: Page, target: Locator, url: RegExp) {
+  await expect(async () => {
+    await target.click();
+    await expect(page).toHaveURL(url, { timeout: 4_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
 test("the strip has the seven tabs in order, and each tab is URL-driven", async ({ page }) => {
   await signIn(page, "sj@despl.local");
   const id = await openJob(page);
@@ -34,13 +42,11 @@ test("the strip has the seven tabs in order, and each tab is URL-driven", async 
   await expect(tabs.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true");
 
   for (const [label, key] of [["Schedule", "schedule"], ["Materials", "materials"], ["QC", "qc"], ["Dispatch", "dispatch"], ["History", "history"]] as const) {
-    await tabs.getByRole("tab", { name: label, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/jobs/${id}\\?tab=${key}$`), { timeout: 20_000 });
+    await clickUntilUrl(page, tabs.getByRole("tab", { name: label, exact: true }), new RegExp(`/jobs/${id}\\?tab=${key}$`));
     await expect(tabs.getByRole("tab", { name: label, exact: true })).toHaveAttribute("aria-selected", "true");
   }
 
-  await tabs.getByRole("tab", { name: "Board" }).click();
-  await expect(page).toHaveURL(new RegExp(`/jobs/${id}/board$`));
+  await clickUntilUrl(page, tabs.getByRole("tab", { name: "Board" }), new RegExp(`/jobs/${id}/board$`));
 });
 
 test("old tab names land on their new tab, keeping other parameters", async ({ page }) => {
@@ -93,11 +99,9 @@ test("Materials: a read-only pipeline of five steps, and Parts and stock keeps t
     await expect(page.getByText("No BOM lines on this job yet.")).toBeVisible();
   }
 
-  await page.getByRole("link", { name: "Short this week" }).click();
-  await expect(page).toHaveURL(/short=1/);
+  await clickUntilUrl(page, page.getByRole("link", { name: "Short this week" }), /short=1/);
 
-  await group.getByRole("link", { name: "Parts and stock" }).click();
-  await expect(page).toHaveURL(/tab=materials&view=parts/);
+  await clickUntilUrl(page, group.getByRole("link", { name: "Parts and stock" }), /tab=materials&view=parts/);
   await expect(group.getByRole("link", { name: "Parts and stock" })).toHaveAttribute("aria-current", "page");
 });
 
@@ -140,8 +144,7 @@ test("Assembly is off the strip but reachable from the Board", async ({ page }) 
   const id = await openJob(page);
   await expect(page.getByRole("tab", { name: "Assembly" })).toHaveCount(0);
   await page.goto(`/jobs/${id}/board`);
-  await page.getByRole("link", { name: "Assembly", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/jobs/${id}\\?tab=assembly$`));
+  await clickUntilUrl(page, page.getByRole("link", { name: "Assembly", exact: true }), new RegExp(`/jobs/${id}\\?tab=assembly$`));
   await expect(page.getByRole("link", { name: /Back to the Board/ })).toBeVisible();
 });
 
