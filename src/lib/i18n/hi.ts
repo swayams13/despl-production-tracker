@@ -84,6 +84,7 @@ export const hi: Dict = {
     startedAt: (time) => ` · ${time} पर शुरू हुआ`, // REVIEW: DESPL
     alsoOnOthers: (n) => ` · ${n} और यूनिट पर भी`, // REVIEW: DESPL
     returnedByQc: (why) => `QC ने वापस भेजा${why ? `: ${why}` : ""}`, // REVIEW: DESPL
+    needsReview: (rev) => `BOM${rev != null ? ` rev ${rev}` : ""} में बदला: प्लानर की समीक्षा का इंतज़ार`, // REVIEW: DESPL
   },
   today: {
     title: "आज", // REVIEW: DESPL

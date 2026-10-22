@@ -84,6 +84,7 @@ export const gu: Dict = {
     startedAt: (time) => ` · ${time} વાગ્યે શરૂ થયું`, // REVIEW: DESPL
     alsoOnOthers: (n) => ` · બીજા ${n} યુનિટ પર પણ`, // REVIEW: DESPL
     returnedByQc: (why) => `QC એ પાછું મોકલ્યું${why ? `: ${why}` : ""}`, // REVIEW: DESPL
+    needsReview: (rev) => `BOM${rev != null ? ` rev ${rev}` : ""} માં બદલાયું: પ્લાનરની સમીક્ષાની રાહ`, // REVIEW: DESPL
   },
   today: {
     title: "આજે", // REVIEW: DESPL

@@ -92,6 +92,7 @@ export const en = {
     startedAt: (time: string) => ` · started ${time}`,
     alsoOnOthers: (n: number) => ` · also on ${n} other unit${n === 1 ? "" : "s"}`,
     returnedByQc: (why: string) => `Returned by QC${why ? `: ${why}` : ""}`,
+    needsReview: (rev: number | null) => `Changed in BOM${rev != null ? ` rev ${rev}` : ""}: waiting for planner review`,
   },
   today: {
     title: "Today",

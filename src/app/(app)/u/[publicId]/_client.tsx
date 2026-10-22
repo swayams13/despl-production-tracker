@@ -87,6 +87,7 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
                   row={r}
                   canRecord={view.canRecord}
                   unitPublicId={view.unit.publicId}
+                  bomRevisionNo={view.bomRevisionNo}
                   busy={busy(r.key)}
                   onAct={(action) => setSheet({ row: r, action })}
                 />
@@ -131,12 +132,15 @@ function FloorRowView({
   row,
   canRecord,
   unitPublicId,
+  bomRevisionNo,
   busy,
   onAct,
 }: {
   row: FloorRow;
   canRecord: boolean;
   unitPublicId: string;
+  /** J5c: the BOM revision a flagged row changed in. */
+  bomRevisionNo: number | null;
   /** A write for this row is waiting (Undo window), sending or refreshing: its buttons are off. */
   busy: boolean;
   onAct: (action: "DONE" | "START") => void;
@@ -161,6 +165,7 @@ function FloorRowView({
             {others > 0 && (row.state === "READY" || row.state === "IN_PROGRESS") ? d.floor.alsoOnOthers(others) : ""}
           </span>
           {row.returnedNote != null && <span className="fl-returned">{d.floor.returnedByQc(row.returnedNote)}</span>}
+          {row.needsReview && <span className="fl-returned">{d.floor.needsReview(bomRevisionNo)}</span>}
         </div>
         {canRecord && (row.state === "READY" || row.state === "IN_PROGRESS") && (
           <div className="fl-actions">
