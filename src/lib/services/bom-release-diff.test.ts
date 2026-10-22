@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 /**
  * J5c: re-releasing a BOM revision (and checking a weld-map / answer change on the current one) reconciles the
@@ -12,6 +12,7 @@ describe.skipIf(!RUN_DB)("BOM re-release diff (DB)", async () => {
   const { PrismaClient } = await import("@/generated/prisma/client");
   const { withTenant } = await import("@/lib/db");
   const svc = await import("./bom-release.service");
+  const review = await import("./bom-review.service");
   const bomSvc = await import("./bom.service");
   const { makeWorldKit } = await import("./bom-release.world.test-util");
   const { assertKitReady } = await import("./_shared");
@@ -22,6 +23,8 @@ describe.skipIf(!RUN_DB)("BOM re-release diff (DB)", async () => {
   afterAll(async () => {
     await owner.$disconnect();
   });
+  // Several releases per case on a shared dev database: give the slow ones room.
+  vi.setConfig({ testTimeout: 120_000 });
 
   const SHELL = { itemNo: 1, partName: "Shell", qtyPer: 1 };
   const PLATE = { itemNo: 2, partName: "Plate", qtyPer: 1 };
@@ -231,5 +234,305 @@ describe.skipIf(!RUN_DB)("BOM re-release diff (DB)", async () => {
     });
   });
 
-  void recordWork;
+  describe("assembly steps and the weld map", () => {
+    const addJoints = (r: R, joints: [string, "NOZZLE" | "ATTACHMENT" | "LONG_SEAM"][]) =>
+      owner.plannedJoint.createMany({ data: joints.map(([jointNo, jointType], i) => ({ jobId: r.j.jobId, equipmentId: r.j.equipmentId, jointNo, jointType, source: "IMPORTED" as const, confirmed: true, sortOrder: i })) });
+    const seqsOf = async (r: R) => {
+      const out = new Map<number, number[]>();
+      for (const s of await steps(r)) out.set(s.unitId, [...(out.get(s.unitId) ?? []), s.seq]);
+      return out;
+    };
+
+    it("a joint added to the weld map adds a PER_JOINT step per unit; the seqs are renumbered without a collision and started steps keep their status", async () => {
+      const r = await released("JOINTADD", { units: 2 });
+      const markOut = (await steps(r)).filter((x) => x.seq === 1);
+      await owner.assemblyStep.update({ where: { id: markOut[0].id }, data: { status: "COMPLETE", startedAt: new Date(), finishedAt: new Date() } });
+      const before = (await steps(r)).length;
+      await addJoints(r, [["N1", "NOZZLE"], ["N2", "NOZZLE"]]);
+      const preview = await svc.previewBomRelease(r.w.actors.eng, r.j.target);
+      expect(preview.state).toBe("DIFF");
+      expect(preview.diff!.counts.step.add).toBe(4);
+      expect((await steps(r)).length).toBe(before); // the preview rolled back
+      const out = await svc.releaseBomRevision(r.w.actors.eng, { ...r.j.target, acknowledgeWarnings: true });
+      expect(out).toMatchObject({ noop: false });
+      expect(out.diff!.step.add).toBe(4);
+      expect((await steps(r)).length).toBe(before + 4);
+      for (const [, seqs] of await seqsOf(r)) {
+        expect(new Set(seqs).size).toBe(seqs.length); // unique among active rows
+        expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+        expect(Math.min(...seqs)).toBeGreaterThan(0);
+      }
+      const nozzle = await owner.assemblyStep.findMany({ where: { unit: { equipmentId: r.j.equipmentId }, jointRef: { in: ["N1", "N2"] } }, orderBy: [{ unitId: "asc" }, { seq: "asc" }] });
+      expect(nozzle).toHaveLength(4);
+      expect(nozzle.every((x) => x.plannedJointId != null && x.status === "NOT_STARTED")).toBe(true);
+      const started = await owner.assemblyStep.findUniqueOrThrow({ where: { id: markOut[0].id } });
+      expect(started).toMatchObject({ status: "COMPLETE", retiredAt: null, seq: 1 });
+      // the same check again changes nothing
+      expect((await svc.releaseBomRevision(r.w.actors.eng, { ...r.j.target, acknowledgeWarnings: true })).noop).toBe(true);
+    });
+
+    it("a joint whose type changes retires its not-started step and flags a started one", async () => {
+      const r = await released("JOINTTYPE", { units: 1 });
+      await addJoints(r, [["N1", "NOZZLE"], ["N2", "NOZZLE"]]);
+      await svc.releaseBomRevision(r.w.actors.eng, { ...r.j.target, acknowledgeWarnings: true });
+      const n2 = await owner.assemblyStep.findFirstOrThrow({ where: { unit: { equipmentId: r.j.equipmentId }, jointRef: "N2", retiredAt: null } });
+      await owner.assemblyStep.update({ where: { id: n2.id }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+      await owner.plannedJoint.updateMany({ where: { equipmentId: r.j.equipmentId }, data: { jointType: "ATTACHMENT" } });
+      const out = await svc.releaseBomRevision(r.w.actors.eng, { ...r.j.target, acknowledgeWarnings: true });
+      expect(out.diff!.step.retire).toBe(1);
+      expect(out.diff!.step.review).toBe(1);
+      const n1 = await owner.assemblyStep.findFirstOrThrow({ where: { unit: { equipmentId: r.j.equipmentId }, jointRef: "N1" } });
+      expect(n1.retiredAt).not.toBeNull();
+      expect(await owner.assemblyStep.findUniqueOrThrow({ where: { id: n2.id } })).toMatchObject({ retiredAt: null, needsReview: true, status: "IN_PROGRESS" });
+    });
+
+    it("an answer change that drops a route step retires its not-started operation and the rule-gated assembly step", async () => {
+      const r = await released("ANSWER", { units: 1, config: { pwht: true } });
+      const weld = () => owner.componentOperation.findMany({ where: { jobId: r.j.jobId, operationId: r.w.opWeld.id, retiredAt: null } });
+      expect(await weld()).toHaveLength(1);
+      const stepsBefore = (await steps(r)).length;
+      await owner.equipment.update({ where: { id: r.j.equipmentId }, data: { config: { pwht: false } } });
+      const out = await svc.releaseBomRevision(r.w.actors.eng, { ...r.j.target, acknowledgeWarnings: true });
+      expect(await weld()).toHaveLength(0);
+      expect(out.diff!.operation.retire).toBe(1);
+      expect(out.diff!.step.retire).toBe(1);
+      expect((await steps(r)).length).toBe(stepsBefore - 1);
+    });
+
+    it("template and route versions stay as the line was pinned (invariant 9); a changed family picks the new route", async () => {
+      const r = await released("PINNED", { units: 1 });
+      const eq = await owner.equipment.findUniqueOrThrow({ where: { id: r.j.equipmentId } });
+      const shellRoute = await owner.routeTemplate.findFirstOrThrow({ where: { componentTypeId: r.w.shl.id, variant: "A" } });
+      const v2 = await owner.routeTemplateVersion.create({ data: { routeId: shellRoute.id, version: 2, status: "PUBLISHED" } });
+      await owner.routeStep.create({ data: { routeVersionId: v2.id, seq: 10, operationId: r.w.opCut.id } });
+      await owner.routeStep.create({ data: { routeVersionId: v2.id, seq: 30, operationId: r.w.opWeld.id } });
+      const av2 = await owner.assemblyTemplateVersion.create({ data: { templateId: (await owner.assemblyTemplateVersion.findUniqueOrThrow({ where: { id: eq.assemblyTemplateVersionId! } })).templateId, version: 2, status: "PUBLISHED", publishedAt: new Date() } });
+      await owner.assemblyTemplateStep.create({ data: { versionId: av2.id, seq: 1, groupCode: "A", groupName: "A", srNo: "1", activity: "A brand new step", kind: "WORK", defaultDepartmentId: r.w.dept.id } });
+      const n = await startNext(r);
+      await owner.bomItem.update({ where: { id: n.byNo.get(1)!.id }, data: { qtyPer: 2, sourceQty: "2 NOS." } });
+      const shellBefore = (await comps(r, false)).find((c) => c.tag === "Shell")!;
+      await release(r, n.bomRevisionId);
+      const shell = await owner.component.findUniqueOrThrow({ where: { id: shellBefore.id }, include: { operations: { where: { retiredAt: null } } } });
+      expect(shell.routeVersionId).toBe(shellBefore.routeVersionId);
+      expect(shell.operations.map((o) => o.seq).sort((a, b) => a - b)).toEqual(shellBefore.operations.map((o) => o.seq).sort((a, b) => a - b)); // no seq 30
+      expect((await owner.equipment.findUniqueOrThrow({ where: { id: r.j.equipmentId } })).assemblyTemplateVersionId).toBe(eq.assemblyTemplateVersionId);
+      expect(await owner.assemblyStep.count({ where: { jobId: r.j.jobId, templateStep: { versionId: av2.id } } })).toBe(0);
+
+      // a not-started part whose family and variant change takes the new family's route
+      const n3 = await svc.startBomRevision(r.w.actors.eng, { equipmentId: r.j.equipmentId });
+      const lines = await owner.bomItem.findMany({ where: { bomRevisionId: n3.bomRevisionId } });
+      const plate = lines.find((l) => l.itemNo === 2)!;
+      await owner.bomItem.update({ where: { id: plate.id }, data: { componentTypeId: r.w.shl.id, routeVariant: "B" } });
+      const out = await release(r, n3.bomRevisionId);
+      expect(out.diff!.component.update).toBe(1);
+      const changed = await owner.component.findFirstOrThrow({ where: { equipmentId: r.j.equipmentId, tag: "Plate", retiredAt: null }, include: { routeVersion: { include: { route: true } }, operations: { where: { retiredAt: null } } } });
+      expect(changed.componentTypeId).toBe(r.w.shl.id);
+      expect(changed.routeVersion!.route.variant).toBe("B");
+      expect(changed.operations).toHaveLength(1);
+    });
+  });
+
+  describe("release against floor writes", () => {
+    it("a release racing a Start on a row it would retire never leaves a started row retired", async () => {
+      const r = await released("RACE", { units: 1 });
+      const plate = (await comps(r, false)).find((c) => c.tag === "Plate")!;
+      const op = plate.operations[0];
+      await owner.stockLot.create({ data: { jobId: r.j.jobId, bomItemId: plate.bomItemId!, location: "Y1", qty: "9" } }); // so a Start is not refused for material
+      const n = await startNext(r);
+      await owner.bomItem.delete({ where: { id: n.byNo.get(2)!.id } });
+      const [started, rel] = await Promise.allSettled([
+        recordWork(r.w.actors.admin, { jobId: r.j.jobId, action: "START", items: [{ kind: "COMPONENT_OP", id: op.id }] }),
+        release(r, n.bomRevisionId),
+      ]);
+      expect(rel.status, String((rel as PromiseRejectedResult).reason)).toBe("fulfilled");
+      expect(started.status, String((started as PromiseRejectedResult).reason)).toBe("fulfilled");
+      const row = await owner.componentOperation.findUniqueOrThrow({ where: { id: op.id } });
+      if (row.status !== "NOT_STARTED") {
+        // the Start won: the release saw it started and flagged it
+        expect(row).toMatchObject({ retiredAt: null, needsReview: true });
+      } else {
+        // the release won: the row is retired and the Start was refused
+        expect(row.retiredAt).not.toBeNull();
+        expect((started as PromiseFulfilledResult<Awaited<ReturnType<typeof recordWork>>>).value.refused[0]).toMatchObject({ code: "FLOOR_ROW_RETIRED" });
+      }
+    });
+  });
+  describe("review: Keep, Replace, Cancel", () => {
+    /** A released line whose started plate (item 2) lost its BOM line in revision 2, so its operation is flagged. */
+    async function flaggedPlate(label: string) {
+      const r = await released(label, { units: 1 });
+      const plate = (await comps(r, false)).find((c) => c.tag === "Plate")!;
+      const op = plate.operations[0];
+      await owner.componentOperation.update({ where: { id: op.id }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+      const n = await startNext(r);
+      await owner.bomItem.delete({ where: { id: n.byNo.get(2)!.id } });
+      await release(r, n.bomRevisionId);
+      return { r, op, plate };
+    }
+    /** A flagged started plate that still has a line (its quantity changed to 4). */
+    async function flaggedPlateQty(label: string) {
+      const r = await released(label, { units: 1 });
+      const plate = (await comps(r, false)).find((c) => c.tag === "Plate")!;
+      const op = plate.operations[0];
+      await owner.componentOperation.update({ where: { id: op.id }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+      const n = await startNext(r);
+      await owner.bomItem.update({ where: { id: n.byNo.get(2)!.id }, data: { qtyPer: 4, sourceQty: "4 NOS." } });
+      await release(r, n.bomRevisionId);
+      return { r, op, plate };
+    }
+    const resolve = (r: R, who: keyof R["w"]["actors"], kind: "ASSEMBLY_STEP" | "COMPONENT_OP", id: number, action: "KEEP" | "REPLACE" | "CANCEL", reason = "Checked with the planner") =>
+      review.resolveReviewRow(r.w.actors[who], { kind, id, action, reason });
+    const opRow = (id: number) => owner.componentOperation.findUniqueOrThrow({ where: { id } });
+    const stepRow = (id: number) => owner.assemblyStep.findUniqueOrThrow({ where: { id } });
+
+    it.each([["planner"], ["qc"], ["sup"], ["admin"], ["client"]] as const)("%s is refused FORBIDDEN and nothing changes", async (who) => {
+      const { r, op } = await flaggedPlate(`ROLE-${who}`);
+      await expect(resolve(r, who, "COMPONENT_OP", op.id, "KEEP")).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(await opRow(op.id)).toMatchObject({ needsReview: true, retiredAt: null });
+      expect(await auditOf(r, "bom.review.keep")).toHaveLength(0);
+    });
+
+    it("another tenant's row is NOT_FOUND", async () => {
+      const { r, op } = await flaggedPlate("TENANT-A");
+      const other = await world("TENANT-B");
+      await expect(review.resolveReviewRow(other.actors.eng, { kind: "COMPONENT_OP", id: op.id, action: "KEEP", reason: "not mine to touch" })).rejects.toMatchObject({ code: "NOT_FOUND" });
+      expect(await opRow(op.id)).toMatchObject({ needsReview: true });
+      void r;
+    });
+
+    it.each([[""], ["   "], ["ok"], ["abcd"]])("a reason of %j is refused REASON_REQUIRED", async (reason) => {
+      const { r, op } = await flaggedPlate("REASON");
+      await expect(resolve(r, "eng", "COMPONENT_OP", op.id, "KEEP", reason)).rejects.toMatchObject({ code: "REASON_REQUIRED" });
+      expect(await opRow(op.id)).toMatchObject({ needsReview: true });
+    });
+
+    it("a row that is not flagged, and a retired row, are refused", async () => {
+      const { r } = await flaggedPlate("NOTFLAGGED");
+      const shellOp = (await comps(r, false)).find((c) => c.tag === "Shell")!.operations[0];
+      await expect(resolve(r, "eng", "COMPONENT_OP", shellOp.id, "KEEP")).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+      const retired = (await comps(r, true))[0]?.operations[0];
+      const { r: r2, op: op2 } = await flaggedPlate("RETIRED");
+      await resolve(r2, "eng", "COMPONENT_OP", op2.id, "CANCEL");
+      await expect(resolve(r2, "eng", "COMPONENT_OP", op2.id, "KEEP")).rejects.toMatchObject({ code: "FLOOR_ROW_RETIRED" });
+      void retired;
+    });
+
+    it("Replace where the current BOM has nothing for the row is VALIDATION_FAILED (keep or cancel it)", async () => {
+      const { r, op } = await flaggedPlate("NOREPLACE");
+      await expect(resolve(r, "eng", "COMPONENT_OP", op.id, "REPLACE")).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+      expect(await opRow(op.id)).toMatchObject({ needsReview: true, retiredAt: null });
+    });
+
+    it("Replace and Cancel wait while the row is SUBMITTED for QC or has an open NCR; Keep does not", async () => {
+      const { r, op } = await flaggedPlateQty("BLOCKED");
+      await owner.componentOperation.update({ where: { id: op.id }, data: { status: "SUBMITTED" } });
+      for (const action of ["REPLACE", "CANCEL"] as const) {
+        await expect(resolve(r, "sj", "COMPONENT_OP", op.id, action)).rejects.toMatchObject({ code: "BOM_REVIEW_BLOCKED", detail: { reason: "QC_PENDING" } });
+      }
+      await owner.componentOperation.update({ where: { id: op.id }, data: { status: "IN_PROGRESS" } });
+      const user = await owner.user.findFirstOrThrow({ where: { tenantId: r.w.tenantId } });
+      const ncr = await owner.ncr.create({ data: { jobId: r.j.jobId, targetComponentOperationId: op.id, ruleCode: "H5", raisedBy: user.id, raisedAt: new Date() } });
+      for (const action of ["REPLACE", "CANCEL"] as const) {
+        await expect(resolve(r, "sj", "COMPONENT_OP", op.id, action)).rejects.toMatchObject({ code: "BOM_REVIEW_BLOCKED", detail: { reason: "NCR_OPEN" } });
+      }
+      expect(await opRow(op.id)).toMatchObject({ needsReview: true, retiredAt: null });
+      await owner.ncr.update({ where: { id: ncr.id }, data: { status: "CLOSED", closedBy: user.id, closedAt: new Date() } });
+      await expect(resolve(r, "sj", "COMPONENT_OP", op.id, "KEEP")).resolves.toMatchObject({ action: "KEEP" });
+    });
+
+    it("Keep clears the flag and audits the full old row with the reason; the part is not flagged again unless its line changes again", async () => {
+      const { r, op, plate } = await flaggedPlateQty("KEEP");
+      const out = await resolve(r, "eng", "COMPONENT_OP", op.id, "KEEP", "Qty change is for the next lot");
+      expect(out).toMatchObject({ action: "KEEP", id: op.id, replacedBy: null });
+      expect(await opRow(op.id)).toMatchObject({ needsReview: false, retiredAt: null, status: "IN_PROGRESS" });
+      const a = (await auditOf(r, "bom.review.keep"))[0];
+      expect(a.entityType).toBe("ComponentOperation");
+      expect(a.before).toMatchObject({ id: op.id, needsReview: true });
+      expect(a.after).toMatchObject({ needsReview: false, reason: "Qty change is for the next lot" });
+      // a later release with the same line does not flag it again
+      const n = await startNext(r);
+      await owner.bomItem.update({ where: { id: n.byNo.get(1)!.id }, data: { remarks: "unrelated" } });
+      await release(r, n.bomRevisionId);
+      expect(await opRow(op.id)).toMatchObject({ needsReview: false });
+      void plate;
+    });
+
+    it("Cancel retires the row (reason 'cancelled in review: ...') and audits; QC history stays on it", async () => {
+      const { r, op } = await flaggedPlate("CANCEL");
+      await resolve(r, "sj", "COMPONENT_OP", op.id, "CANCEL", "Part no longer made");
+      expect(await opRow(op.id)).toMatchObject({ needsReview: false, retiredReason: "cancelled in review: Part no longer made", status: "IN_PROGRESS" });
+      expect((await opRow(op.id)).retiredAt).not.toBeNull();
+      expect((await auditOf(r, "bom.review.cancel"))[0].after).toMatchObject({ retired: true, reason: "Part no longer made" });
+    });
+
+    it("Replace of an operation whose quantity changed retires it and adds the current one on the same part", async () => {
+      const { r, op, plate } = await flaggedPlateQty("REPLACEOP");
+      const out = await resolve(r, "eng", "COMPONENT_OP", op.id, "REPLACE", "Re-cut to the new quantity");
+      expect(out.replacedBy).not.toBeNull();
+      const fresh = await opRow(out.replacedBy!);
+      expect(fresh).toMatchObject({ componentId: plate.id, status: "NOT_STARTED", qtyPlanned: 4, needsReview: false, retiredAt: null });
+      expect(await opRow(op.id)).toMatchObject({ retiredAt: expect.any(Date), needsReview: false });
+      expect((await auditOf(r, "bom.review.replace"))[0].after).toMatchObject({ replacedBy: out.replacedBy });
+    });
+
+    it("Replace of a whole part (its tag changed) retires the part and its operations, makes a new one, copies the drawing link and not the heat or the issue, and re-keys its not-started steps", async () => {
+      const r = await released("REPLACEPART", { units: 1 });
+      const shell = (await comps(r, false)).find((c) => c.tag === "Shell")!;
+      const op = shell.operations[0];
+      await owner.componentOperation.update({ where: { id: op.id }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+      const user = await owner.user.findFirstOrThrow({ where: { tenantId: r.w.tenantId } });
+      const lot = await owner.stockLot.create({ data: { jobId: r.j.jobId, bomItemId: shell.bomItemId!, heatNumber: "H9", location: "Y1", qty: "5" } });
+      await owner.stockTxn.create({ data: { jobId: r.j.jobId, stockLotId: lot.id, type: "ISSUE", qty: "1", by: user.id, componentId: shell.id } });
+      const dt = await owner.drawingTypeRef.create({ data: { tenantId: r.w.tenantId, code: "GA", name: "GA" } });
+      const dwg = await owner.assemblyDrawing.create({ data: { jobId: r.j.jobId, drawingTypeId: dt.id, drawingNo: "GA-1" } });
+      await owner.component.update({ where: { id: shell.id }, data: { governingDrawingId: dwg.id } });
+      const fit = await owner.assemblyStep.findFirstOrThrow({ where: { jobId: r.j.jobId, componentId: shell.id } });
+      const n = await startNext(r);
+      await owner.bomItem.update({ where: { id: n.byNo.get(1)!.id }, data: { partName: "Shell X" } });
+      await release(r, n.bomRevisionId);
+      expect((await opRow(op.id)).needsReview).toBe(true);
+
+      const out = await resolve(r, "eng", "COMPONENT_OP", op.id, "REPLACE", "New shell mark");
+      const old = await owner.component.findUniqueOrThrow({ where: { id: shell.id }, include: { operations: true } });
+      expect(old.retiredAt).not.toBeNull();
+      expect(old.operations.every((o) => o.retiredAt != null)).toBe(true);
+      const fresh = await owner.component.findFirstOrThrow({ where: { equipmentId: r.j.equipmentId, tag: "Shell X", retiredAt: null }, include: { operations: true } });
+      expect(fresh.governingDrawingId).toBe(dwg.id);
+      expect(fresh.operations.every((o) => o.status === "NOT_STARTED")).toBe(true);
+      expect(await owner.stockTxn.count({ where: { componentId: fresh.id } })).toBe(0);
+      expect(await owner.materialIdentification.count({ where: { componentId: fresh.id } })).toBe(0);
+      expect(out.replacedBy).toBe(fresh.operations[0].id);
+      // its not-started "Fit shell course" step now belongs to the new part
+      expect((await stepRow(fit.id)).componentId).toBe(fresh.id);
+    });
+
+    it("Replace of a step adds the current row on the unit with a clean seq order", async () => {
+      const r = await released("REPLACESTEP", { units: 1 });
+      const markOut = (await steps(r))[0];
+      await owner.assemblyStep.update({ where: { id: markOut.id }, data: { status: "IN_PROGRESS", startedAt: new Date(), needsReview: true } });
+      const active = (await steps(r)).length;
+      const out = await resolve(r, "sj", "ASSEMBLY_STEP", markOut.id, "REPLACE", "Redo on the new drawing");
+      expect(out.replacedBy).not.toBeNull();
+      expect(await stepRow(markOut.id)).toMatchObject({ retiredAt: expect.any(Date), needsReview: false, status: "IN_PROGRESS" });
+      const now = await steps(r);
+      expect(now.length).toBe(active);
+      expect(new Set(now.map((s) => s.seq)).size).toBe(now.length);
+      expect(now.find((s) => s.id === out.replacedBy)).toMatchObject({ status: "NOT_STARTED", templateStepId: markOut.templateStepId });
+    });
+
+    it("Replace of a QCP-bound inspection step appends a PENDING execution, so the hold point reopens and the new row has to be inspected", async () => {
+      const r = await released("REPLACEHOLD", { units: 1 });
+      const insp = await owner.assemblyStep.findFirstOrThrow({ where: { jobId: r.j.jobId, templateStep: { kind: "INSPECTION" }, qcpItemId: { not: null } }, orderBy: { id: "asc" } });
+      const hold = await owner.qcpCodeRef.create({ data: { tenantId: r.w.tenantId, code: "H", label: "Hold", blocksCompletion: true } });
+      const party = await owner.inspectionParty.create({ data: { qcpTemplateId: (await owner.qcpItem.findUniqueOrThrow({ where: { id: insp.qcpItemId! } })).qcpTemplateId, code: "DESPL", jobId: r.j.jobId } });
+      await owner.qcpItemPartyCode.create({ data: { qcpItemId: insp.qcpItemId!, inspectionPartyId: party.id, qcpCodeId: hold.id, jobId: r.j.jobId } });
+      const qc = await owner.user.findFirstOrThrow({ where: { tenantId: r.w.tenantId } });
+      await owner.qcpExecution.create({ data: { qcpItemId: insp.qcpItemId!, unitId: insp.unitId, attemptNo: 1, result: "ACCEPTED", clearedBy: qc.id, jobId: r.j.jobId } });
+      await owner.assemblyStep.update({ where: { id: insp.id }, data: { needsReview: true } });
+      const out = await resolve(r, "eng", "ASSEMBLY_STEP", insp.id, "REPLACE", "Inspection redone after rework");
+      const execs = await owner.qcpExecution.findMany({ where: { qcpItemId: insp.qcpItemId!, unitId: insp.unitId }, orderBy: { attemptNo: "asc" } });
+      expect(execs.map((e) => [e.attemptNo, e.result])).toEqual([[1, "ACCEPTED"], [2, "PENDING"]]);
+      expect((await stepRow(out.replacedBy!)).qcpItemId).toBe(insp.qcpItemId);
+    });
+  });
 });

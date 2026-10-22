@@ -343,12 +343,11 @@ async function diffOps(
     if (e && w) {
       const fields = opFieldChanges(e, w);
       if (fields.length === 0) continue;
+      // A started operation is only ever flagged because its part's line changed (flagOps) or the step left the
+      // route; a field that differs now (quantity, QC flag from a changed master) does not reopen what Keep settled.
       if (e.status === NOT_STARTED) {
         await tx.componentOperation.update({ where: { id: e.id }, data: { operationId: w.operationId, requiresQc: w.requiresQc, qtyPlanned: w.qtyPlanned } });
         rec.add("operation", "update", { id: e.id, unitId: c.unitId, label, fields, status: e.status }, { kind: "OP", id: e.id });
-      } else if (!e.needsReview) {
-        await tx.componentOperation.update({ where: { id: e.id }, data: { needsReview: true } });
-        rec.add("operation", "review", { id: e.id, unitId: c.unitId, label, fields, status: e.status }, { kind: "OP", id: e.id });
       }
     } else if (e) {
       if (e.status === NOT_STARTED) {
