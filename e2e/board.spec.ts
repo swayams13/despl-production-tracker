@@ -17,7 +17,7 @@ async function signIn(page: Page, identifier: string) {
 
 async function openBoard(page: Page) {
   await page.goto("/jobs");
-  await page.getByRole("link", { name: "DESPL-320" }).first().click();
+  await page.getByRole("cell", { name: "DESPL-320", exact: true }).click();
   await page.getByRole("link", { name: "Board", exact: true }).click();
   await expect(page).toHaveURL(/\/jobs\/\d+\/board$/);
   await expect(page.getByRole("heading", { level: 1 })).toContainText("Board");

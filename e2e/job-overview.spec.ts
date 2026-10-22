@@ -21,7 +21,7 @@ async function signIn(page: Page, identifier: string) {
 /** Opens DESPL-320 from the jobs list and returns its id. */
 async function openJob(page: Page): Promise<number> {
   await page.goto("/jobs");
-  await page.getByRole("link", { name: "DESPL-320" }).first().click();
+  await page.getByRole("cell", { name: "DESPL-320", exact: true }).click();
   await expect(page).toHaveURL(/\/jobs\/\d+/);
   return Number(page.url().match(/\/jobs\/(\d+)/)![1]);
 }
