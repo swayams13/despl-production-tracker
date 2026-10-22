@@ -41,6 +41,8 @@ export interface CreateJobResult {
   unitCount: number;
   qcpItemCount: number;
   bomItemCount: number;
+  /** J7a: weld-map joints copied from a previous line (unconfirmed). */
+  weldMapJointCount: number;
   /**
    * J5a: a job is created without floor rows. Components, operations and assembly steps are
    * generated when the line's BOM revision is released (bom-release.service.ts); a copied BOM
@@ -63,7 +65,16 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
   assertNotClientUser(actor);
   requireRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
 
-  return withTenant(actor.tenantId, async (tx) => {
+  return withTenant(actor.tenantId, (tx) => createJobTx(tx, actor, parsed));
+}
+
+/**
+ * J7a: everything createJob does, inside a transaction the caller holds. `parsed` is already
+ * createJobSchema output and the role check is the caller's (createJob, releaseDraft and the
+ * rolled-back previewJob each make their own). Nothing here commits.
+ */
+export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput): Promise<CreateJobResult> {
+  {
     // ── Validate everything before writing anything ──────────────────────
     const duplicate = await tx.job.findFirst({
       where: { tenantId: actor.tenantId, jobNumber: parsed.jobNumber },
@@ -298,7 +309,6 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
 
       // Equipment lines and their units first: a line on its own route needs its id for its processes.
       let unitCount = 0;
-      let firstEquipmentId: number | null = null;
       const equipmentIds: number[] = [];
       const blockUnits: {
         equipmentId: number;
@@ -323,7 +333,6 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         });
         equipmentIds.push(equipment.id);
         const rules = LineRules.fromConfig(job.id, equipment.id, lineQuestions[i], block.equipmentTypeId ?? null, blockConfigs[i]);
-        firstEquipmentId ??= equipment.id;
         const units = await tx.unit.createManyAndReturn({
           data: block.serials.map((serialNo) => ({ equipmentId: equipment.id, serialNo, jobId: job.id })),
           select: { id: true },
@@ -451,10 +460,16 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         : { qcpTemplateId: null, itemCount: 0, unmatchedProcessCodes: [] as string[], skipped: [] as { srNo: string; sequence: number }[] };
 
       // J5a: the copied lines wait as DRAFT revision 1; BOM release makes the floor rows.
-      const bom =
-        parsed.copyBomFromEquipmentId != null && firstEquipmentId != null
-          ? await copyBom(tx, parsed.copyBomFromEquipmentId, firstEquipmentId, actor.tenantId, job.id, actor.userId)
-          : { count: 0, createdIds: [] };
+      // J7a: per line. The job-level source still feeds the first line when that line names none.
+      let bomCount = 0;
+      let weldMapJointCount = 0;
+      for (const [i, block] of parsed.equipments.entries()) {
+        const bomSource = block.copyBomFromEquipmentId ?? (i === 0 ? parsed.copyBomFromEquipmentId : null);
+        if (bomSource != null) bomCount += (await copyBom(tx, bomSource, equipmentIds[i], actor.tenantId, job.id, actor.userId)).count;
+        if (block.copyWeldMapFromEquipmentId != null) {
+          weldMapJointCount += await copyWeldMap(tx, block.copyWeldMapFromEquipmentId, equipmentIds[i], actor.tenantId, job.id);
+        }
+      }
 
       await flushRuleDecisions(tx, blockUnits.map((b) => b.rules));
       const ruleDecisionCount = await tx.configRuleDecision.count({ where: { jobId: job.id } });
@@ -467,7 +482,8 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         edgeCount: edgeData.length,
         unitCount,
         qcpItemCount: qcp.itemCount,
-        bomItemCount: bom.count,
+        bomItemCount: bomCount,
+        weldMapJointCount,
         unmatchedQcpProcessCodes: qcp.unmatchedProcessCodes,
         ruleDecisionCount,
         flaggedRuleCount,
@@ -508,7 +524,7 @@ export async function createJob(actor: Actor, input: CreateJobInput): Promise<Cr
         },
       };
     });
-  });
+  }
 }
 
 /**
@@ -963,4 +979,32 @@ async function copyBom(
   }
 
   return { count: source.bomItems.length, createdIds: created.map((c) => c.id) };
+}
+
+/**
+ * J7a: copy a previous line's weld map. Only IMPORTED joints (GENERATED seams follow the new line's
+ * own shell-courses answer at BOM release). Every copy is unconfirmed: the new job's QC or
+ * Engineering confirms it again (J4b). Idempotent by (equipment, joint no) like the importer.
+ */
+async function copyWeldMap(tx: Tx, sourceEquipmentId: number, targetEquipmentId: number, tenantId: number, jobId: number): Promise<number> {
+  const source = await tx.equipment.findFirst({ where: { id: sourceEquipmentId, job: { tenantId } }, select: { id: true } });
+  if (!source) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Equipment", equipmentId: sourceEquipmentId });
+  const joints = await tx.plannedJoint.findMany({ where: { equipmentId: sourceEquipmentId, source: "IMPORTED" }, orderBy: [{ sortOrder: "asc" }, { id: "asc" }] });
+  if (joints.length === 0) return 0;
+  const made = await tx.plannedJoint.createMany({
+    data: joints.map((j) => ({
+      jobId,
+      equipmentId: targetEquipmentId,
+      jointNo: j.jointNo,
+      jointType: j.jointType,
+      joins: j.joins,
+      wpsRef: j.wpsRef,
+      ndtExtent: j.ndtExtent,
+      sortOrder: j.sortOrder,
+      source: "IMPORTED" as const,
+      confirmed: false,
+    })),
+    skipDuplicates: true,
+  });
+  return made.count;
 }

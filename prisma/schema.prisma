@@ -406,6 +406,7 @@ model Organization {
 
   milestones    Milestone[]
   milestoneMaps MilestoneProcessMap[]
+  jobDrafts     JobDraft[]
 
   @@map("organizations")
 }
@@ -486,6 +487,7 @@ model User {
   procurementEvents              ProcurementEvent[]
   stockTxns                      StockTxn[]
   createdScheduleRuns            ScheduleRun[]
+  jobDrafts                      JobDraft[]
   submittedProcessPlans          ProcessPlan[]                 @relation("ProcessPlanSubmittedBy")
   verifiedProcessPlans           ProcessPlan[]                 @relation("ProcessPlanVerifiedBy")
   submittedComponentOps          ComponentOperation[]          @relation("ComponentOperationSubmittedBy")
@@ -1210,6 +1212,8 @@ model Job {
   sequenceOverrides            SequenceOverride[]
   configRuleDecisions          ConfigRuleDecision[]
   workRequests                 WorkRequest[]
+  draftSourceOf                JobDraft[]                   @relation("JobDraftSource")
+  draftReleasedAs              JobDraft[]                   @relation("JobDraftReleased")
 
   @@unique([tenantId, jobNumber])
   @@index([tenantId])
@@ -3407,4 +3411,35 @@ model MilestoneProcessMap {
   @@index([tenantId])
   @@index([milestoneId])
   @@map("milestone_process_maps")
+}
+
+enum JobDraftStatus {
+  DRAFT
+  RELEASED
+  DISCARDED
+}
+
+/// Lean Core J7a (Q1): a half-made job. Deliberately NOT a Job row or a JobStatus value, so no
+/// existing reader needs to learn about it. `payload` is the createJobSchema input (partial while
+/// DRAFT, parsed in full at release). Tenant-root; discard is a status, there is no DELETE grant.
+model JobDraft {
+  id            Int            @id @default(autoincrement())
+  tenantId      Int            @map("tenant_id")
+  createdBy     Int            @map("created_by")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at")
+  /// The job this draft was copied from, when it was.
+  sourceJobId   Int?           @map("source_job_id")
+  payload       Json
+  status        JobDraftStatus @default(DRAFT)
+  releasedJobId Int?           @map("released_job_id")
+
+  tenant      Organization @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  creator     User         @relation(fields: [createdBy], references: [id])
+  sourceJob   Job?         @relation("JobDraftSource", fields: [sourceJobId], references: [id], onDelete: SetNull)
+  releasedJob Job?         @relation("JobDraftReleased", fields: [releasedJobId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([createdBy])
+  @@map("job_drafts")
 }
