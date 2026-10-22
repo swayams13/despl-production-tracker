@@ -44,6 +44,7 @@ export async function resolveReviewRow(actor: Actor, input: ResolveReviewRowInpu
   const found = await withTenant(actor.tenantId, (tx) =>
     kind === "ASSEMBLY_STEP"
       ? tx.assemblyStep
+          // j5c: history
           .findFirst({ where: { id, unit: { equipment: { job: { tenantId: actor.tenantId } } } }, select: { jobId: true, unitId: true, unit: { select: { equipmentId: true } } } })
           .then((s) => (s ? { jobId: s.jobId, unitId: s.unitId, equipmentId: s.unit.equipmentId } : null))
       : tx.componentOperation
