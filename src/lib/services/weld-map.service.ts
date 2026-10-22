@@ -19,6 +19,7 @@ import {
 } from "@/lib/shared/weld-map";
 import { canonicalizeXlsx } from "./xlsx-canonical";
 import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core J4b: a line's weld map and joint register. Joints are per line
@@ -104,7 +105,7 @@ export async function loadWeldMap(actor: Actor, jobId: number): Promise<WeldMapV
               orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
               select: {
                 id: true, jointNo: true, jointType: true, joins: true, wpsRef: true, ndtExtent: true, source: true, confirmed: true,
-                _count: { select: { assemblySteps: true, weldJoints: true } },
+                _count: { select: { assemblySteps: { where: activeRow }, weldJoints: true } },
               },
             },
           },

@@ -26,6 +26,7 @@ import {
   type RejectAssemblyStepInput,
 } from "@/lib/shared/schemas";
 import type { AssemblyStep, AssemblyStepRole, OperationStatus } from "@/generated/prisma/client";
+import { activeRow } from "./active-row";
 
 /**
  * F8's third consumer (state-machine.ts's own comment named this ahead of
@@ -82,6 +83,7 @@ async function lockAssemblyStepForUpdate(
 }> {
   if (opts.unitLock) {
     // L1.2e: the unit's floor lock goes BEFORE the row lock, as in recordWork.
+    // j5c: history (lookup by id only to find the unit lock; the row itself is refused below if retired)
     const pre = await tx.assemblyStep.findFirst({
       where: { id: assemblyStepId, unit: { equipment: { job: { tenantId } } } },
       select: { jobId: true, unitId: true },
@@ -90,6 +92,7 @@ async function lockAssemblyStepForUpdate(
   }
   await tx.$queryRaw`SELECT id FROM assembly_steps WHERE id = ${assemblyStepId} FOR UPDATE`;
 
+  // j5c: history (found, then refused if retired)
   const step = await tx.assemblyStep.findFirst({
     where: { id: assemblyStepId, unit: { equipment: { job: { tenantId } } } },
     include: {
@@ -97,6 +100,7 @@ async function lockAssemblyStepForUpdate(
     },
   });
   if (!step) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyStep", assemblyStepId });
+  if (step.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "AssemblyStep", assemblyStepId });
   // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
   // to the step's own (denormalized) job — same pattern as
   // lockProcessPlanForUpdate in _shared.ts.
@@ -106,7 +110,9 @@ async function lockAssemblyStepForUpdate(
     step.seq > 1
       ? await tx.assemblyStep.findFirst({
           // J4a: by the row's own seq. It equals the template seq until a scoped step expands.
-          where: { unitId: step.unitId, seq: step.seq - 1 },
+          // J5c: the nearest lower ACTIVE seq (a retired row leaves a gap until the next renumber).
+          where: { ...activeRow, unitId: step.unitId, seq: { lt: step.seq } },
+          orderBy: { seq: "desc" },
           select: { seq: true, status: true },
         })
       : null;
@@ -358,7 +364,7 @@ async function completeStepLocked(tx: Tx, actor: Actor, step: LockedStep, to: Op
       // joint). It is cleared only when the last of them is complete; until then the hold stays
       // open. A REJECT still records at once (latest wins), so one bad joint re-opens it.
       const openSiblings = await tx.assemblyStep.count({
-        where: { unitId: step.unitId, qcpItemId: step.qcpItemId, id: { not: step.id }, status: { not: "COMPLETE" } },
+        where: { ...activeRow, unitId: step.unitId, qcpItemId: step.qcpItemId, id: { not: step.id }, status: { not: "COMPLETE" } },
       });
       if (!externalBlocking && openSiblings === 0) {
         const exec = await recordQcpExecutionTx(tx, actor, {
@@ -457,6 +463,7 @@ async function rejectStepLocked(
     // back the whole reject).
     const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
     if (qcIds.length > 0) {
+      // j5c: history (lookup by id for the notification text)
       const ctx = await tx.assemblyStep.findUniqueOrThrow({
         where: { id: step.id },
         select: {
@@ -561,7 +568,7 @@ export async function inspectAssemblyStepTx(
   if (inspection) {
     // The makers: every preceding WORK step of the template group, on the same joint where one is set (H1 scope).
     const group = await tx.assemblyStep.findMany({
-      where: { unitId: step.unitId, seq: { lt: step.seq }, templateStep: { kind: "WORK", groupCode: step.templateStep.groupCode } },
+      where: { ...activeRow, unitId: step.unitId, seq: { lt: step.seq }, templateStep: { kind: "WORK", groupCode: step.templateStep.groupCode } },
       select: { id: true, status: true, submittedBy: true, performedByUserId: true, jointRef: true },
     });
     const own = jointRefs(step.jointRef);
@@ -757,7 +764,7 @@ export async function materializeAssemblyStepsFromTemplate(
   const componentsByUnit = new Map<number, { id: number; componentTypeId: number }[]>();
   if (componentTypeIds.length > 0) {
     const comps = await tx.component.findMany({
-      where: { unitId: { in: unitIds }, componentTypeId: { in: componentTypeIds } },
+      where: { ...activeRow, unitId: { in: unitIds }, componentTypeId: { in: componentTypeIds } },
       orderBy: { id: "asc" },
       select: { id: true, unitId: true, componentTypeId: true },
     });

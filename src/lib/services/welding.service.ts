@@ -98,8 +98,10 @@ export async function createWeldJointTx(
   }
 
   if (componentId != null) {
+    // j5c: history (found, then refused if retired)
     const component = await tx.component.findFirst({ where: { id: componentId, equipment: { jobId } } });
     if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+    if (component.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "Component", componentId });
   }
 
   const welders = await tx.welder.findMany({ where: { id: { in: fields.welderIds }, tenantId: actor.tenantId } });

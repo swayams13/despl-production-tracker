@@ -14,6 +14,7 @@ import {
   requiredJointRef,
 } from "@/lib/shared/floor-rules";
 import { loadOpSeqResolver, lotQtyByUnit, openQcpItemIdsForUnit } from "./_shared";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L1.2: the per-unit snapshot floor-rules.ts evaluates, loaded once
@@ -73,7 +74,8 @@ export async function assertFloorHard(
   const job = { select: { id: true, familyId: true } } as const;
   const src =
     kind === "ASSEMBLY_STEP"
-      ? await tx.assemblyStep.findUniqueOrThrow({ where: { id }, select: { unitId: true, job } })
+      ? // j5c: history (lookup by id; the caller's lock already refused a retired row)
+        await tx.assemblyStep.findUniqueOrThrow({ where: { id }, select: { unitId: true, job } })
       : await tx.componentOperation
           .findUniqueOrThrow({ where: { id }, select: { component: { select: { unitId: true } }, job } })
           .then((o) => ({ unitId: o.component.unitId, job: o.job }));
@@ -105,7 +107,7 @@ export async function loadFloorFacts(
     unitId == null
       ? Promise.resolve([])
       : tx.assemblyStep.findMany({
-          where: { unitId, jobId: job.id },
+          where: { ...activeRow, unitId, jobId: job.id },
           select: {
             id: true,
             seq: true,
@@ -124,7 +126,7 @@ export async function loadFloorFacts(
           },
         }),
     tx.componentOperation.findMany({
-      where: { jobId: job.id, component: { unitId } },
+      where: { ...activeRow, jobId: job.id, component: { unitId, ...activeRow } },
       select: {
         id: true,
         seq: true,
@@ -338,7 +340,7 @@ export async function loadFloorFacts(
       : [];
 
   const hasAssemblySequence =
-    unitId != null ? steps.length > 0 : (await tx.assemblyStep.count({ where: { jobId: job.id } })) > 0;
+    unitId != null ? steps.length > 0 : (await tx.assemblyStep.count({ where: { ...activeRow, jobId: job.id } })) > 0;
 
   return {
     facts: {

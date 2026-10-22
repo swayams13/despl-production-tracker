@@ -5,6 +5,7 @@
 import type { Prisma } from "../../generated/prisma/client";
 import { AppError, ERROR_CODES } from "../shared/errors";
 import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
+import { activeRow } from "./active-row";
 
 export interface MatchStep {
   id: number;
@@ -131,7 +132,7 @@ export async function bindExistingInspectionSteps(
   skipped: { srNo: string; sequence: number }[],
 ): Promise<BindExistingResult> {
   const steps = await tx.assemblyStep.findMany({
-    where: { jobId, qcpItemId: null, templateStep: { kind: "INSPECTION" } },
+    where: { ...activeRow, jobId, qcpItemId: null, templateStep: { kind: "INSPECTION" } },
     select: { id: true, status: true, templateStepId: true, templateStep: { select: { versionId: true, srNo: true } } },
     orderBy: { id: "asc" },
   });

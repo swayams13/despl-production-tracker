@@ -39,21 +39,25 @@ export async function notifyBlocker(actor: Actor, input: NotifyBlockerInput): Pr
     });
     if (!unit) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Unit" });
 
-    const title =
+    // j5c: history (found, then refused if retired)
+    const target =
       input.kind === "ASSEMBLY_STEP"
-        ? (
-            await tx.assemblyStep.findFirst({
+        ? await tx.assemblyStep
+            .findFirst({
               where: { id: input.id, unitId: unit.id },
-              select: { templateStep: { select: { activity: true } } },
+              select: { retiredAt: true, templateStep: { select: { activity: true } } },
             })
-          )?.templateStep.activity
-        : (
-            await tx.componentOperation.findFirst({
+            .then((s) => (s ? { retiredAt: s.retiredAt, title: s.templateStep.activity } : null))
+        : await tx.componentOperation
+            // j5c: history
+            .findFirst({
               where: { id: input.id, component: { unitId: unit.id } },
-              select: { operation: { select: { name: true } } },
+              select: { retiredAt: true, operation: { select: { name: true } } },
             })
-          )?.operation.name;
-    if (!title) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: input.kind, id: input.id });
+            .then((o) => (o ? { retiredAt: o.retiredAt, title: o.operation.name } : null));
+    if (!target?.title) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: input.kind, id: input.id });
+    if (target.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: input.kind, id: input.id });
+    const title = target.title;
 
     const last = await tx.notification.findFirst({
       where: {
@@ -119,10 +123,12 @@ export interface EnsureJointInput {
 export async function ensureJointForStep(actor: Actor, input: EnsureJointInput): Promise<{ weldJointId: number; created: boolean }> {
   assertNotClientUser(actor);
   return withTenant(actor.tenantId, async (tx) => {
+    // j5c: history (found, then refused if retired)
     const step = await tx.assemblyStep.findFirst({
       where: { id: input.assemblyStepId },
       select: {
         id: true,
+        retiredAt: true,
         jobId: true,
         unitId: true,
         jointRef: true,
@@ -131,6 +137,7 @@ export async function ensureJointForStep(actor: Actor, input: EnsureJointInput):
       },
     });
     if (!step) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyStep", id: input.assemblyStepId });
+    if (step.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "AssemblyStep", id: input.assemblyStepId });
     requireDepartmentScope(actor, step.templateStep.defaultDepartmentId);
     const jointNo = (step.templateStep.jointRef ?? step.jointRef)?.trim();
     if (!jointNo) {

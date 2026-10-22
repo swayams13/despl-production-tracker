@@ -16,6 +16,7 @@ import {
 } from "@/lib/shared/schemas";
 import type { Prisma, QcpExecution, QcpExecutionResult, QcpItem, QcpTemplate } from "@/generated/prisma/client";
 import { evidenceNeeded, QC_RECORD_ROLES } from "@/lib/shared/qc-queue";
+import { activeRow } from "./active-row";
 
 /**
  * Bare tx-level create, no audit of its own — same discipline as
@@ -173,7 +174,7 @@ export async function recordQcpExecution(
     });
     // L1.2e: clearing (or failing) a hold point can complete (or reopen) the plan its step feeds.
     if (FEATURES.leanFloor) {
-      const step = await tx.assemblyStep.findFirst({ where: { qcpItemId, unitId }, select: { id: true } });
+      const step = await tx.assemblyStep.findFirst({ where: { ...activeRow, qcpItemId, unitId }, select: { id: true } });
       if (step) await rollupForAssemblyStep(tx, actor, step.id);
     }
     return recorded;

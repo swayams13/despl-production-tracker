@@ -3,6 +3,8 @@ import { audited } from "@/lib/audit";
 import { assertNotClientUser, requireDepartmentScope, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { issueStockTx } from "./stock.service";
+import { activeRow } from "./active-row";
+import { lineBomItemIds } from "./bom-line";
 
 /**
  * Lean Core L2.13: the heat number of a pressure part, picked where the part is
@@ -62,11 +64,13 @@ interface Resolved {
 }
 
 async function resolveComponent(tx: Tx, actor: Actor, componentId: number): Promise<Resolved> {
+  // j5c: history (found, then refused if retired)
   const c = await tx.component.findFirst({
     where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
-    select: { id: true, jobId: true, bomItemId: true, pressureRetaining: true, bomItem: { select: { partName: true, qtyPer: true } } },
+    select: { id: true, jobId: true, bomItemId: true, pressureRetaining: true, retiredAt: true, bomItem: { select: { partName: true, qtyPer: true } } },
   });
   if (!c) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+  if (c.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "Component", componentId });
   if (!c.pressureRetaining) {
     throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "Only a pressure part needs a heat number picked." });
   }
@@ -75,7 +79,7 @@ async function resolveComponent(tx: Tx, actor: Actor, componentId: number): Prom
   }
   const [cutting, picked, issued] = await Promise.all([
     tx.componentOperation.findFirst({
-      where: { componentId, operation: { code: "CUTTING" } },
+      where: { ...activeRow, componentId, operation: { code: "CUTTING" } },
       select: { status: true, operation: { select: { defaultDepartmentId: true } } },
     }),
     tx.materialIdentification.findFirst({ where: { componentId }, orderBy: { id: "asc" }, select: { id: true, heatNumber: true } }),
@@ -117,7 +121,7 @@ async function preparePick(tx: Tx, actor: Actor, input: { componentId: number; s
   scope(actor, r.departmentId);
   assertNotCut(r);
   const lot = await tx.stockLot.findFirst({
-    where: { id: input.stockLotId, bomItemId: r.component.bomItemId, jobId: r.component.jobId },
+    where: { id: input.stockLotId, bomItemId: { in: await lineBomItemIds(tx, r.component.bomItemId) }, jobId: r.component.jobId },
     select: { id: true, heatNumber: true },
   });
   if (!lot) throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "That lot was not received for this part." });
@@ -164,7 +168,7 @@ export async function loadHeatChoices(actor: Actor, componentId: number): Promis
     scope(actor, r.departmentId);
     if (!r.picked) assertNotCut(r);
     const lots = await tx.stockLot.findMany({
-      where: { bomItemId: r.component.bomItemId, jobId: r.component.jobId, heatNumber: r.issuedHeats.size ? { in: [...r.issuedHeats] } : { not: null } },
+      where: { bomItemId: { in: await lineBomItemIds(tx, r.component.bomItemId) }, jobId: r.component.jobId, heatNumber: r.issuedHeats.size ? { in: [...r.issuedHeats] } : { not: null } },
       orderBy: { id: "asc" },
       select: { id: true, heatNumber: true, location: true, qty: true, txns: { select: { type: true, qty: true } } },
     });

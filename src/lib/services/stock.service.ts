@@ -14,6 +14,7 @@ import {
   type RecordLotHeatInput,
 } from "@/lib/shared/schemas";
 import type { StockLot, StockTxn, StockTxnType } from "@/generated/prisma/client";
+import { activeRow } from "./active-row";
 
 /**
  * `StockLot` + `StockTxn` (B6, Phase 4) — a real receipt/consumption ledger,
@@ -95,6 +96,7 @@ export async function recordLotHeat(actor: Actor, input: RecordLotHeatInput): Pr
     const issuedTo = await tx.stockTxn.findMany({ where: { stockLotId, type: "ISSUE", componentId: { not: null } }, select: { componentId: true } });
     const partIds = [...new Set(issuedTo.map((t) => t.componentId!))];
     if (partIds.length) {
+      // j5c: history (traceability: material already cut, even into a part since retired)
       const cut = await tx.componentOperation.count({
         where: { componentId: { in: partIds }, operation: { code: "CUTTING" }, status: { notIn: ["NOT_STARTED", "IN_PROGRESS"] } },
       });
@@ -231,7 +233,9 @@ async function stockTxnTx(
     // mutated, not merely the same tenant — the gap named in the research
     // ("an issue against Job A's stock lot could be logged against a
     // component belonging to Job B").
-    const component = await tx.component.findFirst({ where: { id: componentId, jobId }, select: { id: true } });
+    // j5c: history (found, then refused if retired)
+    const component = await tx.component.findFirst({ where: { id: componentId, jobId }, select: { id: true, retiredAt: true } });
+    if (component?.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "Component", componentId });
     if (!component) {
       throw new AppError(
         ERROR_CODES.VALIDATION_FAILED,
@@ -271,12 +275,13 @@ async function stockTxnTx(
  * is deliberately not derived: it is a check, not a fact.
  */
 async function completeReceiptOnIssue(tx: Tx, actor: Actor, componentId: number, stockTxnId: number): Promise<void> {
+  // j5c: history (lookup by id; the issue above already refused a retired part)
   const comp = await tx.component.findUnique({ where: { id: componentId }, select: { jobId: true, unitId: true } });
   if (!comp) return;
   // The unit's floor lock first (as recordWork takes it), then read the operation, so a Done racing this issue is not overwritten.
   await lockFloorUnits(tx, comp.jobId, [comp.unitId]);
   const op = await tx.componentOperation.findFirst({
-    where: { componentId, operation: { code: "RECEIPT" }, status: { in: ["NOT_STARTED", "IN_PROGRESS"] } },
+    where: { ...activeRow, componentId, operation: { code: "RECEIPT" }, status: { in: ["NOT_STARTED", "IN_PROGRESS"] } },
     orderBy: { seq: "asc" },
     select: { id: true, status: true, requiresQc: true, startedAt: true },
   });
