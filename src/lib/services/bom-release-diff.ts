@@ -53,6 +53,32 @@ export function emptyDiff(): ReleaseDiff {
   return { counts: { component: zero(), operation: zero(), step: zero() }, rows: [] };
 }
 export const diffIsEmpty = (d: ReleaseDiff) => d.rows.length === 0;
+/** Display copy of a diff: the ids in `fields` become names ("Flange → Pipe"). The audit row keeps the raw diff. */
+export async function namedDiff(tx: Tx, d: ReleaseDiff): Promise<ReleaseDiff> {
+  const ids = { partFamily: new Set<number>(), operation: new Set<number>(), part: new Set<number>(), qcpItem: new Set<number>() };
+  for (const r of d.rows) {
+    for (const f of r.fields) {
+      const set = ids[f.field as keyof typeof ids];
+      if (set) for (const v of [f.from, f.to]) if (typeof v === "number") set.add(v);
+    }
+  }
+  const list = (k: keyof typeof ids) => ({ in: [...ids[k]] });
+  const [types, operations, parts, qcp] = await Promise.all([
+    ids.partFamily.size ? tx.componentTypeRef.findMany({ where: { id: list("partFamily") }, select: { id: true, name: true } }) : [],
+    ids.operation.size ? tx.operationRef.findMany({ where: { id: list("operation") }, select: { id: true, name: true } }) : [],
+    // j5c: history (a part named in a diff may already be retired)
+    ids.part.size ? tx.component.findMany({ where: { id: list("part") }, select: { id: true, tag: true } }) : [],
+    ids.qcpItem.size ? tx.qcpItem.findMany({ where: { id: list("qcpItem") }, select: { id: true, srNo: true } }) : [],
+  ]);
+  const names: Record<string, Map<number, string>> = {
+    partFamily: new Map(types.map((t) => [t.id, t.name])),
+    operation: new Map(operations.map((o) => [o.id, o.name])),
+    part: new Map(parts.map((c) => [c.id, c.tag])),
+    qcpItem: new Map(qcp.map((q) => [q.id, q.srNo])),
+  };
+  const name = (field: string, v: unknown) => (typeof v === "number" && names[field]?.get(v)) || v;
+  return { counts: d.counts, rows: d.rows.map((r) => ({ ...r, fields: r.fields.map((f) => ({ ...f, from: name(f.field, f.from), to: name(f.field, f.to) })) })) };
+}
 export function previewDiff(d: ReleaseDiff): ReleaseDiff {
   return { counts: d.counts, rows: d.rows.slice(0, PREVIEW_ROWS) };
 }
@@ -74,6 +100,49 @@ function changedLineFields(old: LineFields, now: LineFields): DiffField[] {
   if (old.partName !== now.partName) out.push({ field: "partName", from: old.partName, to: now.partName });
   if (intQty(old.qtyPer) !== intQty(now.qtyPer)) out.push({ field: "quantity", from: intQty(old.qtyPer), to: intQty(now.qtyPer) });
   return out;
+}
+
+/** Reason prefix `bom-review.service` writes when a row is cancelled. */
+export const CANCELLED_IN_REVIEW = "cancelled in review";
+
+/**
+ * A row cancelled in review stays cancelled: the next check does not add it back until its BOM line changes again.
+ * "Changes again" compares the line as it was in the revision in force when the row was cancelled with the line now
+ * (the four fields of `changedLineFields`); revisions keep their lines, so nothing extra is stored.
+ */
+export class CancelledMemory {
+  private history?: { revisions: { id: number; materializedAt: Date }[]; lines: Map<number, Map<number, LineFields>> };
+  constructor(
+    private readonly tx: Tx,
+    private readonly equipmentId: number,
+    /** The target revision's lines by item number. */
+    private readonly current: Map<number, LineFields>,
+  ) {}
+
+  private async load() {
+    if (this.history) return this.history;
+    const revisions = (await this.tx.bomRevision.findMany({ where: { equipmentId: this.equipmentId, materializedAt: { not: null } }, select: { id: true, materializedAt: true }, orderBy: { materializedAt: "desc" } })).map((r) => ({ id: r.id, materializedAt: r.materializedAt! }));
+    const items = await this.tx.bomItem.findMany({
+      where: { equipmentId: this.equipmentId, bomRevisionId: { in: revisions.map((r) => r.id) } },
+      select: { bomRevisionId: true, itemNo: true, partName: true, qtyPer: true, componentTypeId: true, routeVariant: true },
+    });
+    const lines = new Map<number, Map<number, LineFields>>();
+    for (const it of items) {
+      const m = lines.get(it.bomRevisionId!) ?? new Map<number, LineFields>();
+      m.set(it.itemNo, it);
+      lines.set(it.bomRevisionId!, m);
+    }
+    return (this.history = { revisions, lines });
+  }
+
+  /** True when BOM line `itemNo` reads the same now as in the revision that was released when the row was cancelled. */
+  async lineUnchangedSince(itemNo: number, cancelledAt: Date): Promise<boolean> {
+    const h = await this.load();
+    const inForce = h.revisions.find((r) => r.materializedAt <= cancelledAt);
+    const was = inForce ? h.lines.get(inForce.id)?.get(itemNo) : undefined;
+    const now = this.current.get(itemNo);
+    return was != null && now != null && changedLineFields(was, now).length === 0;
+  }
 }
 
 export interface DiffContext {
@@ -211,6 +280,8 @@ export async function applyReleaseDiff(tx: Tx, actor: Actor, ctx: DiffContext): 
   const existingByKey = new Map(lined.map((c) => [componentKey(c.unitId, c.bomItem!.itemNo), c]));
 
   // ── Components and their operations ───────────────────────────────────
+  const memory = new CancelledMemory(tx, equipment.id, targetByNo);
+  const cancelledSeqs = await cancelledOperationSeqs(tx, memory, lined);
   const toCreate: ComponentRow[] = [];
   const flagOps = async (c: (typeof lined)[number], fields: DiffField[]) => {
     const live = c.operations.filter((o) => !o.needsReview);
@@ -253,7 +324,7 @@ export async function applyReleaseDiff(tx: Tx, actor: Actor, ctx: DiffContext): 
       });
       rec.add("component", "update", { id: c.id, unitId: c.unitId, label: label(c), fields: changed, status: "NOT_STARTED" });
     }
-    await diffOps(tx, rec, c, d, equipment.jobId, retireData);
+    await diffOps(tx, rec, c, d, equipment.jobId, retireData, cancelledSeqs.get(c.id) ?? new Set());
   }
   for (const [key, d] of desired) {
     if (!existingByKey.has(key)) {
@@ -291,6 +362,7 @@ export async function applyReleaseDiff(tx: Tx, actor: Actor, ctx: DiffContext): 
     unitIds,
     desired: stepsBuilt.rows,
     retireData,
+    memory,
   });
 
   // ── Roll the touched plans up ─────────────────────────────────────────
@@ -326,6 +398,26 @@ interface ExistingComponent {
   operations: { id: number; seq: number; operationId: number; status: OperationStatus; requiresQc: boolean; qtyPlanned: number | null; needsReview: boolean }[];
 }
 
+/** componentId -> the operation seqs cancelled in review whose BOM line is unchanged since (see CancelledMemory). */
+async function cancelledOperationSeqs(tx: Tx, memory: CancelledMemory, parts: { id: number; bomItem: { itemNo: number } | null }[]): Promise<Map<number, Set<number>>> {
+  const out = new Map<number, Set<number>>();
+  if (parts.length === 0) return out;
+  const itemNoOf = new Map(parts.map((c) => [c.id, c.bomItem?.itemNo ?? null]));
+  // j5c: history (cancelled rows are what this reads)
+  const cancelled = await tx.componentOperation.findMany({
+    where: { componentId: { in: parts.map((c) => c.id) }, retiredAt: { not: null }, retiredReason: { startsWith: CANCELLED_IN_REVIEW } },
+    select: { componentId: true, seq: true, retiredAt: true },
+  });
+  for (const o of cancelled) {
+    const itemNo = itemNoOf.get(o.componentId);
+    if (itemNo == null || !(await memory.lineUnchangedSince(itemNo, o.retiredAt!))) continue;
+    const set = out.get(o.componentId) ?? new Set<number>();
+    set.add(o.seq);
+    out.set(o.componentId, set);
+  }
+  return out;
+}
+
 async function diffOps(
   tx: Tx,
   rec: Recorder,
@@ -333,6 +425,8 @@ async function diffOps(
   d: ComponentRow,
   jobId: number,
   retireData: { retiredAt: Date; retiredReason: string; needsReview: boolean },
+  /** Operations of this part cancelled in review whose line has not changed since: not added back. */
+  cancelledSeqs: Set<number>,
 ): Promise<void> {
   const have = new Map(c.operations.map((o) => [o.seq, o]));
   const want = new Map(d.ops.map((o) => [o.seq, o]));
@@ -358,6 +452,7 @@ async function diffOps(
         rec.add("operation", "review", { id: e.id, unitId: c.unitId, label, fields: [{ field: "step", from: "in the route", to: "removed" }], status: e.status }, { kind: "OP", id: e.id });
       }
     } else if (w) {
+      if (cancelledSeqs.has(seq)) continue;
       const row = await tx.componentOperation.create({
         data: { componentId: c.id, seq: w.seq, operationId: w.operationId, requiresQc: w.requiresQc, ...(w.qtyPlanned != null ? { qtyPlanned: w.qtyPlanned } : {}), jobId },
         select: { id: true },
@@ -387,6 +482,8 @@ export interface StepDiffArgs {
   retireData: { retiredAt: Date; retiredReason: string; needsReview: boolean };
   /** Review Replace: only the steps of these parts. */
   onlyComponentIds?: number[];
+  /** A release or check: steps cancelled in review are not added back while what they depend on is unchanged. */
+  memory?: CancelledMemory;
 }
 
 /** Step rows of a unit in the materialiser's own order, then numbered with its own formula. */
@@ -473,6 +570,23 @@ export async function diffSteps(tx: Tx, rec: Recorder, args: StepDiffArgs): Prom
   const activity = new Map(steps.map((s) => [s.id, s.activity]));
   const labelOf = (r: { templateStepId: number; jointRef: string | null }) => `${activity.get(r.templateStepId) ?? "Step"}${r.jointRef ? ` · ${r.jointRef}` : ""}`;
 
+  const cancelledSteps = args.memory
+    ? // j5c: history (cancelled rows are what this reads)
+      await tx.assemblyStep.findMany({
+        where: { unit: { equipmentId: args.equipmentId }, retiredAt: { not: null }, retiredReason: { startsWith: CANCELLED_IN_REVIEW } },
+        orderBy: { retiredAt: "desc" },
+        select: { unitId: true, templateStepId: true, plannedJointId: true, componentId: true, jointRef: true, qcpItemId: true, requiresQc: true, pressurePart: true, role: true, qtyPlanned: true, retiredAt: true },
+      })
+    : [];
+  // A cancelled row stays cancelled while its part's BOM line is unchanged; a row with no BOM line, while what would be
+  // added is exactly what was cancelled.
+  const stayCancelled = async (key: string, w: AssemblyStepRow): Promise<boolean> => {
+    const c = cancelledSteps.find((r) => keyOf(r) === key);
+    if (!c || !args.memory) return false;
+    const itemNo = w.componentId != null ? (itemNoOf.get(w.componentId) ?? null) : null;
+    return itemNo != null ? args.memory.lineUnchangedSince(itemNo, c.retiredAt!) : stepFieldChanges(c, w).length === 0;
+  };
+
   const adds: AssemblyStepRow[] = [];
   const retireIds: number[] = [];
   const touchedUnits = new Set<number>();
@@ -505,6 +619,7 @@ export async function diffSteps(tx: Tx, rec: Recorder, args: StepDiffArgs): Prom
   }
   for (const [key, w] of want) {
     if (!have.has(key)) {
+      if (await stayCancelled(key, w)) continue;
       adds.push(w);
       touchedUnits.add(w.unitId);
     }

@@ -191,6 +191,8 @@ function Body({
   const [edits, setEdits] = useState<Map<number, Edit>>(new Map());
   const [saving, startSaving] = useTransition();
   const [releasing, startReleasing] = useTransition();
+  const [checking, startChecking] = useTransition();
+  const [checked, setChecked] = useState(false);
   const [confirm, setConfirm] = useState<boolean | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const editable = preview.state !== "ALREADY_RELEASED" && preview.state !== "LEGACY_MATERIALIZED" && preview.state !== "SUPERSEDED" && preview.revision.materializedAt == null;
@@ -243,7 +245,10 @@ function Body({
             {preview.state === "ALREADY_RELEASED" && view.canRelease && (
               <>
                 {" "}
-                <button type="button" className="btn" onClick={() => router.refresh()}>Check for changes</button>
+                <button type="button" className="btn" disabled={checking} onClick={() => startChecking(() => { router.refresh(); setChecked(true); })}>
+                  {checking ? "Checking…" : "Check for changes"}
+                </button>
+                {checked && !checking && <span role="status"> Checked just now: the floor rows match this revision.</span>}
               </>
             )}
           </p>

@@ -90,6 +90,7 @@ export function ReviewPanel({ jobId, rows }: { jobId: number; rows: ReviewRow[] 
             <label style={{ display: "grid", gap: 4 }}>
               Reason (required, recorded with your name)
               <textarea className="ws-detail" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />
+              {reason.trim().length < MIN_REASON && <span className="note" style={{ textAlign: "left", margin: 0 }}>Write at least {MIN_REASON} characters to continue.</span>}
             </label>
             {error && <div role="alert"><span className="chip c-overdue"><i />{error}</span></div>}
           </div>

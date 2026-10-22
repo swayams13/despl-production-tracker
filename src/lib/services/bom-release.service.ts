@@ -12,7 +12,7 @@ import { flushRuleDecisions, LineRules } from "./config-rules";
 import { approvedComponentTypeIds, materializeComponentsFromBomItems } from "./component.service";
 import { materializeAssemblyStepsFromTemplate } from "./assembly.service";
 import { ensureDraftRevisionTx } from "./bom.service";
-import { applyReleaseDiff, diffIsEmpty, previewDiff, type ReleaseDiff } from "./bom-release-diff";
+import { applyReleaseDiff, diffIsEmpty, namedDiff, previewDiff, type ReleaseDiff } from "./bom-release-diff";
 import { loadSkippedQcpItems } from "./assembly-qcp-match";
 import { buildReleaseWarnings, suggestPartFamily, type PartFamilySuggestion, type ReleaseWarning } from "./bom-release.rules";
 import { activeRow } from "./active-row";
@@ -335,7 +335,8 @@ export async function previewBomRelease(actor: Actor, input: BomReleaseTargetInp
   const jobId = await jobIdOf(actor, equipmentId);
   try {
     await withJob(actor.tenantId, jobId, async (tx) => {
-      throw new DryRun(await runBomRelease(tx, actor, equipmentId, bomRevisionId));
+      const run = await runBomRelease(tx, actor, equipmentId, bomRevisionId);
+      throw new DryRun(run.diff ? { ...run, diff: await namedDiff(tx, run.diff) } : run);
     });
   } catch (e) {
     if (e instanceof DryRun) return e.preview.diff ? { ...e.preview, diff: previewDiff(e.preview.diff) } : e.preview;

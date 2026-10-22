@@ -134,6 +134,18 @@ describe.skipIf(!RUN_DB)("BOM re-release diff (DB)", async () => {
       expect((await svc.previewBomRelease(r.w.actors.eng, r.j.target)).state).toBe("ALREADY_RELEASED");
     });
 
+    it("the preview names a changed part family instead of showing its id; the audit row keeps the ids", async () => {
+      const r = await released("NAMES", { units: 1 });
+      const n = await startNext(r);
+      await owner.bomItem.update({ where: { id: n.byNo.get(2)!.id }, data: { componentTypeId: r.w.shl.id } });
+      const target = { equipmentId: r.j.equipmentId, bomRevisionId: n.bomRevisionId };
+      const field = (rows: { fields: { field: string; from: unknown; to: unknown }[] }[]) => rows.flatMap((x) => x.fields).find((x) => x.field === "partFamily")!;
+      expect(field((await svc.previewBomRelease(r.w.actors.eng, target)).diff!.rows)).toMatchObject({ from: "PLT", to: "Shell course" });
+      await release(r, n.bomRevisionId);
+      const stored = (await auditOf(r, "bom.release"))[0].after as { diff: { rows: { fields: { field: string; from: unknown; to: unknown }[] }[] } };
+      expect(field(stored.diff.rows)).toMatchObject({ from: r.w.plt.id, to: r.w.shl.id });
+    });
+
     it("a new line adds a part per unit with its operations; revision 2 becomes the released one; the audit row carries the diff", async () => {
       const r = await released("ADD", { units: 2 });
       const n = await startNext(r);
@@ -463,6 +475,48 @@ describe.skipIf(!RUN_DB)("BOM re-release diff (DB)", async () => {
       expect(await opRow(op.id)).toMatchObject({ needsReview: false, retiredReason: "cancelled in review: Part no longer made", status: "IN_PROGRESS" });
       expect((await opRow(op.id)).retiredAt).not.toBeNull();
       expect((await auditOf(r, "bom.review.cancel"))[0].after).toMatchObject({ retired: true, reason: "Part no longer made" });
+    });
+
+    it("a cancelled operation stays cancelled on a check and on a later revision that leaves its line alone; it comes back when the line changes again", async () => {
+      const r = await released("STICK", { units: 1 });
+      const plate = (await comps(r, false)).find((c) => c.tag === "Plate")!;
+      const op = plate.operations[0];
+      await owner.componentOperation.update({ where: { id: op.id }, data: { status: "IN_PROGRESS", startedAt: new Date() } });
+      const n2 = await startNext(r);
+      await owner.bomItem.update({ where: { id: n2.byNo.get(2)!.id }, data: { qtyPer: 4, sourceQty: "4 NOS." } });
+      await release(r, n2.bomRevisionId); // the started plate is flagged: its quantity changed
+      await resolve(r, "eng", "COMPONENT_OP", op.id, "CANCEL", "Not needed for this lot");
+      const active = () => owner.componentOperation.count({ where: { componentId: plate.id, retiredAt: null } });
+      expect(await active()).toBe(0);
+
+      // a check on the same revision does not bring it back
+      await svc.releaseBomRevision(r.w.actors.eng, { equipmentId: r.j.equipmentId, bomRevisionId: n2.bomRevisionId, acknowledgeWarnings: true });
+      expect(await active()).toBe(0);
+
+      // a later revision that changes another line leaves it cancelled
+      const n3 = await startNext(r);
+      await owner.bomItem.update({ where: { id: n3.byNo.get(1)!.id }, data: { remarks: "unrelated" } });
+      await release(r, n3.bomRevisionId);
+      expect(await active()).toBe(0);
+
+      // its own line changes again: the BOM wants the operation again
+      const n4 = await startNext(r);
+      await owner.bomItem.update({ where: { id: n4.byNo.get(2)!.id }, data: { qtyPer: 7, sourceQty: "7 NOS." } });
+      await release(r, n4.bomRevisionId);
+      expect(await active()).toBe(1);
+    });
+
+    it("a cancelled step stays cancelled while nothing it depends on changed, and a row retired for another reason is still added back", async () => {
+      const r = await released("STICKSTEP", { units: 1 });
+      const [a, b] = await steps(r);
+      const retire = (id: number, reason: string) => owner.assemblyStep.update({ where: { id }, data: { retiredAt: new Date(), retiredReason: reason, needsReview: false } });
+      await retire(a.id, "cancelled in review: not needed");
+      await retire(b.id, "removed in BOM rev 1");
+      const out = await svc.releaseBomRevision(r.w.actors.eng, { ...r.j.target, acknowledgeWarnings: true });
+      const live = await steps(r);
+      expect(live.some((s) => s.templateStepId === a.templateStepId && s.plannedJointId === a.plannedJointId && s.componentId === a.componentId)).toBe(false);
+      expect(live.some((s) => s.templateStepId === b.templateStepId && s.plannedJointId === b.plannedJointId && s.componentId === b.componentId)).toBe(true);
+      expect(out.diff!.step.add).toBe(1);
     });
 
     it("Replace of an operation whose quantity changed retires it and adds the current one on the same part", async () => {
