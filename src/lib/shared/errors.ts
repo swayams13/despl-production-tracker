@@ -122,6 +122,10 @@ export const ERROR_CODES = {
   BOM_RELEASE_DIFF_NOT_BUILT: "BOM_RELEASE_DIFF_NOT_BUILT",
   /** releaseBomRevision / mapBomLines (J5a): the line already has components or assembly steps (made at job creation, or by this release). */
   BOM_ALREADY_MATERIALIZED: "BOM_ALREADY_MATERIALIZED",
+  /** Floor writes (J5c): the step, operation or part was retired by a BOM re-release or a review; the write targets the active row instead. */
+  FLOOR_ROW_RETIRED: "FLOOR_ROW_RETIRED",
+  /** resolveReviewRow (J5c): Replace or Cancel is blocked while the row waits for QC (reason QC_PENDING) or has an open NCR (reason NCR_OPEN). */
+  BOM_REVIEW_BLOCKED: "BOM_REVIEW_BLOCKED",
   /** releaseDraft (J7a): the draft was already turned into a job (once only). */
   DRAFT_ALREADY_RELEASED: "DRAFT_ALREADY_RELEASED",
   /** saveDraft / releaseDraft (J7a): the draft was discarded. */
@@ -265,6 +269,10 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This line's floor steps were already generated from another BOM revision. Releasing a later revision on top of them is not available yet.",
   BOM_ALREADY_MATERIALIZED:
     "This line already has components or assembly steps, so its BOM cannot be released again. Existing jobs are never changed by a release.",
+  FLOOR_ROW_RETIRED:
+    "This step was replaced or removed when the BOM changed, so it can no longer be worked. Refresh the screen to see the current steps.",
+  BOM_REVIEW_BLOCKED:
+    "This step cannot be replaced or cancelled yet: it is waiting for QC, or it has an open NCR. Finish that first, or keep the step as it is.",
   DRAFT_ALREADY_RELEASED: "This draft was already turned into a job. Open that job instead.",
   DRAFT_DISCARDED: "This draft was discarded. Copy a job or start a new one.",
   JOB_HAS_INCOMPLETE_PLANS: "This job cannot be marked complete — it still has incomplete process plans on its current schedule run.",

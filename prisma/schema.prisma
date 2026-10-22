@@ -2112,6 +2112,10 @@ model Component {
   /// L1.2 (D2, H2/H3): copied from PartFamily at materialisation; false = the
   /// material-issue, heat-number and drawing HARD rules do not apply.
   pressureRetaining  Boolean @default(false) @map("pressure_retaining")
+  /// J5c: a re-release retires a not-started component the new BOM no longer wants (nothing is deleted, invariant 6).
+  /// Every reader filters `activeRow` (src/lib/services/active-row.ts); reason is set with the timestamp (CHECK).
+  retiredAt          DateTime? @map("retired_at")
+  retiredReason      String?   @map("retired_reason")
   /// H1 job-level RLS backstop: denormalized from equipment.jobId.
   jobId              Int     @map("job_id")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
@@ -2147,7 +2151,8 @@ model Component {
   /// Not representable in Prisma's schema DSL (no filtered-index syntax), so
   /// it has no `@@` counterpart here — do not let a future `prisma migrate
   /// dev` diff propose dropping it as drift; that migration is authoritative.
-  @@unique([unitId, tag])
+  /// J5c (20261030100000): `components_unit_id_tag_active_key (unit_id, tag) WHERE retired_at IS NULL` replaced the
+  /// full @@unique([unitId, tag]); the equipment-grain index above gained `AND retired_at IS NULL`. No compound key.
   @@index([equipmentId])
   @@index([unitId])
   @@index([parentComponentId])
@@ -2197,6 +2202,11 @@ model ComponentOperation {
   qtyPlanned          Int?
   qtyGood             Int?
   qtyRejected         Int?
+  /// J5c: retired by a re-release or a review (never deleted); readers filter `activeRow`.
+  retiredAt           DateTime?       @map("retired_at")
+  retiredReason       String?         @map("retired_reason")
+  /// J5c: a started row whose BOM line changed or vanished stays workable (chip) but holds plan completion until reviewed.
+  needsReview         Boolean         @default(false) @map("needs_review")
   /// H1 job-level RLS backstop: denormalized from component.jobId.
   jobId               Int             @map("job_id")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
@@ -2218,7 +2228,7 @@ model ComponentOperation {
   paintRecord       PaintRecord?
   dftReadings       DftReading[]
 
-  @@unique([componentId, seq])
+  // J5c (20261030100000): component_operations_component_id_seq_key is now partial, (component_id, seq) WHERE retired_at IS NULL.
   @@index([componentId])
   @@index([operationId])
   @@index([status])
@@ -2724,6 +2734,11 @@ model AssemblyStep {
   /// Lean Core J6: a LOT unit's step carries the quantity; null for serial units.
   qtyPlanned          Int?              @map("qty_planned")
   qtyDone             Int               @default(0) @map("qty_done")
+  /// J5c: retired by a re-release or a review (never deleted); readers filter `activeRow`.
+  retiredAt           DateTime?         @map("retired_at")
+  retiredReason       String?           @map("retired_reason")
+  /// J5c: started row whose BOM/weld-map key changed or vanished: workable with a chip, holds plan completion.
+  needsReview         Boolean           @default(false) @map("needs_review")
   /// AUD-001: 0 is a placeholder Prisma needs to treat this field as
   /// optional in create() input. The BEFORE INSERT DB trigger
   /// (aud001_derive_tenant_id) always overwrites it from job_id before
@@ -2745,7 +2760,7 @@ model AssemblyStep {
   rejections        AssemblyStepRejection[]
   ruleNcrs          Ncr[]
 
-  @@unique([unitId, seq])
+  // J5c (20261030100000): assembly_steps_unit_id_seq_key is now partial, (unit_id, seq) WHERE retired_at IS NULL.
   @@index([unitId])
   @@index([templateStepId])
   @@index([status])

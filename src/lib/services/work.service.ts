@@ -84,21 +84,32 @@ const JOINT_REQUIRED =
 type Item = RecordWorkInput["items"][number];
 
 /** unitId (null = job level) of every item that belongs to this job; absent = not in this job. */
-async function resolveUnits(tx: Tx, jobId: number, items: Item[]): Promise<Map<string, number | null>> {
+async function resolveUnits(
+  tx: Tx,
+  jobId: number,
+  items: Item[],
+): Promise<{ unitOf: Map<string, number | null>; retired: Set<string> }> {
   const ids = (k: WorkKind) => items.filter((i) => i.kind === k).map((i) => i.id);
   const [steps, ops, plans] = await Promise.all([
-    tx.assemblyStep.findMany({ where: { id: { in: ids("ASSEMBLY_STEP") }, jobId }, select: { id: true, unitId: true } }),
+    // j5c: history (a retired row is resolved so it can be refused with FLOOR_ROW_RETIRED, never silently skipped)
+    tx.assemblyStep.findMany({ where: { id: { in: ids("ASSEMBLY_STEP") }, jobId }, select: { id: true, unitId: true, retiredAt: true } }),
+    // j5c: history
     tx.componentOperation.findMany({
       where: { id: { in: ids("COMPONENT_OP") }, jobId },
-      select: { id: true, component: { select: { unitId: true } } },
+      select: { id: true, retiredAt: true, component: { select: { unitId: true } } },
     }),
     tx.processPlan.findMany({ where: { id: { in: ids("PROCESS_PLAN") }, jobId }, select: { id: true, unitId: true } }),
   ]);
-  return new Map<string, number | null>([
+  const retired = new Set<string>([
+    ...steps.filter((s) => s.retiredAt).map((s) => rowKey("ASSEMBLY_STEP", s.id)),
+    ...ops.filter((o) => o.retiredAt).map((o) => rowKey("COMPONENT_OP", o.id)),
+  ]);
+  const unitOf = new Map<string, number | null>([
     ...steps.map((s) => [rowKey("ASSEMBLY_STEP", s.id), s.unitId] as const),
     ...ops.map((o) => [rowKey("COMPONENT_OP", o.id), o.component.unitId] as const),
     ...plans.map((p) => [rowKey("PROCESS_PLAN", p.id), p.unitId] as const),
   ]);
+  return { unitOf, retired };
 }
 
 /**
@@ -142,7 +153,7 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
       });
       if (!job) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Job", jobId });
 
-      const unitOf = await resolveUnits(tx, job.id, items);
+      const { unitOf, retired } = await resolveUnits(tx, job.id, items);
       await lockFloorUnits(tx, job.id, unitOf.values());
 
       // After the lock: a concurrent duplicate of this request has committed by now.
@@ -198,6 +209,7 @@ export async function recordWork(actor: Actor, input: RecordWorkInput): Promise<
         const key = rowKey(it.kind, it.id);
         try {
           if (!unitOf.has(key)) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: ENTITY[it.kind], id: it.id });
+          if (retired.has(key)) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: ENTITY[it.kind], id: it.id });
           const facts = factsByUnit.get(unitOf.get(key)!)!;
           const row = facts.rows.get(key);
           // Resolved in this job but not in the current schedule run: a superseded plan.
@@ -703,18 +715,21 @@ export async function inspect(actor: Actor, input: InspectInput): Promise<Inspec
 
   const target = await withTenant(actor.tenantId, async (tx) =>
     kind === "ASSEMBLY_STEP"
-      ? tx.assemblyStep.findFirst({
+      ? // j5c: history (a retired target is refused just below, not hidden)
+        tx.assemblyStep.findFirst({
           where: { id: targetId, unit: { equipment: { job: { tenantId: actor.tenantId } } } },
-          select: { jobId: true, unitId: true },
+          select: { jobId: true, unitId: true, retiredAt: true },
         })
       : tx.componentOperation
+          // j5c: history
           .findFirst({
             where: { id: targetId, component: { equipment: { job: { tenantId: actor.tenantId } } } },
-            select: { jobId: true, component: { select: { unitId: true } } },
+            select: { jobId: true, retiredAt: true, component: { select: { unitId: true } } },
           })
-          .then((o) => (o ? { jobId: o.jobId, unitId: o.component.unitId } : null)),
+          .then((o) => (o ? { jobId: o.jobId, unitId: o.component.unitId, retiredAt: o.retiredAt } : null)),
   );
   if (!target) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: ENTITY[kind], id: targetId });
+  if (target.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: ENTITY[kind], id: targetId });
 
   return withJob(
     actor.tenantId,

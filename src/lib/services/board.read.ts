@@ -5,6 +5,7 @@ import { loadJobHeader, type JobHeader } from "./job-detail.read";
 import { loadJobSpines } from "./spine.read";
 import { loadOpSeqResolver, loadWorkOrderStageNames, workOrderStageName } from "./_shared";
 import { inRoute, loadJobRoutes } from "./line-route";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L2.4: the Job board. One row per unit, one column per work-order
@@ -84,11 +85,11 @@ export async function loadJobBoard(actor: Actor, jobId: number): Promise<BoardVi
           })
         : Promise.resolve([]),
       tx.assemblyStep.findMany({
-        where: { jobId },
+        where: { ...activeRow, jobId },
         select: { id: true, unitId: true, status: true, templateStep: { select: { leadTimeProcessSeq: true } } },
       }),
       tx.componentOperation.findMany({
-        where: { jobId },
+        where: { ...activeRow, jobId },
         select: { id: true, status: true, seq: true, operationId: true, component: { select: { unitId: true, routeVersionId: true } } },
       }),
       tx.sequenceOverride.findMany({ where: { jobId }, select: { targetKind: true, targetId: true, unitId: true } }),

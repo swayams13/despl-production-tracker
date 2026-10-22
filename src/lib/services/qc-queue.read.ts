@@ -20,6 +20,7 @@ import {
   type ReadyRow,
 } from "@/lib/shared/qc-queue";
 import { ncrTenantScope } from "./ncr.service";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L2.6: the QC queue behind `/qc`. Three lists, one definition each,
@@ -123,7 +124,7 @@ async function buildReady(tx: Tx, s: Scope, now: Date): Promise<ReadyRow[]> {
 
   const [submittedSteps, submittedOps, submittedPlans, inspections] = await Promise.all([
     tx.assemblyStep.findMany({
-      where: { status: "SUBMITTED", ...jobFilter, ...unitFilter, ...tenantUnit },
+      where: { ...activeRow, status: "SUBMITTED", ...jobFilter, ...unitFilter, ...tenantUnit },
       select: {
         id: true,
         jobId: true,
@@ -136,6 +137,7 @@ async function buildReady(tx: Tx, s: Scope, now: Date): Promise<ReadyRow[]> {
     }),
     tx.componentOperation.findMany({
       where: {
+        ...activeRow,
         status: "SUBMITTED",
         ...jobFilter,
         component: { equipment: { job: { tenantId: s.tenantId, status: { in: ["ACTIVE", "ON_HOLD"] } } }, ...(s.unitId ? { unitId: s.unitId } : {}) },
@@ -180,6 +182,7 @@ async function buildReady(tx: Tx, s: Scope, now: Date): Promise<ReadyRow[]> {
     // Not yet complete INSPECTION steps: ready only if their preceding work is in (below).
     tx.assemblyStep.findMany({
       where: {
+        ...activeRow,
         status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
         templateStep: { kind: "INSPECTION" },
         ...jobFilter,
@@ -202,7 +205,7 @@ async function buildReady(tx: Tx, s: Scope, now: Date): Promise<ReadyRow[]> {
   const inspUnits = [...new Set(inspections.map((i) => i.unitId))];
   const work = inspUnits.length
     ? await tx.assemblyStep.findMany({
-        where: { unitId: { in: inspUnits }, templateStep: { kind: "WORK" } },
+        where: { ...activeRow, unitId: { in: inspUnits }, templateStep: { kind: "WORK" } },
         select: { id: true, unitId: true, seq: true, status: true, jointRef: true, templateStep: { select: { groupCode: true } } },
       })
     : [];

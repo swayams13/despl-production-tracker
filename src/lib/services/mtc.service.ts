@@ -48,6 +48,7 @@ export async function recordMtc(actor: Actor, input: RecordMtcInput): Promise<Ma
     let jobId = bomItem.equipment.job.id;
 
     if (componentId != null) {
+      // j5c: history (lookup by id)
       const component = await tx.component.findFirst({
         where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
         select: { equipment: { select: { job: { select: { clientId: true, id: true } } } } },

@@ -247,7 +247,9 @@ export async function ensureDraftRevisionTx(
 ): Promise<{ id: number; revisionNo: number; status: "DRAFT" | "RELEASED"; materializedAt: Date | null; created: boolean; moved: number } | null> {
   await tx.$queryRaw`SELECT id FROM equipments WHERE id = ${equipmentId} FOR UPDATE`;
   const [haveComponents, haveSteps, materialised] = await Promise.all([
+    // j5c: any row, retired or not, means this line has floor rows
     tx.component.count({ where: { equipmentId } }),
+    // j5c: any row, retired or not
     tx.assemblyStep.count({ where: { unit: { equipmentId } } }),
     tx.bomRevision.count({ where: { equipmentId, materializedAt: { not: null } } }),
   ]);
@@ -345,7 +347,11 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
         targetRevision != null &&
         targetRevision.status === "DRAFT" &&
         targetRevision.materializedAt == null &&
-        (await tx.component.count({ where: { equipmentId } })) + (await tx.assemblyStep.count({ where: { unit: { equipmentId } } })) === 0;
+        // j5c: any row, retired or not, means this line has floor rows
+        (await tx.component.count({ where: { equipmentId } })) +
+          // j5c: any row, retired or not
+          (await tx.assemblyStep.count({ where: { unit: { equipmentId } } })) ===
+          0;
       const importRevisionId = bomRevisionId ?? started?.id ?? null;
 
       // Every `componentType` code must resolve before anything is created —

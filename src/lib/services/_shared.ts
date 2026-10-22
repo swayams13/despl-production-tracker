@@ -9,6 +9,8 @@ import { collapseUnitPlans, predecessorStatus, type Collapsed } from "@/lib/shar
 import { drawingStateOf } from "@/lib/shared/floor-rules";
 import { resolveProcessSeq, stepKey } from "@/lib/shared/stage-mapping";
 import { routeWhere, unitRouteKey } from "./line-route";
+import { activeRow } from "./active-row";
+import { lineBomItemIds } from "./bom-line";
 import { explodeBomItem, computeAvailableToIssue, type ExplodableBomItem } from "./bom-explosion";
 import type {
   ScheduleProcess,
@@ -644,6 +646,8 @@ export interface MappedOp {
   reportedFinishAt: Date | null;
   /** J6: pieces done (assembly: qtyDone, fabrication: qtyGood); only read for a lot's plan. */
   qtyDone: number | null;
+  /** J5c: a started row whose BOM line changed; it holds the plan's completion until reviewed. */
+  needsReview: boolean;
 }
 
 /**
@@ -694,10 +698,11 @@ async function loadComponentOpsForProcessSeq(
 ) {
   const resolve = await loadOpSeqResolver(tx, args.familyId);
   const ops = await tx.componentOperation.findMany({
-    where: { component: { unitId: args.unitId } },
+    where: { ...activeRow, component: { unitId: args.unitId, ...activeRow } },
     select: {
       id: true,
       seq: true,
+      needsReview: true,
       status: true,
       operationId: true,
       startedAt: true,
@@ -720,6 +725,7 @@ async function loadComponentOpsForProcessSeq(
       reportedStartAt: o.reportedStartAt,
       reportedFinishAt: o.reportedFinishAt,
       qtyDone: o.qtyGood,
+      needsReview: o.needsReview,
     }));
 }
 
@@ -759,10 +765,11 @@ export async function loadMappedOps(
   const [componentOps, assemblySteps] = await Promise.all([
     loadComponentOpsForProcessSeq(tx, { familyId: jobProcess.job.familyId, seq, unitId: args.unitId }),
     tx.assemblyStep.findMany({
-      where: { unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
+      where: { ...activeRow, unitId: args.unitId, templateStep: { leadTimeProcessSeq: seq } },
       select: {
         id: true,
         status: true,
+        needsReview: true,
         startedAt: true,
         finishedAt: true,
         reportedStartAt: true,
@@ -789,7 +796,8 @@ export async function assertComponentOpsComplete(
   args: { jobProcessId: number; unitId: number | null; jobId: number },
 ): Promise<void> {
   const ops = await loadMappedOps(tx, args);
-  const incomplete = ops.filter((o) => o.status !== "COMPLETE");
+  // J5c: a row flagged by a BOM re-release counts as incomplete until it is reviewed.
+  const incomplete = ops.filter((o) => o.status !== "COMPLETE" || o.needsReview);
   if (incomplete.length > 0) {
     throw new AppError(ERROR_CODES.COMPONENT_OPS_INCOMPLETE, {
       jobProcessId: args.jobProcessId,
@@ -1184,6 +1192,7 @@ export const KNOWN_GATE_PRODUCERS: Record<string, boolean> = {
  * are untouched — same SCRAP-only convention as before.
  */
 export async function assertKitReady(tx: Tx, componentId: number, tenantId: number): Promise<void> {
+  // j5c: history (lookup by id; the start path already refused a retired operation)
   const component = await tx.component.findFirst({
     where: { id: componentId, equipment: { job: { tenantId } } },
     select: { bomItemId: true },
@@ -1199,10 +1208,14 @@ export async function assertKitReady(tx: Tx, componentId: number, tenantId: numb
       equipmentId: true,
       qtyPer: true,
       parentBomItemId: true,
-      stockLots: { select: { qty: true, txns: { select: { type: true, qty: true } } } },
     },
   });
   if (!bomItem) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "BomItem", bomItemId: component.bomItemId });
+  // J5c: stock received against this line in an earlier BOM revision still counts (line = equipment + item number).
+  const stockLots = await tx.stockLot.findMany({
+    where: { bomItemId: { in: await lineBomItemIds(tx, bomItem.id) } },
+    select: { qty: true, txns: { select: { type: true, qty: true } } },
+  });
   // S18: a Component WITH a real bomItemId link but zero StockLot rows ever
   // recorded is not a SEAM anymore — it means the part was never brought in,
   // a genuine shortage. (The read-side computeAvailableForShortage still
@@ -1226,7 +1239,7 @@ export async function assertKitReady(tx: Tx, componentId: number, tenantId: numb
     return; // unparsed qtyPer somewhere in the chain, or a cycle — nothing display-worthy to check (same fallback as loadBomTree)
   }
 
-  const available = computeAvailableToIssue(bomItem.stockLots) ?? new Decimal(0);
+  const available = computeAvailableToIssue(stockLots) ?? new Decimal(0);
 
   const shortfall = required.minus(available);
   if (shortfall.gt(0)) {
@@ -1256,6 +1269,7 @@ export async function assertDrawingReleased(
   componentId: number,
   tenantId: number,
 ): Promise<number | null> {
+  // j5c: history (lookup by id; the start path already refused a retired operation)
   const component = await tx.component.findFirst({
     where: { id: componentId, equipment: { job: { tenantId } } },
     select: { governingDrawingId: true, jobId: true },
@@ -1458,6 +1472,7 @@ export async function rollupProcessPlan(
   if (items.every((i) => i.status === "COMPLETE")) {
     const args = { jobProcessId, unitId: plan.unitId, jobId: plan.jobId };
     const blocked =
+      items.some((i) => i.needsReview) || // J5c: waiting for the planner's Keep / Replace / Cancel
       (await findOpenHoldPointItemIds(tx, args)).length > 0 ||
       (await findOpenNcrOperations(tx, args)).length > 0 ||
       (await findMissingEvidence(tx, args)) != null;
@@ -1515,6 +1530,7 @@ export async function rollupProcessPlan(
  * FEATURES.leanFloor is on.
  */
 export async function rollupForAssemblyStep(tx: Tx, actor: Actor, assemblyStepId: number): Promise<RollupChange | null> {
+  // j5c: history (rollup after a write; also runs for a just-retired row, whose plan still needs recomputing)
   const s = await tx.assemblyStep.findUnique({
     where: { id: assemblyStepId },
     select: { jobId: true, unitId: true, templateStep: { select: { leadTimeProcessSeq: true } } },
@@ -1528,6 +1544,7 @@ export async function rollupForComponentOperation(
   actor: Actor,
   componentOperationId: number,
 ): Promise<RollupChange | null> {
+  // j5c: history (see rollupForAssemblyStep)
   const o = await tx.componentOperation.findUnique({
     where: { id: componentOperationId },
     select: {

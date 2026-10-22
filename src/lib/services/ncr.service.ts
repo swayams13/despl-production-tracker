@@ -16,6 +16,7 @@ import {
   type RatifyConcessionInput,
 } from "@/lib/shared/schemas";
 import type { AssemblyStepRole, Ncr, NcrStatus, NcrDisposition, NcrRuleCode } from "@/generated/prisma/client";
+import { activeRow } from "./active-row";
 
 /**
  * N1/N2/N4 (Phase 5) — the disposition/rework workflow layered on top of
@@ -213,11 +214,13 @@ async function assertConcessionNotByMaker(tx: Tx, actor: Actor, ncr: Ncr): Promi
   if (target) {
     const item =
       target.entityType === "AssemblyStep"
-        ? await tx.assemblyStep.findFirst({
+        ? // j5c: history (the makers of the NCR's target, whether or not it was since retired)
+          await tx.assemblyStep.findFirst({
             where: { id: target.id, jobId: ncr.jobId },
             select: { submittedBy: true, performedByUserId: true },
           })
-        : await tx.componentOperation.findFirst({
+        : // j5c: history
+          await tx.componentOperation.findFirst({
             where: { id: target.id, jobId: ncr.jobId },
             select: { submittedBy: true, performedByUserId: true },
           });
@@ -301,7 +304,7 @@ export async function ratifyConcession(actor: Actor, input: RatifyConcessionInpu
 async function reopenForRepair(tx: Tx, actor: Actor, ncr: Ncr, unitId: number | null): Promise<number[]> {
   if (unitId == null) return [];
   const steps = await tx.assemblyStep.findMany({
-    where: { unitId, jobId: ncr.jobId, role: { in: REOPEN_ROLES[ncr.ruleCode!] }, status: { not: "NOT_STARTED" } },
+    where: { ...activeRow, unitId, jobId: ncr.jobId, role: { in: REOPEN_ROLES[ncr.ruleCode!] }, status: { not: "NOT_STARTED" } },
     orderBy: { id: "asc" },
   });
   for (const s of steps) {
@@ -371,18 +374,21 @@ export async function raiseRuleNcr(actor: Actor, input: RaiseRuleNcrInput): Prom
 
   const target = await withTenant(actor.tenantId, async (tx) =>
     kind === "ASSEMBLY_STEP"
-      ? tx.assemblyStep.findFirst({
+      ? // j5c: history (found, then refused if retired)
+        tx.assemblyStep.findFirst({
           where: { id: targetId, unit: { equipment: { job: { tenantId: actor.tenantId } } } },
-          select: { jobId: true, unitId: true },
+          select: { jobId: true, unitId: true, retiredAt: true },
         })
       : tx.componentOperation
+          // j5c: history
           .findFirst({
             where: { id: targetId, component: { equipment: { job: { tenantId: actor.tenantId } } } },
-            select: { jobId: true, component: { select: { unitId: true } } },
+            select: { jobId: true, retiredAt: true, component: { select: { unitId: true } } },
           })
-          .then((o) => (o ? { jobId: o.jobId, unitId: o.component.unitId } : null)),
+          .then((o) => (o ? { jobId: o.jobId, unitId: o.component.unitId, retiredAt: o.retiredAt } : null)),
   );
   if (!target) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: kind === "ASSEMBLY_STEP" ? "AssemblyStep" : "ComponentOperation", id: targetId });
+  if (target.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: kind === "ASSEMBLY_STEP" ? "AssemblyStep" : "ComponentOperation", id: targetId });
 
   return withJob(
     actor.tenantId,
@@ -459,7 +465,7 @@ export async function closeRuleNcrsOnRedo(
   const rule = step.role ? ROLE_RULE[step.role] : undefined;
   if (!rule) return;
   const pending = await tx.assemblyStep.count({
-    where: { unitId: step.unitId, jobId: step.jobId, role: step.role!, status: { not: "COMPLETE" } },
+    where: { ...activeRow, unitId: step.unitId, jobId: step.jobId, role: step.role!, status: { not: "COMPLETE" } },
   });
   if (pending > 0) return;
   const ncrs = await tx.ncr.findMany({

@@ -41,6 +41,7 @@ import {
 } from "@/lib/shared/schemas";
 import type { Component, ComponentOperation, DftReading, PaintRecord } from "@/generated/prisma/client";
 import { OperationStatus } from "@/generated/prisma/enums";
+import { activeRow } from "./active-row";
 
 /** P1 (Phase 5): a PAINTING op's coats requirement — 1 if unset. */
 const DEFAULT_COATS_REQUIRED = 1;
@@ -115,7 +116,7 @@ async function findPreviousComponentOperation(
     if (idx > 0) {
       const prevStepOperationId = steps[idx - 1].operationId;
       return tx.componentOperation.findFirst({
-        where: { componentId: op.componentId, operationId: prevStepOperationId },
+        where: { ...activeRow, componentId: op.componentId, operationId: prevStepOperationId },
         select: { seq: true, status: true },
       });
     }
@@ -125,7 +126,7 @@ async function findPreviousComponentOperation(
 
   return op.seq > 1
     ? tx.componentOperation.findFirst({
-        where: { componentId: op.componentId, seq: op.seq - 1 },
+        where: { ...activeRow, componentId: op.componentId, seq: op.seq - 1 },
         select: { seq: true, status: true },
       })
     : null;
@@ -154,6 +155,7 @@ async function lockComponentOperationForUpdate(
 }> {
   if (opts.unitLock) {
     // L1.2e: the unit's floor lock goes BEFORE the row lock, as in recordWork.
+    // j5c: history (lookup by id only to find the unit lock; the row itself is refused below if retired)
     const pre = await tx.componentOperation.findFirst({
       where: { id: componentOperationId, component: { equipment: { job: { tenantId } } } },
       select: { jobId: true, component: { select: { unitId: true } } },
@@ -162,6 +164,7 @@ async function lockComponentOperationForUpdate(
   }
   await tx.$queryRaw`SELECT id FROM component_operations WHERE id = ${componentOperationId} FOR UPDATE`;
 
+  // j5c: history (found, then refused if retired)
   const op = await tx.componentOperation.findFirst({
     where: { id: componentOperationId, component: { equipment: { job: { tenantId } } } },
     include: { operation: true, component: { select: { routeVersionId: true } } },
@@ -169,6 +172,7 @@ async function lockComponentOperationForUpdate(
   if (!op) {
     throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "ComponentOperation", componentOperationId });
   }
+  if (op.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "ComponentOperation", componentOperationId });
   // H1 job-level RLS backstop: scope every subsequent query in THIS transaction
   // to the operation's own (denormalized) job — same pattern as
   // lockProcessPlanForUpdate in _shared.ts.
@@ -537,6 +541,7 @@ export async function rejectComponentOperationTx(
     // ncr.create above (a failed notify rolls back the whole reject).
     const qcIds = await userIdsWithRole(tx, actor.tenantId, ROLES.QC);
     if (qcIds.length > 0) {
+      // j5c: history (lookup by id for the notification text)
       const ctx = await tx.componentOperation.findUniqueOrThrow({
         where: { id: op.id },
         select: {
@@ -857,11 +862,13 @@ export async function linkGoverningDrawing(actor: Actor, input: LinkGoverningDra
   requireRole(actor, ...DRAWING_WRITE_ROLES);
 
   return withTenant(actor.tenantId, async (tx) => {
+    // j5c: history (found, then refused if retired)
     const component = await tx.component.findFirst({
       where: { id: componentId, equipment: { job: { tenantId: actor.tenantId } } },
-      select: { id: true, tag: true, governingDrawingId: true, equipment: { select: { job: { select: { id: true, clientId: true } } } } },
+      select: { id: true, tag: true, retiredAt: true, governingDrawingId: true, equipment: { select: { job: { select: { id: true, clientId: true } } } } },
     });
     if (!component) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentId });
+    if (component.retiredAt) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "Component", componentId });
     assertClientScope(actor, component.equipment.job.clientId);
 
     if (assemblyDrawingId != null) {
@@ -912,10 +919,13 @@ export async function linkDrawingToComponents(actor: Actor, input: LinkDrawingTo
     assertClientScope(actor, job.clientId);
     const drawing = await tx.assemblyDrawing.findFirst({ where: { id: assemblyDrawingId, jobId }, select: { id: true, drawingNo: true } });
     if (!drawing) throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "AssemblyDrawing", assemblyDrawingId });
+    // j5c: history (found, then refused if any is retired)
     const components = await tx.component.findMany({
       where: { id: { in: ids }, jobId, tenantId: actor.tenantId },
-      select: { id: true, tag: true, governingDrawingId: true },
+      select: { id: true, tag: true, retiredAt: true, governingDrawingId: true },
     });
+    const retiredIds = components.filter((c) => c.retiredAt).map((c) => c.id);
+    if (retiredIds.length) throw new AppError(ERROR_CODES.FLOOR_ROW_RETIRED, { entity: "Component", componentIds: retiredIds });
     if (components.length !== ids.length) {
       const found = new Set(components.map((c) => c.id));
       throw new AppError(ERROR_CODES.NOT_FOUND, { entity: "Component", componentIds: ids.filter((i) => !found.has(i)) });

@@ -2,6 +2,7 @@ import { withTenant } from "@/lib/db";
 import { assertNotClientUser, requireRole, ROLES, type Actor } from "@/lib/authz";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { OFFICE_PROCESS_MAX_SEQ, requiredJointRef, type WorkKind } from "@/lib/shared/floor-rules";
+import { activeRow } from "./active-row";
 
 /**
  * Lean Core L2.10 part B: the list a Production Head ticks at the switch-over
@@ -61,14 +62,14 @@ export async function loadSwitchOver(actor: Actor, jobId: number): Promise<Switc
     const [units, steps, ops, plans, categories, welders] = await Promise.all([
       tx.unit.findMany({ where: { equipment: { jobId } }, select: { id: true, serialNo: true } }),
       tx.assemblyStep.findMany({
-        where: { jobId, templateStep: { kind: "WORK" } },
+        where: { ...activeRow, jobId, templateStep: { kind: "WORK" } },
         select: {
           id: true, unitId: true, seq: true, status: true, templateStepId: true, weldJointId: true, jointRef: true,
           templateStep: { select: { activity: true, groupName: true, jointRef: true, scope: true } },
         },
       }),
       tx.componentOperation.findMany({
-        where: { jobId },
+        where: { ...activeRow, jobId },
         select: { id: true, seq: true, status: true, operationId: true, operation: { select: { name: true } }, component: { select: { id: true, tag: true, unitId: true } } },
       }),
       tx.processPlan.findMany({
