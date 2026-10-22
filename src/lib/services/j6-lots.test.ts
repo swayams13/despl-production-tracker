@@ -1,4 +1,5 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { Actor } from "@/lib/authz";
 import { ZodError } from "zod";
 import { createJobSchema, recordWorkSchema } from "@/lib/shared/schemas";
 
@@ -163,11 +164,17 @@ describe.skipIf(!RUN_DB)("Lean Core J6 lots (DB)", async () => {
   });
 
   // ── recordWork on a lot ───────────────────────────────────────────────
-  describe("recordWork with detail.qty", async () => {
-    const o = await makeWorkOrg(owner, "J6");
-    const sup = await o.user("sup", ["SUPERVISOR"], [o.fab.id]);
-    const sup2 = await o.user("sup2", ["SUPERVISOR"], [o.fab.id]);
-    const qc = await o.user("qc", ["QC"]);
+  describe("recordWork with detail.qty", () => {
+    let o: Awaited<ReturnType<typeof makeWorkOrg>>;
+    let sup: Actor;
+    let sup2: Actor;
+    let qc: Actor;
+    beforeAll(async () => {
+      o = await makeWorkOrg(owner, "J6");
+      sup = await o.user("sup", ["SUPERVISOR"], [o.fab.id]);
+      sup2 = await o.user("sup2", ["SUPERVISOR"], [o.fab.id]);
+      qc = await o.user("qc", ["QC"]);
+    });
 
     /** One lot unit (qty 10) with two steps on process 20, a plan for it, and one serial unit alongside. */
     async function lotJob(opts: { requiresQc?: boolean } = {}) {

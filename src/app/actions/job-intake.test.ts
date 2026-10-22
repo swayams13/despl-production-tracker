@@ -27,7 +27,7 @@ vi.mock("@/lib/services/job-intake.service", () => ({
     committedDeliveryDate: i.committedDeliveryDate,
   })),
 }));
-vi.mock("@/lib/services/job-intake.read", () => ({}));
+vi.mock("@/lib/services/job-intake.read", () => ({ qtyBandWarning: async () => null }));
 vi.mock("@/lib/services/admin.service", () => ({}));
 vi.mock("@/lib/services/schedule.service", () => ({
   generateSchedule: vi.fn(async () => ({ feasibility: "FEASIBLE", shortfallDays: null, processPlans: [1, 2] })),
