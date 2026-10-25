@@ -12,6 +12,13 @@ Checked 24–25 Oct 2026 on production (read-only) and on staging (with test wri
 
 The platform is healthy and the new screens work. The team cannot use it yet because the floor screens are off on production, there are no real team logins, and master data is empty. The one probable blocker found, QC unable to accept the document and material gate steps, was fixed and verified on staging the same day (PR #158).
 
+## Status update, 25 Oct 2026 evening
+Since this report was first written:
+- **QC gate-steps issue fixed and verified on staging** (PR #158, merged, deployed to production and staging).
+- **New jobs get the weld, PWHT and hydro rules** (PR #159, merged). The roles script was applied on **staging** (v2) and on **production** (v2: 31 roles, 25 pressure flags; v1 untouched; DESPL-320's own rows were already complete). Verified on a new staging job: H1 (weld before fit-up) and H4 (hydro before final PWHT) now refuse with plain-English reasons.
+- **Production backfills applied** (by Swayam): 8 config questions, 14 planned joints and 126 linked steps for DESPL-320, 3 equipment types (PV-VERT-SKIRT active) with the skirt template and kit, 10 milestones and 36 map rows. All read back clean. Details: `PRODUCTION-ROLES-SCRIPT-25-OCT.md`.
+- **Still NO-GO for the team.** Open: `LEAN_FLOOR` off on production, no real team logins, master data and part families empty, placeholder client names (no rename path in code), DESPL-320 indent/PO and joint confirmation, H5/H6/dispatch not yet exercised, QC cannot raise an H5/H6 NCR from any screen, credentials rotation.
+
 ## What was verified
 
 **Railway and deploys**
