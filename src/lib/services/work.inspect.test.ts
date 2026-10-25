@@ -220,12 +220,71 @@ describe.skipIf(!RUN_DB)("L1.2e inspect, derived switch, unit lock (DB)", async 
         expect(await code(inspectStep(qc, j.step(3)))).toBeNull();
       });
 
-      it("no preceding work step at all: MAKER_CHECKER_VIOLATION on ACCEPT and REJECT", async () => {
-        const j = await o.job({ processes: [{ code: "20" }], steps: [I(1)] });
-        for (const result of ["ACCEPT", "REJECT"] as const) {
-          expect(await code(inspectStep(qc, j.step(1), result))).toBe(ERROR_CODES.MAKER_CHECKER_VIOLATION);
-        }
-        expect(await owner.qcpExecution.count({ where: { jobId: j.job.id } })).toBe(0);
+      // L1.2g (25 Oct): a gate inspection has no maker (document and material gates, a clearance at the head of a group).
+      // QC accepts alone; the role and the reject rules are unchanged.
+      describe("gate inspection: nothing built before it", () => {
+        it("QC accepts it alone: COMPLETE, verified by the QC user, its H point cleared", async () => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [I(1)] });
+          expect(await code(inspectStep(qc, j.step(1)))).toBeNull();
+          const s = await stepRow(j.step(1));
+          expect(s.status).toBe("COMPLETE");
+          expect(s.verifiedBy).toBe(qc.userId);
+          expect(await owner.qcpExecution.count({ where: { jobId: j.job.id } })).toBe(1);
+        });
+
+        it("QC rejects it: a rejection and an NCR open, the step stays IN_PROGRESS", async () => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [I(1)] });
+          expect(await code(inspectStep(qc, j.step(1), "REJECT"))).toBeNull();
+          expect((await stepRow(j.step(1))).status).toBe("IN_PROGRESS");
+          expect(await owner.assemblyStepRejection.count({ where: { jobId: j.job.id } })).toBe(1);
+          expect(await owner.ncr.count({ where: { jobId: j.job.id } })).toBe(1);
+        });
+
+        it.each([
+          ["a supervisor", () => sup, ERROR_CODES.FORBIDDEN],
+          ["a Production Head without QC", () => head, ERROR_CODES.FORBIDDEN],
+        ])("%s still cannot accept it", async (_l, who, expected) => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [I(1)] });
+          expect(await code(inspectStep(who(), j.step(1)))).toBe(expected);
+          expect((await stepRow(j.step(1))).status).toBe("NOT_STARTED");
+        });
+
+        it("a second accept is refused (already complete)", async () => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [I(1)] });
+          await inspectStep(qc, j.step(1));
+          expect(await code(inspectStep(qc2, j.step(1)))).toBe(ERROR_CODES.INVALID_STATE_TRANSITION);
+        });
+
+        it("head of a group, earlier work in another group not yet in: INSPECT_PRECONDITION on ACCEPT and REJECT", async () => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [W(1, { groupCode: "C" }), I(2, { groupCode: "D" })] });
+          for (const result of ["ACCEPT", "REJECT"] as const) {
+            expect(await code(inspectStep(qc, j.step(2), result))).toBe(ERROR_CODES.INSPECT_PRECONDITION);
+          }
+          expect((await stepRow(j.step(2))).status).toBe("NOT_STARTED");
+          expect(await owner.ncr.count({ where: { jobId: j.job.id } })).toBe(0);
+          expect(await owner.qcpExecution.count({ where: { jobId: j.job.id } })).toBe(0);
+        });
+
+        it("head of a group, earlier work in another group done: accepted", async () => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [W(1, { groupCode: "C" }), I(2, { groupCode: "D" })] });
+          await setStep(j.step(1), "COMPLETE", sup);
+          expect(await code(inspectStep(qc, j.step(2)))).toBeNull();
+          expect((await stepRow(j.step(2))).status).toBe("COMPLETE");
+        });
+
+        it("head of a group: the QC user who recorded the earlier work in another group is refused", async () => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [W(1, { groupCode: "C" }), I(2, { groupCode: "D" })] });
+          await setStep(j.step(1), "COMPLETE", supQc);
+          for (const result of ["ACCEPT", "REJECT"] as const) {
+            expect(await code(inspectStep(supQc, j.step(2), result))).toBe(ERROR_CODES.MAKER_CHECKER_VIOLATION);
+          }
+          expect(await code(inspectStep(qc, j.step(2)))).toBeNull();
+        });
+
+        it("later work in the same group is not a maker of an earlier inspection", async () => {
+          const j = await o.job({ processes: [{ code: "20" }], steps: [I(1), W(2)] });
+          expect(await code(inspectStep(qc, j.step(1)))).toBeNull();
+        });
       });
 
       it("the QC user who recorded an earlier (not the nearest) work step of the group is refused", async () => {

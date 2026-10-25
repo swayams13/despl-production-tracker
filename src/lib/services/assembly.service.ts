@@ -2,7 +2,8 @@ import { withTenant, type Tx } from "@/lib/db";
 import { type Actor, assertMakerChecker, assertNotClientUser, requireDepartmentScope, ROLES } from "@/lib/authz";
 import { audited, recordAudit } from "@/lib/audit";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
-import { deriveRequiresQc, jointRefs, requiredJointRef } from "@/lib/shared/floor-rules";
+import { deriveRequiresQc, requiredJointRef } from "@/lib/shared/floor-rules";
+import { inspectionMakers } from "@/lib/shared/inspection-makers";
 import { GENERATED_JOINT_TYPES, generateShellJoints, MAX_SHELL_COURSES } from "@/lib/shared/joint-generator";
 import { FEATURES } from "@/lib/shared/flags";
 import { assertStateTransition } from "./state-machine";
@@ -552,9 +553,11 @@ async function rejectStepLocked(
  * it IN_PROGRESS for re-inspection. Maker–checker (invariant 3): QC role, not
  * the submitter, and for an INSPECTION step not whoever recorded or performed
  * ANY preceding WORK step of the same template group (same joint where the
- * step names one); with no such step there is no maker and it refuses. ACCEPT
- * and REJECT of an INSPECTION step also need every one of those steps SUBMITTED or
- * COMPLETE (INSPECT_PRECONDITION). No Production Head exception until D11 is
+ * step names one), else of the unit's earlier work (`inspectionMakers`). With
+ * no earlier WORK step at all (document and material gates) there is no maker
+ * and QC accepts alone (L1.2g, 25 Oct; was refused). ACCEPT and REJECT of an
+ * INSPECTION step also need every one of those steps SUBMITTED or COMPLETE
+ * (INSPECT_PRECONDITION). No Production Head exception until D11 is
  * decided.
  */
 export async function inspectAssemblyStepTx(
@@ -566,16 +569,16 @@ export async function inspectAssemblyStepTx(
   assertMakerChecker(actor, step.submittedBy);
   const inspection = step.templateStep.kind === "INSPECTION";
   if (inspection) {
-    // The makers: every preceding WORK step of the template group, on the same joint where one is set (H1 scope).
-    const group = await tx.assemblyStep.findMany({
-      where: { ...activeRow, unitId: step.unitId, seq: { lt: step.seq }, templateStep: { kind: "WORK", groupCode: step.templateStep.groupCode } },
-      select: { id: true, status: true, submittedBy: true, performedByUserId: true, jointRef: true },
+    // The makers (L1.2g, shared with the QC queue): earlier WORK of the group (same joint where set), else the unit's earlier work.
+    const unitWork = await tx.assemblyStep.findMany({
+      where: { ...activeRow, unitId: step.unitId, seq: { lt: step.seq }, templateStep: { kind: "WORK" } },
+      select: { id: true, seq: true, status: true, submittedBy: true, performedByUserId: true, jointRef: true, templateStep: { select: { groupCode: true } } },
     });
-    const own = jointRefs(step.jointRef);
-    const makers = own.length ? group.filter((s) => jointRefs(s.jointRef).some((j) => own.includes(j))) : group;
-    if (makers.length === 0) {
-      throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { reason: "no preceding work step to inspect", assemblyStepId: step.id });
-    }
+    const makers = inspectionMakers(
+      { seq: step.seq, groupCode: step.templateStep.groupCode, jointRef: step.jointRef },
+      unitWork.map((w) => ({ ...w, groupCode: w.templateStep.groupCode })),
+    );
+    // No maker at all (a document or material gate): nothing was built before it, QC accepts alone.
     const mine = makers.find((m) => m.submittedBy === actor.userId || m.performedByUserId === actor.userId);
     if (mine) {
       throw new AppError(ERROR_CODES.MAKER_CHECKER_VIOLATION, { reason: "recorded a preceding work step", precedingStepId: mine.id });
