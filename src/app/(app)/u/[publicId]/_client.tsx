@@ -8,6 +8,7 @@ import {
   FloorUndoStack,
   HeatPickButton,
   NotifyBlockerButton,
+  RaiseRuleNcrButton,
   stateLabel,
   useFloorWrites,
 } from "@/components/industrial/floor-actions";
@@ -197,6 +198,7 @@ function FloorRowView({
           {refusal.clearedBy && <span>Can clear it: {refusal.clearedBy.label}</span>}
           {canRecord && row.heatComponentId != null && <HeatPickButton componentId={row.heatComponentId} />}
           {canRecord && <NotifyBlockerButton unitPublicId={unitPublicId} row={row} />}
+          <RaiseRuleNcrButton row={row} />
         </div>
       )}
     </li>
