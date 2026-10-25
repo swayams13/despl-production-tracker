@@ -21,6 +21,8 @@ export interface StepSpec {
   templateJointRef?: string | null;
   /** Link a blocking H point (DESPL party) to this step; open until an execution clears it. */
   hold?: boolean;
+  /** AssemblyTemplateStep.groupCode. Default "E". */
+  groupCode?: string;
 }
 
 export interface ComponentSpec {
@@ -198,7 +200,7 @@ export async function makeWorkOrg(owner: PrismaClient, label: string) {
           data: {
             versionId: v.id,
             seq: s.seq,
-            groupCode: "E",
+            groupCode: s.groupCode ?? "E",
             groupName: "g",
             srNo: String(s.seq),
             activity: `step ${s.seq}`,

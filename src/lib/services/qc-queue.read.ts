@@ -1,6 +1,6 @@
 import { withTenant, type Tx } from "@/lib/db";
 import { hasRole, ROLES, type Actor } from "@/lib/authz";
-import { jointRefs } from "@/lib/shared/floor-rules";
+import { inspectionMakers } from "@/lib/shared/inspection-makers";
 import {
   ageDaysOf,
   classRank,
@@ -201,7 +201,7 @@ async function buildReady(tx: Tx, s: Scope, now: Date): Promise<ReadyRow[]> {
     }),
   ]);
 
-  // Inspection steps: the preceding WORK steps of the same group (same joint where named), as `inspect` reads them.
+  // Inspection steps: the makers, as `inspect` reads them (inspectionMakers): none at all means a gate, ready at once.
   const inspUnits = [...new Set(inspections.map((i) => i.unitId))];
   const work = inspUnits.length
     ? await tx.assemblyStep.findMany({
@@ -209,14 +209,12 @@ async function buildReady(tx: Tx, s: Scope, now: Date): Promise<ReadyRow[]> {
         select: { id: true, unitId: true, seq: true, status: true, jointRef: true, templateStep: { select: { groupCode: true } } },
       })
     : [];
-  const workByUnit = new Map<number, typeof work>();
-  for (const w of work) (workByUnit.get(w.unitId) ?? workByUnit.set(w.unitId, []).get(w.unitId)!).push(w);
+  const workByUnit = new Map<number, Array<(typeof work)[number] & { groupCode: string | null }>>();
+  for (const w of work) (workByUnit.get(w.unitId) ?? workByUnit.set(w.unitId, []).get(w.unitId)!).push({ ...w, groupCode: w.templateStep.groupCode });
   const readyInspections = inspections
     .map((i) => {
-      const group = (workByUnit.get(i.unitId) ?? []).filter((w) => w.seq < i.seq && w.templateStep.groupCode === i.templateStep.groupCode);
-      const own = jointRefs(i.jointRef);
-      const makers = own.length ? group.filter((w) => jointRefs(w.jointRef).some((j) => own.includes(j))) : group;
-      const ready = makers.length > 0 && makers.every((m) => m.status === "SUBMITTED" || m.status === "COMPLETE");
+      const makers = inspectionMakers({ seq: i.seq, groupCode: i.templateStep.groupCode, jointRef: i.jointRef }, workByUnit.get(i.unitId) ?? []);
+      const ready = makers.every((m) => m.status === "SUBMITTED" || m.status === "COMPLETE");
       return ready ? { step: i, makerIds: makers.map((m) => m.id) } : null;
     })
     .filter((x): x is NonNullable<typeof x> => x != null);

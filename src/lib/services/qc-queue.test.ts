@@ -116,6 +116,22 @@ describe.skipIf(!RUN_DB)("L2.6 QC queue (DB)", async () => {
       expect(rowsOf((await loadQcQueue(qc, q({ jobId: j.job.id }))).ready).map((r) => r.key)).not.toContain(key);
     });
 
+    // L1.2g (25 Oct): a gate inspection has no maker, so it is ready at once; a group-head clearance waits for the unit's earlier work.
+    it("a gate inspection with nothing built before it is ready at once", async () => {
+      const j = await o.job({ steps: [{ seq: 1, kind: "INSPECTION", groupCode: "A" }, { seq: 2, groupCode: "C" }] });
+      const rows = rowsOf((await loadQcQueue(qc, q({ jobId: j.job.id }))).ready);
+      expect(rows.map((r) => r.key)).toEqual([`IN:${j.step(1)}`]);
+      expect(rows[0]).toMatchObject({ inspection: true, makerName: null });
+    });
+
+    it("a group-head clearance waits for the unit's earlier work in other groups, then shows", async () => {
+      const j = await o.job({ steps: [{ seq: 1, groupCode: "C" }, { seq: 2, kind: "INSPECTION", groupCode: "D" }] });
+      const key = `IN:${j.step(2)}`;
+      expect(rowsOf((await loadQcQueue(qc, q({ jobId: j.job.id }))).ready).map((r) => r.key)).not.toContain(key);
+      await owner.assemblyStep.update({ where: { id: j.step(1) }, data: { status: "SUBMITTED", submittedBy: maker.userId } });
+      expect(rowsOf((await loadQcQueue(qc, q({ jobId: j.job.id }))).ready).map((r) => r.key)).toContain(key);
+    });
+
     it("is oldest first, grouped job then unit, and filters by job and unit in SQL", async () => {
       const j = await o.job({ units: 2, steps: [{ seq: 1 }] });
       const t = (d: number) => new Date(Date.now() - d * 86_400_000);
