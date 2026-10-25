@@ -367,6 +367,17 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
       expect(r.counts.stepsByScope).toEqual({ PER_UNIT: 6 });
     });
 
+    // L1.2h: a sequence whose steps carry no role switches H1 and H4-H6 off for every unit it makes.
+    it("warns that the sequence has no step roles, and stops once a template step carries one", async () => {
+      const w = await world("NOROLES");
+      const j = await w.job({ withQcp: false, units: 1, config: { pwht: true } }); // an empty BOM: only role-less per-unit steps
+      const p = await svc.previewBomRelease(w.actors.admin, j.target);
+      expect(p.warnings.map((x) => x.code)).toContain("STEP_ROLES_MISSING");
+      await owner.assemblyTemplateStep.updateMany({ where: { version: { template: { tenantId: w.tenantId } }, seq: 1 }, data: { role: "FIT_UP" } });
+      const q = await svc.previewBomRelease(w.actors.admin, j.target);
+      expect(q.warnings.map((x) => x.code)).not.toContain("STEP_ROLES_MISSING");
+    });
+
     it("the preview is a release that rolls back: same counts, nothing written", async () => {
       const w = await world("PREVIEW");
       const j = await w.job({ bom: [{ itemNo: 1, partName: "Shell", typeId: w.shl.id }, { itemNo: 2, partName: "Plate", typeId: w.plt.id }] });

@@ -301,7 +301,13 @@ export async function runBomRelease(tx: Tx, actor: Actor, equipmentId: number, b
     ? await tx.equipmentTypeComponent.findMany({ where: { equipmentTypeId: equipment.equipmentTypeId, tenantId: actor.tenantId }, select: { componentType: { select: { id: true, code: true } } } })
     : [];
   const noRoute = lines.filter((l) => l.componentTypeId != null && l.effectiveVariant == null);
+  // L1.2h: the steps just made (or kept) for this line's units: none with a role = the floor rules H1 and H4-H6 are off.
+  const [stepTotal, stepRoled] = await Promise.all([
+    tx.assemblyStep.count({ where: { ...activeRow, unit: { equipmentId } } }),
+    tx.assemblyStep.count({ where: { ...activeRow, unit: { equipmentId }, role: { not: null } } }),
+  ]);
   const warnings = buildReleaseWarnings({
+    stepsWithoutRoles: stepTotal > 0 && stepRoled === 0,
     unmappedItemNos: lines.filter((l) => l.componentTypeId == null).map((l) => l.itemNo),
     noRouteItemNos: noRoute.map((l) => l.itemNo),
     unmappedKitCodes: kit.filter((k) => !mappedTypeIds.has(k.componentType.id)).map((k) => k.componentType.code),

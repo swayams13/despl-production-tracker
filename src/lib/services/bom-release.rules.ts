@@ -62,6 +62,7 @@ export function suggestPartFamily(
 }
 
 export type ReleaseWarningCode =
+  | "STEP_ROLES_MISSING"
   | "LINES_UNMAPPED"
   | "LINES_NO_ROUTE"
   | "KIT_COMPONENT_UNMAPPED"
@@ -87,12 +88,21 @@ export interface ReleaseWarningInput {
   emptyJointTypes: string[];
   /** Pressure-retaining components being created: none of them has a governing drawing yet. */
   pressureParts: number;
+  /** L1.2h: the line's assembly steps exist and none carries a role, so H1 and H4-H6 cannot apply. */
+  stepsWithoutRoles?: boolean;
 }
 
 /** The acknowledgeable warnings, in the order the screen lists them. Refusals are not here. */
 export function buildReleaseWarnings(i: ReleaseWarningInput): ReleaseWarning[] {
   const w: ReleaseWarning[] = [];
   const nos = (a: number[]) => a.map((n) => `Item ${n}`);
+  if (i.stepsWithoutRoles)
+    w.push({
+      code: "STEP_ROLES_MISSING",
+      message:
+        "This assembly sequence has no step roles, so the weld-order (H1), heat-treatment and hydro (H4 to H6) rules will not apply to these units. Publish the sequence with roles before releasing.",
+      items: [],
+    });
   if (i.unmappedItemNos.length)
     w.push({
       code: "LINES_UNMAPPED",

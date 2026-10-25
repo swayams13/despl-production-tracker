@@ -42,6 +42,19 @@ describe("buildReleaseWarnings", () => {
     expect(buildReleaseWarnings(none)).toEqual([]);
   });
 
+  // L1.2h: a sequence whose steps carry no role silently switches H1 and H4-H6 off for the units it makes.
+  it("warns first, and only, when the assembly sequence carries no step roles", () => {
+    const w = buildReleaseWarnings({ ...none, stepsWithoutRoles: true, hasQcp: false });
+    expect(w.map((x) => x.code)).toEqual(["STEP_ROLES_MISSING", "NO_QCP"]);
+    expect(w[0].message).toMatch(/no step roles/);
+    expect(w[0].message).toMatch(/H1/);
+    expect(w[0].items).toEqual([]);
+  });
+
+  it.each([[false], [undefined]])("is silent about roles when stepsWithoutRoles is %s", (stepsWithoutRoles) => {
+    expect(buildReleaseWarnings({ ...none, stepsWithoutRoles })).toEqual([]);
+  });
+
   it("lists every kind, in screen order, with the items concerned", () => {
     const w = buildReleaseWarnings({
       unmappedItemNos: [3, 7],
