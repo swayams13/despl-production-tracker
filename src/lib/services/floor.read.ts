@@ -71,6 +71,8 @@ export interface FloorRow {
   qty: { planned: number; done: number } | null;
   /** J5c: a BOM re-release changed this started row's line; it stays workable and waits for the planner's Keep / Replace / Cancel. */
   needsReview: boolean;
+  /** L1.2i, QC viewers only: H5/H6 refuse this row and route to an NCR; `openNcrId` set = one is already open (no second button). */
+  ruleNcr: { rule: "H5" | "H6"; openNcrId: number | null } | null;
 }
 
 export interface FloorUnitView {
@@ -91,6 +93,12 @@ export interface FloorUnitView {
   /** Process plans (this unit's and the job's) whose status is derived from mapped steps / ops: never recorded directly. */
   derivedPlanIds: number[];
 }
+
+/** L1.2i: the refusals that route to a rule NCR (D2 H5, H6), and the rule each names. */
+const RULE_NCR_OF_CODE: Partial<Record<string, "H5" | "H6">> = {
+  [ERROR_CODES.WELD_AFTER_PWHT]: "H5",
+  [ERROR_CODES.WELD_AFTER_HYDRO]: "H6",
+};
 
 const FLOOR_RECORD_ROLES = [ROLES.OPERATOR, ROLES.SUPERVISOR, ROLES.PRODUCTION_HEAD, ROLES.ADMIN] as const;
 const ROW_CAP = 60;
@@ -166,7 +174,8 @@ export async function loadFloorUnit(
     });
     if (!unit || unit.job.id !== unit.jobId) return null;
 
-    const all = hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD);
+    // L1.2i: QC reads every department too (read-only: canRecord stays false), so it can see a refused weld and raise its rule NCR.
+    const all = hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.QC);
     const deptIds = actor.departmentIds;
     const inScope = (departmentId: number | null) => all || (departmentId != null && deptIds.includes(departmentId));
 
@@ -293,11 +302,35 @@ export async function loadFloorUnit(
         returnedNote: null,
         qty: row.qty ?? null,
         needsReview: lab.needsReview,
+        ruleNcr: null,
       });
     }
 
     rows.sort((a, b) => RANK[a.state] - RANK[b.state] || a.group.localeCompare(b.group) || a.id - b.id);
     const shown = rows.slice(0, ROW_CAP);
+
+    // L1.2i: a row H5 or H6 refuses can have a rule NCR raised by QC; say which rule, and whether one is already open.
+    if (hasRole(actor, ROLES.QC)) {
+      const ruled = shown.flatMap((r) => {
+        const rule = r.refusal ? RULE_NCR_OF_CODE[r.refusal.code] : undefined;
+        return rule ? [{ r, rule }] : [];
+      });
+      if (ruled.length) {
+        const stepIds = ruled.filter((x) => x.r.kind === "ASSEMBLY_STEP").map((x) => x.r.id);
+        const opIds = ruled.filter((x) => x.r.kind === "COMPONENT_OP").map((x) => x.r.id);
+        const open = await tx.ncr.findMany({
+          where: {
+            jobId: unit.jobId,
+            status: "OPEN",
+            ruleCode: { in: ["H5", "H6"] },
+            OR: [{ targetAssemblyStepId: { in: stepIds } }, { targetComponentOperationId: { in: opIds } }],
+          },
+          select: { id: true, ruleCode: true, targetAssemblyStepId: true, targetComponentOperationId: true },
+        });
+        const openId = new Map(open.map((n) => [`${n.ruleCode}:${n.targetAssemblyStepId != null ? "A" : "C"}:${n.targetAssemblyStepId ?? n.targetComponentOperationId}`, n.id]));
+        for (const { r, rule } of ruled) r.ruleNcr = { rule, openNcrId: openId.get(`${rule}:${r.kind === "ASSEMBLY_STEP" ? "A" : "C"}:${r.id}`) ?? null };
+      }
+    }
 
     // A step QC rejected is in progress again and looks like any other: say that it came back, and why.
     const back = shown.filter((r) => r.state === "IN_PROGRESS");

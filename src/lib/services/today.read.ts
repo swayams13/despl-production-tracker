@@ -153,6 +153,7 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
       heatComponentId: null,
       returnedNote: null,
       needsReview: false,
+      ruleNcr: null,
       qty: p.qtyPlanned != null ? { planned: p.qtyPlanned, done: p.qtyDone } : null,
       siblings: [],
       jobId: m.jobId,

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ensureJointAction, notifyBlockerAction, recordWorkAction } from "@/app/actions/work";
+import { ensureJointAction, notifyBlockerAction, raiseRuleNcrAction, recordWorkAction } from "@/app/actions/work";
 import { loadHeatChoicesAction, pickHeatNumberAction } from "@/app/actions/heat";
 import type { HeatChoices } from "@/lib/services/heat.service";
 import type { FloorRow, FloorUnitView } from "@/lib/services/floor.read";
@@ -263,6 +264,47 @@ export function NotifyBlockerButton({
     <button className="btn" disabled={busy || nudge != null} onClick={notify}>
       {nudge ?? `Notify ${who.label}`}
     </button>
+  );
+}
+
+/**
+ * L1.2i: "Raise NCR (H5 / H6)" on a refused weld, for QC. The rule refuses welding on a pressure part after the unit's final PWHT
+ * (H5) or after hydro (H6) and routes to an NCR; only QC raises it, then the Production Head accepts per a code clause and QC
+ * ratifies. Shown only when the read model says the rule applies (`ruleNcr`); an NCR already open replaces the button.
+ * English like the refusal card it sits in (refusal copy is not translated until a DESPL speaker reviews it, L2.12).
+ */
+export function RaiseRuleNcrButton({ row }: { row: Pick<FloorRow, "id" | "kind" | "ruleNcr"> }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [raised, setRaised] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const rule = row.ruleNcr;
+  if (!rule) return null;
+  if (rule.openNcrId != null)
+    return (
+      <Link className="btn" href="/qc?tab=ncrs">
+        NCR open
+      </Link>
+    );
+  if (raised) return <span>NCR raised</span>;
+  const raise = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await raiseRuleNcrAction({ kind: row.kind, targetId: row.id, rule: rule.rule });
+    setBusy(false);
+    if (r.ok) {
+      setRaised(true);
+      router.refresh();
+    } else setError(r.message);
+  };
+  return (
+    <>
+      <button className="btn" disabled={busy} onClick={raise}>
+        Raise NCR ({rule.rule})
+      </button>
+      {error && <span role="alert">{error}</span>}
+    </>
   );
 }
 

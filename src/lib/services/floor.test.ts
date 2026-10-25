@@ -14,6 +14,7 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
   const { loadFloorUnit } = await import("./floor.read");
   const { notifyBlocker, ensureJointForStep, jointTypeOf } = await import("./floor.service");
   const { recordWork, inspect } = await import("./work.service");
+  const { raiseRuleNcr } = await import("./ncr.service");
   const { makeWorkOrg, attachPrintedRoute } = await import("./work.test-util");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
@@ -345,6 +346,50 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
       const before = await owner.notification.count({ where: { type: "FLOOR_NUDGE" } });
       expect(await code(call(j))).toBe(expected);
       expect(await owner.notification.count({ where: { type: "FLOOR_NUDGE" } })).toBe(before);
+    });
+  });
+
+  // L1.2i: QC raises an H5/H6 NCR from the unit page. The read model says which refused rows it applies to.
+  describe("rule NCR on a refused weld (H5)", () => {
+    async function h5Job() {
+      const j = await o.job({
+        processes: [{ code: "20" }, { code: "21" }],
+        steps: [
+          { seq: 1, role: "WELD", jointRef: "J1", pressurePart: true, processSeq: 20 },
+          { seq: 2, kind: "INSPECTION", role: "FINAL_PWHT", processSeq: 21 },
+          { seq: 3, role: "FIT_UP", jointRef: "J2", pressurePart: true, processSeq: 20 },
+        ],
+      });
+      await recordWork(sup, { jobId: j.job.id, action: "DONE", items: [{ kind: S, id: j.step(1) }] });
+      await inspect(qcUser, { kind: S, targetId: j.step(1), result: "ACCEPT" });
+      await inspect(qcUser, { kind: S, targetId: j.step(2), result: "ACCEPT" }); // final PWHT done: welding on a pressure part is now refused
+      return j;
+    }
+
+    it("only QC is told the refused row can have an NCR raised; supervisor and Production Head are not", async () => {
+      const j = await h5Job();
+      const pub = j.units[0].publicId;
+      expect(byTitle(await view(sup, pub), "step 3").ruleNcr).toBeNull();
+      expect(byTitle(await view(head, pub), "step 3").ruleNcr).toBeNull();
+      const qc = byTitle(await view(qcUser, pub), "step 3");
+      expect(qc.refusal?.code).toBe(ERROR_CODES.WELD_AFTER_PWHT);
+      expect(qc.ruleNcr).toEqual({ rule: "H5", openNcrId: null });
+    });
+
+    it("QC sees the refused row although it belongs to another department", async () => {
+      const j = await h5Job();
+      expect((await view(qcUser, j.units[0].publicId)).rows.map((r) => r.title)).toContain("step 3");
+    });
+
+    it("once the NCR is raised the row carries its id, so the button is replaced by the open NCR", async () => {
+      const j = await h5Job();
+      const ncr = await raiseRuleNcr(qcUser, { kind: S, targetId: j.step(3), rule: "H5" });
+      expect(byTitle(await view(qcUser, j.units[0].publicId), "step 3").ruleNcr).toEqual({ rule: "H5", openNcrId: ncr.id });
+    });
+
+    it("a row that is not refused by H5 or H6 has no rule NCR, for QC too", async () => {
+      const j = await o.job({ processes: [{ code: "20" }], steps: [{ seq: 1, role: "WELD", jointRef: "J1", pressurePart: true, processSeq: 20 }] });
+      expect(byTitle(await view(qcUser, j.units[0].publicId), "step 1").ruleNcr).toBeNull();
     });
   });
 });

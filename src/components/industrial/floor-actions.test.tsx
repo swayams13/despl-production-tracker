@@ -5,14 +5,14 @@ import type { ReactNode } from "react";
 
 const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
-vi.mock("@/app/actions/work", () => ({ ensureJointAction: vi.fn(), notifyBlockerAction: vi.fn(), recordWorkAction: vi.fn() }));
+vi.mock("@/app/actions/work", () => ({ ensureJointAction: vi.fn(), notifyBlockerAction: vi.fn(), recordWorkAction: vi.fn(), raiseRuleNcrAction: vi.fn() }));
 vi.mock("@/app/actions/heat", () => ({ loadHeatChoicesAction: vi.fn(), pickHeatNumberAction: vi.fn() }));
 
 import { LocaleProvider } from "@/lib/i18n/provider";
-import { notifyBlockerAction } from "@/app/actions/work";
+import { notifyBlockerAction, raiseRuleNcrAction } from "@/app/actions/work";
 import { en } from "@/lib/i18n/en";
 import { hi } from "@/lib/i18n/hi";
-import { UNDO_MS, doneLabel, nudgeText, NotifyBlockerButton, useFloorWrites } from "./floor-actions";
+import { UNDO_MS, doneLabel, nudgeText, NotifyBlockerButton, RaiseRuleNcrButton, useFloorWrites } from "./floor-actions";
 
 /**
  * Rehearsal finding: after "marked done" the row still showed live Done / Start buttons until the Undo window had passed and
@@ -104,4 +104,41 @@ describe("floor messages (rehearsal polish)", () => {
       expect(screen.getByRole("button").textContent).toBe(text);
     },
   );
+
+  // L1.2i: QC raises the H5/H6 NCR from the refused row. Violations first.
+  describe("RaiseRuleNcrButton", () => {
+    const refused = { kind: "ASSEMBLY_STEP" as const, id: 7, ruleNcr: { rule: "H5" as const, openNcrId: null } };
+
+    it("renders nothing for a row no rule NCR applies to", () => {
+      const { container } = render(<RaiseRuleNcrButton row={{ ...refused, ruleNcr: null }} />, { wrapper });
+      expect(container.textContent).toBe(""); // the locale wrapper is an empty div
+      expect(container.querySelector("button, a")).toBeNull();
+    });
+
+    it("an NCR already open shows it and offers no second button", () => {
+      render(<RaiseRuleNcrButton row={{ ...refused, ruleNcr: { rule: "H5", openNcrId: 42 } }} />, { wrapper });
+      expect(screen.queryByRole("button")).toBeNull();
+      expect(screen.getByRole("link", { name: /NCR open/ }).getAttribute("href")).toBe("/qc?tab=ncrs");
+    });
+
+    it("a refusal shows the server's message and the button stays tappable", async () => {
+      vi.mocked(raiseRuleNcrAction).mockResolvedValueOnce({ ok: false, code: "VALIDATION_FAILED", message: "H5 does not refuse this item now." } as never);
+      render(<RaiseRuleNcrButton row={refused} />, { wrapper });
+      await act(async () => screen.getByRole("button", { name: "Raise NCR (H5)" }).click());
+      expect(screen.getByText("H5 does not refuse this item now.")).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Raise NCR (H5)" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it("sends the row's kind, id and rule once, then says it is raised and refreshes the screen", async () => {
+      vi.mocked(raiseRuleNcrAction).mockResolvedValueOnce({ ok: true, result: { ncrId: 5 } });
+      render(<RaiseRuleNcrButton row={{ ...refused, kind: "COMPONENT_OP", id: 9, ruleNcr: { rule: "H6", openNcrId: null } }} />, { wrapper });
+      await act(async () => screen.getByRole("button", { name: "Raise NCR (H6)" }).click());
+      expect(raiseRuleNcrAction).toHaveBeenCalledTimes(1);
+      expect(raiseRuleNcrAction).toHaveBeenCalledWith({ kind: "COMPONENT_OP", targetId: 9, rule: "H6" });
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("NCR raised")).toBeTruthy();
+      expect(screen.queryByRole("button")).toBeNull();
+    });
+  });
 });
