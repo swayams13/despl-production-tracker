@@ -1,5 +1,5 @@
 import type { IntakeOptions, IntakeFamily } from "@/lib/services/job-intake.read";
-import type { CreateJobInput } from "@/lib/shared/schemas";
+import type { BomUploadLine, CreateJobInput } from "@/lib/shared/schemas";
 
 /**
  * J7b: the new-job wizard's state, validation and the draft payload, with no React in it.
@@ -13,8 +13,14 @@ export const PRIORITIES = ["LOW", "NORMAL", "HIGH", "URGENT"] as const;
 export type Priority = (typeof PRIORITIES)[number];
 export const PRIORITY_LABEL: Record<string, string> = { LOW: "Low", NORMAL: "Normal", HIGH: "High", URGENT: "Urgent" };
 
-/** Where a line's BOM comes from: nothing yet, a previous job's line, or the equipment type's standard kit. */
-export type BomMode = "NONE" | "COPY" | "KIT";
+/** Where a line's BOM comes from: nothing yet, a previous job's line, the equipment type's standard kit, or an uploaded Excel file. */
+export type BomMode = "NONE" | "COPY" | "KIT" | "UPLOAD";
+
+/** The lines read from an uploaded BOM file, kept in the draft (the file itself is not). */
+export interface BomUploadState {
+  fileName: string;
+  lines: BomUploadLine[];
+}
 
 export interface EquipBlockState {
   key: string;
@@ -36,6 +42,8 @@ export interface EquipBlockState {
   copyWeldMapFromEquipmentId: number | null;
   /** J3a: a line may run on another published route; carried through a copy, not editable here. */
   templateVersionId: number | null;
+  /** Set when bomMode is UPLOAD. */
+  bomUpload: BomUploadState | null;
 }
 
 export interface WizardState {
@@ -89,6 +97,7 @@ export function emptyBlock(bomMode: BomMode = "NONE"): EquipBlockState {
     copyBomFromEquipmentId: null,
     copyWeldMapFromEquipmentId: null,
     templateVersionId: null,
+    bomUpload: null,
   };
 }
 
@@ -150,6 +159,7 @@ export function step2BlockReason(s: WizardState, families: IntakeFamily[]): stri
     const label = e.name.trim() || `line ${i + 1}`;
     if (!e.name.trim()) return `Give line ${i + 1} a name`;
     if (e.bomMode === "KIT" && e.equipmentTypeId == null) return `Choose the equipment type of ${label} to fill its BOM from the kit`;
+    if (e.bomMode === "UPLOAD" && !(e.bomUpload && e.bomUpload.lines.length > 0)) return `Upload the BOM file for ${label}, or pick another BOM source`;
     if (e.bomMode === "COPY" && e.copyBomFromEquipmentId == null) return `Choose the job whose BOM ${label} copies, or pick another BOM source`;
     if (e.tracking === "LOT") {
       if (!(Number.isInteger(Number(e.lotQty)) && Number(e.lotQty) > 0)) return `Enter how many pieces are in the lot of ${label}`;
@@ -223,6 +233,7 @@ export function toPayload(s: WizardState): Json {
       config: Object.keys(s.answers).length ? s.answers : null,
       ...(e.bomMode === "COPY" && e.copyBomFromEquipmentId != null ? { copyBomFromEquipmentId: e.copyBomFromEquipmentId } : {}),
       ...(e.bomMode === "KIT" ? { bomFromKit: true } : {}),
+      ...(e.bomMode === "UPLOAD" && e.bomUpload ? { bomLines: e.bomUpload.lines, bomFileName: e.bomUpload.fileName } : {}),
       ...(e.copyWeldMapFromEquipmentId != null ? { copyWeldMapFromEquipmentId: e.copyWeldMapFromEquipmentId } : {}),
       ...(e.tracking === "LOT"
         ? { trackingMode: "LOT", lotQty: Number(e.lotQty) || null, serials: [] }
@@ -254,9 +265,11 @@ export function fromPayload(payload: Json, options: IntakeOptions, route: "templ
   const equipments: EquipBlockState[] = lines.map((l) => {
     const serials = Array.isArray(l.serials) ? (l.serials as unknown[]).map(str) : [];
     const copyBom = int(l.copyBomFromEquipmentId);
-    const bomMode: BomMode = l.bomFromKit === true ? "KIT" : copyBom != null ? "COPY" : "NONE";
+    const uploaded = Array.isArray(l.bomLines) ? (l.bomLines as BomUploadLine[]).filter((x) => x != null && typeof x === "object") : [];
+    const bomMode: BomMode = l.bomFromKit === true ? "KIT" : copyBom != null ? "COPY" : uploaded.length > 0 ? "UPLOAD" : "NONE";
     return {
       ...emptyBlock(bomMode),
+      bomUpload: bomMode === "UPLOAD" ? { fileName: str(l.bomFileName), lines: uploaded } : null,
       equipmentTypeId: int(l.equipmentTypeId),
       templateVersionId: int(l.templateVersionId),
       name: str(l.name),
@@ -306,6 +319,10 @@ export function bomSourceLabel(b: EquipBlockState, options: Pick<IntakeOptions, 
     if (b.copyBomFromEquipmentId == null) return "Copy chosen, but no previous line picked";
     const src = options.bomSources.find((s) => s.equipmentId === b.copyBomFromEquipmentId);
     return src ? `Copied from ${src.label} (${src.itemCount} ${src.itemCount === 1 ? "line" : "lines"})` : "Nothing to copy: the chosen line has no BOM lines";
+  }
+  if (b.bomMode === "UPLOAD") {
+    const n = b.bomUpload?.lines.length ?? 0;
+    return n > 0 ? `Uploaded from ${b.bomUpload?.fileName || "an Excel file"} (${n} ${n === 1 ? "line" : "lines"})` : "Upload chosen, but no file read yet";
   }
   if (b.bomMode === "KIT") {
     const type = options.equipmentTypes.find((t) => t.id === b.equipmentTypeId);

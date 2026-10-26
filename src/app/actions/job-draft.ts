@@ -2,7 +2,9 @@
 import { requireActor } from "@/lib/authz";
 import { saveDraft, copyJobToDraft, releaseDraft, discardDraft, type JobDraftView } from "@/lib/services/job-draft.service";
 import { previewJob, type JobPreview } from "@/lib/services/job-preview.service";
+import { previewBomUpload, type BomUploadPreview } from "@/lib/services/bom-upload.service";
 import type { CreateJobResult } from "@/lib/services/job-intake.service";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import type { CreateJobInput } from "@/lib/shared/schemas";
 import { toActionError, type ActionResult } from "./_action";
 
@@ -14,6 +16,18 @@ export type DraftActionResult = ActionResult & { draft?: JobDraftView };
 export async function previewJobAction(input: CreateJobInput): Promise<ActionResult & { preview?: JobPreview }> {
   try {
     return { ok: true, preview: await previewJob(await requireActor(), input) };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** Wizard "Upload a BOM Excel file": read the file and say what it holds. Writes nothing; the lines are kept in the draft. */
+export async function previewBomUploadAction(fd: FormData): Promise<ActionResult & { preview?: BomUploadPreview }> {
+  try {
+    const actor = await requireActor();
+    const file = fd.get("file");
+    if (!(file instanceof File)) throw new AppError(ERROR_CODES.VALIDATION_FAILED, { reason: "Choose a file first." }, "Choose a file first.");
+    return { ok: true, preview: await previewBomUpload(actor, { fileName: file.name, bytes: Buffer.from(await file.arrayBuffer()) }) };
   } catch (e) {
     return toActionError(e);
   }
