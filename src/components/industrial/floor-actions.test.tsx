@@ -76,9 +76,12 @@ describe("useFloorWrites: send on tap", () => {
     expect(failed.error).toBe(en.outcome.noConnection);
     expect(failed.retry).toBeTypeOf("function");
     expect(result.current.busy("COMPONENT_OP:1")).toBe(false);
+    // Walkthrough finding: with no connection the refresh fails too and Next reloads the page, losing this card. No refresh after a failed send.
+    expect(refresh).not.toHaveBeenCalled();
 
     await act(async () => failed.retry!());
     expect(send).toHaveBeenCalledTimes(2); // same closure, so the same requestId: the server replays rather than repeats
+    expect(refresh).toHaveBeenCalledTimes(1); // the retry went through, so now the screen refreshes
     expect(result.current.outcomes).toHaveLength(1);
     expect(result.current.outcomes[0]).toMatchObject({ applied: 1, error: undefined });
   });

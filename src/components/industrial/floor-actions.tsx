@@ -101,7 +101,8 @@ export function useFloorWrites(titleOf: Map<string, string>) {
       };
       setOutcomes((o) => [outcome, ...o.filter((x) => x.id !== id)]);
       // router.refresh() after an await is not tracked by React: start it in its own transition, so `refreshing` is true until the new rows are on screen.
-      startRefresh(() => router.refresh());
+      // Not after a failed send: nothing changed, and with no connection the refresh fails too, which makes Next reload the whole page and drop the "Not sent" card.
+      if (!out.error) startRefresh(() => router.refresh());
       setInFlight((n) => n - 1);
     },
     [router, titleOf, d],
