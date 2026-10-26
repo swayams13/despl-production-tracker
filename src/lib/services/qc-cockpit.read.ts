@@ -111,7 +111,15 @@ interface QueueRow {
 export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
   // AUD-037: raw tenant-wide SQL below, so the gate lives here too, not only in the page.
   if (actor.clientId !== null || !hasRole(actor, ...QC_VIEW_ROLES)) throw new AppError(ERROR_CODES.FORBIDDEN);
-  return withTenant(actor.tenantId, async (tx) => {
+  return loadQcCockpitForTenant(actor.tenantId);
+}
+
+/**
+ * The cockpit read with NO role check: for the hourly alert job, which has no user (it reads the tenant's hold points to
+ * notify QC). Any caller that acts for a person must go through `loadQcCockpit`, which gates on the role.
+ */
+export async function loadQcCockpitForTenant(tenantId: number): Promise<QcCockpit> {
+  return withTenant(tenantId, async (tx) => {
     // ── Awaiting verification queue, oldest submission first ────────────────
     const queueRows = await tx.$queryRaw<QueueRow[]>`
       SELECT pp.id AS plan_id, j.id AS job_id, j.job_number, u.id AS unit_id,
@@ -265,7 +273,7 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
     //    are reached via the rejection → operation/step → component/unit →
     //    equipment → job → tenantId chain (or, L1.2f, a rule NCR's target),
     //    never RLS alone (audit C3).
-    const tenantNcrScope = ncrTenantScope(actor.tenantId);
+    const tenantNcrScope = ncrTenantScope(tenantId);
     const openCount = await tx.ncr.count({ where: { status: { not: "CLOSED" }, ...tenantNcrScope } });
     const closedReworkNcrs = await tx.ncr.findMany({
       where: {
