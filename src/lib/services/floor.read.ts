@@ -73,6 +73,8 @@ export interface FloorRow {
   needsReview: boolean;
   /** L1.2i, QC viewers only: H5/H6 refuse this row and route to an NCR; `openNcrId` set = one is already open (no second button). */
   ruleNcr: { rule: "H5" | "H6"; openNcrId: number | null } | null;
+  /** Any viewer: an H5/H6 rule NCR is already open on this refused row, so "Notify" has nothing left to say. */
+  ruleNcrOpen: boolean;
 }
 
 export interface FloorUnitView {
@@ -303,6 +305,7 @@ export async function loadFloorUnit(
         qty: row.qty ?? null,
         needsReview: lab.needsReview,
         ruleNcr: null,
+        ruleNcrOpen: false,
       });
     }
 
@@ -310,7 +313,9 @@ export async function loadFloorUnit(
     const shown = rows.slice(0, ROW_CAP);
 
     // L1.2i: a row H5 or H6 refuses can have a rule NCR raised by QC; say which rule, and whether one is already open.
-    if (hasRole(actor, ROLES.QC)) {
+    // Everyone learns whether one is open (so "Notify" goes away); only QC gets the rule and the Raise button.
+    {
+      const isQc = hasRole(actor, ROLES.QC);
       const ruled = shown.flatMap((r) => {
         const rule = r.refusal ? RULE_NCR_OF_CODE[r.refusal.code] : undefined;
         return rule ? [{ r, rule }] : [];
@@ -328,7 +333,11 @@ export async function loadFloorUnit(
           select: { id: true, ruleCode: true, targetAssemblyStepId: true, targetComponentOperationId: true },
         });
         const openId = new Map(open.map((n) => [`${n.ruleCode}:${n.targetAssemblyStepId != null ? "A" : "C"}:${n.targetAssemblyStepId ?? n.targetComponentOperationId}`, n.id]));
-        for (const { r, rule } of ruled) r.ruleNcr = { rule, openNcrId: openId.get(`${rule}:${r.kind === "ASSEMBLY_STEP" ? "A" : "C"}:${r.id}`) ?? null };
+        for (const { r, rule } of ruled) {
+          const openNcrId = openId.get(`${rule}:${r.kind === "ASSEMBLY_STEP" ? "A" : "C"}:${r.id}`) ?? null;
+          r.ruleNcrOpen = openNcrId != null;
+          if (isQc) r.ruleNcr = { rule, openNcrId };
+        }
       }
     }
 

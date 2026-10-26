@@ -227,3 +227,38 @@ describe("toActionError — reportedAt refusal names only its own reason", () =>
     expect((r as { message: string }).message).not.toMatch(no);
   });
 });
+
+describe("toActionError — VALIDATION_FAILED names the field (floor/QC defects, 26 Oct)", () => {
+  const msg = (e: unknown) => (toActionError(e) as { message: string }).message;
+  const generic = "Some of the values submitted are not valid.";
+
+  it("keeps the words a service chose for its own refusal, instead of the generic sentence", () => {
+    const e = new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "codeClause" }, "Enter the code clause this acceptance relies on.");
+    expect(toActionError(e)).toMatchObject({ ok: false, code: "VALIDATION_FAILED", message: "Enter the code clause this acceptance relies on." });
+  });
+
+  it("a bare VALIDATION_FAILED that names a field says which one", () => {
+    expect(msg(new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "codeClause" }))).toBe("Enter the code clause.");
+    expect(msg(new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "reworkDueDate" }))).toBe("Check the rework due date and try again.");
+  });
+
+  it("a zod failure on the code clause says Enter the code clause; other fields are named in words", async () => {
+    const { z } = await import("zod");
+    const fail = (schema: import("zod").ZodType, input: unknown) => {
+      const p = schema.safeParse(input);
+      if (p.success) throw new Error("expected a failure");
+      return p.error;
+    };
+    expect(msg(fail(z.object({ codeClause: z.string().trim().min(1) }), { codeClause: "   " }))).toBe("Enter the code clause.");
+    expect(msg(fail(z.object({ reworkOwnerId: z.number() }), { reworkOwnerId: "x" }))).toBe("Check the rework owner id and try again.");
+  });
+
+  it("no field to name: the generic sentence is still the fallback", () => {
+    expect(msg(new AppError(ERROR_CODES.VALIDATION_FAILED))).toBe(generic);
+    expect(msg(new AppError(ERROR_CODES.VALIDATION_FAILED, { issues: [] }))).toBe(generic);
+  });
+
+  it("other codes are unchanged: their custom text is not forwarded", () => {
+    expect(msg(new AppError(ERROR_CODES.GATING_BLOCKED, {}, "internal wording"))).not.toBe("internal wording");
+  });
+});

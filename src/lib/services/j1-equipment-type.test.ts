@@ -377,8 +377,10 @@ describe.skipIf(!RUN_DB)("Lean Core J1 equipment type anchor (DB)", async () => 
       });
       expect(fresh.length).toBe(despl.length);
       // Left out, both older than J1: requiresQc (createJob derives it by the D3 rule, the 18 Oct seed copied the
-      // template value) and the QCP binding of WORK steps (the seed script fuzzy-binds them all, createJob binds
-      // INSPECTION steps only, see materializeAssemblyStepsFromTemplate).
+      // template value), role, jointRef and pressurePart (the seed pins DESPL-320 to the role-less family v1, as on production
+      // before its backfill, while a new job copies the skirt template, which carries the L1.2h roles; seeded roles
+      // are covered by seed-assembly-roles.test.ts) and the QCP binding of WORK steps (the seed script fuzzy-binds
+      // them all, createJob binds INSPECTION steps only, see materializeAssemblyStepsFromTemplate).
       const view = (s: (typeof fresh)[number]) => ({
         seq: s.seq,
         group: s.templateStep.groupCode,
@@ -387,9 +389,6 @@ describe.skipIf(!RUN_DB)("Lean Core J1 equipment type anchor (DB)", async () => 
         kind: s.templateStep.kind,
         qcpSrNo: s.templateStep.qcpSrNo,
         leadTimeProcessSeq: s.templateStep.leadTimeProcessSeq,
-        jointRef: s.jointRef,
-        role: s.role,
-        pressurePart: s.pressurePart,
         qcpBound:
           s.templateStep.kind === "INSPECTION" && s.qcpItem ? { srNo: s.qcpItem.srNo, sequence: s.qcpItem.sequence } : null,
       });

@@ -18,7 +18,6 @@ export const gu: Dict = {
     startEarly: "વહેલું શરૂ કરો…", // REVIEW: DESPL
     cancel: "રદ કરો", // REVIEW: DESPL
     dismiss: "બંધ કરો", // REVIEW: DESPL
-    undo: "પાછું લો", // REVIEW: DESPL
     tryAgain: "ફરી પ્રયત્ન કરો", // REVIEW: DESPL
     now: "હમણાં", // REVIEW: DESPL
     earlier: "પહેલાં", // REVIEW: DESPL

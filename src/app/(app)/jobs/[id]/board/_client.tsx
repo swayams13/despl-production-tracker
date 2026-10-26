@@ -9,7 +9,6 @@ import type { StageDisplayStatus } from "@/components/industrial/stage-status";
 import {
   ActionSheet,
   FloorOutcomes,
-  FloorUndoStack,
   NotifyBlockerButton,
   useFloorWrites,
 } from "@/components/industrial/floor-actions";
@@ -68,7 +67,7 @@ export function BoardClient({
   const [act, setAct] = useState<{ item: BoardItem; action: "DONE" | "START" } | null>(null);
 
   const titles = new Map<string, string>();
-  const { pending, outcomes, queue, undo, dismiss } = useFloorWrites(titles);
+  const { outcomes, commit, dismiss } = useFloorWrites(titles);
 
   const collapsible = view.stages.length >= 20 && !expanded;
   const early = view.stages.filter((s) => s.stageNo <= 9).map((s) => s.stageNo);
@@ -313,8 +312,6 @@ export function BoardClient({
         ))}
       </ul>
 
-      <FloorUndoStack pending={pending} undo={undo} />
-
       {open && (
         <CellSheet
           open
@@ -344,7 +341,7 @@ export function BoardClient({
           onClose={() => setAct(null)}
           onConfirm={(label, send) => {
             setAct(null);
-            queue(label, send);
+            commit(label, send);
           }}
         />
       )}
@@ -533,7 +530,7 @@ function ItemRow({
         <div className="fl-refusal" role="note">
           <b>{f.refusal.message}</b>
           {f.refusal.clearedBy && <span>Can clear it: {f.refusal.clearedBy.label}</span>}
-          {canAct && <NotifyBlockerButton unitPublicId={unitPublicId} row={{ kind: item.kind, id: item.id, refusal: f.refusal }} />}
+          {canAct && <NotifyBlockerButton unitPublicId={unitPublicId} row={{ kind: item.kind, id: item.id, refusal: f.refusal, ruleNcr: f.ruleNcr, ruleNcrOpen: f.ruleNcrOpen }} />}
         </div>
       )}
       {!leanFloor && (f || item.canInspect) && <span className="sub">Actions turn on with the lean floor.</span>}

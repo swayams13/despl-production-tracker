@@ -299,3 +299,18 @@ export function fromPayload(payload: Json, options: IntakeOptions, route: "templ
     answers,
   };
 }
+
+/** What the review step says about a line's BOM: follows the real source, not just the chosen mode. */
+export function bomSourceLabel(b: EquipBlockState, options: Pick<IntakeOptions, "bomSources" | "equipmentTypes">): string {
+  if (b.bomMode === "COPY") {
+    if (b.copyBomFromEquipmentId == null) return "Copy chosen, but no previous line picked";
+    const src = options.bomSources.find((s) => s.equipmentId === b.copyBomFromEquipmentId);
+    return src ? `Copied from ${src.label} (${src.itemCount} ${src.itemCount === 1 ? "line" : "lines"})` : "Nothing to copy: the chosen line has no BOM lines";
+  }
+  if (b.bomMode === "KIT") {
+    const type = options.equipmentTypes.find((t) => t.id === b.equipmentTypeId);
+    if (!type) return "Standard kit chosen, but no equipment type picked";
+    return type.kit.length ? `From the ${type.name} kit (${type.kit.length} ${type.kit.length === 1 ? "line" : "lines"})` : `The ${type.name} kit is empty: no BOM lines`;
+  }
+  return "Not started";
+}
