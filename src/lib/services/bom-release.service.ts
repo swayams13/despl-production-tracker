@@ -110,11 +110,13 @@ async function jobIdOf(actor: Actor, equipmentId: number): Promise<number> {
 }
 
 async function storedCounts(tx: Tx, equipmentId: number, unmappedLines: number): Promise<BomReleaseCounts> {
-  const [components, operations, steps, ruleDecisions] = await Promise.all([
+  const [components, operations, steps, ruleDecisions, boundToQcp] = await Promise.all([
     tx.component.count({ where: { ...activeRow, equipmentId } }),
     tx.componentOperation.count({ where: { ...activeRow, component: { equipmentId } } }),
     tx.assemblyStep.groupBy({ by: ["templateStepId"], where: { ...activeRow, unit: { equipmentId } }, _count: true }),
     tx.configRuleDecision.count({ where: { equipmentId } }),
+    // Steps bound to a QC plan point: what the release summary counts as it makes them.
+    tx.assemblyStep.count({ where: { ...activeRow, unit: { equipmentId }, qcpItemId: { not: null } } }),
   ]);
   const scopes = steps.length
     ? await tx.assemblyTemplateStep.findMany({ where: { id: { in: steps.map((s) => s.templateStepId) } }, select: { id: true, scope: true } })
@@ -127,7 +129,7 @@ async function storedCounts(tx: Tx, equipmentId: number, unmappedLines: number):
     const sc = scopeOf.get(s.templateStepId) ?? "PER_UNIT";
     stepsByScope[sc] = (stepsByScope[sc] ?? 0) + s._count;
   }
-  return { components, operations, steps: total, stepsByScope, boundToQcp: 0, unmappedLines, ruleDecisions };
+  return { components, operations, steps: total, stepsByScope, boundToQcp, unmappedLines, ruleDecisions };
 }
 
 /** Everything the preview and the release share. Writes the floor rows only when state is READY. J7a: also run by previewJob inside its own rolled-back transaction. */

@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/industrial/page-header";
 import { MetricCard } from "@/components/industrial/metric-card";
 import { Sunburst, type SunburstNode } from "@/components/viz";
 import { portfolioToSunburst } from "./_sunburst-data";
+import { sCurveVariancePct, sCurveVarianceLabel } from "./_s-curve-variance";
 
 const STATUS_COLS = ["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "COMPLETE", "ON_HOLD"] as const;
 const STATUS_LABELS: Record<(typeof STATUS_COLS)[number], string> = {
@@ -495,10 +496,7 @@ function SCurveCard({ sCurve }: { sCurve: JobKpis["sCurve"] }) {
   const actualPts = sCurve.filter((p) => p.actual !== null).map((p, i) => `${xFor(i)},${yFor(p.actual!)}`).join(" ");
   const lastActualIdx = sCurve.map((p) => p.actual).lastIndexOf(sCurve.map((p) => p.actual).filter((a) => a !== null).at(-1) ?? null);
   const lastActual = sCurve[lastActualIdx];
-  const variancePct =
-    lastActual?.actual !== null && lastActual?.actual !== undefined && lastActual.planned > 0
-      ? Math.round(((lastActual.actual - lastActual.planned) / lastActual.planned) * 1000) / 10
-      : null;
+  const variancePct = sCurveVariancePct(sCurve);
 
   return (
     <div className="card">
@@ -506,7 +504,7 @@ function SCurveCard({ sCurve }: { sCurve: JobKpis["sCurve"] }) {
         <h3>Schedule S-curve — planned vs actual</h3>
         <div className="legend">
           <span><i style={{ background: "var(--muted)" }} />Planned</span>
-          <span><i style={{ background: "var(--accent)" }} />Actual{variancePct !== null && ` · ${variancePct > 0 ? "+" : ""}${variancePct}%`}</span>
+          <span><i style={{ background: "var(--accent)" }} />Actual{sCurveVarianceLabel(variancePct)}</span>
         </div>
       </div>
       <div style={{ padding: 16 }}>
