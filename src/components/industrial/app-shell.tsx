@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -13,7 +13,8 @@ import { nextThemeState, themeLabel } from "@/lib/theme";
 import { dictFor, nextLocale, type Locale } from "@/lib/i18n";
 import type { NotificationRow } from "@/lib/services/notifications.read";
 import { fmtWhen, notificationHref } from "@/lib/notifications-ui";
-import type { JobListItem } from "@/lib/services/jobs.read";
+import type { ShellJob } from "@/lib/services/jobs.read";
+import type { StageSegment } from "./stage-status";
 import { activeItem, navFor, sidebarJobs, type NavIcon, type NavItem } from "@/lib/shared/nav";
 import { jobSwitchHref } from "@/lib/shared/job-tabs";
 
@@ -146,7 +147,7 @@ export function AppShell({
   /** Work waiting for QC (the QC queue's Ready count): the Queue badge. */
   qcWaitingCount: number;
   notifications: { unreadCount: number; recent: NotificationRow[] };
-  jobs: JobListItem[];
+  jobs: ShellJob[];
   /** FEATURES.leanFloor, read on the server: Scan and its target exist only while it is on. */
   leanFloor: boolean;
   /** User.locale: the language of the Floor screen and Today (L2.12). */
@@ -169,6 +170,25 @@ export function AppShell({
   // another job, so it lands on the job page.
   const jobIdMatch = pathname.match(/^\/jobs\/(\d+)(?:\/.*)?$/);
   const currentJob = jobIdMatch ? jobs.find((j) => j.id === Number(jobIdMatch[1])) : undefined;
+
+  // The topbar's mini spine is the one thing here that needs a job's per-unit stage rows. It is
+  // fetched for the job being viewed only (AUD-020: the layout used to compute it for every job on
+  // every render). Re-fetched when the layout re-renders (`jobs` is a fresh prop then).
+  const [rollup, setRollup] = useState<{ jobId: number; segments: StageSegment[] } | null>(null);
+  const currentJobId = currentJob?.id;
+  useEffect(() => {
+    if (currentJobId == null) return;
+    let live = true;
+    fetch(`/api/jobs/${currentJobId}/rollup`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { rollup?: StageSegment[] } | null) => {
+        if (live && d?.rollup) setRollup({ jobId: currentJobId, segments: d.rollup });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [currentJobId, jobs]);
 
   const openNotification = async (n: NotificationRow) => {
     if (!n.readAt) await markNotificationReadAction(n.id);
@@ -416,7 +436,7 @@ export function AppShell({
             <span style={{ color: "var(--muted)", fontSize: "var(--fs-sm, 12px)" }}>
               {currentJob.projectName ?? currentJob.familyName}
             </span>
-            <StageSpine variant="mini" segments={currentJob.unitRollup} />
+            <StageSpine variant="mini" segments={rollup?.jobId === currentJob.id ? rollup.segments : []} />
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8B919A" strokeWidth={2}>
               <path d="M6 9l6 6 6-6" />
             </svg>

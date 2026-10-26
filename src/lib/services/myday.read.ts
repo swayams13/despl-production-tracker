@@ -3,7 +3,7 @@ import { hasRole, ROLES, type Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
 import { getCurrentScheduleRunsBatch, loadJobSpinesBatch, computeCpmSafe } from "./_shared";
 import { prioritize, compareRankedPlans, type RankedPlan } from "./prioritizer";
-import { loadJobs } from "./jobs.read";
+import { loadJobRefs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
 import { isOnTime } from "@/lib/shared/business-day";
 import { pctOf } from "@/lib/shared/metrics";
@@ -129,7 +129,7 @@ export function istDay(now: Date, offsetDays: number): { start: Date; end: Date;
 
 export async function loadMyDay(actor: Actor): Promise<MyDayView> {
   const now = new Date();
-  const jobs = (await loadJobs(actor)).filter((j) => j.status === "ACTIVE");
+  const jobs = await loadJobRefs(actor, { onlyActive: true });
   // QC verifies cross-department (workspace.read.ts's `qcQueue` — "SUBMITTED
   // plans across ALL departments"). Without this, a QC actor whose only
   // department is QC itself would never see a SUBMITTED plan owned by any

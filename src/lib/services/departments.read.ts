@@ -2,7 +2,7 @@ import { withTenant, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
 import { resolveCalendarsForJobs } from "./_shared";
-import { isOverdue, isOnTime } from "@/lib/shared/business-day";
+import { isOverdue } from "@/lib/shared/business-day";
 import { pctOf } from "@/lib/shared/metrics";
 
 /**
@@ -114,23 +114,33 @@ export async function loadDepartmentCards(actor: Actor): Promise<DeptCard[]> {
     });
     const repByDept = new Map(reps.map((r) => [r.departmentId, r.user.name]));
 
-    const plans = await tx.processPlan.findMany({
-      where: { scheduleRun: { isCurrent: true } },
-      select: { ownerDepartmentId: true, status: true, plannedFinish: true, actualFinish: true },
-    });
-
-    const byDept = new Map<number, { open: number; overdue: number; onTime: number; onTimeTotal: number }>();
-    for (const p of plans) {
-      const b = byDept.get(p.ownerDepartmentId) ?? { open: 0, overdue: 0, onTime: 0, onTimeTotal: 0 };
-      if (p.status !== "COMPLETE") {
-        b.open++;
-        if (isOverdue(p.plannedFinish)) b.overdue++;
-      } else if (p.actualFinish && p.plannedFinish) {
-        b.onTimeTotal++;
-        if (isOnTime(p.actualFinish, p.plannedFinish)) b.onTime++;
-      }
-      byDept.set(p.ownerDepartmentId, b);
-    }
+    // AUD-022: the six per-department numbers are computed in the database, not by loading every
+    // current ProcessPlan of the tenant into Node. "Overdue" and "on time" are the SQL twins of
+    // business-day.ts's isOverdue / isOnTime (ist_day_marker mirrors istCalendarDayMarker, AUD-027).
+    const planRows = await tx.$queryRaw<
+      { department_id: number; open: number; overdue: number; on_time: number; on_time_total: number }[]
+    >`
+      SELECT pp.owner_department_id AS department_id,
+             count(*) FILTER (WHERE pp.status <> 'COMPLETE')::int AS open,
+             count(*) FILTER (
+               WHERE pp.status <> 'COMPLETE' AND pp.planned_finish IS NOT NULL
+                 AND pp.planned_finish < ist_day_marker(now())
+             )::int AS overdue,
+             count(*) FILTER (
+               WHERE pp.status = 'COMPLETE' AND pp.actual_finish IS NOT NULL AND pp.planned_finish IS NOT NULL
+             )::int AS on_time_total,
+             count(*) FILTER (
+               WHERE pp.status = 'COMPLETE' AND pp.actual_finish IS NOT NULL AND pp.planned_finish IS NOT NULL
+                 AND ist_day_marker(pp.actual_finish AT TIME ZONE 'UTC') <= (pp.planned_finish AT TIME ZONE 'UTC')
+             )::int AS on_time
+      FROM process_plans pp
+      JOIN schedule_runs sr ON sr.id = pp.schedule_run_id AND sr.is_current = true
+      WHERE pp.tenant_id = ${actor.tenantId}
+      GROUP BY pp.owner_department_id
+    `;
+    const byDept = new Map(
+      planRows.map((r) => [r.department_id, { open: r.open, overdue: r.overdue, onTime: r.on_time, onTimeTotal: r.on_time_total }]),
+    );
 
     const openNcrs = await loadOpenNcrs(tx, actor.tenantId);
     const reworkCountByDept = new Map<number, number>();

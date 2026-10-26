@@ -76,7 +76,12 @@ export async function loadJobSpines(actor: Actor, jobId: number): Promise<UnitSp
  * v_unit_stage_status rows is simply absent from the map — callers replace
  * today's `(await loadJobSpines(...)) ?? []` with `map.get(id) ?? []`.
  */
-export async function loadUnitSpinesBatch(actor: Actor, jobIds: number[]): Promise<Map<number, UnitSpine[]>> {
+export async function loadUnitSpinesBatch(
+  actor: Actor,
+  jobIds: number[],
+  /** Only this unit's rows (the Floor screen shows one unit; reading the whole job's spine for it was O(units) per tap). */
+  opts: { unitId?: number } = {},
+): Promise<Map<number, UnitSpine[]>> {
   if (jobIds.length === 0) return new Map();
 
   return withTenant(actor.tenantId, async (tx) => {
@@ -97,6 +102,7 @@ export async function loadUnitSpinesBatch(actor: Actor, jobIds: number[]): Promi
       FROM v_unit_stage_status v
       JOIN units u ON u.id = v.unit_id
       WHERE v.job_id = ANY(${visibleJobIds}::int[])
+        AND (${opts.unitId ?? null}::int IS NULL OR v.unit_id = ${opts.unitId ?? null}::int)
       ORDER BY v.job_id, u.serial_no, v.stage_no
     `;
 

@@ -3411,6 +3411,7 @@ model DomainEvent {
 
   @@index([tenantId, aggregateType, aggregateId, at])
   @@index([tenantId, type, at])
+  @@index([tenantId, aggregateType, at, id])
   @@map("domain_events")
 }
 

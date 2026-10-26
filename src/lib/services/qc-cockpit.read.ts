@@ -160,15 +160,19 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
     const holdPoints: GlobalHoldPoint[] = [];
     if (blockingItems.length > 0) {
       const itemIds = blockingItems.map((i) => i.id);
-      const execs = await tx.qcpExecution.findMany({
-        where: { qcpItemId: { in: itemIds } },
-        orderBy: { attemptNo: "desc" },
-        select: { qcpItemId: true, unitId: true, result: true, waiverApprovedBy: true, recordedAt: true },
-      });
+      // AUD-057: the latest attempt per (item, unit) straight from the database (the unique
+      // (qcp_item_id, unit_id, attempt_no) index serves it), not every attempt ever recorded sorted in JS.
+      const execs = await tx.$queryRaw<
+        { qcp_item_id: number; unit_id: number; result: LatestAttempt["result"]; waiver_approved_by: number | null; recorded_at: Date }[]
+      >`
+        SELECT DISTINCT ON (qcp_item_id, unit_id) qcp_item_id, unit_id, result, waiver_approved_by, recorded_at
+        FROM qcp_executions
+        WHERE qcp_item_id = ANY(${itemIds}::int[])
+        ORDER BY qcp_item_id, unit_id, attempt_no DESC
+      `;
       const latestByKey = new Map<string, LatestAttempt>();
       for (const e of execs) {
-        const k = `${e.qcpItemId}:${e.unitId}`;
-        if (!latestByKey.has(k)) latestByKey.set(k, e);
+        latestByKey.set(`${e.qcp_item_id}:${e.unit_id}`, { result: e.result, waiverApprovedBy: e.waiver_approved_by, recordedAt: e.recorded_at });
       }
 
       const linkedJp = new Map(blockingItems.map((i) => [i.id, i.processLinks[0]?.jobProcess]));
@@ -180,6 +184,13 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
           })
         : [];
       const now = new Date();
+      // AUD-057: bucket the plans by process once, not a full `plans.filter` per blocking item.
+      const plansByJp = new Map<number, typeof plans>();
+      for (const p of plans) {
+        const b = plansByJp.get(p.jobProcessId);
+        if (b) b.push(p);
+        else plansByJp.set(p.jobProcessId, [p]);
+      }
 
       for (const item of blockingItems) {
         const jp = linkedJp.get(item.id);
@@ -187,7 +198,7 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
         const blockingCode = item.partyCodes[0]?.qcpCode;
         const classCode = blockingCode?.code ?? "?";
         const requiresCall = blockingCode?.requiresCall ?? false;
-        const unitPlans = plans.filter((p) => p.jobProcessId === jp.id);
+        const unitPlans = plansByJp.get(jp.id) ?? [];
 
         for (const p of unitPlans) {
           if (p.unitId == null) continue;
@@ -227,7 +238,9 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
       FROM weeks w
       LEFT JOIN domain_events de
         ON de.aggregate_type = 'ProcessPlan'
-        AND date_trunc('week', de.at)::date = w.week_start
+        -- AUD-056: a range on the indexed column, not date_trunc() on every event ever recorded.
+        AND de.at >= w.week_start
+        AND de.at < w.week_start + 7
         AND de.type IN ('ProcessSubmitted', 'ProcessRejected')
       GROUP BY w.week_start
       ORDER BY w.week_start

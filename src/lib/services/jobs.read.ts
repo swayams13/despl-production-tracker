@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { withTenant } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { loadUnitSpinesBatch, rollupJobSpine } from "./spine.read";
@@ -55,11 +56,58 @@ interface PercentRow {
 }
 
 /** Pre-serialization row shape (dates still `Date`, not ISO strings) — used only to type the empty-jobs early return so it unifies with `mapped`'s inferred type instead of `JobListItem[]`'s (string dates). */
-type JobRow = Omit<JobListItem, "committedDeliveryDate" | "forecastDispatch" | "lastActivityAt"> & {
+type JobRow = Omit<JobListItem, "committedDeliveryDate" | "forecastDispatch" | "lastActivityAt" | "openHoldPoints" | "unitRollup"> & {
   committedDeliveryDate: Date | null;
   forecastDispatch: Date | null;
   lastActivityAt: Date | null;
 };
+
+/**
+ * What the app shell needs of a job (sidebar, switcher, topbar): the cheap half of `JobListItem`.
+ * No hold points, no spine, no last-activity — those cost a `domain_events` join and the whole
+ * `v_unit_stage_status` view per job, and the shell renders on every page load (AUD-020).
+ */
+export type ShellJob = Omit<JobListItem, "openHoldPoints" | "lastActivityAt" | "unitRollup">;
+
+/** Most jobs the shell lists. ACTIVE jobs are taken first, so the sidebar's worst-five and the switcher never lose a live job. */
+export const SHELL_JOB_CAP = 50;
+
+/**
+ * Shell variant of `loadJobs` (AUD-020): same fields and same values as `loadJobs` for the jobs it
+ * returns, minus the heavy extras, capped at SHELL_JOB_CAP (ACTIVE first), ordered by job number.
+ * Memoised per render on the actor, so the layout and a page share one call.
+ */
+export const loadShellJobs = cache(async (actor: Actor): Promise<ShellJob[]> => {
+  const { base } = await loadJobsBase(actor, undefined, { shell: true });
+  return base.map(toShellJob);
+});
+
+function toShellJob({ lastActivityAt: _skipped, ...j }: JobRow): ShellJob {
+  return {
+    ...j,
+    committedDeliveryDate: j.committedDeliveryDate ? j.committedDeliveryDate.toISOString() : null,
+    forecastDispatch: j.forecastDispatch ? j.forecastDispatch.toISOString() : null,
+  };
+}
+
+/**
+ * Just the identity of the actor's jobs (same set and order as `loadJobs`, which was being called by
+ * the Today list, Command Center, Workspace and Welding only to read `id`, `jobNumber` and `status`).
+ * One indexed query instead of the tallies, percent view, event join, hold points and spine view
+ * `loadJobs` runs for every job (AUD-061). `onlyActive` is `loadJobs(...).filter(j => j.status === "ACTIVE")`.
+ */
+export async function loadJobRefs(
+  actor: Actor,
+  { onlyActive = false }: { onlyActive?: boolean } = {},
+): Promise<{ id: number; jobNumber: string; status: string }[]> {
+  return withTenant(actor.tenantId, (tx) =>
+    tx.job.findMany({
+      where: { ...(actor.clientId != null ? { clientId: actor.clientId } : {}), ...(onlyActive ? { status: "ACTIVE" as const } : {}) },
+      select: { id: true, jobNumber: true, status: true },
+      orderBy: { jobNumber: "asc" },
+    }),
+  );
+}
 
 export async function loadJobs(actor: Actor): Promise<JobListItem[]>;
 export async function loadJobs(
@@ -70,24 +118,76 @@ export async function loadJobs(
   actor: Actor,
   opts?: { page: number; pageSize: number },
 ): Promise<JobListItem[] | { items: JobListItem[]; total: number; page: number; pageSize: number }> {
-  const { base, total } = await withTenant(actor.tenantId, async (tx) => {
+  const { base, total } = await loadJobsBase(actor, opts, { shell: false });
+  if (base.length === 0) return opts ? { items: [], total, page: opts.page, pageSize: opts.pageSize } : [];
+
+  // Per-job extras (hold points, spine rollup), batched into 2 grouped
+  // queries total instead of 2 per job — Gate 4 N+1 fix.
+  const jobIds = base.map((j) => j.id);
+  const [holdPointsByJob, unitSpinesByJob] = await Promise.all([
+    loadOpenHoldPointsBatch(actor, jobIds),
+    loadUnitSpinesBatch(actor, jobIds),
+  ]);
+  const extrasByJob = new Map(
+    base.map((j) => [
+      j.id,
+      {
+        openHoldPoints: (holdPointsByJob.get(j.id) ?? []).length,
+        unitRollup: rollupJobSpine(unitSpinesByJob.get(j.id) ?? []),
+      },
+    ]),
+  );
+
+  const items: JobListItem[] = base.map((j) => {
+    const extra = extrasByJob.get(j.id)!;
+    return {
+      ...j,
+      committedDeliveryDate: j.committedDeliveryDate ? j.committedDeliveryDate.toISOString() : null,
+      forecastDispatch: j.forecastDispatch ? j.forecastDispatch.toISOString() : null,
+      lastActivityAt: j.lastActivityAt ? j.lastActivityAt.toISOString() : null,
+      openHoldPoints: extra.openHoldPoints,
+      unitRollup: extra.unitRollup,
+    };
+  });
+  return opts ? { items, total, page: opts.page, pageSize: opts.pageSize } : items;
+}
+
+/**
+ * The shared first half of `loadJobs` and `loadShellJobs`: job rows + plan tallies + percent
+ * (+ last activity unless `shell`). `shell` also picks the capped, ACTIVE-first job set.
+ */
+async function loadJobsBase(
+  actor: Actor,
+  opts: { page: number; pageSize: number } | undefined,
+  { shell }: { shell: boolean },
+): Promise<{ base: JobRow[]; total: number }> {
+  return withTenant(actor.tenantId, async (tx) => {
     // Client-scoped users see only their own client's jobs; staff see all.
     const where = actor.clientId != null ? { clientId: actor.clientId } : undefined;
     const total = opts ? await tx.job.count({ where }) : 0;
-    const jobs = await tx.job.findMany({
-      where,
-      select: {
-        id: true,
-        jobNumber: true,
-        projectName: true,
-        status: true,
-        committedDeliveryDate: true,
-        family: { select: { name: true } },
-        equipments: { select: { _count: { select: { units: true } } } },
-      },
-      orderBy: { jobNumber: "asc" },
-      ...(opts ? { skip: (opts.page - 1) * opts.pageSize, take: opts.pageSize } : {}),
-    });
+    const jobSelect = {
+      id: true,
+      jobNumber: true,
+      projectName: true,
+      status: true,
+      committedDeliveryDate: true,
+      family: { select: { name: true } },
+      equipments: { select: { _count: { select: { units: true } } } },
+    } as const;
+    let jobs;
+    if (shell) {
+      const active = await tx.job.findMany({ where: { ...where, status: "ACTIVE" }, select: jobSelect, orderBy: { jobNumber: "asc" }, take: SHELL_JOB_CAP });
+      const room = SHELL_JOB_CAP - active.length;
+      const others = room > 0 ? await tx.job.findMany({ where: { ...where, status: { not: "ACTIVE" } }, select: jobSelect, orderBy: { jobNumber: "asc" }, take: room }) : [];
+      jobs = [...active, ...others].sort((a, b) => (a.jobNumber < b.jobNumber ? -1 : a.jobNumber > b.jobNumber ? 1 : 0));
+    } else {
+      jobs = await tx.job.findMany({
+        where,
+        select: jobSelect,
+        orderBy: { jobNumber: "asc" },
+        ...(opts ? { skip: (opts.page - 1) * opts.pageSize, take: opts.pageSize } : {}),
+      });
+    }
     if (jobs.length === 0) return { base: [] as JobRow[], total };
 
     const jobIds = jobs.map((j) => j.id);
@@ -119,7 +219,9 @@ export async function loadJobs(
     `;
     const percentByJob = new Map(percents.map((p) => [p.job_id, p.percent]));
 
-    const activity = await tx.$queryRaw<ActivityRow[]>`
+    // The shell never shows last activity, and this is the join that scales with the whole event stream (AUD-020).
+    // The shell never shows last activity, and this is the join that scales with the whole event stream (AUD-020).
+    const activity = shell ? [] : await tx.$queryRaw<ActivityRow[]>`
       SELECT jp.job_id, max(de.at) AS last_at
       FROM domain_events de
       JOIN process_plans pp ON pp.id::text = de.aggregate_id
@@ -170,35 +272,4 @@ export async function loadJobs(
     });
     return { base: mapped, total };
   });
-  if (base.length === 0) return opts ? { items: [], total, page: opts.page, pageSize: opts.pageSize } : [];
-
-  // Per-job extras (hold points, spine rollup), batched into 2 grouped
-  // queries total instead of 2 per job — Gate 4 N+1 fix.
-  const jobIds = base.map((j) => j.id);
-  const [holdPointsByJob, unitSpinesByJob] = await Promise.all([
-    loadOpenHoldPointsBatch(actor, jobIds),
-    loadUnitSpinesBatch(actor, jobIds),
-  ]);
-  const extrasByJob = new Map(
-    base.map((j) => [
-      j.id,
-      {
-        openHoldPoints: (holdPointsByJob.get(j.id) ?? []).length,
-        unitRollup: rollupJobSpine(unitSpinesByJob.get(j.id) ?? []),
-      },
-    ]),
-  );
-
-  const items: JobListItem[] = base.map((j) => {
-    const extra = extrasByJob.get(j.id)!;
-    return {
-      ...j,
-      committedDeliveryDate: j.committedDeliveryDate ? j.committedDeliveryDate.toISOString() : null,
-      forecastDispatch: j.forecastDispatch ? j.forecastDispatch.toISOString() : null,
-      lastActivityAt: j.lastActivityAt ? j.lastActivityAt.toISOString() : null,
-      openHoldPoints: extra.openHoldPoints,
-      unitRollup: extra.unitRollup,
-    };
-  });
-  return opts ? { items, total, page: opts.page, pageSize: opts.pageSize } : items;
 }

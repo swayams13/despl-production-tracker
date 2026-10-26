@@ -2,7 +2,7 @@ import { withTenant } from "@/lib/db";
 import { hasRole, ROLES, type Actor } from "@/lib/authz";
 import { getCurrentScheduleRunsBatch, loadJobSpinesBatch, computeCpmSafe } from "./_shared";
 import { prioritize, compareRankedPlans, type RankedPlan, type PlanState } from "./prioritizer";
-import { loadJobs } from "./jobs.read";
+import { loadJobRefs } from "./jobs.read";
 import { stageLabel } from "./workspace.read";
 import { loadDepartmentCards, type DeptCard } from "./departments.read";
 import { istDay } from "./myday.read";
@@ -224,7 +224,7 @@ export async function loadCommandCenter(
   deptName: string,
 ): Promise<CommandCenterView> {
   const now = new Date();
-  const jobs = (await loadJobs(actor)).filter((j) => j.status === "ACTIVE");
+  const jobs = await loadJobRefs(actor, { onlyActive: true });
 
   const ownRows: CommandCenterRow[] = [];
   const blockingRows: CommandCenterRow[] = [];
