@@ -37,7 +37,7 @@ Always dry run first; `--apply` goes after the `.ts` filename, inside the quotes
 | Target line | `<host>.proxy.rlwy.net/railway` and "dry run". If it says `localhost`, `DATABASE_PUBLIC_URL` was empty: stop. |
 | 1 | "questions to create: design_pressure, design_temperature, mdmt, moc, capacity, orientation, radiography, shell_courses" (8) and "default specs to rename: none". |
 | 2 | 14 planned joints (LS-1, CS-1, CS-2, SK-1, NF-M1, NF-N2, NF-N3, NS-M1, NS-N1..N6), 126 steps to link, 0 weld records, 72 multi-joint steps left alone. Always pass `--job DESPL-320`. |
-| 3 | "source: v1", "steps to fill: 31; already complete: 23", "would publish: v2" (31 roles, 25 pressure flags; a rehearsal on a freshly seeded DB gave exactly this). If it says "the mapping does not match", stop. A second run says "Nothing to do". Existing jobs keep their pin: DESPL-320's rows got their roles from `lean-backfill-floor-facts.ts` on 18 Oct. |
+| 3 | "source: v1", "steps to fill: 31; already complete: 23", "would publish: v2" (31 roles, 25 pressure flags; a rehearsal on a freshly seeded DB gave exactly this). If it says "the mapping does not match", stop. A second run says "Nothing to do". A database seeded with `pnpm db:seed` after 26 Oct already has v2 (and a role-carrying skirt template) and says "Nothing to do" at once; production and staging were seeded earlier and still need this step. Existing jobs keep their pin: DESPL-320's rows got their roles from `lean-backfill-floor-facts.ts` on 18 Oct. |
 | 4 | 3 types (PV-VERT-SKIRT, PV-VERT-LEGS, PV-HORZ-SADDLE), 1 skirt template of 54 steps, 7 kit rows, 1 equipment to link. |
 
 A second `--apply` of any step changes nothing.
