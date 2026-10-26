@@ -27,8 +27,9 @@ import { ROLES, type Actor } from "@/lib/authz";
 let cookieValue: string | undefined;
 // The caller's address as the reverse proxy would report it (AUD-109).
 let callerIp = "203.0.113.1";
+let forwardedFor: string | undefined; // overrides callerIp when a test sets the whole header
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ "x-real-ip": callerIp }),
+  headers: async () => new Headers({ "x-forwarded-for": forwardedFor ?? callerIp }),
   cookies: async () => ({
     get: (name: string) => (name === "despl_session" && cookieValue !== undefined ? { value: cookieValue } : undefined),
     set: (name: string, value: string) => {
@@ -204,6 +205,79 @@ describe.skipIf(!RUN_DB)("login() — identity resolution (DB)", async () => {
       expect((await attempt(`spray-${stamp}-fresh`, "whatever-not-real-1", ip))?.error).toBe("Too many attempts. Try again in a few minutes.");
       // Another address is unaffected.
       expect((await attempt(`spray-${stamp}-fresh`, "whatever-not-real-1", "192.0.2.200"))?.error).toBe("Incorrect username, email, or password");
+    });
+
+    it("a spoofed leading x-forwarded-for entry does not dodge the throttle", async () => {
+      const identifier = `spoof-${Date.now()}`;
+      const { login } = await import("./auth");
+      for (let i = 0; i < 6; i++) {
+        cookieValue = undefined;
+        forwardedFor = `10.9.9.${i}, 198.51.100.55`; // attacker rotates the part it controls
+        const form = new FormData();
+        form.set("identifier", identifier);
+        form.set("password", "whatever-not-real-1");
+        const state = await login({}, form);
+        expect(state?.error).toBe(i < 5 ? "Incorrect username, email, or password" : "Too many attempts. Try again in a few minutes.");
+      }
+      forwardedFor = undefined;
+    });
+
+    // Account-wide ceiling: many addresses against one account. Rows are written
+    // directly (as the owner) so the test needs neither 25 argon2 rounds nor the clock.
+    describe("account-wide ceiling (all IPs)", () => {
+      const failures = (identifier: string, n: number, ageMs: number) =>
+        owner.auditLog.createMany({
+          data: Array.from({ length: n }, (_, i) => ({
+            tenantId,
+            action: "auth.loginFailed",
+            entityType: "User",
+            entityId: identifier,
+            ip: `192.0.2.${(i % 250) + 1}`,
+            at: new Date(Date.now() - ageMs),
+          })),
+        });
+      const newUser = async (label: string) => {
+        const username = `${label}-${Date.now()}`;
+        const created = await createEmployee(admin, { displayName: label, username, roles: ["QC"], departmentIds: [], password });
+        return { username, userId: created.userId };
+      };
+
+      it("25 failures from many addresses just now: the next attempt is refused, even from a fresh address", async () => {
+        const { username } = await newUser("acct-cap");
+        await failures(username, 25, 1000);
+        expect((await attempt(username, password, "203.0.113.250"))?.error).toBe("Too many attempts. Try again in a few minutes.");
+        expect(cookieValue).toBeUndefined();
+      });
+
+      it("it is a delay, not a lock: the same failures a few minutes old no longer stop the real user", async () => {
+        const { username, userId } = await newUser("acct-delay");
+        await failures(username, 25, 2 * 60 * 1000); // delay at the cap is 15 s
+        const { readSession } = await import("@/lib/auth/session");
+        expect((await attempt(username, password, "203.0.113.251"))?.error).toBeUndefined();
+        expect((await readSession())?.userId).toBe(userId);
+      });
+
+      it("below the cap the real user from a different address succeeds", async () => {
+        const { username, userId } = await newUser("acct-below");
+        await failures(username, 24, 1000);
+        const { readSession } = await import("@/lib/auth/session");
+        expect((await attempt(username, password, "203.0.113.252"))?.error).toBeUndefined();
+        expect((await readSession())?.userId).toBe(userId);
+      });
+
+      it("the ceiling clears once the failures leave the 15-minute window", async () => {
+        const { username, userId } = await newUser("acct-window");
+        await failures(username, 60, 16 * 60 * 1000);
+        const { readSession } = await import("@/lib/auth/session");
+        expect((await attempt(username, password, "203.0.113.253"))?.error).toBeUndefined();
+        expect((await readSession())?.userId).toBe(userId);
+      });
+
+      it("the delay grows with the overage", async () => {
+        const { username } = await newUser("acct-grow");
+        await failures(username, 35, 60 * 1000); // 11 steps = 165 s > 60 s since the last failure
+        expect((await attempt(username, password, "203.0.113.254"))?.error).toBe("Too many attempts. Try again in a few minutes.");
+      });
     });
   });
 });

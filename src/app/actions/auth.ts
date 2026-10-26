@@ -8,6 +8,7 @@ import { createSession, destroySession } from "@/lib/auth/session";
 import { resolveTenantForLogin } from "@/lib/auth/tenant-resolution";
 import { loginSchema } from "@/lib/shared/schemas";
 import { safeNext } from "@/lib/shared/safe-next";
+import { clientIpFromForwardedFor, trustedProxyHops } from "@/lib/auth/client-ip";
 
 export interface LoginState {
   error?: string;
@@ -18,24 +19,23 @@ export interface LoginState {
  * userId — pre-auth, an unknown/wrong identifier never resolves to one.
  *
  * AUD-109: the count is per (identifier, client IP), so another address cannot
- * lock a named user out; a per-IP ceiling across all identifiers still slows
- * someone spraying many usernames from one address. */
+ * lock a named user out; a per-IP ceiling across all identifiers slows someone
+ * spraying many usernames from one address; an account-wide ceiling (all IPs)
+ * stops a distributed guess at one account without becoming the old lockout:
+ * above the cap an attempt is refused only if the last failure was less than a
+ * growing delay ago, so the real user gets back in within minutes. All the
+ * numbers live here; adjust them here only. */
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
-const RATE_LIMIT_MAX_ATTEMPTS = 5;
-const RATE_LIMIT_MAX_PER_IP = 30;
+const RATE_LIMIT_MAX_ATTEMPTS = 5; // per (identifier, IP)
+const RATE_LIMIT_MAX_PER_IP = 30; // per IP, all identifiers
+const RATE_LIMIT_MAX_PER_ACCOUNT = 25; // per identifier, all IPs
+const ACCOUNT_DELAY_STEP_MS = 15 * 1000; // delay after the cap: (failures over cap + 1) steps...
+const ACCOUNT_DELAY_MAX_MS = 5 * 60 * 1000; // ...never more than this
 
-/**
- * The caller's address as the reverse proxy reports it, null when unknown.
- * ponytail: trusts `x-real-ip`, then the first `x-forwarded-for` entry — the
- * proxy in front (Railway today, the on-prem proxy later) must overwrite both,
- * or a caller can rotate them to dodge the throttle. No parsing or validation
- * beyond trimming; the value is only ever compared and stored as text.
- */
+/** Caller's address per TRUSTED_PROXY_HOPS (lib/auth/client-ip.ts); null when unknown. */
 async function clientIp(): Promise<string | null> {
   try {
-    const h = await headers();
-    const ip = h.get("x-real-ip") ?? h.get("x-forwarded-for")?.split(",")[0];
-    return ip?.trim().slice(0, 64) || null;
+    return clientIpFromForwardedFor((await headers()).get("x-forwarded-for"), trustedProxyHops());
   } catch {
     return null; // no request scope (tests, scripts)
   }
@@ -69,14 +69,20 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     // pattern already exists for changeOwnPassword, just never applied here.
     // Keyed on the identifier attempted (entityId), since a userId isn't
     // known yet for an unknown/wrong identifier.
-    const since = { gte: new Date(Date.now() - RATE_LIMIT_WINDOW_MS) };
-    const base = { tenantId, action: "auth.loginFailed", at: since, ip };
-    const [byIdentifier, byIp] = await Promise.all([
-      tx.auditLog.count({ where: { ...base, entityId: identifierKey } }),
-      // No address, no ceiling: everyone without one would share a single bucket.
-      ip === null ? 0 : tx.auditLog.count({ where: base }),
+    const now = Date.now();
+    const since = { gte: new Date(now - RATE_LIMIT_WINDOW_MS) };
+    const base = { tenantId, action: "auth.loginFailed", at: since };
+    const [byIdentifier, byIp, account] = await Promise.all([
+      tx.auditLog.count({ where: { ...base, ip, entityId: identifierKey } }),
+      // No address, no per-IP ceiling: everyone without one would share a single bucket.
+      ip === null ? 0 : tx.auditLog.count({ where: { ...base, ip } }),
+      tx.auditLog.aggregate({ where: { ...base, entityId: identifierKey }, _count: true, _max: { at: true } }),
     ]);
-    if (byIdentifier >= RATE_LIMIT_MAX_ATTEMPTS || byIp >= RATE_LIMIT_MAX_PER_IP) {
+    // Progressive, not a lock: refused only while the last failure is newer than the delay.
+    const overCap = account._count - RATE_LIMIT_MAX_PER_ACCOUNT;
+    const accountDelayMs = overCap >= 0 ? Math.min(ACCOUNT_DELAY_MAX_MS, (overCap + 1) * ACCOUNT_DELAY_STEP_MS) : 0;
+    const accountBlocked = accountDelayMs > 0 && account._max.at !== null && now - account._max.at.getTime() < accountDelayMs;
+    if (byIdentifier >= RATE_LIMIT_MAX_ATTEMPTS || byIp >= RATE_LIMIT_MAX_PER_IP || accountBlocked) {
       return { session: null, rateLimitedNow: true };
     }
 
