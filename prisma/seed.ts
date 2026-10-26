@@ -28,7 +28,9 @@ import { hash } from "@node-rs/argon2";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import type { AssemblyStepRole } from "../src/generated/prisma/enums";
 import { ensurePvEquipmentTypes, SKIRT_TYPE_CODE } from "../src/lib/services/equipment-type.setup";
+import { ensureAssemblyRoles } from "../src/lib/services/assembly-roles.setup";
 import { ensurePvConfigQuestions } from "../src/lib/services/config-questions.setup";
+import { loadMapping } from "../scripts/lean-backfill-floor-facts";
 import { JOB_GRAIN_PROCESS_CODES } from "../src/lib/shared/job-grain";
 import {
   ProcessEdgeType,
@@ -872,6 +874,25 @@ async function seedReference(tx: Tx, src: Sources, stats: Record<string, number>
       });
       stats.assemblyTemplateSteps = await tx.assemblyTemplateStep.count({ where: { versionId: asmV1.id } });
 
+      // ── 7c'. Lean Core L1.2h: publish v2 of the family template with the reviewed step roles, joints
+      // and pressure flags, exactly as scripts/lean-publish-assembly-roles.ts does (same service, same
+      // mapping), so a fresh install needs no extra step and new jobs get hard rules H1, H4-H6. Runs
+      // BEFORE 7d: the skirt template copies the newest published family version, as in the production
+      // order. v1 stays role-less (invariant 9); DESPL-320 is pinned to it in seedDemo.
+      const roles = loadMapping();
+      if (roles.reviewStatus === "DRAFT_NEEDS_SIGNOFF") {
+        console.warn("! seed/assembly-step-roles-pv-v1.json is DRAFT_NEEDS_SIGNOFF: seeding the assembly template without step roles.");
+      } else {
+        const r = await ensureAssemblyRoles(tx, tenantId, {
+          apply: true,
+          mapping: roles.steps,
+          mappingStatus: roles.reviewStatus,
+          audit: true,
+          auditSource: "prisma/seed.ts",
+        });
+        stats.assemblyRoleStepsFilled = r.filled;
+      }
+
       // ── 7d. Lean Core J1: PV equipment types + the "vertical on skirt"
       // assembly template (a copy of v1 above) and kit. DESPL-320 is linked
       // to the skirt type when its equipment is created (section 11).
@@ -1287,6 +1308,14 @@ async function seedDemo(
           familyId: familyIdByCode.get("PRESSURE_VESSEL")!,
           templateVersionId: pvV1.id,
           calendarId: calendar.id,
+          // Pinned to the role-less family v1 (as on production), so DESPL-320's steps stay role-less
+          // here; the skirt template and family v2 carry roles for new jobs. // L1.2h
+          assemblyTemplateVersionId: (
+            await tx.assemblyTemplateVersion.findFirstOrThrow({
+              where: { version: 1, template: { tenantId, familyId: familyIdByCode.get("PRESSURE_VESSEL")!, equipmentTypeId: null } },
+              select: { id: true },
+            })
+          ).id,
           jobNumber: "DESPL-320",
           projectName: qcpFile.template.vessel,
           designCode: qcpFile.template.designCode,

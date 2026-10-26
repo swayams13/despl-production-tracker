@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { loadWeldingView } from "@/lib/services/welding.read";
@@ -6,7 +7,7 @@ import { WeldingClient } from "./_client";
 
 export default async function WeldingPage() {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const [view, jobs] = await Promise.all([loadWeldingView(actor), loadJobs(actor)]);

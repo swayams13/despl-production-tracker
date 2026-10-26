@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { withTenant } from "@/lib/db";
@@ -17,7 +18,7 @@ export default async function ScanPage({
 }) {
   if (!FEATURES.leanFloor) notFound();
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const sp = await searchParams;

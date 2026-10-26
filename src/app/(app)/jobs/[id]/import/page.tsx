@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { getActor, hasRole } from "@/lib/authz";
@@ -11,7 +12,7 @@ import { TrackerImport } from "./_import";
  */
 export default async function ImportPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   const jobId = Number((await params).id);
   if (!Number.isInteger(jobId) || jobId <= 0) notFound();

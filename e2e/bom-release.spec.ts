@@ -41,12 +41,12 @@ test("a new job's BOM is released from the screen, not created by an import or b
   await page.locator('input[type="date"]').nth(1).fill("2027-03-31");
   await page.getByRole("button", { name: "Next →" }).click(); // J7b: the wizard holds its state in the page, so no waits between steps
   await page.getByText(/route version available/).first().click();
-  await page.locator("select").filter({ hasText: "Vertical vessel on skirt" }).selectOption({ label: "Vertical vessel on skirt" });
+  const picker = page.getByRole("combobox", { name: "Equipment type or master BOM for line 1" });
+  await picker.click();
+  await picker.fill("DESPL-320");
+  await page.getByRole("option", { name: /DESPL-320 · .* · 29 lines/ }).first().click(); // type-ahead: the master BOM of an earlier job
   await page.getByPlaceholder("e.g. 320SR").fill("J5BE");
   await page.locator("xpath=//label[normalize-space()='Quantity']/following::input[1]").fill("2");
-  await page.getByLabel("BOM source for line 1").selectOption("COPY");
-  const copy = page.getByLabel("Job to copy the BOM of line 1 from");
-  await copy.selectOption({ value: (await copy.locator("option", { hasText: /^DESPL-320 — .*29 items/ }).first().getAttribute("value")) ?? "" });
   await page.getByRole("button", { name: "Next →" }).click();
   await page.locator("xpath=//label[normalize-space()='Shell courses']/following::input[1]").fill("2");
   await page.getByRole("button", { name: "Next →" }).click(); // QC plan

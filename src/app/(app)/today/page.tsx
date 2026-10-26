@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { FEATURES } from "@/lib/shared/flags";
@@ -14,7 +15,7 @@ import { dictFor } from "@/lib/i18n";
 export default async function TodayPage() {
   if (!FEATURES.leanFloor) notFound();
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const view = await loadToday(actor);

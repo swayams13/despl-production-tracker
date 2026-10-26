@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
@@ -10,7 +11,7 @@ import { StartScreen } from "./start-screen";
 
 export default async function NewJobPage({ searchParams }: { searchParams: Promise<{ draft?: string; route?: string }> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   // J7b: a planner builds and saves drafts; only the Production Head and Admin create the job.
   if (!hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD, ROLES.PLANNER)) redirect("/jobs");
@@ -32,7 +33,8 @@ export default async function NewJobPage({ searchParams }: { searchParams: Promi
             <p style={{ marginTop: 0 }}>
               {draft.status === "RELEASED" ? "This draft was already turned into a job." : "This draft was discarded."}
             </p>
-            {draft.releasedJobId != null && <Link className="btn btn-accent" href={`/jobs/${draft.releasedJobId}`}>Open the job</Link>}{" "}
+            {draft.releasedJobId != null && <Link className="btn btn-accent" href={`/jobs/${draft.releasedJobId}/release`}>Release the BOM</Link>}{" "}
+            {draft.releasedJobId != null && <Link className="btn" href={`/jobs/${draft.releasedJobId}`}>Open the job</Link>}{" "}
             <Link className="btn" href="/jobs/new">Start a new job</Link>
           </div>
         );

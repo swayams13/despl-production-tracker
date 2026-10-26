@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ensureJointAction, notifyBlockerAction, raiseRuleNcrAction, recordWorkAction } from "@/app/actions/work";
@@ -13,16 +13,17 @@ import { useDict } from "@/lib/i18n/provider";
 /**
  * Lean Core L2.2 / L2.3: the write side shared by the Floor screen (/u/...) and
  * Today (/today). One sheet (done-at, late reason, welder, other units, early
- * start reason), one 10 s Undo queue, one outcome list.
+ * start reason), one outcome list.
  *
- * Undo is a delayed send: the write goes out when the bar expires, or at once
- * if the page is hidden. Closing the tab inside the 10 s can drop a write; the
- * row is then simply still not done when the page is reopened (never silent
- * wrong state). Each write carries a requestId, so a retry or a double flush
- * is idempotent (recordWork replays a request it has already recorded).
+ * A write is sent on tap (decided 26 Oct 2026, replacing the 10 s Undo: a delayed
+ * send was lost when the tab closed, and nothing on the server reverses a write;
+ * a wrong tap goes through the correction flow). The rows stay busy until the
+ * result is on screen. With no connection the outcome card says "Not sent" and
+ * keeps Try again; nothing is stored on the device. Each write carries a
+ * requestId, so a retry is idempotent (recordWork replays a request it has
+ * already recorded).
  */
 
-export const UNDO_MS = 10_000;
 /**
  * Floor state text. Blocked and out-of-order are refusal copy: English until a
  * DESPL speaker has reviewed a translation (L2.12).
@@ -46,13 +47,9 @@ export interface Outcome {
   applied: number;
   refused: Array<{ title: string; message: string }>;
   error?: string;
+  /** The session ended: the card offers a way back to sign in (AUD-062). */
+  signIn?: boolean;
   retry?: () => void;
-}
-export interface PendingView {
-  id: string;
-  label: string;
-  /** The rows (`KIND:id`) this write will change: they stay disabled until the screen shows the result. */
-  keys: string[];
 }
 export interface SendResult {
   /** Replaces the queued label in the outcome card (e.g. a Done that went to QC says so). */
@@ -60,6 +57,13 @@ export interface SendResult {
   applied: number;
   refused: Array<{ kind: Kind | "PROCESS_PLAN"; id: number; message: string }>;
   error?: string;
+  signIn?: boolean;
+}
+/** A refused send as an outcome card; a dead session says so and offers sign-in. */
+export function notSent(d: Dict, r: { code: string; message: string }): SendResult {
+  return r.code === "UNAUTHENTICATED"
+    ? { applied: 0, refused: [], error: d.outcome.signedOut, signIn: true }
+    : { applied: 0, refused: [], error: r.message };
 }
 /** What the sheet needs about the unit a row belongs to. */
 export interface SheetContext {
@@ -70,22 +74,23 @@ export interface SheetContext {
   lateCategories: FloorUnitView["lateCategories"];
 }
 
-/** The Undo queue and outcome list. `titleOf` names a refused item as "<key>" -> text. */
+/** Sends writes on tap and keeps the outcome list. `titleOf` names a refused item as "<key>" -> text. */
 export function useFloorWrites(titleOf: Map<string, string>) {
   const router = useRouter();
   const d = useDict();
-  const [pending, setPending] = useState<PendingView[]>([]);
   const [outcomes, setOutcomes] = useState<Outcome[]>([]);
-  // Rows whose write was sent and whose result the screen has not shown yet: still disabled, so a second tap cannot repeat it.
+  // Rows whose write was tapped and whose result the screen has not shown yet: disabled, so a second tap cannot repeat it.
   const [settling, setSettling] = useState<Set<string>>(new Set());
+  const [inFlight, setInFlight] = useState(0);
   const [refreshing, startRefresh] = useTransition();
   useEffect(() => {
-    if (!refreshing && settling.size > 0) setSettling(new Set());
-  }, [refreshing, settling]);
-  const queued = useRef(new Map<string, { send: () => Promise<SendResult>; label: string; keys: string[]; timer: ReturnType<typeof setTimeout> }>());
+    if (!refreshing && inFlight === 0 && settling.size > 0) setSettling(new Set());
+  }, [refreshing, inFlight, settling]);
 
   const finish = useCallback(
-    async (id: string, label: string, send: () => Promise<SendResult>, keys: string[] = []) => {
+    async (id: string, label: string, send: () => Promise<SendResult>, keys: string[]) => {
+      setSettling((cur) => new Set([...cur, ...keys]));
+      setInFlight((n) => n + 1);
       let out: SendResult;
       try {
         out = await send();
@@ -101,41 +106,20 @@ export function useFloorWrites(titleOf: Map<string, string>) {
           message: r.message,
         })),
         error: out.error,
+        signIn: out.signIn,
         retry: out.error ? () => { setOutcomes((o) => o.filter((x) => x.id !== id)); void finish(id, label, send, keys); } : undefined,
       };
       setOutcomes((o) => [outcome, ...o.filter((x) => x.id !== id)]);
       // router.refresh() after an await is not tracked by React: start it in its own transition, so `refreshing` is true until the new rows are on screen.
-      setSettling((cur) => new Set([...cur, ...keys]));
-      startRefresh(() => router.refresh());
+      // Not after a failed send: nothing changed, and with no connection the refresh fails too, which makes Next reload the whole page and drop the "Not sent" card.
+      if (!out.error) startRefresh(() => router.refresh());
+      setInFlight((n) => n - 1);
     },
     [router, titleOf, d],
   );
 
-  const flush = useCallback(
-    (id: string) => {
-      const q = queued.current.get(id);
-      if (!q) return;
-      clearTimeout(q.timer);
-      queued.current.delete(id);
-      setPending((p) => p.filter((x) => x.id !== id));
-      void finish(id, q.label, q.send, q.keys);
-    },
-    [finish],
-  );
-
-  const queue = (label: string, send: () => Promise<SendResult>, keys: string[] = []) => {
-    const id = crypto.randomUUID();
-    const timer = setTimeout(() => flush(id), UNDO_MS);
-    queued.current.set(id, { send, label, keys, timer });
-    setPending((p) => [...p, { id, label, keys }]);
-  };
-
-  const undo = (id: string) => {
-    const q = queued.current.get(id);
-    if (q) clearTimeout(q.timer);
-    queued.current.delete(id);
-    setPending((p) => p.filter((x) => x.id !== id));
-  };
+  /** Send now. `keys` are the rows (`KIND:id`) the write changes; they stay busy until the screen shows the result. */
+  const commit = (label: string, run: () => Promise<SendResult>, keys: string[] = []) => void finish(crypto.randomUUID(), label, run, keys);
 
   const dismiss = (id: string) => setOutcomes((x) => x.filter((y) => y.id !== id));
 
@@ -147,23 +131,9 @@ export function useFloorWrites(titleOf: Map<string, string>) {
     return () => clearTimeout(t);
   }, [outcomes]);
 
-  // A hidden page sends what is waiting now; the Undo window ends with the screen.
-  useEffect(() => {
-    const sendAll = () => {
-      for (const id of [...queued.current.keys()]) flush(id);
-    };
-    const onVis = () => document.visibilityState === "hidden" && sendAll();
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("pagehide", sendAll);
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("pagehide", sendAll);
-    };
-  }, [flush]);
-
-  /** True from the tap until the screen shows the result (Undo window, sending, refreshing): the row's buttons are off. */
-  const busy = (key: string) => settling.has(key) || pending.some((p) => p.keys.includes(key));
-  return { pending, outcomes, queue, undo, dismiss, busy };
+  /** True from the tap until the screen shows the result (sending, refreshing): the row's buttons are off. */
+  const busy = (key: string) => settling.has(key);
+  return { outcomes, commit, dismiss, busy };
 }
 
 /** Outcome cards (a partial result stays until dismissed). */
@@ -181,6 +151,11 @@ export function FloorOutcomes({ outcomes, dismiss }: { outcomes: Outcome[]; dism
                 : d.outcome.recorded(o.label)}
           </b>
           {o.error && <span>{o.error}</span>}
+          {o.signIn && (
+            <a className="btn btn-accent" href={`/login?${new URLSearchParams({ next: window.location.pathname + window.location.search, session: "ended" })}`}>
+              {d.outcome.signIn}
+            </a>
+          )}
           {o.refused.map((r, i) => (
             <span key={i}>
               {r.title}: {r.message}
@@ -202,28 +177,6 @@ export function FloorOutcomes({ outcomes, dismiss }: { outcomes: Outcome[]; dism
   );
 }
 
-/** The 10 s Undo bars. */
-export function FloorUndoStack({ pending, undo }: { pending: PendingView[]; undo: (id: string) => void }) {
-  const d = useDict();
-  return (
-    <>
-      {pending.length > 0 && (
-        <div className="fl-undo-stack" aria-live="polite">
-          {pending.map((p) => (
-            <div key={p.id} className="fl-undo">
-              <span>{p.label}</span>
-              <button className="btn" onClick={() => undo(p.id)}>
-                {d.common.undo}
-              </button>
-              <i style={{ animationDuration: `${UNDO_MS}ms` }} />
-            </div>
-          ))}
-        </div>
-      )}
-    </>
-  );
-}
-
 /** The Done line: "sent to QC" when QC still has to verify it, "marked done" when it completed directly. */
 export function doneLabel(d: Dict, title: string, units: number, applied: Array<{ to: string }>): string {
   const toQc = applied.length > 0 && applied.every((a) => a.to === "SUBMITTED");
@@ -241,13 +194,15 @@ export function NotifyBlockerButton({
   row,
 }: {
   unitPublicId: string;
-  row: Pick<FloorRow, "id" | "refusal"> & { kind: "COMPONENT_OP" | "ASSEMBLY_STEP" };
+  row: Pick<FloorRow, "id" | "refusal"> & Partial<Pick<FloorRow, "ruleNcr" | "ruleNcrOpen">> & { kind: "COMPONENT_OP" | "ASSEMBLY_STEP" };
 }) {
   const d = useDict();
   const [nudge, setNudge] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const who = row.refusal?.clearedBy;
-  if (!who) return null;
+  // An open rule NCR (H5/H6) is already with QC: nobody is left to notify.
+  if (!who || row.ruleNcr?.openNcrId != null || row.ruleNcrOpen) return null;
   const notify = async () => {
     if (busy) return;
     setBusy(true);
@@ -258,12 +213,17 @@ export function NotifyBlockerButton({
       role: who.role as "QC" | "STORES" | "ENGINEERING" | "PRODUCTION_HEAD",
     });
     setBusy(false);
-    setNudge(r.ok ? nudgeText(d, who.label, r.recipients) : r.message);
+    // A refusal (e.g. the cooldown) shows beside the button, which stays tappable; only a sent nudge locks it.
+    setError(r.ok ? null : r.message);
+    setNudge(r.ok ? nudgeText(d, who.label, r.recipients) : null);
   };
   return (
-    <button className="btn" disabled={busy || nudge != null} onClick={notify}>
-      {nudge ?? `Notify ${who.label}`}
-    </button>
+    <>
+      <button className="btn" disabled={busy || nudge != null} onClick={notify}>
+        {nudge ?? `Notify ${who.label}`}
+      </button>
+      {error && <span role="alert">{error}</span>}
+    </>
   );
 }
 
@@ -456,7 +416,7 @@ export function ActionSheet({
       ];
       if (needsWelder || (done && row.weld)) {
         const j = await ensureJointAction({ assemblyStepId: row.id, welderIds: welder ? [Number(welder)] : undefined });
-        if (!j.ok) return { applied: 0, refused: [], error: j.message };
+        if (!j.ok) return notSent(d, j);
         items[0].detail = { ...items[0].detail, weldJointId: j.weldJointId, ...(welder ? { performedByWelderId: Number(welder) } : {}) };
       }
       const r = await recordWorkAction({
@@ -470,7 +430,7 @@ export function ActionSheet({
           : {}),
         ...(category != null ? { lateReason: { categoryId: category, ...(lateNote.trim() ? { note: lateNote.trim() } : {}) } } : {}),
       });
-      if (!r.ok) return { applied: 0, refused: [], error: r.message };
+      if (!r.ok) return notSent(d, r);
       return {
         ...(done ? { label: doneLabel(d, row.title, count, r.result.applied) } : {}),
         applied: r.result.applied.length,

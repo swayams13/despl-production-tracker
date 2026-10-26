@@ -34,6 +34,8 @@ export async function middleware(request: NextRequest) {
   }
 
   const token = request.cookies.get("despl_session")?.value;
+  // AUD-062: pages read this to send the person back to where they were.
+  headers.set("x-return-path", pathname + request.nextUrl.search);
   if (token) {
     try {
       await jwtVerify(token, new TextEncoder().encode(process.env.AUTH_SECRET));
@@ -53,9 +55,22 @@ export async function middleware(request: NextRequest) {
     );
   }
 
+  // A Server Action POST with a dead session passes through: its own
+  // requireActor() refuses with UNAUTHENTICATED, which the screen can show
+  // ("Not sent. Sign in again…"). A redirect here would be followed by fetch
+  // and surface as a generic network error. Every action must reach a session
+  // check: src/app/actions/actions-authz.test.ts walks them all (AUD-095).
+  if (request.method === "POST" && request.headers.has("next-action") && !pathname.startsWith("/api/")) {
+    const res = NextResponse.next({ request: { headers } });
+    res.headers.set("x-request-id", requestId);
+    return res;
+  }
+
   const url = request.nextUrl.clone();
   url.pathname = "/login";
-  url.searchParams.set("next", pathname);
+  url.search = "";
+  url.searchParams.set("next", pathname + request.nextUrl.search);
+  if (token) url.searchParams.set("session", "ended");
   return NextResponse.redirect(url);
 }
 

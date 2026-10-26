@@ -26,7 +26,6 @@ export const en = {
     startEarly: "Start early…",
     cancel: "Cancel",
     dismiss: "Dismiss",
-    undo: "Undo",
     tryAgain: "Try again",
     now: "Now",
     earlier: "Earlier",
@@ -37,6 +36,8 @@ export const en = {
   outcome: {
     notSent: "Not sent",
     noConnection: "No connection. Nothing was sent.",
+    signedOut: "Sign in again, then try again.",
+    signIn: "Sign in",
     otherUnitStep: "Another unit's step",
     partial: (done: number, blocked: number) => `${done} done · ${blocked} blocked`,
     recorded: (label: string) => `${label} — recorded`,

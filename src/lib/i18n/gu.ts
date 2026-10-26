@@ -18,7 +18,6 @@ export const gu: Dict = {
     startEarly: "વહેલું શરૂ કરો…", // REVIEW: DESPL
     cancel: "રદ કરો", // REVIEW: DESPL
     dismiss: "બંધ કરો", // REVIEW: DESPL
-    undo: "પાછું લો", // REVIEW: DESPL
     tryAgain: "ફરી પ્રયત્ન કરો", // REVIEW: DESPL
     now: "હમણાં", // REVIEW: DESPL
     earlier: "પહેલાં", // REVIEW: DESPL
@@ -29,6 +28,8 @@ export const gu: Dict = {
   outcome: {
     notSent: "મોકલાયું નથી", // REVIEW: DESPL
     noConnection: "કનેક્શન નથી. કંઈ મોકલાયું નથી.", // REVIEW: DESPL
+    signedOut: "ફરીથી સાઇન ઇન કરો, પછી ફરી પ્રયાસ કરો.", // REVIEW: DESPL
+    signIn: "સાઇન ઇન", // REVIEW: DESPL
     otherUnitStep: "બીજા યુનિટનું સ્ટેપ", // REVIEW: DESPL
     partial: (done, blocked) => `${done} પૂરા · ${blocked} અટક્યા`, // REVIEW: DESPL
     recorded: (label) => `${label} — નોંધાયું`, // REVIEW: DESPL

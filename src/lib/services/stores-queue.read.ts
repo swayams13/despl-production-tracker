@@ -25,6 +25,8 @@ export interface StoresLine {
   qtyLabel: string;
   requiredQty: number | null;
   receivedQty: number | null;
+  /** A receipt or stock lot exists, even when no quantity was recorded. */
+  anyReceipt: boolean;
   issuedQty: number;
   heats: string[];
   lotsWithoutHeat: number;
@@ -105,7 +107,7 @@ export async function loadStoresQueue(actor: Actor, now: Date = new Date()): Pro
       all.push({
         id: it.id, jobId: it.jobId, jobNumber: job.jobNumber, projectName: job.projectName, equipmentName: eq?.name ?? "",
         itemNo: it.itemNo, partName: it.partName, material: it.material, qtyLabel: it.sourceQty,
-        requiredQty, receivedQty: facts.receivedQty, issuedQty: facts.issuedQty, heats: facts.heats, lotsWithoutHeat,
+        requiredQty, receivedQty: facts.receivedQty, anyReceipt: facts.anyReceipt, issuedQty: facts.issuedQty, heats: facts.heats, lotsWithoutHeat,
         chips: derivePipeline(facts, now), needs,
       });
     }

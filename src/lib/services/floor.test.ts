@@ -387,6 +387,16 @@ describe.skipIf(!RUN_DB)("L2.2 floor read model + writes (DB)", async () => {
       expect(byTitle(await view(qcUser, j.units[0].publicId), "step 3").ruleNcr).toEqual({ rule: "H5", openNcrId: ncr.id });
     });
 
+    it("every viewer learns an NCR is open (so Notify goes away), but only QC gets the rule and the id", async () => {
+      const j = await h5Job();
+      const pub = j.units[0].publicId;
+      expect(byTitle(await view(sup, pub), "step 3").ruleNcrOpen).toBe(false);
+      await raiseRuleNcr(qcUser, { kind: S, targetId: j.step(3), rule: "H5" });
+      for (const who of [sup, head, qcUser]) expect(byTitle(await view(who, pub), "step 3").ruleNcrOpen).toBe(true);
+      expect(byTitle(await view(sup, pub), "step 3").ruleNcr).toBeNull();
+      expect(byTitle(await view(head, pub), "step 3").ruleNcr).toBeNull();
+    });
+
     it("a row that is not refused by H5 or H6 has no rule NCR, for QC too", async () => {
       const j = await o.job({ processes: [{ code: "20" }], steps: [{ seq: 1, role: "WELD", jointRef: "J1", pressurePart: true, processSeq: 20 }] });
       expect(byTitle(await view(qcUser, j.units[0].publicId), "step 1").ruleNcr).toBeNull();

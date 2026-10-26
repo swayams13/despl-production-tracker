@@ -332,6 +332,8 @@ describe.skipIf(!RUN_DB)("BOM release (DB)", async () => {
       expect(after.materializedAt).not.toBeNull();
       const row = await owner.auditLog.findFirstOrThrow({ where: { tenantId: w.tenantId, action: "bom.release", entityId: String(j.revisionId) } });
       expect(row.after).toMatchObject({ components: 6, steps: r.counts.steps, boundToQcp: 2 });
+      // the released-BOM panel reads the stored counts: they must agree with the summary above (was 0)
+      expect((await svc.previewBomRelease(w.actors.admin, j.target)).counts).toMatchObject({ steps: r.counts.steps, boundToQcp: 2 });
     });
 
     it("releasing the same revision again is a no-op that reports the same counts", async () => {

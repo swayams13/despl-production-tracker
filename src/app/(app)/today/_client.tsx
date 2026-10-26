@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import {
   ActionSheet,
   FloorOutcomes,
-  FloorUndoStack,
   HeatPickButton,
   NotifyBlockerButton,
   stateLabel,
@@ -64,7 +63,7 @@ export function TodayClient({
       ),
     [s],
   );
-  const { pending, outcomes, queue, undo, dismiss, busy } = useFloorWrites(titleOf);
+  const { outcomes, commit, dismiss, busy } = useFloorWrites(titleOf);
 
   const total = s.summary.assigned;
   const todayRows = showAll ? s.today : s.today.slice(0, SHOWN);
@@ -102,7 +101,7 @@ export function TodayClient({
           onClose={() => setCheckIn(false)}
           onSend={(label, send) => {
             setCheckIn(false);
-            queue(label, send);
+            commit(label, send);
           }}
         />
       )}
@@ -201,8 +200,6 @@ export function TodayClient({
         </p>
       </details>
 
-      <FloorUndoStack pending={pending} undo={undo} />
-
       {sheet && (
         <ActionSheet
           key={`${sheet.row.key}:${sheet.action}`}
@@ -212,7 +209,7 @@ export function TodayClient({
           onClose={() => setSheet(null)}
           onConfirm={(label, send, keys) => {
             setSheet(null);
-            queue(label, send, keys);
+            commit(label, send, keys);
           }}
         />
       )}
@@ -220,7 +217,7 @@ export function TodayClient({
   );
 }
 
-function RowCard({ row, first, busy, onAct }: { row: TodayRow; first?: boolean; /** A write for this row is waiting (Undo window), sending or refreshing: its buttons are off. */ busy: boolean; onAct: (row: TodayRow, a: "DONE" | "START") => void }) {
+function RowCard({ row, first, busy, onAct }: { row: TodayRow; first?: boolean; /** A write for this row is sending or refreshing: its buttons are off. */ busy: boolean; onAct: (row: TodayRow, a: "DONE" | "START") => void }) {
   const d = useDict();
   const stopped = row.state === "BLOCKED" || (row.state === "NEEDS_OVERRIDE" && !row.canOverride);
   const waiting = row.refusal ? row.refusal.missing.length + row.refusal.moreMissing : 0;
@@ -272,7 +269,7 @@ function RowCard({ row, first, busy, onAct }: { row: TodayRow; first?: boolean; 
           {row.refusal?.clearedBy && <span>Can clear it: {row.refusal.clearedBy.label}</span>}
           {row.heatComponentId != null && <HeatPickButton componentId={row.heatComponentId} />}
           {row.unitPublicId && row.kind !== "PROCESS_PLAN" && row.refusal?.clearedBy && (
-            <NotifyBlockerButton unitPublicId={row.unitPublicId} row={{ kind: row.kind, id: row.id, refusal: row.refusal }} />
+            <NotifyBlockerButton unitPublicId={row.unitPublicId} row={{ kind: row.kind, id: row.id, refusal: row.refusal, ruleNcr: row.ruleNcr, ruleNcrOpen: row.ruleNcrOpen }} />
           )}
         </div>
       )}

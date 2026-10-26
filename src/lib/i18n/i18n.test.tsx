@@ -10,7 +10,7 @@ import { hi } from "./hi";
 import { gu } from "./gu";
 import { dictFor, LOCALES, nextLocale } from ".";
 import { LocaleProvider } from "./provider";
-import { FloorOutcomes, FloorUndoStack, stateLabel } from "@/components/industrial/floor-actions";
+import { FloorOutcomes, stateLabel } from "@/components/industrial/floor-actions";
 
 type Leaf = string | ((...a: string[]) => string);
 /** Every string / function leaf with its dotted path. */
@@ -84,19 +84,16 @@ describe("L2.12 shared floor components follow the provider", () => {
     renderToStaticMarkup(
       <LocaleProvider locale={locale}>
         <FloorOutcomes outcomes={[outcome]} dismiss={() => {}} />
-        <FloorUndoStack pending={[{ id: "p", label: "x", keys: [] }]} undo={() => {}} />
       </LocaleProvider>,
     );
 
   it("renders English without a provider-set locale and translates under hi/gu", () => {
     const e = render("en");
     expect(e).toContain("Dismiss");
-    expect(e).toContain("Undo");
     expect(e).toContain('lang="en"');
     const h = render("hi");
     expect(h).toContain(hi.common.dismiss);
-    expect(h).toContain(hi.common.undo);
     expect(h).toContain('lang="hi"');
-    expect(render("gu")).toContain(gu.common.undo);
+    expect(render("gu")).toContain(gu.common.dismiss);
   });
 });

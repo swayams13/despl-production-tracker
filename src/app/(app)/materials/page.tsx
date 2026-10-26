@@ -1,10 +1,11 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, hasRole } from "@/lib/authz";
 import { PageHeader } from "@/components/industrial/page-header";
 import { loadStoresQueue, STORES_QUEUE_CAP } from "@/lib/services/stores-queue.read";
 import { MATERIALS_QUEUE_ROLES, storesAccess } from "@/lib/shared/stores-access";
-import { NEED_LABEL, NEED_ORDER, type StoresNeed } from "@/lib/shared/stores-queue";
+import { NEED_LABEL, NEED_ORDER, inLabel, type StoresNeed } from "@/lib/shared/stores-queue";
 
 /**
  * Lean Core L2.14: Stores' queue across active jobs. Which BOM lines still need
@@ -17,7 +18,7 @@ const num = (n: number | null) => (n == null ? "—" : Number.isInteger(n) ? Str
 
 export default async function MaterialsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   if (!hasRole(actor, ...MATERIALS_QUEUE_ROLES)) {
     return (
@@ -55,8 +56,8 @@ export default async function MaterialsPage({ searchParams }: { searchParams: Pr
         <span className="jt-hint">
           {need === "receive" && "A PO is placed and the quantity is not all in."}
           {need === "identify" && "Something is in, but no heat number or MTC is recorded against the line."}
-          {need === "issue" && "Something is in and not all of it is issued."}
-          {need === "heat" && "A lot was received without a heat number. Without one the floor cannot pick a heat to cut a pressure part."}
+          {need === "issue" && "Received and identified, and not all of it is issued."}
+          {need === "heat" && "Otherwise done, but a lot was received without a heat number. Without one the floor cannot pick a heat to cut a pressure part."}
         </span>
       </div>
 
@@ -84,7 +85,7 @@ export default async function MaterialsPage({ searchParams }: { searchParams: Pr
                       </td>
                       <td>{l.material ?? "—"}</td>
                       <td className="num mono">{l.qtyLabel}</td>
-                      <td className="num mono">{num(l.receivedQty)}</td>
+                      <td className="num mono">{inLabel(l)}</td>
                       <td className="num mono">{num(l.issuedQty)}</td>
                       <td>
                         {l.heats.length ? <span className="mono">{l.heats.join(", ")}</span> : <span style={{ color: "var(--muted)" }}>none recorded</span>}

@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { FEATURES } from "@/lib/shared/flags";
@@ -10,13 +11,16 @@ import { QcQueueClient } from "./_queue";
 
 export default async function QcCockpit({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
-  // L2.6: with the lean floor on, /qc is the queue (role-gated, paged, URL-driven).
+  // AUD-037: NCRs name the person who caused them, so both screens are role-gated
+  // (QC_VIEW_ROLES); the legacy cockpit used to show every NCR to every staff user.
+  if (!resolveQcAccess(actor).view) redirect(landingFor(actor.roles, { leanFloor: FEATURES.leanFloor }));
+
+  // L2.6: with the lean floor on, /qc is the queue (paged, URL-driven).
   // Off, the cockpit below is unchanged.
   if (FEATURES.leanFloor) {
-    if (!resolveQcAccess(actor).view) redirect(landingFor(actor.roles, { leanFloor: true }));
     const view = await loadQcQueue(actor, parseQcQuery(await searchParams));
     return <QcQueueClient view={view} viewerId={actor.userId} />;
   }
