@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { getActor } from "@/lib/authz";
 import { ChangePasswordForm } from "./_client";
 
@@ -13,7 +13,7 @@ import { ChangePasswordForm } from "./_client";
  */
 export default async function ChangePasswordPage() {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
 
   return (
     <ChangePasswordForm

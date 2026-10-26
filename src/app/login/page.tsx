@@ -10,8 +10,12 @@ export default function LoginPage() {
   const [state, formAction, pending] = useActionState(login, initial);
   // The middleware's `?next=` (L2.2). Read after mount: this page is prerendered, and the server re-validates it.
   const [next, setNext] = useState("");
+  // AUD-062: `session=ended` is set when a session cookie was present but no longer valid.
+  const [ended, setEnded] = useState(false);
   useEffect(() => {
-    setNext(new URLSearchParams(window.location.search).get("next") ?? "");
+    const q = new URLSearchParams(window.location.search);
+    setNext(q.get("next") ?? "");
+    setEnded(q.get("session") === "ended");
   }, []);
 
   // Pre-authentication: there is no user row to read a preference from, so
@@ -56,6 +60,12 @@ export default function LoginPage() {
               required
               className="ws-detail mt-1.5"
             />
+
+            {ended && !state.error ? (
+              <p role="status" className="mt-4 rounded-[4px] border px-3 py-2 text-xs">
+                Your session ended, sign in to continue
+              </p>
+            ) : null}
 
             {state.error ? (
               <p

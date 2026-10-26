@@ -7,7 +7,7 @@ import { IST_OFFSET_MS, istCalendarDayMarker } from "@/lib/shared/business-day";
 import { DEFAULT_CALENDAR, isWorkingDay } from "@/lib/schedule";
 import type { WorkCalendarInput } from "@/lib/schedule/types";
 import { loadPlanNotifyContext } from "./_shared";
-import { loadQcCockpit } from "./qc-cockpit.read";
+import { loadQcCockpitForTenant } from "./qc-cockpit.read";
 import type { ProcessPlan } from "@/generated/prisma/client";
 
 /**
@@ -385,21 +385,8 @@ export async function nudgeQc(actor: Actor, planId: number, ageDays: number): Pr
 }
 
 export async function syncHoldPointAgedNotifications(tenantId: number): Promise<void> {
-  // loadQcCockpit only ever reads `.tenantId` off the actor it's given
-  // (confirmed by reading its body) — this synthetic actor exists purely to
-  // satisfy that parameter's type. It is never persisted or audited.
-  const cockpit = await loadQcCockpit({
-    userId: 0,
-    tenantId,
-    clientId: null,
-    name: "system",
-    email: "system@internal",
-    roles: [],
-    departmentIds: [],
-    mustChangePassword: false,
-    themePreference: "SYSTEM",
-    outdoorMode: false,
-  });
+  // Background job, no user: the tenant-level read, not the role-gated one (AUD-037 gates loadQcCockpit for pages).
+  const cockpit = await loadQcCockpitForTenant(tenantId);
   const aged = cockpit.holdPoints.filter((h) => h.ageDays > HOLD_POINT_AGE_ALERT_DAYS);
   if (aged.length === 0) return;
 

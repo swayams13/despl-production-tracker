@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { FEATURES } from "@/lib/shared/flags";
@@ -20,7 +21,7 @@ export default async function JobBoardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const jobId = Number((await params).id);

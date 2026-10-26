@@ -133,3 +133,15 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadQcCockpit (DB)", async () => {
     }
   });
 });
+
+// AUD-037: the loader runs raw tenant-wide SQL, so it refuses before touching the database.
+const actorWith = (roles: string[], clientId: number | null = null) => ({ userId: 7, tenantId: 1, clientId, roles }) as unknown as Actor;
+
+describe("loadQcCockpit refuses callers who may not see NCRs", () => {
+  it.each([["SUPERVISOR"], ["OPERATOR"], ["PLANNER"], ["STORES"]])("%s", async (role) => {
+    await expect(loadQcCockpit(actorWith([role]))).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+  it("a client user, even holding a QC role", async () => {
+    await expect(loadQcCockpit(actorWith(["QC"], 3))).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+});

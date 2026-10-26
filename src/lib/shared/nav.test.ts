@@ -90,7 +90,8 @@ describe("navFor: primary items per role (build prompt §8.2 item 21, interim ro
   it("keeps every pre-L2.1 page reachable for the roles that could see it", () => {
     for (const role of ["SUPERVISOR", "QC", "PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"]) {
       const all = hrefs([...navFor([role]).primary, ...navFor([role]).more]);
-      for (const h of ["/departments", "/welding", "/reports", "/qc"]) expect(all, `${role} ${h}`).toContain(h);
+      // AUD-037: /qc is no longer in a supervisor's menu (NCRs name the person who caused them).
+      for (const h of ["/departments", "/welding", "/reports", ...(role === "SUPERVISOR" ? [] : ["/qc"])]) expect(all, `${role} ${h}`).toContain(h);
     }
   });
 
@@ -224,12 +225,11 @@ describe("no dead nav items: every item shown to a role is enterable by that rol
     }
   });
 
-  it("with the lean floor on, QC & hold points reaches only who can open the queue; off, the cockpit keeps its old audience", () => {
+  it("AUD-037: QC & hold points reaches only who can open /qc, with the lean floor on or off", () => {
     const holds = (role: string, leanFloor: boolean) => navFor([role], { leanFloor }).more.some((i) => i.id === "qc-holds");
-    for (const r of ["SUPERVISOR", "PLANNER"]) {
-      expect(holds(r, true), r).toBe(false);
-      expect(holds(r, false), r).toBe(true);
+    for (const leanFloor of [true, false]) {
+      for (const r of ["SUPERVISOR", "PLANNER", "OPERATOR", "STORES", "ENGINEERING"]) expect(holds(r, leanFloor), r).toBe(false);
+      for (const r of ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"]) expect(holds(r, leanFloor), r).toBe(true);
     }
-    for (const r of ["PRODUCTION_HEAD", "MANAGEMENT", "ADMIN"]) expect(holds(r, true), r).toBe(true);
   });
 });
