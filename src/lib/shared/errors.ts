@@ -355,8 +355,21 @@ const REPORTED_AT_REASON_MESSAGES: Record<string, string> = {
   DONE_BEFORE_START: "Done cannot be earlier than when the work started. Choose a later time.",
 };
 
+/** VALIDATION_FAILED: say which field, in a sentence a person on the floor can act on. */
+const FIELD_PROMPTS: Record<string, string> = { codeClause: "Enter the code clause." };
+
+function validationMessage(detail?: Record<string, unknown>): string {
+  const issues = detail?.issues;
+  const first = Array.isArray(issues) ? (issues[0] as { path?: unknown } | undefined)?.path : undefined;
+  const field = typeof detail?.field === "string" ? detail.field : typeof first === "string" ? first : "";
+  const last = field.split(".").pop() ?? "";
+  if (!last) return ERROR_MESSAGES.VALIDATION_FAILED;
+  return FIELD_PROMPTS[last] ?? `Check the ${last.replace(/([A-Z])/g, " $1").toLowerCase()} and try again.`;
+}
+
 /** The default message for a refusal: the code's sentence, or the specific one its detail selects. */
 export function messageFor(code: ErrorCode, detail?: Record<string, unknown>): string {
+  if (code === ERROR_CODES.VALIDATION_FAILED) return validationMessage(detail);
   if (code === ERROR_CODES.REPORTED_AT_OUT_OF_WINDOW && typeof detail?.reason === "string") {
     return REPORTED_AT_REASON_MESSAGES[detail.reason] ?? ERROR_MESSAGES[code];
   }

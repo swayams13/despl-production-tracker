@@ -269,7 +269,7 @@ function RowCard({ row, first, busy, onAct }: { row: TodayRow; first?: boolean; 
           {row.refusal?.clearedBy && <span>Can clear it: {row.refusal.clearedBy.label}</span>}
           {row.heatComponentId != null && <HeatPickButton componentId={row.heatComponentId} />}
           {row.unitPublicId && row.kind !== "PROCESS_PLAN" && row.refusal?.clearedBy && (
-            <NotifyBlockerButton unitPublicId={row.unitPublicId} row={{ kind: row.kind, id: row.id, refusal: row.refusal }} />
+            <NotifyBlockerButton unitPublicId={row.unitPublicId} row={{ kind: row.kind, id: row.id, refusal: row.refusal, ruleNcr: row.ruleNcr, ruleNcrOpen: row.ruleNcrOpen }} />
           )}
         </div>
       )}

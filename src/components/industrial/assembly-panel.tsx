@@ -27,7 +27,7 @@ function statusLabel(status: string): string {
   return "not started";
 }
 
-export function AssemblyPanel({ jobId, data, canReleaseBom = false }: { jobId: number; data: AssemblyGrid; canReleaseBom?: boolean }) {
+export function AssemblyPanel({ jobId, data, canReleaseBom = false, canVerify = true }: { jobId: number; data: AssemblyGrid; canReleaseBom?: boolean; canVerify?: boolean }) {
   const router = useRouter();
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set(data.groups[0] ? [data.groups[0].groupCode] : []),
@@ -109,6 +109,7 @@ export function AssemblyPanel({ jobId, data, canReleaseBom = false }: { jobId: n
                     welders={data.welders}
                     delayCategories={data.delayCategories}
                     testTypes={data.testTypes}
+                    canVerify={canVerify}
                   />
                 ))}
               </div>
@@ -128,7 +129,9 @@ function AssemblyStepItem({
   welders,
   delayCategories,
   testTypes,
+  canVerify,
 }: {
+  canVerify: boolean;
   jobId: number;
   step: AssemblyStepRow;
   pending: boolean;
@@ -154,6 +157,7 @@ function AssemblyStepItem({
           welders={welders}
           delayCategories={delayCategories}
           testTypes={testTypes}
+          canVerify={canVerify}
         />
       </div>
       <AssemblyStepMeta step={step} />
@@ -205,7 +209,9 @@ function AssemblyStepAction({
   welders,
   delayCategories,
   testTypes,
+  canVerify,
 }: {
+  canVerify: boolean;
   jobId: number;
   step: AssemblyStepRow;
   pending: boolean;
@@ -294,6 +300,8 @@ function AssemblyStepAction({
   }
 
   if (step.status === "SUBMITTED") {
+    // Verify and Reject are QC's: nothing to show to anyone else (the server refuses them, FORBIDDEN).
+    if (!canVerify) return null;
     if (mode === "reject")
       return (
         <div className="sh-route-step-form" style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "6px 0" }}>

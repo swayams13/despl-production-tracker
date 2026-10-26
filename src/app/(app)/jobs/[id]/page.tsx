@@ -58,7 +58,7 @@ export default async function JobDetail({
   // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
   // cosmetic, the server is authoritative either way.
   const canManagePacking = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
-  const canVerify = hasRole(actor, ROLES.QC);
+  const canVerify = resolveQcAccess(actor).inspect;
   const canReleaseBom = hasRole(actor, ...BOM_RELEASE_ROLES);
   // S6 gated all five dispatch mutations (create/add/approve/record) to the
   // same PRODUCTION_HEAD/ADMIN pair — one boolean covers all of them.

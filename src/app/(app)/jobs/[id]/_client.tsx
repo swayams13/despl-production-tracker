@@ -221,7 +221,7 @@ export function JobDetailClient({
       ) : view === "bom" ? (
         bom ? <BomPanel jobId={jobId} bom={bom} access={storesAccess} canVerify={canVerify} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
       ) : view === "assembly" ? (
-        assembly ? <AssemblyPanel jobId={jobId} data={assembly} canReleaseBom={canReleaseBom} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
+        assembly ? <AssemblyPanel jobId={jobId} data={assembly} canReleaseBom={canReleaseBom} canVerify={canVerify} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
       ) : view === "qcp" ? (
         qcp ? <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveQcpWaiver} canRecord={canRecordQcp} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
       ) : view === "packing" ? (

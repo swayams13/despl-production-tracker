@@ -1,6 +1,6 @@
 import { loadJobRoutes, routeWhere } from "./line-route";
 import { withTenant } from "@/lib/db";
-import { assertClientScope, type Actor } from "@/lib/authz";
+import { assertClientScope, hasRole, ROLES, type Actor } from "@/lib/authz";
 import { workingDaysBetween } from "@/lib/schedule";
 import { loadJobSpine, loadMappedOps, loadWorkOrderStageNames, workOrderStageName, type MappedOp } from "./_shared";
 import type { StageDisplayStatus } from "@/components/industrial/stage-status";
@@ -59,6 +59,8 @@ export interface StageRejection {
 }
 
 export interface StageDetail {
+  /** Verify and Reject are QC's (maker-checker); the sheet shows them to no one else. */
+  canVerify: boolean;
   jobId: number;
   jobNumber: string;
   stageNo: number;
@@ -308,6 +310,7 @@ export async function loadStageDetail(
     const delayCategories = await tx.delayCategoryRef.findMany({ where: { active: true }, select: { id: true, name: true } });
 
     return {
+      canVerify: hasRole(actor, ROLES.QC),
       jobId,
       jobNumber: job.jobNumber,
       stageNo,
