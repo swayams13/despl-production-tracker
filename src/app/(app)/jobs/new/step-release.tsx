@@ -5,7 +5,7 @@ import type { ScheduleVerdict } from "@/app/actions/job-intake";
 import type { IntakeOptions, IntakeFamily } from "@/lib/services/job-intake.read";
 import type { CreateJobResult } from "@/lib/services/job-intake.service";
 import { plural } from "@/lib/shared/plural";
-import { PRIORITY_LABEL, type WizardState } from "./wizard-state";
+import { PRIORITY_LABEL, bomSourceLabel, type WizardState } from "./wizard-state";
 import type { PreviewState } from "./preview-panel";
 
 function fmtDate(iso: string): string {
@@ -152,7 +152,7 @@ export function StepRelease({
                 <td>{b.name || "—"}</td>
                 <td className="num mono">{b.tracking === "LOT" ? b.lotQty : b.serials.filter((s) => s.trim()).length}</td>
                 <td className="mono" style={{ color: "var(--muted)" }}>{b.tracking === "LOT" ? "One lot, counted" : b.serials.filter((s) => s.trim()).join(", ")}</td>
-                <td style={{ color: "var(--muted)" }}>{b.bomMode === "KIT" ? "From the standard kit" : b.bomMode === "COPY" ? "Copied from a previous job" : "Not started"}</td>
+                <td style={{ color: "var(--muted)" }}>{bomSourceLabel(b, options)}</td>
               </tr>
             ))}
           </tbody>

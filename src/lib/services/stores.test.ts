@@ -185,10 +185,11 @@ describe.skipIf(!RUN_DB)("L2.14 Stores actions (DB)", async () => {
       const line = q.lines.find((l) => l.id === mine.item.id);
       expect(line, `${r} sees the line`).toBeTruthy();
       expect(line).toMatchObject({ jobNumber: mine.j.job.jobNumber, lotsWithoutHeat: 1, receivedQty: 4, issuedQty: 0 });
-      expect(line!.needs).toEqual(["receive", "identify", "issue", "heat"]);
+      expect(line!.needs).toEqual(["receive"]); // one group per line: the earliest unfinished stage
       expect(q.lines.some((l) => l.id === held.item.id), "an on-hold job is not queued").toBe(false);
       expect(q.lines.some((l) => l.id === theirs.item.id), "another tenant's line is never shown").toBe(false);
-      expect(q.counts.heat).toBeGreaterThanOrEqual(1);
+      expect(q.counts.receive).toBeGreaterThanOrEqual(1);
+      expect(q.counts.identify + q.counts.issue + q.counts.heat, "not repeated under later stages").toBe(q.lines.filter((l) => l.needs[0] !== "receive").length);
     }
     const theirsQ = await loadStoresQueue(bStores);
     expect(theirsQ.lines.map((l) => l.id)).toContain(theirs.item.id);
