@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
@@ -24,7 +25,7 @@ export default async function TeamPage({
 }) {
   if (!FEATURES.leanFloor) notFound();
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const { dept } = await params;

@@ -65,8 +65,11 @@ export async function GET() {
   }
 
   if (pending.length > 0) {
+    // AUD-107: this route is public. The names would tell a stranger exactly when
+    // the deployment runs ahead of its schema; operators read them in the log.
+    console.error("[health] pending migrations", { pending });
     return NextResponse.json(
-      { status: "error", migrations: "pending", pending },
+      { status: "error", migrations: "pending", pendingCount: pending.length },
       { status: 503 },
     );
   }

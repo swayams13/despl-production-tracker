@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
@@ -42,7 +43,7 @@ async function myDepartments(tenantId: number, ids: number[]): Promise<{ name: s
  */
 export default async function MyDay() {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   // L2.3: with the lean floor on, Today replaces this page for the roles that have it.
   // L2.6: QC's "With QC" list is the QC queue now, so QC lands there instead.

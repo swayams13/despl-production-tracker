@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import * as XLSX from "xlsx";
 
 /**
  * Lean Core J7b: the new-job flow through the REAL /login form (never a forged session, CLAUDE.md
@@ -35,6 +36,13 @@ async function fillOrder(page: Page, jobNumber: string) {
   await page.locator('input[type="date"]').nth(0).fill("2026-10-22");
   await page.locator('input[type="date"]').nth(1).fill("2027-06-30");
   await next(page).click();
+}
+/** The line's picker: type to search the master BOMs, click the row. */
+async function pickBom(page: Page, query: string, option: RegExp) {
+  const box = page.getByRole("combobox", { name: "Equipment type or master BOM for line 1" });
+  await box.click();
+  await box.fill(query);
+  await page.getByRole("option", { name: option }).first().click();
 }
 async function fillSerials(page: Page, prefix: string, qty: string) {
   await page.getByPlaceholder("e.g. 320SR").fill(prefix);
@@ -104,7 +112,7 @@ test("Build from master: the equipment type's kit fills the BOM as a draft revis
   await fillOrder(page, jobNumber);
 
   await page.getByText(/route version available/).first().click();
-  await page.locator("select").filter({ hasText: "Vertical vessel on skirt" }).selectOption({ label: "Vertical vessel on skirt" });
+  await pickBom(page, "skirt", /Vertical vessel on skirt\s*Standard kit/);
   // the kit is shown before anything is created
   await expect(page.getByText(/from the Vertical vessel on skirt kit go into the BOM as a draft/)).toBeVisible();
   await expect(page.getByRole("cell", { name: "Skirt", exact: true })).toBeVisible();
@@ -125,6 +133,59 @@ test("Build from master: the equipment type's kit fills the BOM as a draft revis
   await page.context().close();
 });
 
+test("upload a BOM Excel file: read, checked on screen, kept in the draft, created as a draft BOM", async ({ browser }) => {
+  test.setTimeout(180_000);
+  const page = await (await browser.newContext()).newPage();
+  await signIn(page, "sj@despl.local");
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    wb,
+    XLSX.utils.aoa_to_sheet([
+      ["Item No", "Part Name", "Material", "Qty", "Drawing ref"],
+      [1, "Shell", "SA 516 Gr 70", 1, "D-1"],
+      [2, "Dish end", "SA 516 Gr 70", 2, "D-2"],
+      [3, "Nozzle N1", "SA 105", 4, "D-3"],
+      ["x", "Bad row", "", 1, ""],
+    ]),
+    "BOM",
+  );
+  const bytes = XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+
+  await page.goto("/jobs/new");
+  await page.getByRole("link", { name: "Start from a template" }).click();
+  await fillOrder(page, `J7B-UPLOAD-${Date.now()}`);
+  await page.getByText(/route version available/).first().click();
+  await pickBom(page, "skirt", /Vertical vessel on skirt\s*Standard kit/);
+
+  // a wrong kind of file is refused on the spot
+  await page.getByRole("button", { name: "Upload a BOM Excel file instead" }).click();
+  const file = page.getByLabel("BOM Excel file for line 1");
+  await file.setInputFiles({ name: "bom.csv", mimeType: "text/csv", buffer: Buffer.from("a,b") });
+  await expect(page.getByText("Choose an Excel workbook (.xlsx).")).toBeVisible();
+
+  await file.setInputFiles({ name: "line1-bom.xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buffer: bytes });
+  await expect(page.getByText("3 lines can be read; 1 row cannot")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Excel row 5:")).toBeVisible();
+  await expect(page.getByText("Drawing ref: not used")).toBeVisible();
+  await page.getByRole("button", { name: "Use these 3 lines" }).click();
+  await expect(page.getByText(/3 lines from line1-bom.xlsx go into the BOM as a draft/)).toBeVisible();
+
+  await fillSerials(page, "J7BU", "1");
+  await next(page).click();
+  await expect(page.getByRole("heading", { name: "What this job will get" })).toBeVisible();
+  await next(page).click();
+  await next(page).click();
+  await page.getByRole("button", { name: "Create job" }).click();
+  await expect(page.getByText("Job created")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/3 BOM lines/)).toBeVisible();
+
+  await page.getByRole("link", { name: /Next: release the BOM/ }).click();
+  await expect(page.getByRole("heading", { name: "BOM release" })).toBeVisible();
+  await expect(page.getByText("3 lines", { exact: true })).toBeVisible();
+  await page.context().close();
+});
+
 test("a planner builds and saves a draft; Create is the Production Head's", async ({ browser }) => {
   test.setTimeout(180_000);
   const page = await (await browser.newContext()).newPage();
@@ -135,7 +196,7 @@ test("a planner builds and saves a draft; Create is the Production Head's", asyn
   await page.getByRole("link", { name: "Start from a template" }).click();
   await fillOrder(page, `J7B-PLAN-${Date.now()}`);
   await page.getByText(/route version available/).first().click();
-  await page.locator("select").filter({ hasText: "Vertical vessel on skirt" }).selectOption({ label: "Vertical vessel on skirt" });
+  await pickBom(page, "skirt", /Vertical vessel on skirt\s*Standard kit/);
   await fillSerials(page, "J7BP", "1");
   await next(page).click();
   await next(page).click();

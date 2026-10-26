@@ -201,7 +201,7 @@ export async function updateBomItem(actor: Actor, bomItemId: number, input: Upda
  * non-`.strict()` as a second line of defense — rather than failing the
  * whole row.
  */
-const IMPORT_HEADER_ALIASES: Record<string, keyof BomImportRow> = {
+export const IMPORT_HEADER_ALIASES: Record<string, keyof BomImportRow> = {
   itemno: "itemNo",
   srno: "itemNo",
   sno: "itemNo",
@@ -222,15 +222,44 @@ const IMPORT_HEADER_ALIASES: Record<string, keyof BomImportRow> = {
   componenttypecode: "componentType",
 };
 
-function normalizeImportRow(raw: unknown): Record<string, unknown> {
+const REQUIRED_IMPORT_FIELDS = new Set<string>(["itemNo", "partName", "sourceQty"]);
+
+export function normalizeImportRow(raw: unknown): Record<string, unknown> {
   if (typeof raw !== "object" || raw === null) return {};
   const out: Record<string, unknown> = {};
   for (const [rawKey, value] of Object.entries(raw as Record<string, unknown>)) {
     const norm = rawKey.trim().toLowerCase().replace(/[\s_.-]+/g, "");
     const canonical = IMPORT_HEADER_ALIASES[norm];
-    if (canonical) out[canonical] = value;
+    // A blank text cell (a formula returning "", a space) is no value for an optional column; the required ones keep their own message.
+    if (canonical && !(typeof value === "string" && value.trim() === "" && !REQUIRED_IMPORT_FIELDS.has(canonical))) out[canonical] = value;
   }
   return out;
+}
+
+const NUMBER_FIELD_LABEL: Record<string, string> = { itemNo: "Item no", blockNo: "Block no", qtyPer: "Quantity per unit", parentBomItemId: "Parent item" };
+/** The row schema's own words for text fields; a plain sentence for a number field that is not a number. */
+function importIssueMessage(iss: { path: PropertyKey[]; message: string }): string {
+  const label = NUMBER_FIELD_LABEL[String(iss.path[0])];
+  return label ? `${label} must be a number above zero` : iss.message;
+}
+
+/** One spreadsheet row through the importer's own header aliases and row schema (the wizard's upload preview shares this). */
+export function parseImportRow(raw: unknown): { ok: true; data: BomImportRow } | { ok: false; error: string } {
+  const parsed = bomImportRowSchema.safeParse(normalizeImportRow(raw));
+  return parsed.success ? { ok: true, data: parsed.data } : { ok: false, error: parsed.error.issues.map(importIssueMessage).join("; ") };
+}
+
+export function unrecognisedCodes(codes: string[]): string {
+  return `Unrecognised component type code${codes.length > 1 ? "s" : ""}: ${codes.map((c) => `"${c}"`).join(", ")}. Use the codes from Equipment types, or clear that column.`;
+}
+
+/** `ComponentTypeRef.code` -> id for the codes a BOM file names. M3: a part family is only usable on a BOM once approved. */
+export async function resolveComponentTypeCodes(tx: Tx, tenantId: number, codes: string[]): Promise<Map<string, number>> {
+  if (codes.length === 0) return new Map();
+  const found = await tx.componentTypeRef.findMany({
+    where: { tenantId, code: { in: codes }, OR: [{ kind: "RAW_FORM" }, { partFamily: { status: "APPROVED" } }] },
+  });
+  return new Map(found.map((c) => [c.code, c.id]));
 }
 
 /** ponytail: a flat row-count cap, not chunked sub-transactions — a real BOM
@@ -423,20 +452,7 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
       // function; discovering a bad code after some rows already
       // materialized Components would leave a partial, confusing result.
       const codes = [...new Set(rows.map((r) => normalizeImportRow(r).componentType).filter((c): c is string => typeof c === "string"))];
-      const componentTypesByCode = new Map(
-        codes.length > 0
-          ? (
-              await tx.componentTypeRef.findMany({
-                where: {
-                  tenantId: actor.tenantId,
-                  code: { in: codes },
-                  // M3: a part family is only usable on a BOM once approved.
-                  OR: [{ kind: "RAW_FORM" }, { partFamily: { status: "APPROVED" } }],
-                },
-              })
-            ).map((c) => [c.code, c.id])
-          : [],
-      );
+      const componentTypesByCode = await resolveComponentTypeCodes(tx, actor.tenantId, codes);
       const unresolvedRows = rows
         .map((r, i) => ({ row: i + 1, code: normalizeImportRow(r).componentType }))
         .filter((r): r is { row: number; code: string } => typeof r.code === "string" && !componentTypesByCode.has(r.code));
@@ -453,9 +469,9 @@ export async function importBomItems(actor: Actor, input: ImportBomItemsInput): 
 
       for (let i = 0; i < rows.length; i++) {
         const rowNo = i + 1;
-        const parsedRow = bomImportRowSchema.safeParse(normalizeImportRow(rows[i]));
-        if (!parsedRow.success) {
-          failures.push({ row: rowNo, error: parsedRow.error.issues.map((iss) => iss.message).join("; ") });
+        const parsedRow = parseImportRow(rows[i]);
+        if (!parsedRow.ok) {
+          failures.push({ row: rowNo, error: parsedRow.error });
           continue;
         }
         const { componentType, ...rowFields } = parsedRow.data;

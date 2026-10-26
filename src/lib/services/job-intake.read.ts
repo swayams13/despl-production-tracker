@@ -43,7 +43,7 @@ export interface IntakeOptions {
     defaultDesignCode: string | null;
     defaultSpecs: Record<string, unknown> | null;
     /** J7b: the standard kit (component type x quantity) "Build from master" fills a line's BOM from. */
-    kit: Array<{ name: string; qty: number; qtySource: string }>;
+    kit: Array<{ name: string; code: string; qty: number; qtySource: string }>;
   }>;
   /** Active config questions of every family (J2); the client filters by family and the lines' equipment types. */
   questions: ConfigQuestionDef[];
@@ -59,8 +59,25 @@ export interface IntakeOptions {
     itemCount: number;
     assemblyGaps: Record<number, string[]>;
   }>;
-  bomSources: Array<{ equipmentId: number; label: string; itemCount: number }>;
+  /** Earlier jobs' equipment lines that have BOM lines, newest job first, at most BOM_SOURCE_LIMIT. */
+  bomSources: Array<{
+    equipmentId: number;
+    /** "<job number> — <equipment name>", as the review step and the old copy list showed it. */
+    label: string;
+    itemCount: number;
+    equipmentName: string;
+    jobNumber: string;
+    clientName: string;
+    familyId: number;
+    equipmentTypeId: number | null;
+    equipmentTypeName: string | null;
+    /** Component type codes the BOM lines use, for the picker's search. */
+    partCodes: string[];
+  }>;
 }
+
+/** The master-BOM picker lists at most this many earlier lines (newest job first); typing narrows within them. */
+export const BOM_SOURCE_LIMIT = 200;
 
 export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
   assertNotClientUser(actor);
@@ -103,7 +120,7 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
           name: true,
           defaultDesignCode: true,
           defaultSpecs: true,
-          components: { orderBy: { id: "asc" }, select: { defaultQty: true, qtySource: true, componentType: { select: { name: true } } } },
+          components: { orderBy: { id: "asc" }, select: { defaultQty: true, qtySource: true, componentType: { select: { name: true, code: true } } } },
         },
       }),
       tx.qcpTemplate.findMany({
@@ -113,10 +130,24 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
       }),
       tx.equipment.findMany({
         where: { job: { tenantId: actor.tenantId }, bomItems: { some: {} } },
-        include: { job: { select: { jobNumber: true } }, _count: { select: { bomItems: true } } },
-        orderBy: { id: "asc" },
+        include: {
+          job: { select: { jobNumber: true, familyId: true, client: { select: { name: true } } } },
+          equipmentType: { select: { name: true } },
+          _count: { select: { bomItems: true } },
+        },
+        orderBy: [{ jobId: "desc" }, { id: "asc" }],
+        take: BOM_SOURCE_LIMIT,
       }),
     ]);
+    const codeRows = equipments.length
+      ? await tx.bomItem.findMany({
+          where: { equipmentId: { in: equipments.map((e) => e.id) }, componentTypeId: { not: null } },
+          distinct: ["equipmentId", "componentTypeId"],
+          select: { equipmentId: true, componentType: { select: { code: true } } },
+        })
+      : [];
+    const codesOf = new Map<number, string[]>();
+    for (const r of codeRows) if (r.componentType) codesOf.set(r.equipmentId, [...(codesOf.get(r.equipmentId) ?? []), r.componentType.code]);
 
     const qcpIds = qcpTemplates.map((q) => q.id);
     const qcpItems = await loadQcpItemsByTemplate(tx, actor.tenantId, qcpIds);
@@ -154,7 +185,7 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
       equipmentTypes: equipmentTypes.map(({ components, ...e }) => ({
         ...e,
         defaultSpecs: (e.defaultSpecs as Record<string, unknown> | null) ?? null,
-        kit: components.map((c) => ({ name: c.componentType.name, qty: c.defaultQty, qtySource: c.qtySource })),
+        kit: components.map((c) => ({ name: c.componentType.name, code: c.componentType.code, qty: c.defaultQty, qtySource: c.qtySource })),
       })),
       qcpTemplates: qcpTemplates.map((q) => ({
         id: q.id,
@@ -168,6 +199,13 @@ export async function loadIntakeOptions(actor: Actor): Promise<IntakeOptions> {
         equipmentId: e.id,
         label: `${e.job.jobNumber} — ${e.name}`,
         itemCount: e._count.bomItems,
+        equipmentName: e.name,
+        jobNumber: e.job.jobNumber,
+        clientName: e.job.client.name,
+        familyId: e.job.familyId,
+        equipmentTypeId: e.equipmentTypeId,
+        equipmentTypeName: e.equipmentType?.name ?? null,
+        partCodes: codesOf.get(e.id) ?? [],
       })),
     };
   });

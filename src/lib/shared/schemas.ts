@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BOM_UPLOAD_MAX_LINES } from "./upload";
 
 /**
  * zod is the single source of validation truth — client and server import the
@@ -788,6 +789,45 @@ export const createClientSchema = z
 export type CreateClientInput = z.infer<typeof createClientSchema>;
 
 /**
+ * One row of a bulk BOM import (CSV/XLSX). Validated per-row in
+ * `bom.service.ts`'s `importBomItems` so one malformed row is reported by
+ * name rather than aborting or silently dropping the whole batch.
+ * `z.coerce` on the numeric fields — spreadsheet cells commonly arrive as
+ * strings even when they read as numbers.
+ *
+ * Task review Important #1: NOT `.strict()`. The real BOM data this app
+ * seeds from (`seed/despl-320-bom-items.json`, read by
+ * `scripts/seed-despl320-bom.ts`) is shaped `{itemNo, partName, description,
+ * material, qty, unit, remarks}` — note `qty`, not `sourceQty` — and a real
+ * workbook export routinely carries extra columns (a serial/notes column, a
+ * drawing ref) this schema doesn't model at all. `bom.service.ts`'s
+ * `importBomItems` normalizes each row's keys (case/space-insensitive,
+ * aliasing `qty`/`quantity` → `sourceQty` etc.) before this schema ever sees
+ * it; staying non-strict here means a column that survives normalization
+ * unrecognized is quietly dropped rather than failing the whole row.
+ */
+export const bomImportRowSchema = z.object({
+  itemNo: z.coerce.number().int().positive(),
+  blockNo: z.coerce.number().int().positive().optional(),
+  partName: z.string().trim().min(1, "Part name is required"),
+  description: z.string().trim().min(1).optional(),
+  material: z.string().trim().min(1).optional(),
+  sourceQty: z.coerce.string().trim().min(1, "Quantity is required"),
+  qtyPer: z.coerce.number().positive().optional(),
+  uom: z.string().trim().min(1).optional(),
+  unit: z.string().trim().min(1).optional(),
+  remarks: z.string().trim().min(1).optional(),
+  parentBomItemId: z.coerce.number().int().positive().optional(),
+  /** `ComponentTypeRef.code`, not its numeric id — the template's own column
+   * header is human-typeable. Resolved to `componentTypeId` in the service;
+   * an unresolvable code fails the whole import (see `importBomItems`). */
+  componentType: z.string().trim().min(1).optional(),
+});
+export type BomImportRow = z.infer<typeof bomImportRowSchema>;
+/** One line of a wizard BOM upload (the importer's row without a parent link). */
+export type BomUploadLine = Omit<BomImportRow, "parentBomItemId">;
+
+/**
  * Job intake (docs/superpowers/specs/2026-08-22-job-intake-design.md §4.1).
  *
  * `.strict()` with NO actual_* or *_at field (invariant #1). orderDate,
@@ -836,6 +876,10 @@ export const createJobSchema = z
             copyWeldMapFromEquipmentId: id.nullish(),
             /** J7b (Build from master): fill this line's BOM from its equipment type's kit as DRAFT revision 1. Needs a type; not together with a copied BOM. */
             bomFromKit: z.boolean().optional(),
+            /** Wizard upload: BOM lines already read from an Excel file (parsed rows only, never the file), kept as DRAFT revision 1. Not together with a kit or a copied BOM. */
+            bomLines: z.array(bomImportRowSchema.omit({ parentBomItemId: true })).max(BOM_UPLOAD_MAX_LINES, `A BOM upload takes up to ${BOM_UPLOAD_MAX_LINES} lines`).optional(),
+            /** The uploaded file's name, for the audit trail only. */
+            bomFileName: z.string().trim().min(1).max(200).nullish(),
             /** J6 (D21): SERIAL (or omitted) = one unit per serial. LOT = one unit carrying `lotQty`. LOT_THEN_SERIAL is refused by the service until D21 picks it. */
             trackingMode: z.enum(["SERIAL", "LOT", "LOT_THEN_SERIAL"]).optional(),
             lotQty: z.number().int().positive().nullish(),
@@ -845,6 +889,7 @@ export const createJobSchema = z
           .superRefine((b, ctx) => {
             if (b.bomFromKit && b.equipmentTypeId == null) ctx.addIssue({ code: "custom", path: ["bomFromKit"], message: "Choose the equipment type to fill the BOM from its kit" });
             if (b.bomFromKit && b.copyBomFromEquipmentId != null) ctx.addIssue({ code: "custom", path: ["bomFromKit"], message: "Fill the BOM from the kit or copy another job's BOM, not both" });
+            if (b.bomLines && b.bomLines.length > 0 && (b.bomFromKit || b.copyBomFromEquipmentId != null)) ctx.addIssue({ code: "custom", path: ["bomLines"], message: "Use one BOM source per line: the kit, a copied job or an uploaded file" });
             const mode = b.trackingMode ?? "SERIAL";
             if (mode === "SERIAL" || mode === "LOT_THEN_SERIAL") {
               if (mode === "SERIAL" && b.serials.length === 0) {
@@ -997,42 +1042,6 @@ export const updateBomItemSchema = z
   .strict();
 export type UpdateBomItemInput = z.infer<typeof updateBomItemSchema>;
 
-/**
- * One row of a bulk BOM import (CSV/XLSX). Validated per-row in
- * `bom.service.ts`'s `importBomItems` so one malformed row is reported by
- * name rather than aborting or silently dropping the whole batch.
- * `z.coerce` on the numeric fields — spreadsheet cells commonly arrive as
- * strings even when they read as numbers.
- *
- * Task review Important #1: NOT `.strict()`. The real BOM data this app
- * seeds from (`seed/despl-320-bom-items.json`, read by
- * `scripts/seed-despl320-bom.ts`) is shaped `{itemNo, partName, description,
- * material, qty, unit, remarks}` — note `qty`, not `sourceQty` — and a real
- * workbook export routinely carries extra columns (a serial/notes column, a
- * drawing ref) this schema doesn't model at all. `bom.service.ts`'s
- * `importBomItems` normalizes each row's keys (case/space-insensitive,
- * aliasing `qty`/`quantity` → `sourceQty` etc.) before this schema ever sees
- * it; staying non-strict here means a column that survives normalization
- * unrecognized is quietly dropped rather than failing the whole row.
- */
-export const bomImportRowSchema = z.object({
-  itemNo: z.coerce.number().int().positive(),
-  blockNo: z.coerce.number().int().positive().optional(),
-  partName: z.string().trim().min(1, "Part name is required"),
-  description: z.string().trim().min(1).optional(),
-  material: z.string().trim().min(1).optional(),
-  sourceQty: z.coerce.string().trim().min(1, "Quantity is required"),
-  qtyPer: z.coerce.number().positive().optional(),
-  uom: z.string().trim().min(1).optional(),
-  unit: z.string().trim().min(1).optional(),
-  remarks: z.string().trim().min(1).optional(),
-  parentBomItemId: z.coerce.number().int().positive().optional(),
-  /** `ComponentTypeRef.code`, not its numeric id — the template's own column
-   * header is human-typeable. Resolved to `componentTypeId` in the service;
-   * an unresolvable code fails the whole import (see `importBomItems`). */
-  componentType: z.string().trim().min(1).optional(),
-});
-export type BomImportRow = z.infer<typeof bomImportRowSchema>;
 
 export const importBomItemsSchema = z
   .object({

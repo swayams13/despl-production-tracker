@@ -70,7 +70,8 @@ async function gotoReady(page: Page, path: string) {
 // content to overflow). SHELL_NAV now also points at /workspace, /qc, /jobs —
 // real pages with real tables — so this list is pointed at those instead of
 // the stub pages, per the S13 work item.
-const SHELL_PAGES = ["/my-day", "/workspace", "/qc", "/jobs"] as const;
+// AUD-037: /qc is QC/management only now; a supervisor is redirected away, so it is not a page to measure here.
+const SHELL_PAGES = ["/my-day", "/workspace", "/jobs"] as const;
 
 // R2's first item (progress.md, 18 Aug 2026): /my-day's "Department pool"
 // and "Held by teammates" tables, and /workspace's per-process unit table,

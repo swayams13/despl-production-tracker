@@ -26,7 +26,7 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: async () => ({ has: () => false }) }));
 vi.mock("@/lib/auth/session", () => ({ readSession: async () => null }));
 vi.mock("@/lib/authz", () => ({
   requireActor: vi.fn(async () => ({ userId: 1, tenantId: 1, clientId: null, roles: ["ADMIN"] })),

@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { loadJobDrawings } from "@/lib/services/drawings.read";
@@ -10,7 +11,7 @@ import { DrawingsClient } from "./_client";
  */
 export default async function DrawingsPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   const jobId = Number((await params).id);
   if (!Number.isInteger(jobId) || jobId <= 0) notFound();
