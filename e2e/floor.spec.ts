@@ -51,32 +51,6 @@ test("Scan: an unknown serial says so, and an unknown unit id is not found", asy
   await expect(page.locator(".fl-wrap")).toHaveCount(0);
 });
 
-test("Undo inside the 10 s window sends nothing", async ({ page }) => {
-  test.setTimeout(60_000);
-  await signIn(page, "sup.fabrication@despl.local");
-  const path = await openUnit(page);
-
-  // The first row a supervisor can act on: Done, Start, or (out of order) Start early with a reason.
-  const act = page.locator(".fl-row").getByRole("button", { name: /^(Done|Start early…)$/ }).first();
-  test.skip((await act.count()) === 0, "no actionable row on this unit");
-  const row = act.locator("xpath=ancestor::li[1]");
-  const title = (await row.locator(".fl-main b").innerText()).trim();
-  await act.click();
-  const sheet = page.locator(".fl-sheet");
-  if (await sheet.getByText("Why now?").count()) await sheet.locator(".fl-chip").first().click();
-  await sheet.locator(".fl-sheet-foot .btn-accent").click();
-
-  await expect(page.locator(".fl-undo")).toBeVisible();
-  await page.locator(".fl-undo").getByRole("button", { name: "Undo" }).click();
-  await expect(page.locator(".fl-undo")).toHaveCount(0);
-
-  await page.waitForTimeout(11_000); // past the window: a stray send would land now
-  await page.goto(path);
-  await expect(page.locator(".fl-row", { hasText: title }).first()).toContainText(/Out of usual order|Ready|In progress/);
-  await expect(page.locator(".fl-result")).toHaveCount(0);
-  await expect(page.locator(".fl-row", { hasText: title }).first()).not.toContainText("started early");
-});
-
 test("a row that cannot start names what is missing and who can clear it", async ({ page }) => {
   await signIn(page, "sup.fabrication@despl.local");
   await openUnit(page);

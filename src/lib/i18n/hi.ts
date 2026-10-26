@@ -18,7 +18,6 @@ export const hi: Dict = {
     startEarly: "जल्दी शुरू करें…", // REVIEW: DESPL
     cancel: "रद्द करें", // REVIEW: DESPL
     dismiss: "बंद करें", // REVIEW: DESPL
-    undo: "वापस लें", // REVIEW: DESPL
     tryAgain: "फिर कोशिश करें", // REVIEW: DESPL
     now: "अभी", // REVIEW: DESPL
     earlier: "पहले", // REVIEW: DESPL

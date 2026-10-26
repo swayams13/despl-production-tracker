@@ -87,10 +87,10 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadStageDetail — rejection histor
     await owner.$disconnect();
   });
 
-  function actor(): Actor {
+  function actor(role: Actor["roles"][number] = ROLES.ADMIN): Actor {
     return {
       userId: 1, tenantId, clientId: null, name: "Test", email: "t@despl.local",
-      roles: [ROLES.ADMIN], departmentIds: [], mustChangePassword: false,
+      roles: [role], departmentIds: [], mustChangePassword: false,
       themePreference: "SYSTEM", outdoorMode: false,
     };
   }
@@ -102,5 +102,11 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("loadStageDetail — rejection histor
     expect(detail!.rejections.length).toBe(2);
     const reasons = detail!.rejections.map((r) => r.reason).sort();
     expect(reasons).toEqual(["bad weld", "dimension out of tolerance"].sort());
+  });
+
+  // The sheet shows Verify and Reject only to QC (maker-checker); every other role gets no such button.
+  it.each(Object.values(ROLES).map((r) => [r, r === ROLES.QC] as const))("%s: canVerify is %s", async (role, expected) => {
+    const detail = await loadStageDetail(actor(role), jobId, unitId, STAGE_NO);
+    expect(detail?.canVerify).toBe(expected);
   });
 });

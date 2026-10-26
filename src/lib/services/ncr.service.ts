@@ -138,7 +138,7 @@ export async function dispositionNcr(actor: Actor, input: DispositionNcrInput): 
     if (concession) {
       requireRole(actor, ROLES.PRODUCTION_HEAD);
       if (!codeClause) {
-        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "codeClause" }, "Record the code clause this acceptance relies on.");
+        throw new AppError(ERROR_CODES.VALIDATION_FAILED, { field: "codeClause" }, "Enter the code clause this acceptance relies on.");
       }
       await assertConcessionNotByMaker(tx, actor, ncr);
     } else {

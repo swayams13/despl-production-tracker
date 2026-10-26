@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createJobSchema } from "@/lib/shared/schemas";
 import type { IntakeOptions, IntakeFamily } from "@/lib/services/job-intake.read";
 import {
-  allValid, defaultState, emptyBlock, fromPayload, payloadToInput, resumeStep, step2BlockReason, step3BlockReason, stepBlockReason, toPayload, type WizardState,
+  allValid, bomSourceLabel, defaultState, emptyBlock, fromPayload, payloadToInput, resumeStep, step2BlockReason, step3BlockReason, stepBlockReason, toPayload, type EquipBlockState, type WizardState,
 } from "./wizard-state";
 
 const families = [
@@ -98,5 +98,23 @@ describe("the draft payload", () => {
   it("the Build from master route starts new lines with the kit fill on", () => {
     expect(defaultState(options, "master").equipments[0].bomMode).toBe("KIT");
     expect(defaultState(options, "template").equipments[0].bomMode).toBe("NONE");
+  });
+});
+
+describe("the review step's BOM label follows the real source", () => {
+  const opts = {
+    bomSources: [{ equipmentId: 7, label: "J-0 Vessel", itemCount: 12 }],
+    equipmentTypes: [{ id: 1, name: "Air receiver", kit: [{ name: "Shell", qty: 1 }] }, { id: 2, name: "Empty type", kit: [] }],
+  } as unknown as Parameters<typeof bomSourceLabel>[1];
+  it.each<[string, Partial<EquipBlockState>, string]>([
+    ["no BOM chosen", { bomMode: "NONE" }, "Not started"],
+    ["copy, nothing picked", { bomMode: "COPY" }, "Copy chosen, but no previous line picked"],
+    ["copy from a source with lines", { bomMode: "COPY", copyBomFromEquipmentId: 7 }, "Copied from J-0 Vessel (12 lines)"],
+    ["copy from a line that has no BOM lines", { bomMode: "COPY", copyBomFromEquipmentId: 99 }, "Nothing to copy: the chosen line has no BOM lines"],
+    ["kit, no type", { bomMode: "KIT" }, "Standard kit chosen, but no equipment type picked"],
+    ["kit with lines", { bomMode: "KIT", equipmentTypeId: 1 }, "From the Air receiver kit (1 line)"],
+    ["kit that is empty", { bomMode: "KIT", equipmentTypeId: 2 }, "The Empty type kit is empty: no BOM lines"],
+  ])("%s", (_n, over, label) => {
+    expect(bomSourceLabel(line(over), opts)).toBe(label);
   });
 });

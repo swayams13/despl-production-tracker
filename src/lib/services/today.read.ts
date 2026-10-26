@@ -154,6 +154,7 @@ export async function loadToday(actor: Actor): Promise<TodayView> {
       returnedNote: null,
       needsReview: false,
       ruleNcr: null,
+      ruleNcrOpen: false,
       qty: p.qtyPlanned != null ? { planned: p.qtyPlanned, done: p.qtyDone } : null,
       siblings: [],
       jobId: m.jobId,

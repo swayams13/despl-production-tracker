@@ -26,7 +26,6 @@ export const en = {
     startEarly: "Start early…",
     cancel: "Cancel",
     dismiss: "Dismiss",
-    undo: "Undo",
     tryAgain: "Try again",
     now: "Now",
     earlier: "Earlier",

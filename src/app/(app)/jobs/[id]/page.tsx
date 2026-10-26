@@ -2,6 +2,7 @@ import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
+import { BOM_RELEASE_ROLES } from "@/lib/shared/stores-access";
 import { loadJobHeader } from "@/lib/services/job-detail.read";
 import { loadJobSpines, rollupJobSpine } from "@/lib/services/spine.read";
 import { loadJobMilestones } from "@/lib/services/milestone.read";
@@ -58,7 +59,8 @@ export default async function JobDetail({
   // Matches S6's gate on createPackage/assignUnitToPackage exactly — UI is
   // cosmetic, the server is authoritative either way.
   const canManagePacking = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
-  const canVerify = hasRole(actor, ROLES.QC);
+  const canVerify = resolveQcAccess(actor).inspect;
+  const canReleaseBom = hasRole(actor, ...BOM_RELEASE_ROLES);
   // S6 gated all five dispatch mutations (create/add/approve/record) to the
   // same PRODUCTION_HEAD/ADMIN pair — one boolean covers all of them.
   const canManageDispatch = hasRole(actor, ROLES.PRODUCTION_HEAD, ROLES.ADMIN);
@@ -165,6 +167,7 @@ export default async function JobDetail({
       canEditJobDates={canEditJobDates}
       canEditJobDetails={canEditJobDetails}
       canManagePacking={canManagePacking}
+      canReleaseBom={canReleaseBom}
       canManageDispatch={canManageDispatch}
       canApproveQcpWaiver={canApproveQcpWaiver}
       canRecordQcp={canRecordQcp}
