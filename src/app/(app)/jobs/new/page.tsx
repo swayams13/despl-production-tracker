@@ -32,7 +32,8 @@ export default async function NewJobPage({ searchParams }: { searchParams: Promi
             <p style={{ marginTop: 0 }}>
               {draft.status === "RELEASED" ? "This draft was already turned into a job." : "This draft was discarded."}
             </p>
-            {draft.releasedJobId != null && <Link className="btn btn-accent" href={`/jobs/${draft.releasedJobId}`}>Open the job</Link>}{" "}
+            {draft.releasedJobId != null && <Link className="btn btn-accent" href={`/jobs/${draft.releasedJobId}/release`}>Release the BOM</Link>}{" "}
+            {draft.releasedJobId != null && <Link className="btn" href={`/jobs/${draft.releasedJobId}`}>Open the job</Link>}{" "}
             <Link className="btn" href="/jobs/new">Start a new job</Link>
           </div>
         );

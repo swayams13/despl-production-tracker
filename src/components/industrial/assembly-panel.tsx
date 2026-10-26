@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -26,7 +27,7 @@ function statusLabel(status: string): string {
   return "not started";
 }
 
-export function AssemblyPanel({ jobId, data }: { jobId: number; data: AssemblyGrid }) {
+export function AssemblyPanel({ jobId, data, canReleaseBom = false }: { jobId: number; data: AssemblyGrid; canReleaseBom?: boolean }) {
   const router = useRouter();
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set(data.groups[0] ? [data.groups[0].groupCode] : []),
@@ -36,7 +37,8 @@ export function AssemblyPanel({ jobId, data }: { jobId: number; data: AssemblyGr
   if (!data.hasTemplate) {
     return (
       <p className="note" style={{ margin: "16px 0" }}>
-        No assembly template pinned for this job&apos;s product family yet — the A–Q sequence has not been authored for it.
+        This job has no assembly steps yet. They are created from the standard sequence when the BOM is released.{" "}
+        {canReleaseBom && <Link href={`/jobs/${jobId}/release`}>Release the BOM →</Link>}
       </p>
     );
   }

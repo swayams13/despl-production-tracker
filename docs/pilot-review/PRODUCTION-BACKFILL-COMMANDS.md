@@ -42,7 +42,21 @@ Always dry run first; `--apply` goes after the `.ts` filename, inside the quotes
 
 A second `--apply` of any step changes nothing.
 
-Also owed and not in this file yet (found in the 25 Oct pre-flight): `scripts/lean-seed-milestones.ts` (J8: 10 milestones, 36 map rows), and the screen steps (master data import, confirming DESPL-320's joints at `/jobs/4/weld-map`, entering its indent/PO). There is no script or screen to rename the placeholder client text; that needs a small owner-role UPDATE with an audit row.
+Also owed and not in this file yet (found in the 25 Oct pre-flight): `scripts/lean-seed-milestones.ts` (J8: 10 milestones, 36 map rows), and the screen steps (master data import, confirming DESPL-320's joints at `/jobs/4/weld-map`, entering its indent/PO). Renaming the placeholder client text is `scripts/rename-client.ts` (section below).
+
+## Rename a placeholder client
+
+`scripts/rename-client.ts` renames one client in the DESPL tenant and writes one `audit_log` row (`client.rename`, before/after) in the same transaction. The new name shows on the dashboard, jobs list, new-job screen and the printed traveller. Dry run by default; `--apply` writes. It refuses an empty name, a name another client in the tenant already has (case-insensitive), a client of another tenant, and a `--match` that finds more than one client (it lists them with their ids).
+
+```
+# a. list the candidates: an ambiguous --match prints every hit and exits without writing
+railway run --environment production --service Postgres -- sh -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" DIRECT_URL="$DATABASE_PUBLIC_URL" pnpm -s tsx scripts/rename-client.ts --match "Unknown client" --name "x"'
+
+# b. dry run with the id from (a), read before/after, then add --apply and --actor-user <your user id>
+railway run --environment production --service Postgres -- sh -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" DIRECT_URL="$DATABASE_PUBLIC_URL" pnpm -s tsx scripts/rename-client.ts --client-id <id> --name "<real client name>" 2>&1 | tee -a "$HOME/prod-backfill-$(date +%Y%m%d).log"'
+```
+
+Run once per placeholder client. The target line must say `*.proxy.rlwy.net/railway`. `--actor-user` is optional (the audit actor is null without it) but is checked to be a user of the tenant. Staging: same commands with `--environment staging`.
 
 ## Risks
 
