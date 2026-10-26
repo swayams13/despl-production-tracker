@@ -5,7 +5,6 @@ import { StageSpine } from "@/components/industrial/stage-spine";
 import {
   ActionSheet,
   FloorOutcomes,
-  FloorUndoStack,
   HeatPickButton,
   NotifyBlockerButton,
   RaiseRuleNcrButton,
@@ -44,7 +43,7 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
       ),
     [view.rows],
   );
-  const { pending, outcomes, queue, undo, dismiss, busy } = useFloorWrites(titleOf);
+  const { outcomes, commit, dismiss, busy } = useFloorWrites(titleOf);
 
   const rows = showAll ? view.rows : view.rows.slice(0, VISIBLE);
   const hidden = view.rows.length - rows.length;
@@ -104,8 +103,6 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
         </button>
       )}
 
-      <FloorUndoStack pending={pending} undo={undo} />
-
       {sheet && (
         <ActionSheet
           key={`${sheet.row.key}:${sheet.action}`}
@@ -121,7 +118,7 @@ export function FloorClient({ view }: { view: FloorUnitView }) {
           onClose={() => setSheet(null)}
           onConfirm={(label, send, keys) => {
             setSheet(null);
-            queue(label, send, keys);
+            commit(label, send, keys);
           }}
         />
       )}
@@ -142,7 +139,7 @@ function FloorRowView({
   unitPublicId: string;
   /** J5c: the BOM revision a flagged row changed in. */
   bomRevisionNo: number | null;
-  /** A write for this row is waiting (Undo window), sending or refreshing: its buttons are off. */
+  /** A write for this row is sending or refreshing: its buttons are off. */
   busy: boolean;
   onAct: (action: "DONE" | "START") => void;
 }) {

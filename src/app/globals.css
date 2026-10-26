@@ -762,7 +762,7 @@ body {
     z-index: 20;
   }
 }
-/* L2.10: the switch-over screen's sticky action bar; on a phone it sits above the bottom nav, as the floor's undo bars do. */
+/* L2.10: the switch-over screen's sticky action bar; on a phone it sits above the bottom nav, as the floor's outcome cards do. */
 .theme-industrial .so-bar { position: sticky; bottom: 0; z-index: 30; background: var(--bg); padding: 10px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 @media (max-width: 639px) {
   .theme-industrial .so-bar { bottom: calc(64px + env(safe-area-inset-bottom)); }
@@ -871,7 +871,7 @@ body {
 .theme-industrial .fl-main span, .theme-industrial .fl-sub { color: var(--muted); font-size: 12px; }
 .theme-industrial .fl-main .fl-returned { color: var(--s-hold); font-weight: 600; }
 .theme-industrial .fl-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-undo .btn, .theme-industrial .fl-more { min-height: 40px; }
+.theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-more { min-height: 40px; }
 .theme-industrial .fl-done { min-width: 96px; }
 .theme-industrial .fl-refusal { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); display: grid; gap: 4px; font-size: 12px; }
 .theme-industrial .fl-refusal b { font-size: 13px; font-weight: 600; }
@@ -881,10 +881,6 @@ body {
 .theme-industrial .fl-empty { margin-top: 18px; padding: 16px; border: 1px dashed var(--border); border-radius: 6px; display: grid; gap: 4px; color: var(--muted); }
 .theme-industrial .fl-empty b { color: var(--text); }
 .theme-industrial .fl-more { margin-top: 14px; width: 100%; }
-.theme-industrial .fl-undo-stack { position: fixed; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); display: grid; gap: 8px; z-index: 40; max-width: 616px; margin: 0 auto; }
-.theme-industrial .fl-undo { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .35); font-size: 13px; }
-.theme-industrial .fl-undo i { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--accent); transform-origin: left; animation: fl-drain linear forwards; }
-@keyframes fl-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 .theme-industrial .fl-sheet-ov { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
 .theme-industrial .fl-sheet { width: 100%; max-width: 640px; max-height: 90dvh; overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border: 1px solid var(--border); border-radius: 12px 12px 0 0; padding: 16px; display: grid; gap: 14px; }
 .theme-industrial .fl-sheet h2 { font-size: 16px; font-weight: 600; margin: 0; }
@@ -910,10 +906,9 @@ body {
 .theme-industrial .fl-checkin { max-width: none; }
 .theme-industrial .fl-sheet-foot { justify-content: flex-end; position: sticky; bottom: 0; background: var(--surface); padding-top: 8px; }
 @media (pointer: coarse) {
-  .theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-undo .btn, .theme-industrial .fl-more { min-height: 48px; min-width: 48px; }
+  .theme-industrial .fl-row .btn, .theme-industrial .fl-sheet .btn, .theme-industrial .fl-result .btn, .theme-industrial .fl-more { min-height: 48px; min-width: 48px; }
   .theme-industrial .fl-chip, .theme-industrial .fl-unit { min-height: 48px; }
 }
-@media (prefers-reduced-motion: reduce) { .theme-industrial .fl-undo i { animation: none; } }
 
 /* Job board (L2.4). Cells are 52 x 44 buttons, 48 high on coarse pointers; the value is always printed. */
 .theme-industrial .bd-filters { display: grid; gap: 8px; margin-bottom: 12px; }

@@ -2687,9 +2687,9 @@ model AssemblyTemplateStep {
   /// Lean Core L1.1 (D3): see OperationRef.requiresQc.
   requiresQc          Boolean           @default(true) @map("requires_qc")
   /// L1.2 (D2): copied onto AssemblyStep at intake. Published v1 rows stay
-  /// null/false (invariant 9) and the seed JSON has no role fields, so EVERY
-  /// environment publishes a version that carries them with
-  /// scripts/lean-publish-assembly-roles.ts (L1.2h) before new jobs get H1, H4-H6.
+  /// null/false (invariant 9) and the seed JSON has no role fields. `pnpm db:seed`
+  /// publishes v2 with them; an environment seeded before that (production, staging)
+  /// runs scripts/lean-publish-assembly-roles.ts (L1.2h) before new jobs get H1, H4-H6.
   role                AssemblyStepRole?
   pressurePart        Boolean           @default(false) @map("pressure_part")
   /// Lean Core J2: see TemplateProcess.includeWhen. A published version is

@@ -87,7 +87,8 @@ export async function scheduleNewJobAction(
       mode: "BACKWARD",
       ...(requiredDeliveryDate ? { requiredDeliveryDate } : {}),
     });
-    revalidatePath(`/jobs/${jobId}`);
+    // No revalidatePath: the wizard's result step calls this, and a revalidation would re-render /jobs/new
+    // (now "draft already released") over it. /jobs/[id] is dynamic, so it is fresh on open.
     return {
       kind: run.feasibility === "INFEASIBLE" ? "INFEASIBLE" : "FEASIBLE",
       shortfallDays: run.shortfallDays,

@@ -1,5 +1,4 @@
 "use server";
-import { revalidatePath } from "next/cache";
 import { requireActor } from "@/lib/authz";
 import { saveDraft, copyJobToDraft, releaseDraft, discardDraft, type JobDraftView } from "@/lib/services/job-draft.service";
 import { previewJob, type JobPreview } from "@/lib/services/job-preview.service";
@@ -40,7 +39,8 @@ export async function copyJobToDraftAction(jobId: number): Promise<DraftActionRe
 export async function releaseDraftAction(draftId: number): Promise<DraftActionResult & { job?: CreateJobResult }> {
   try {
     const { job } = await releaseDraft(await requireActor(), { draftId });
-    revalidatePath("/jobs");
+    // No revalidatePath here: in a Server Action it re-renders the page the wizard is on, and that page
+    // answers a released draft with "already turned into a job", replacing the result step. /jobs is dynamic.
     return { ok: true, job };
   } catch (e) {
     return toActionError(e);

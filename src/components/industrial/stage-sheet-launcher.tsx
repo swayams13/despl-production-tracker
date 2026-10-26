@@ -33,7 +33,12 @@ export function useStageSheetLauncher() {
   const router = useRouter();
 
   const openStage = async (jobId: number, unitId: number | undefined, stageNo: number) => {
-    if (unitId == null) return;
+    // A job-level step (processes 1-11, 33) has no unit to open a stage for: go to the job, never a dead click.
+    if (unitId == null) {
+      toast.info("This step belongs to the whole job. Opening the job.");
+      router.push(`/jobs/${jobId}`);
+      return;
+    }
     setSheet({ open: true, loading: true, jobId, detail: null });
     try {
       const res = await fetch(`/api/jobs/${jobId}/stage?unit=${unitId}&stage=${stageNo}`);
@@ -272,6 +277,7 @@ export function StageSheetLauncher({
             </div>
             <div className="sh-ft-desktop">
               <StageSheetFooter
+                canVerify={d.canVerify}
                 governing={governing}
                 overdue={overdueReasonPending}
                 unreasonedOverduePlanIds={unreasonedOverduePlanIds}
@@ -536,6 +542,7 @@ function BackingPlanRow({
 }
 
 function StageSheetFooter({
+  canVerify,
   governing,
   overdue,
   unreasonedOverduePlanIds,
@@ -548,6 +555,7 @@ function StageSheetFooter({
   rejectReason,
   setRejectReason,
 }: {
+  canVerify: boolean;
   governing: StageBackingPlan;
   overdue: boolean;
   unreasonedOverduePlanIds: number[];
@@ -626,7 +634,7 @@ function StageSheetFooter({
       {overdue && (
         <button className="btn" disabled={pending} onClick={() => setFiling(true)}>File reason…</button>
       )}
-      {governing.status === "SUBMITTED" && (
+      {governing.status === "SUBMITTED" && canVerify && (
         <button className="btn" disabled={pending} onClick={() => setRejecting(true)}>Reject…</button>
       )}
       {governing.status === "NOT_STARTED" && (
@@ -635,7 +643,7 @@ function StageSheetFooter({
       {governing.status === "IN_PROGRESS" && (
         <button className="btn btn-accent" disabled={pending} onClick={() => run(() => submitAction(governing.planId), "Submitted for QC.", onChanged)}>Submit for QC</button>
       )}
-      {governing.status === "SUBMITTED" && (
+      {governing.status === "SUBMITTED" && canVerify && (
         <button className="btn btn-accent" disabled={pending} onClick={() => run(() => verifyAction(governing.planId), "Verified — next stage unlocked.", onChanged)}>Verify</button>
       )}
     </>
