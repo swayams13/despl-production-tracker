@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { assignPlansAction } from "@/app/actions/assignment";
 import { fileDelayBulkAction } from "@/app/actions/delay";
+import { acknowledgeOverrideAction } from "@/app/actions/override";
 import { leastLoadedFirst } from "@/lib/shared/team";
 import { fmtDay } from "@/lib/shared/board";
 import type { TeamRow, TeamView } from "@/lib/services/team.read";
@@ -107,6 +108,16 @@ export function TeamClient({
       const r = await fileDelayBulkAction(planIds, reasonCat);
       if (!r.ok) toast.error(r.message);
       else toast.success(`Reason filed on ${r.filed ?? planIds.length} item${planIds.length === 1 ? "" : "s"}.`);
+      router.refresh();
+    });
+
+  // D2: one tap, no confirm. "Already acknowledged" just means someone beat us to it; refresh shows who.
+  const acknowledge = (overrideId: number) =>
+    startBusy(async () => {
+      const r = await acknowledgeOverrideAction(overrideId);
+      if (r.ok) toast.success("Acknowledged.");
+      else if (r.code === "OVERRIDE_ALREADY_ACKNOWLEDGED") toast.message(r.message);
+      else toast.error(r.message);
       router.refresh();
     });
 
@@ -333,6 +344,35 @@ export function TeamClient({
         </div>
       )}
 
+      {view.earlyStarts && view.earlyStarts.pendingTotal > 0 && (
+        <section className="tm-sec" aria-labelledby="tm-early">
+          <h2 id="tm-early">
+            Early starts to review · {view.earlyStarts.pendingTotal}
+            {view.earlyStarts.staleTotal > 0 && ` · ${view.earlyStarts.staleTotal} waiting over 2 working days`}
+          </h2>
+          <Capped
+            rows={view.earlyStarts.pending}
+            render={(o) => (
+              <li key={o.id} className="tm-ack">
+                <div>
+                  <b>
+                    <span className="mono">{o.serialNo}</span> · {o.title}
+                  </b>
+                  <small>
+                    {o.jobNumber} · {o.category.replace(/_/g, " ").toLowerCase()}
+                    {o.note ? ` · “${o.note}”` : ""} · {o.by} · {fmtDay(o.at)}
+                    {o.stale ? " · waiting over 2 working days" : ""}
+                  </small>
+                </div>
+                <button className="btn" disabled={busy} onClick={() => acknowledge(o.id)}>
+                  Acknowledge
+                </button>
+              </li>
+            )}
+          />
+        </section>
+      )}
+
       {view.outOfSequence.length > 0 && (
         <section className="tm-sec" aria-labelledby="tm-oos">
           <h2 id="tm-oos">Out of sequence · last 7 days · {view.outOfSequence.length}</h2>
@@ -346,6 +386,7 @@ export function TeamClient({
                 <small>
                   {o.jobNumber} · {o.category.replace(/_/g, " ").toLowerCase()}
                   {o.note ? ` · “${o.note}”` : ""} · {o.by} · {fmtDay(o.at)}
+                  {o.ack ? ` · acknowledged by ${o.ack.by}, ${fmtDay(o.ack.at)}` : ""}
                 </small>
               </li>
             )}

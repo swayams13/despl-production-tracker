@@ -5,6 +5,8 @@ import { sameDayRate, type UpdateEvent } from "@/lib/shared/team";
 import type { DigestPayload } from "@/lib/shared/digest-email";
 import { loadPortfolio, loadPortfolioFacts } from "./portfolio.read";
 import { milestoneLabel } from "@/lib/shared/milestones";
+import { staleAcksByJob } from "@/lib/shared/override-review";
+import { resolveCalendarsForJobs } from "./_shared";
 
 /**
  * Lean Core L2.11: everything the 08:30 IST digest email says, as one JSON
@@ -118,6 +120,16 @@ export async function loadDigestPayload(
     return { reasons, overrides, steps, ops, plans, departments, title };
   });
 
+  // ── D2: early starts nobody acknowledged for 2 working days, one line per job ──
+  const unreviewedEarlyStarts = await withTenant(actor.tenantId, async (tx) => {
+    const open = await tx.sequenceOverride.findMany({
+      where: { tenantId: actor.tenantId, ack: null, createdAt: { lt: new Date(now.getTime() - 2 * DAY_MS) } },
+      select: { jobId: true, createdAt: true, job: { select: { jobNumber: true, calendarId: true } } },
+    });
+    const calendars = await resolveCalendarsForJobs(tx, [...new Map(open.map((o) => [o.jobId, { id: o.jobId, calendarId: o.job.calendarId }])).values()]);
+    return staleAcksByJob(open.map((o) => ({ jobId: o.jobId, jobNumber: o.job.jobNumber, createdAt: o.createdAt })), now, calendars);
+  });
+
   // ── overdue by department, top reason = most filed (ties: alphabetical) ──
   const reasonsByPlan = new Map<number, Set<string>>();
   for (const r of data.reasons) {
@@ -186,6 +198,7 @@ export async function loadDigestPayload(
     overdueByDept,
     overrides: overrides.slice(0, DIGEST_OVERRIDES_SHOWN),
     overridesTotal: overrides.length,
+    unreviewedEarlyStarts,
     sameDay: { overall: sameDayRate(all), byDept: deptRates },
     appUrl: opts.appUrl,
   };

@@ -13,6 +13,7 @@ const base = (over: Partial<DigestPayload> = {}): DigestPayload => ({
   overdueByDept: [{ dept: "Fabrication", overdue: 3, topReason: "Material delay", topReasonCount: 2 }, { dept: "QC", overdue: 2, topReason: null, topReasonCount: 0 }],
   overrides: [{ jobNumber: "DESPL-320", serialNo: "320SR05", title: "Nozzle N2 fit-up", by: "R. Patel", at: "2027-02-10T09:40:00Z", category: "Crew or machine free", note: null }],
   overridesTotal: 1,
+  unreviewedEarlyStarts: [],
   sameDay: { overall: { same: 63, total: 78, rate: 81 }, byDept: [{ dept: "QC", same: 4, total: 9, rate: 44 }, { dept: "Fabrication", same: 59, total: 69, rate: 86 }] },
   appUrl: "https://tracker.despl.in",
   ...over,
@@ -69,6 +70,27 @@ describe("L2.11 digest email render", () => {
 
   it("never claims an override was acknowledged (only the Production Head may)", () => {
     expect(renderDigest(base()).html.toLowerCase()).not.toContain("acknowledged");
+  });
+
+  it("adds one line per job for early starts waiting more than 2 working days, and nothing when none wait", () => {
+    const quiet = renderDigest(base());
+    expect(quiet.html).not.toContain("waiting for review");
+    expect(quiet.text).not.toContain("WAITING FOR REVIEW");
+    expect(digestPreheader(base())).not.toContain("not reviewed");
+
+    const d = base({
+      unreviewedEarlyStarts: [
+        { jobNumber: "DESPL-320", count: 3, oldestAt: "2027-02-08T09:40:00Z" },
+        { jobNumber: "DESPL-327", count: 1, oldestAt: "2027-02-09T04:00:00Z" },
+      ],
+    });
+    const r = renderDigest(d);
+    expect(r.html).toContain("Early starts waiting for review");
+    expect(r.html).toContain("DESPL-320: 3 early starts not yet acknowledged by the Production Head, the oldest from 8 Feb");
+    expect(r.html).toContain("DESPL-327: 1 early start not yet acknowledged");
+    expect(r.text).toContain("EARLY STARTS WAITING FOR REVIEW\nDESPL-320: 3 early starts");
+    expect(r.text.match(/not yet acknowledged/g)).toHaveLength(2);
+    expect(digestPreheader(d)).toBe("DESPL-327 +12 d and DESPL-320 · 5 steps overdue · 1 out-of-sequence start · 4 early starts not reviewed");
   });
 
   it("names the weekday when the covered day is not yesterday (a Monday reports Saturday)", () => {

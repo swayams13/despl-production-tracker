@@ -4,7 +4,9 @@
  * mailer (design frame 09A/09B: one 600 px column that reflows on a phone).
  *
  * English only. Overrides are listed, never "acknowledged by": only the
- * Production Head may acknowledge (build prompt §8.2 item 10).
+ * Production Head may acknowledge (build prompt §8.2 item 10). The one
+ * exception is the "waiting for review" lines (D2): early starts nobody has
+ * acknowledged for 2 working days, one line per job.
  */
 
 export interface DigestJobAtRisk {
@@ -40,6 +42,13 @@ export interface DigestOverride {
   note: string | null;
 }
 
+export interface DigestStaleAck {
+  jobNumber: string;
+  count: number;
+  /** ISO instant of the oldest early start still waiting. */
+  oldestAt: string;
+}
+
 export interface DigestRate {
   same: number;
   total: number;
@@ -60,6 +69,8 @@ export interface DigestPayload {
   /** The first few only; `overridesTotal` is the full count. */
   overrides: DigestOverride[];
   overridesTotal: number;
+  /** D2: early starts unacknowledged after 2 working days, one entry per job. */
+  unreviewedEarlyStarts: DigestStaleAck[];
   sameDay: { overall: DigestRate; byDept: Array<DigestRate & { dept: string }> };
   /** Base URL of the app, no trailing slash; null leaves the button out. */
   appUrl: string | null;
@@ -103,6 +114,7 @@ export function digestPreheader(p: DigestPayload): string {
     ...(jobs.length ? [jobs.join(" and ")] : []),
     `${plural(p.overdueTotal, "step")} overdue`,
     `${plural(p.overridesTotal, "out-of-sequence start")}`,
+    ...(p.unreviewedEarlyStarts.length ? [`${plural(p.unreviewedEarlyStarts.reduce((n, x) => n + x.count, 0), "early start")} not reviewed`] : []),
   ];
   return parts.join(" · ");
 }
@@ -162,6 +174,12 @@ export function renderDigest(d: DigestPayload): RenderedDigest {
       (d.overridesTotal > d.overrides.length ? p(`and ${d.overridesTotal - d.overrides.length} more`, `color:${C.muted}`) : "")
     : p(`No stage was started out of sequence ${when}.`, `color:${C.muted}`);
 
+  const staleLine = (x: DigestStaleAck) =>
+    `${x.jobNumber}: ${plural(x.count, "early start")} not yet acknowledged by the Production Head, the oldest from ${fmtShort(x.oldestAt)}`;
+  const staleHtml = d.unreviewedEarlyStarts.length
+    ? d.unreviewedEarlyStarts.map((x) => `<div style="padding:8px 0;border-top:1px solid ${C.line}">${p(esc(staleLine(x)))}</div>`).join("")
+    : "";
+
   const rateHtml = d.sameDay.overall.total
     ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="padding:4px 0;font-size:12px;color:${C.muted}">Department</td><td style="padding:4px 0;font-size:12px;color:${C.muted};text-align:right">Same day</td><td style="padding:4px 0;font-size:12px;color:${C.muted};text-align:right">Rate</td></tr>
@@ -189,6 +207,7 @@ ${p(`${d.sameDay.overall.rate === null ? `No updates were recorded ${when}.` : `
 ${h2("Jobs at risk")}${jobsHtml}
 ${h2("Overdue by department")}${deptHtml}
 ${h2(`Out of sequence ${when}`)}${overrideHtml}
+${staleHtml ? h2("Early starts waiting for review") + staleHtml : ""}
 ${h2("Same-day updates by department")}${rateHtml}
 ${button}
 <p style="margin:24px 0 0;font-size:12px;line-height:16px;color:${C.muted}">Sent every working day at 08:30 IST to the MD, CEO and Production Head. Figures are from ${esc(fmtTime(d.asOf))} IST.</p>
@@ -221,6 +240,7 @@ ${button}
           ...(d.overridesTotal > d.overrides.length ? [`and ${d.overridesTotal - d.overrides.length} more`] : []),
         ]
       : [`No stage was started out of sequence ${when}.`]),
+    ...(d.unreviewedEarlyStarts.length ? ["", "EARLY STARTS WAITING FOR REVIEW", ...d.unreviewedEarlyStarts.map(staleLine)] : []),
     "",
     "SAME-DAY UPDATES BY DEPARTMENT",
     ...(d.sameDay.overall.total

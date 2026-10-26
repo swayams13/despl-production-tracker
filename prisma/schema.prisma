@@ -399,6 +399,7 @@ model Organization {
   itemTests                    ItemTest[]
   sequenceOverrides            SequenceOverride[]
   workRequests                 WorkRequest[]
+  sequenceOverrideAcks     SequenceOverrideAck[]
   // AUD-080: back-relations for the tenant_id columns added to the nine
   // job_id-carrying tables H1/AUD-001 omitted (see
   // prisma/migrations/20260909140000_aud080_tenant_id_add_column).
@@ -529,6 +530,7 @@ model User {
   passwordResetRequestsApproved  PendingPasswordReset[]        @relation("PendingPasswordResetApprover")
   sequenceOverrides              SequenceOverride[]
   workRequests                   WorkRequest[]
+  sequenceOverrideAcks       SequenceOverrideAck[]
   atRiskDrawingReleases          DrawingRevision[]             @relation("DrawingRevisionAtRiskReleasedBy")
   preparedPartFamilies           PartFamily[]                  @relation("PartFamilyPreparedBy")
   approvedPartFamilies           PartFamily[]                  @relation("PartFamilyApprovedBy")
@@ -1222,6 +1224,7 @@ model Job {
   sequenceOverrides            SequenceOverride[]
   configRuleDecisions          ConfigRuleDecision[]
   workRequests                 WorkRequest[]
+  sequenceOverrideAcks     SequenceOverrideAck[]
   draftSourceOf                JobDraft[]                   @relation("JobDraftSource")
   draftReleasedAs              JobDraft[]                   @relation("JobDraftReleased")
 
@@ -1768,12 +1771,35 @@ model SequenceOverride {
   unit    Unit?           @relation(fields: [unitId], references: [id], onDelete: Cascade)
   edge    JobProcessEdge? @relation(fields: [edgeId], references: [id], onDelete: Cascade)
   creator User            @relation(fields: [createdBy], references: [id])
+  ack     SequenceOverrideAck?
 
   @@index([jobId])
   @@index([tenantId])
   @@index([targetKind, targetId])
   @@index([tenantId, createdAt])
   @@map("sequence_overrides")
+}
+
+/// D2: the Production Head's "seen" mark on a SequenceOverride. Never blocks or
+/// changes the work item. At most one per override (the unique index); append-only
+/// for the app role, like the override it points at.
+model SequenceOverrideAck {
+  id             Int      @id @default(autoincrement())
+  /// AUD-001: 0 is a placeholder; the aud001 trigger overwrites it from job_id.
+  tenantId       Int      @default(0) @map("tenant_id")
+  jobId          Int      @map("job_id")
+  overrideId     Int      @unique @map("override_id")
+  acknowledgedBy Int      @map("acknowledged_by")
+  acknowledgedAt DateTime @default(now()) @map("acknowledged_at")
+
+  tenant   Organization     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  job      Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  override SequenceOverride @relation(fields: [overrideId], references: [id], onDelete: Cascade)
+  user     User             @relation(fields: [acknowledgedBy], references: [id])
+
+  @@index([jobId])
+  @@index([tenantId])
+  @@map("sequence_override_acks")
 }
 
 /// Lean Core L1.2: recordWork idempotency. One row per client requestId; a
