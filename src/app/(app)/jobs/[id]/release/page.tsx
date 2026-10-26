@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { loadBomReleaseView } from "@/lib/services/bom-release.read";
@@ -12,7 +13,7 @@ import { ReleaseClient } from "./_client";
  */
 export default async function BomReleasePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ line?: string; rev?: string }> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   const jobId = Number((await params).id);
   if (!Number.isInteger(jobId) || jobId <= 0) notFound();

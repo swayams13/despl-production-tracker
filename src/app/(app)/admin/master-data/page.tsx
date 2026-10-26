@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { redirect } from "next/navigation";
 import { getActor, hasRole } from "@/lib/authz";
 import { loadPartFamilies } from "@/lib/services/master-data.read";
@@ -13,7 +14,7 @@ export default async function MasterDataPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   if (!hasRole(actor, ...MASTER_DATA_READ_ROLES)) return <RefusalCard />;
 

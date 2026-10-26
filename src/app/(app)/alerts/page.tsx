@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { loadNotifications } from "@/lib/services/notifications.read";
@@ -5,7 +6,7 @@ import { AlertsClient } from "./_client";
 
 export default async function Alerts() {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   // S14 — was a stub. loadNotifications/the Notification model/the bell

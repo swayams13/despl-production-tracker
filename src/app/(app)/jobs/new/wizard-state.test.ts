@@ -26,6 +26,8 @@ describe("step 2 (family, route, lines) says why it cannot go on", () => {
     ["a nameless line", { equipments: [line({ name: " " })] }, "Give line 1 a name"],
     ["a kit fill with no type", { equipments: [line({ bomMode: "KIT" })] }, "Choose the equipment type of Vessel"],
     ["a copy with no source", { equipments: [line({ bomMode: "COPY" })] }, "Choose the job whose BOM"],
+    ["an upload with no file read", { equipments: [line({ bomMode: "UPLOAD" })] }, "Upload the BOM file for Vessel"],
+    ["an upload whose file had no lines", { equipments: [line({ bomMode: "UPLOAD", bomUpload: { fileName: "x.xlsx", lines: [] } })] }, "Upload the BOM file for Vessel"],
     ["a line with no serials", { equipments: [line({ serials: [""] })] }, "at least one serial"],
     ["duplicate serials", { equipments: [line({ serials: ["S1", "S1"] })] }, "must be unique"],
     ["a lot with no quantity", { equipments: [line({ tracking: "LOT", lotQty: "0" })] }, "pieces are in the lot"],
@@ -116,5 +118,54 @@ describe("the review step's BOM label follows the real source", () => {
     ["kit that is empty", { bomMode: "KIT", equipmentTypeId: 2 }, "The Empty type kit is empty: no BOM lines"],
   ])("%s", (_n, over, label) => {
     expect(bomSourceLabel(line(over), opts)).toBe(label);
+  });
+});
+
+describe("an uploaded BOM file", () => {
+  const upload = { fileName: "bom.xlsx", lines: [{ itemNo: 1, partName: "Shell", sourceQty: "1", material: "SA 516 Gr 70", componentType: "SHELL" }, { itemNo: 2, partName: "Dish end", sourceQty: "2" }] };
+  const withUpload = (over = {}) => good({ equipments: [line({ bomMode: "UPLOAD", bomUpload: upload, ...over })] });
+
+  it("passes step 2 once lines are kept", () => {
+    expect(step2BlockReason(withUpload(), families)).toBeNull();
+  });
+
+  it("goes into the payload as parsed lines and the file name, and nothing else of the file", () => {
+    const p = toPayload(withUpload()) as { equipments: Array<Record<string, unknown>> };
+    expect(p.equipments[0].bomLines).toEqual(upload.lines);
+    expect(p.equipments[0].bomFileName).toBe("bom.xlsx");
+    expect(p.equipments[0]).not.toHaveProperty("bomFromKit");
+    expect(p.equipments[0]).not.toHaveProperty("copyBomFromEquipmentId");
+  });
+
+  it("is left out of the payload when the line is on another source, even if lines were kept earlier", () => {
+    const p = toPayload(withUpload({ bomMode: "KIT", equipmentTypeId: 7 })) as { equipments: Array<Record<string, unknown>> };
+    expect(p.equipments[0]).not.toHaveProperty("bomLines");
+    expect(p.equipments[0].bomFromKit).toBe(true);
+  });
+
+  it("round trips through the draft and is accepted whole by createJobSchema, with no actual_ or _at key", () => {
+    const payload = JSON.parse(JSON.stringify(toPayload(withUpload())));
+    const back = fromPayload(payload, options);
+    expect(back.equipments[0]).toMatchObject({ bomMode: "UPLOAD", bomUpload: { fileName: "bom.xlsx" } });
+    expect(toPayload(back)).toEqual(toPayload(withUpload()));
+    const parsed = createJobSchema.parse(payloadToInput(payload));
+    expect(parsed.equipments[0].bomLines).toHaveLength(2);
+    const keys = JSON.stringify(payload).match(/"(actual_\w+|\w+_at)"/g);
+    expect(keys).toBeNull();
+  });
+
+  it("is refused by the schema with a kit or a copied BOM, or past 500 lines", () => {
+    const payload = JSON.parse(JSON.stringify(toPayload(withUpload({ equipmentTypeId: 7 }))));
+    const eq = payload.equipments[0];
+    expect(() => createJobSchema.parse(payloadToInput({ ...payload, equipments: [{ ...eq, bomFromKit: true }] }))).toThrow(/one BOM source/);
+    expect(() => createJobSchema.parse(payloadToInput({ ...payload, equipments: [{ ...eq, copyBomFromEquipmentId: 4 }] }))).toThrow(/one BOM source/);
+    const many = Array.from({ length: 501 }, (_, i) => ({ itemNo: i + 1, partName: "P", sourceQty: "1" }));
+    expect(() => createJobSchema.parse(payloadToInput({ ...payload, equipments: [{ ...eq, bomLines: many }] }))).toThrow(/up to 500/);
+  });
+
+  it("is described on the review step by file and line count", () => {
+    const opts = { bomSources: [], equipmentTypes: [] } as unknown as Parameters<typeof bomSourceLabel>[1];
+    expect(bomSourceLabel(line({ bomMode: "UPLOAD", bomUpload: upload }), opts)).toBe("Uploaded from bom.xlsx (2 lines)");
+    expect(bomSourceLabel(line({ bomMode: "UPLOAD" }), opts)).toBe("Upload chosen, but no file read yet");
   });
 });

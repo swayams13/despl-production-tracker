@@ -15,6 +15,9 @@ describe.skipIf(!RUN_DB)("Lean Core J7a job drafts (DB)", async () => {
   const { previewJob } = await import("./job-preview.service");
   const { saveDraft, copyJobToDraft, releaseDraft, discardDraft, listDrafts, loadDraft } = await import("./job-draft.service");
   const { releaseJobBoms } = await import("./bom-release.test-util");
+  const { previewBomUpload } = await import("./bom-upload.service");
+  const { loadIntakeOptions, BOM_SOURCE_LIMIT } = await import("./job-intake.read");
+  const XLSX = await import("xlsx");
   const owner = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
   const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   let n = 0;
@@ -491,7 +494,7 @@ describe.skipIf(!RUN_DB)("Lean Core J7a job drafts (DB)", async () => {
       await createJob(other.actors.admin, other.input());
       const { loadIntakeOptions, loadCopyableJobs } = await import("./job-intake.read");
       const opts = await loadIntakeOptions(w.actors.planner);
-      expect(opts.equipmentTypes.find((t) => t.id === type.id)?.kit).toEqual([
+      expect(opts.equipmentTypes.find((t) => t.id === type.id)?.kit.map(({ name, qty, qtySource }) => ({ name, qty, qtySource }))).toEqual([
         { name: "Plate", qty: 1, qtySource: "FIXED" }, { name: "Shell ring", qty: 1, qtySource: "ANSWER:shell_courses" }, { name: "Coupling", qty: 3, qtySource: "FIXED" },
       ]);
       const jobs = await loadCopyableJobs(w.actors.planner);
@@ -499,6 +502,156 @@ describe.skipIf(!RUN_DB)("Lean Core J7a job drafts (DB)", async () => {
       expect(jobs[0]).toMatchObject({ clientName: "ACME", product: "Vessel × 2", units: 2 });
       await expect(loadCopyableJobs(w.actors.supervisor)).rejects.toMatchObject({ code: "FORBIDDEN" });
       await expect(loadIntakeOptions(w.actors.qc)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+  });
+  // ── Wizard: the master-BOM picker's list and the BOM Excel upload ───────────────
+  describe("Master BOM picker and BOM upload", () => {
+    /** A real .xlsx: the first row is the header. */
+    const book = (rows: unknown[][], sheet = "BOM") => {
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), sheet);
+      return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    };
+    const HEAD = ["Item No", "Part Name", "Material", "Qty", "Drawing ref"];
+    const good = book([HEAD, [1, "Shell", "SA 516 Gr 70", 1, "D-1"], [2, "Dish end", "SA 516 Gr 70", 2, "D-2"], [3, "Nozzle N1", "SA 105", "4 NOS.", "D-3"]]);
+    const upload = (w: Awaited<ReturnType<typeof world>>, bytes: Buffer | Uint8Array = good, fileName = "bom.xlsx", who: keyof typeof w.actors = "planner") =>
+      previewBomUpload(w.actors[who], { fileName, bytes });
+
+    it.each([
+      ["a file that is not .xlsx", (w: never) => upload(w, good, "bom.csv"), /\.xlsx/],
+      ["an old .xls file", (w: never) => upload(w, good, "bom.xls"), /\.xlsx/],
+      ["bytes that are not a workbook", (w: never) => upload(w, Buffer.from("not a zip at all"), "bom.xlsx"), /does not look like an Excel/],
+      ["an empty file", (w: never) => upload(w, Buffer.alloc(0), "bom.xlsx"), /empty/],
+      ["a sheet with a header and no lines", (w: never) => upload(w, book([HEAD])), /no BOM lines/],
+      ["a file without a quantity column", (w: never) => upload(w, book([["Item No", "Part Name"], [1, "Shell"]])), /column for Quantity/],
+      ["a file where no row can be read", (w: never) => upload(w, book([HEAD, ["x", "", "", "", ""], ["y", "", "", "", ""]])), /None of the 2 rows could be read/],
+      ["more than 500 lines", (w: never) => upload(w, book([HEAD, ...Array.from({ length: 501 }, (_, i) => [i + 1, `Part ${i}`, "", 1, ""])])), /more than 500 lines/],
+      ["a component type code nobody has", (w: never) => upload(w, book([[...HEAD, "Component Type"], [1, "Shell", "", 1, "", "NOPE"]])), /Unrecognised component type code: "NOPE"/],
+    ])("refuses %s", async (_n, run, message) => {
+      const w = await world("UPREFUSE");
+      await expect(run(w as never)).rejects.toMatchObject({ code: "VALIDATION_FAILED", message: expect.stringMatching(message) });
+    });
+
+    it("lets Admin, Production Head and Planner read a file, and refuses everyone else", async () => {
+      const w = await world("UPROLES");
+      for (const who of ["admin", "head", "planner"] as const) expect((await upload(w, good, "bom.xlsx", who)).lines).toHaveLength(3);
+      for (const who of ["supervisor", "qc", "client"] as const) await expect(upload(w, good, "bom.xlsx", who)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("reads lines through the importer's own column names, reports unused columns and unreadable rows by Excel row, and writes nothing", async () => {
+      const w = await world("UPREAD");
+      const before = await tally(w.tenantId);
+      const bytes = book([[...HEAD, "Parent BOM Item Id"], [1, "Shell", "SA 516", 1, "D", ""], ["bad", "Head", "", 1, "", ""], [3, "Nozzle", "", "4 NOS.", "", ""], [3, "Nozzle again", "", 1, "", ""], [5, "", "", 1, "", ""]]);
+      const p = await upload(w, bytes);
+      expect(p.lines.map((l) => [l.itemNo, l.partName, l.sourceQty])).toEqual([[1, "Shell", "1"], [3, "Nozzle", "4 NOS."], [3, "Nozzle again", "1"]]);
+      expect(p.failures.map((f) => f.row)).toEqual([3, 6]);
+      expect(p.failures[1].error).toMatch(/Part name/);
+      expect(p.columns).toContainEqual({ header: "Qty", readAs: "Quantity" });
+      expect(p.columns).toContainEqual({ header: "Drawing ref", readAs: null });
+      expect(p.warnings.join(" ")).toMatch(/Drawing ref/);
+      expect(p.warnings.join(" ")).toMatch(/Item no 3 appears on rows 4, 5/);
+      expect(p.warnings.join(" ")).toMatch(/parent item column is not used/);
+      expect(p).toMatchObject({ fileName: "bom.xlsx", sheetName: "BOM", totalRows: 5 });
+      expect(await tally(w.tenantId)).toEqual(before);
+    });
+
+    it("refuses an upload together with a kit or a copied BOM, and past 500 lines, at createJob", async () => {
+      const w = await world("UPSCHEMA");
+      const src = await w.sourceJob();
+      const lines = [{ itemNo: 1, partName: "Shell", sourceQty: "1" }];
+      await expect(createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomLines: lines, copyBomFromEquipmentId: src.eqs[0].id })] }))).rejects.toThrow(/one BOM source/);
+      await expect(createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomLines: lines, bomFromKit: true, equipmentTypeId: 1 })] }))).rejects.toThrow(/one BOM source/);
+      const many = Array.from({ length: 501 }, (_, i) => ({ itemNo: i + 1, partName: "P", sourceQty: "1" }));
+      await expect(createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomLines: many })] }))).rejects.toThrow(/up to 500/);
+    });
+
+    it("creates DRAFT revision 1 from the uploaded lines, makes no floor rows, and the preview counts equal the create without writing", async () => {
+      const w = await world("UPCREATE");
+      const p = await upload(w);
+      const input = w.input({ equipments: [w.line("V", ["S1", "S2"], { bomLines: p.lines, bomFileName: p.fileName })] });
+      const before = await tally(w.tenantId);
+      const pv = await previewJob(w.actors.planner, input);
+      expect(pv.result.bomItemCount).toBe(3);
+      expect(await tally(w.tenantId)).toEqual(before);
+
+      const r = await createJob(w.actors.admin, input);
+      expect(r.bomItemCount).toBe(pv.result.bomItemCount);
+      const eq = await owner.equipment.findFirstOrThrow({ where: { jobId: r.jobId } });
+      const revs = await owner.bomRevision.findMany({ where: { equipmentId: eq.id } });
+      expect(revs.map((x) => [x.revisionNo, x.status, x.materializedAt])).toEqual([[1, "DRAFT", null]]);
+      const items = await owner.bomItem.findMany({ where: { equipmentId: eq.id }, orderBy: { itemNo: "asc" } });
+      expect(items.map((i) => [i.itemNo, i.partName, i.material, i.sourceQty, i.bomRevisionId === revs[0].id, i.jobId === r.jobId])).toEqual([
+        [1, "Shell", "SA 516 Gr 70", "1", true, true], [2, "Dish end", "SA 516 Gr 70", "2", true, true], [3, "Nozzle N1", "SA 105", "4 NOS.", true, true],
+      ]);
+      expect(await owner.component.count({ where: { equipmentId: eq.id } })).toBe(0);
+      expect(await owner.assemblyStep.count({ where: { unit: { equipmentId: eq.id } } })).toBe(0);
+      const audit = await owner.auditLog.findFirstOrThrow({ where: { tenantId: w.tenantId, action: "job.create", entityId: String(r.jobId) } });
+      expect((audit.after as { bomUploads?: unknown }).bomUploads).toEqual([{ line: "V", fileName: "bom.xlsx", lines: 3 }]);
+      expect((audit.after as { bomItemCount: number }).bomItemCount).toBe(3);
+    });
+
+    it("resolves a component type code to the type, and refuses the whole job (nothing written) when the code is gone by create time", async () => {
+      const w = await world("UPCODE");
+      const ct = await owner.componentTypeRef.create({ data: { tenantId: w.tenantId, code: uniq("SHL"), name: "Shell ring" } });
+      const bytes = book([[...HEAD, "Component Type"], [1, "Shell", "", 1, "", ct.code]]);
+      const p = await upload(w, bytes);
+      expect(p.lines[0].componentType).toBe(ct.code);
+      const r = await createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomLines: p.lines })] }));
+      expect((await owner.bomItem.findFirstOrThrow({ where: { jobId: r.jobId } })).componentTypeId).toBe(ct.id);
+
+      const before = await tally(w.tenantId);
+      await expect(
+        createJob(w.actors.admin, w.input({ equipments: [w.line("V", ["S1"], { bomLines: [{ itemNo: 1, partName: "Shell", sourceQty: "1", componentType: "GONE" }] })] })),
+      ).rejects.toMatchObject({ code: "VALIDATION_FAILED", message: expect.stringMatching(/"GONE"/) });
+      expect(await tally(w.tenantId)).toEqual(before);
+    });
+
+    it("keeps the parsed lines in a saved draft (a planner saves, only Production Head or Admin releases) and the release creates them", async () => {
+      const w = await world("UPDRAFT");
+      const p = await upload(w);
+      const d = await saveDraft(w.actors.planner, { payload: w.input({ equipments: [w.line("V", ["S1"], { bomLines: p.lines, bomFileName: p.fileName })] }) });
+      expect(((d.payload.equipments as Array<{ bomLines: unknown[] }>)[0]).bomLines).toHaveLength(3);
+      await expect(releaseDraft(w.actors.planner, { draftId: d.id })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      const { job } = await releaseDraft(w.actors.head, { draftId: d.id });
+      expect(job.bomItemCount).toBe(3);
+      // The draft still refuses a key createJob does not know, inside a line.
+      await expect(saveDraft(w.actors.planner, { payload: w.input({ equipments: [w.line("V", ["S1"], { bomFile: "x" })] }) })).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    });
+
+    it("lists earlier lines that have BOM lines, newest job first, with their job, client and part codes, and none of another tenant's or a line without BOM lines", async () => {
+      const w = await world("PICK");
+      const other = await world("PICK2");
+      const ct = await owner.componentTypeRef.create({ data: { tenantId: w.tenantId, code: uniq("NZ"), name: "Nozzle" } });
+      await w.sourceJob();
+      const second = await createJob(w.actors.admin, w.input({ equipments: [w.line("Bare", ["B1"])] })); // no BOM lines
+      const third = await createJob(w.actors.admin, w.input({ equipments: [w.line("Late", ["L1"])] }));
+      const lateEq = await owner.equipment.findFirstOrThrow({ where: { jobId: third.jobId } });
+      await owner.bomItem.create({ data: { jobId: third.jobId, equipmentId: lateEq.id, itemNo: 1, partName: "N", sourceQty: "1", componentTypeId: ct.id } });
+      await other.sourceJob();
+
+      const opts = await loadIntakeOptions(w.actors.planner);
+      expect(opts.bomSources.map((s) => s.equipmentName)).toEqual(["Late", "Shell", "Skirt"]);
+      expect(opts.bomSources[0]).toMatchObject({ clientName: "ACME", familyId: w.family.id, itemCount: 1, partCodes: [ct.code], equipmentTypeId: null });
+      expect(opts.bomSources[0].jobNumber).toBe((await owner.job.findUniqueOrThrow({ where: { id: third.jobId } })).jobNumber);
+      expect(opts.bomSources.map((s) => s.equipmentId)).not.toContain((await owner.equipment.findFirstOrThrow({ where: { jobId: second.jobId } })).id);
+      const oursOnly = await owner.equipment.findMany({ where: { id: { in: opts.bomSources.map((s) => s.equipmentId) } }, select: { job: { select: { tenantId: true } } } });
+      expect(new Set(oursOnly.map((e) => e.job.tenantId))).toEqual(new Set([w.tenantId]));
+      await expect(loadIntakeOptions(w.actors.supervisor)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    });
+
+    it("lists at most the newest 200 lines", async () => {
+      const w = await world("PICKCAP");
+      const old = await createJob(w.actors.admin, w.input({ equipments: [w.line("Oldest", ["O1"])] }));
+      const job = await createJob(w.actors.admin, w.input({ equipments: [w.line("Newest", ["N1"])] }));
+      const eqs = Array.from({ length: BOM_SOURCE_LIMIT }, (_, i) => ({ jobId: job.jobId, name: `Bulk ${i}` }));
+      await owner.equipment.createMany({ data: eqs });
+      const all = await owner.equipment.findMany({ where: { jobId: job.jobId }, select: { id: true } });
+      await owner.bomItem.createMany({ data: all.map((e) => ({ jobId: job.jobId, equipmentId: e.id, itemNo: 1, partName: "P", sourceQty: "1" })) });
+      const oldEq = await owner.equipment.findFirstOrThrow({ where: { jobId: old.jobId } });
+      await owner.bomItem.create({ data: { jobId: old.jobId, equipmentId: oldEq.id, itemNo: 1, partName: "P", sourceQty: "1" } });
+      const opts = await loadIntakeOptions(w.actors.planner);
+      expect(opts.bomSources).toHaveLength(BOM_SOURCE_LIMIT);
+      expect(opts.bomSources.map((s) => s.equipmentName)).not.toContain("Oldest");
     });
   });
 });

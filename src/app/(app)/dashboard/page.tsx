@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { landingFor } from "@/lib/shared/nav";
@@ -33,7 +34,7 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
  */
 export default async function Dashboard({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   if (!hasRole(actor, ROLES.MANAGEMENT, ROLES.PRODUCTION_HEAD, ROLES.ADMIN)) redirect(landingFor(actor.roles, { leanFloor: FEATURES.leanFloor }));
   if (!FEATURES.leanFloor) return <LegacyDashboard actor={actor} searchParams={searchParams} />;

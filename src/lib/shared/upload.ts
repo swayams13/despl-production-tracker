@@ -12,3 +12,6 @@ export function checkWorkbookUpload(file: { name: string; size: number; head: Ar
   if (!(h[0] === 0x50 && h[1] === 0x4b && h[2] === 0x03 && h[3] === 0x04)) return "This does not look like an Excel workbook (.xlsx).";
   return null;
 }
+
+/** The most lines one wizard BOM upload carries into a draft (the draft payload holds the parsed lines). */
+export const BOM_UPLOAD_MAX_LINES = 500;

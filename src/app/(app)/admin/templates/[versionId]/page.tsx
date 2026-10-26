@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { redirect, notFound } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { loadVersionEditor } from "@/lib/services/template.read";
@@ -6,7 +7,7 @@ import { VersionEditorClient } from "./_client";
 
 export default async function VersionEditorPage({ params }: { params: Promise<{ versionId: string }> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   if (!hasRole(actor, ROLES.ADMIN, ROLES.PRODUCTION_HEAD)) redirect("/dashboard");
 

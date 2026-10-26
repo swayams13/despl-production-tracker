@@ -18,6 +18,7 @@ import { flushRuleDecisions, lineConfig, LineRules, loadQuestionDefs } from "./c
 import { notifyJobCreated } from "./notifications.service";
 import { assertShellCoursesAnswered, generatedJointTypesToPlan } from "./assembly.service";
 import { resolveAssemblyTemplateVersion } from "./assembly-template.resolve";
+import { resolveComponentTypeCodes, unrecognisedCodes } from "./bom.service";
 import { bindExistingInspectionSteps, type BindExistingResult } from "./assembly-qcp-match";
 
 /**
@@ -477,11 +478,16 @@ export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput):
       // J5a: the copied lines wait as DRAFT revision 1; BOM release makes the floor rows.
       // J7a: per line. The job-level source still feeds the first line when that line names none.
       let bomCount = 0;
+      const bomUploads: { line: string; fileName: string | null; lines: number }[] = [];
       let weldMapJointCount = 0;
       for (const [i, block] of parsed.equipments.entries()) {
         const bomSource = block.copyBomFromEquipmentId ?? (block.bomFromKit ? null : i === 0 ? parsed.copyBomFromEquipmentId : null);
         if (bomSource != null) bomCount += (await copyBom(tx, bomSource, equipmentIds[i], actor.tenantId, job.id, actor.userId)).count;
         if (block.bomFromKit) bomCount += await kitBom(tx, block, equipmentIds[i], actor.tenantId, job.id, actor.userId);
+        if (block.bomLines?.length) {
+          bomCount += await uploadedBom(tx, block.bomLines, equipmentIds[i], actor.tenantId, job.id, actor.userId);
+          bomUploads.push({ line: block.name, fileName: block.bomFileName ?? null, lines: block.bomLines.length });
+        }
         if (block.copyWeldMapFromEquipmentId != null) {
           weldMapJointCount += await copyWeldMap(tx, block.copyWeldMapFromEquipmentId, equipmentIds[i], actor.tenantId, job.id);
         }
@@ -523,6 +529,7 @@ export async function createJobTx(tx: Tx, actor: Actor, parsed: CreateJobInput):
             equipmentCount: parsed.equipments.length,
             unitCount: result.unitCount,
             bomItemCount: result.bomItemCount,
+            ...(bomUploads.length > 0 ? { bomUploads } : {}),
             ruleDecisionCount: result.ruleDecisionCount,
             flaggedRuleCount: result.flaggedRuleCount,
             droppedEdgeCount: result.droppedEdgeCount,
@@ -1038,6 +1045,36 @@ async function kitBom(
     }),
   });
   return kit.length;
+}
+
+/**
+ * Wizard upload: the BOM lines read from an Excel file (previewBomUpload) as the line's DRAFT revision 1,
+ * made the same way as the kit's and a copied job's so the preview counts equal the real create. A
+ * component type code that no longer resolves refuses the whole job (as the BOM panel's import does).
+ */
+async function uploadedBom(
+  tx: Tx,
+  lines: NonNullable<CreateJobInput["equipments"][number]["bomLines"]>,
+  equipmentId: number,
+  tenantId: number,
+  jobId: number,
+  createdBy: number,
+): Promise<number> {
+  const codes = [...new Set(lines.flatMap((l) => (l.componentType ? [l.componentType] : [])))];
+  const known = await resolveComponentTypeCodes(tx, tenantId, codes);
+  const unknown = codes.filter((c) => !known.has(c));
+  if (unknown.length > 0) throw new AppError(ERROR_CODES.VALIDATION_FAILED, { unknown, reason: unrecognisedCodes(unknown) }, unrecognisedCodes(unknown));
+  const revision = await tx.bomRevision.create({ data: { equipmentId, revisionNo: 1, status: "DRAFT", createdBy, jobId } });
+  await tx.bomItem.createMany({
+    data: lines.map(({ componentType, ...l }) => ({
+      ...l,
+      equipmentId,
+      bomRevisionId: revision.id,
+      jobId,
+      componentTypeId: componentType ? (known.get(componentType) ?? null) : null,
+    })),
+  });
+  return lines.length;
 }
 
 /**
