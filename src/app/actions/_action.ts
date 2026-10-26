@@ -119,8 +119,8 @@ function log(level: "info" | "error", tag: string, payload: Record<string, unkno
   })();
 }
 
-function result(code: ErrorCode, detail?: Record<string, unknown>): ActionResult {
-  const base = { ok: false as const, code, message: messageFor(code, detail) ?? "This action could not be completed." };
+function result(code: ErrorCode, detail?: Record<string, unknown>, message?: string): ActionResult {
+  const base = { ok: false as const, code, message: message ?? messageFor(code, detail) ?? "This action could not be completed." };
   return detail ? { ...base, detail } : base;
 }
 
@@ -137,7 +137,10 @@ export function toActionError(e: unknown): ActionResult {
       const reason = typeof e.detail?.reason === "string" ? e.detail.reason : undefined;
       return result(e.code, reason ? { reason } : undefined);
     }
-    return result(e.code, e.detail);
+    // A service that names the problem in its own words ("Enter the code clause...") keeps them; the
+    // code's generic sentence ("values not valid") is only the fallback.
+    const own = e.code === ERROR_CODES.VALIDATION_FAILED && e.message !== messageFor(e.code, e.detail) ? e.message : undefined;
+    return result(e.code, e.detail, own);
   }
 
   // Prisma's interactive-transaction timeout: everything in it was rolled back.

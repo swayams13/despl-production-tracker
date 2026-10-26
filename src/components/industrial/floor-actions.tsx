@@ -241,13 +241,15 @@ export function NotifyBlockerButton({
   row,
 }: {
   unitPublicId: string;
-  row: Pick<FloorRow, "id" | "refusal"> & { kind: "COMPONENT_OP" | "ASSEMBLY_STEP" };
+  row: Pick<FloorRow, "id" | "refusal"> & Partial<Pick<FloorRow, "ruleNcr" | "ruleNcrOpen">> & { kind: "COMPONENT_OP" | "ASSEMBLY_STEP" };
 }) {
   const d = useDict();
   const [nudge, setNudge] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const who = row.refusal?.clearedBy;
-  if (!who) return null;
+  // An open rule NCR (H5/H6) is already with QC: nobody is left to notify.
+  if (!who || row.ruleNcr?.openNcrId != null || row.ruleNcrOpen) return null;
   const notify = async () => {
     if (busy) return;
     setBusy(true);
@@ -258,12 +260,17 @@ export function NotifyBlockerButton({
       role: who.role as "QC" | "STORES" | "ENGINEERING" | "PRODUCTION_HEAD",
     });
     setBusy(false);
-    setNudge(r.ok ? nudgeText(d, who.label, r.recipients) : r.message);
+    // A refusal (e.g. the cooldown) shows beside the button, which stays tappable; only a sent nudge locks it.
+    setError(r.ok ? null : r.message);
+    setNudge(r.ok ? nudgeText(d, who.label, r.recipients) : null);
   };
   return (
-    <button className="btn" disabled={busy || nudge != null} onClick={notify}>
-      {nudge ?? `Notify ${who.label}`}
-    </button>
+    <>
+      <button className="btn" disabled={busy || nudge != null} onClick={notify}>
+        {nudge ?? `Notify ${who.label}`}
+      </button>
+      {error && <span role="alert">{error}</span>}
+    </>
   );
 }
 

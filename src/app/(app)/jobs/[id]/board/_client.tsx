@@ -533,7 +533,7 @@ function ItemRow({
         <div className="fl-refusal" role="note">
           <b>{f.refusal.message}</b>
           {f.refusal.clearedBy && <span>Can clear it: {f.refusal.clearedBy.label}</span>}
-          {canAct && <NotifyBlockerButton unitPublicId={unitPublicId} row={{ kind: item.kind, id: item.id, refusal: f.refusal }} />}
+          {canAct && <NotifyBlockerButton unitPublicId={unitPublicId} row={{ kind: item.kind, id: item.id, refusal: f.refusal, ruleNcr: f.ruleNcr, ruleNcrOpen: f.ruleNcrOpen }} />}
         </div>
       )}
       {!leanFloor && (f || item.canInspect) && <span className="sub">Actions turn on with the lean floor.</span>}

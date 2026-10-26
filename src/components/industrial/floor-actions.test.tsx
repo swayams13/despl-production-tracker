@@ -105,6 +105,27 @@ describe("floor messages (rehearsal polish)", () => {
     },
   );
 
+  describe("NotifyBlockerButton after a rule NCR opens, and after a refusal", () => {
+    const base = { kind: "ASSEMBLY_STEP" as const, id: 1, refusal: { clearedBy: { role: "QC", label: "QC" } } as never };
+    it.each([
+      ["no NCR yet", {}, true],
+      ["an NCR open (QC's read: ruleNcr.openNcrId)", { ruleNcr: { rule: "H5" as const, openNcrId: 42 } }, false],
+      ["an NCR open (everyone else's read: ruleNcrOpen)", { ruleNcr: null, ruleNcrOpen: true }, false],
+      ["a rule that applies but no NCR open", { ruleNcr: { rule: "H6" as const, openNcrId: null }, ruleNcrOpen: false }, true],
+    ])("%s", (_l, extra, shown) => {
+      render(<NotifyBlockerButton unitPublicId="u" row={{ ...base, ...extra }} />, { wrapper });
+      expect(screen.queryByRole("button", { name: "Notify QC" }) != null).toBe(shown);
+    });
+
+    it("a refusal (the cooldown) shows its reason beside the button, which stays tappable", async () => {
+      vi.mocked(notifyBlockerAction).mockResolvedValueOnce({ ok: false, code: "NUDGE_COOLDOWN", message: "QC was told a few minutes ago." } as never);
+      render(<NotifyBlockerButton unitPublicId="u" row={base} />, { wrapper });
+      await act(async () => screen.getByRole("button", { name: "Notify QC" }).click());
+      expect(screen.getByRole("alert").textContent).toBe("QC was told a few minutes ago.");
+      expect((screen.getByRole("button", { name: "Notify QC" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+  });
+
   // L1.2i: QC raises the H5/H6 NCR from the refused row. Violations first.
   describe("RaiseRuleNcrButton", () => {
     const refused = { kind: "ASSEMBLY_STEP" as const, id: 7, ruleNcr: { rule: "H5" as const, openNcrId: null } };
