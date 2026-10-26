@@ -65,6 +65,7 @@ export function JobDetailClient({
   canEditJobDates,
   canEditJobDetails,
   canManagePacking,
+  canReleaseBom,
   canManageDispatch,
   canApproveQcpWaiver,
   canRecordQcp,
@@ -95,6 +96,8 @@ export function JobDetailClient({
   canEditJobDates: boolean;
   canEditJobDetails: boolean;
   canManagePacking: boolean;
+  /** Engineering, Production Head, Admin: may open the BOM release page. */
+  canReleaseBom?: boolean;
   canManageDispatch: boolean;
   canApproveQcpWaiver: boolean;
   canRecordQcp: boolean;
@@ -218,7 +221,7 @@ export function JobDetailClient({
       ) : view === "bom" ? (
         bom ? <BomPanel jobId={jobId} bom={bom} access={storesAccess} canVerify={canVerify} /> : <p className="note" style={{ margin: "16px 0" }}>No BOM loaded for this job.</p>
       ) : view === "assembly" ? (
-        assembly ? <AssemblyPanel jobId={jobId} data={assembly} canVerify={canVerify} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
+        assembly ? <AssemblyPanel jobId={jobId} data={assembly} canReleaseBom={canReleaseBom} canVerify={canVerify} /> : <p className="note" style={{ margin: "16px 0" }}>No assembly data for this job.</p>
       ) : view === "qcp" ? (
         qcp ? <QcpGrid jobId={jobId} data={qcp} canApproveWaiver={canApproveQcpWaiver} canRecord={canRecordQcp} /> : <p className="note" style={{ margin: "16px 0" }}>No QCP template for this job.</p>
       ) : view === "packing" ? (
