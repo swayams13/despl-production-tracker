@@ -5,7 +5,7 @@ import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { withTenant } from "@/lib/db";
 import { FEATURES } from "@/lib/shared/flags";
 import { loadWorkspaceView } from "@/lib/services/workspace.read";
-import { loadJobs } from "@/lib/services/jobs.read";
+import { loadJobRefs } from "@/lib/services/jobs.read";
 import { UnitRow, UnitCardView, CardBulkActions, QcRow, QcCardView, HoldRow, HoldCardView, FilterChip, SortSelect } from "./_client";
 import { ResponsiveTable } from "@/components/industrial/responsive-table";
 
@@ -45,7 +45,7 @@ export default async function Workspace({
   const jobId = Number.isInteger(jobParam) && jobParam > 0 ? jobParam : null;
 
   if (!jobId) {
-    const jobs = await loadJobs(actor); // already tenant/client scoped — see jobs.read.ts
+    const jobs = await loadJobRefs(actor); // already tenant/client scoped — see jobs.read.ts
     return (
       <>
         <div className="page-h"><h1>My Workspace</h1></div>

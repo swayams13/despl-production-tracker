@@ -57,8 +57,13 @@ export async function loadEvents(
     // Two branches, not one join, because the two aggregate types reach
     // process/unit context through different foreign keys (pp.id directly vs
     // dr.process_plan_id).
+    //
+    // AUD-023: each branch takes its own newest `limit` rows BEFORE the union (the newest `limit` of
+    // the union are always inside the union of each branch's newest `limit`), so the outer
+    // ORDER BY/LIMIT sorts at most 2 x limit rows instead of every event ever recorded. The branches
+    // order by de.at/de.id so the (tenant_id, aggregate_type, at, id) index serves them.
     const rows = await tx.$queryRaw<Row[]>`
-      SELECT de.id, de.type, de.at,
+      (SELECT de.id, de.type, de.at,
              usr.name    AS actor_name,
              jp.name     AS process_name,
              u.serial_no AS serial_no,
@@ -70,10 +75,12 @@ export async function loadEvents(
       LEFT JOIN users usr        ON usr.id = de.actor_id
       WHERE de.aggregate_type = 'ProcessPlan'
         AND (${opts.jobId ?? null}::int IS NULL OR jp.job_id = ${opts.jobId ?? null}::int)
+      ORDER BY de.at DESC, de.id DESC
+      LIMIT ${limit})
 
       UNION ALL
 
-      SELECT de.id, de.type, de.at,
+      (SELECT de.id, de.type, de.at,
              usr.name    AS actor_name,
              jp.name     AS process_name,
              u.serial_no AS serial_no,
@@ -87,6 +94,8 @@ export async function loadEvents(
       LEFT JOIN users usr             ON usr.id = de.actor_id
       WHERE de.aggregate_type = 'DelayReason'
         AND (${opts.jobId ?? null}::int IS NULL OR jp.job_id = ${opts.jobId ?? null}::int)
+      ORDER BY de.at DESC, de.id DESC
+      LIMIT ${limit})
 
       ORDER BY at DESC, id DESC
       LIMIT ${limit}

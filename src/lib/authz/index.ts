@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { withTenant } from "@/lib/db";
 import { readSession } from "@/lib/auth/session";
 import { AppError, ERROR_CODES } from "@/lib/shared/errors";
@@ -49,8 +50,15 @@ export interface Actor {
  * Roles and department scopes are read from the database on every call rather
  * than trusted from the token, so a revoked role or a department reassignment
  * takes effect on the next request.
+ *
+ * AUD-061: wrapped in React `cache()`, so the layout and the page of one
+ * render share a single lookup (a `withTenant` transaction plus a user query)
+ * instead of running it per caller. `cache()` is scoped to one render and is a
+ * plain pass-through outside a render (Server Actions, route handlers, tests),
+ * so a mutation never reads a stale actor: the re-render after an action
+ * starts a fresh cache.
  */
-export async function getActor(): Promise<Actor | null> {
+export const getActor = cache(async (): Promise<Actor | null> => {
   const session = await readSession();
   if (!session) return null;
 
@@ -81,7 +89,7 @@ export async function getActor(): Promise<Actor | null> {
       locale: user.locale,
     };
   });
-}
+});
 
 /**
  * "Give me an actor I may act as." Every server action and API route goes

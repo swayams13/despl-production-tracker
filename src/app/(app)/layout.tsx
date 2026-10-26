@@ -6,7 +6,7 @@ import { ThemeRoot } from "@/components/industrial/theme-root";
 import { getActor } from "@/lib/authz";
 import { loadOverdueCounts } from "@/lib/services/workspace.read";
 import { loadQcReadyCount } from "@/lib/services/qc-queue.read";
-import { loadJobs, type JobListItem } from "@/lib/services/jobs.read";
+import { loadShellJobs, type ShellJob } from "@/lib/services/jobs.read";
 import { loadNotifications } from "@/lib/services/notifications.read";
 import { toasterTheme } from "@/lib/theme";
 import { FEATURES } from "@/lib/shared/flags";
@@ -24,7 +24,8 @@ import { FEATURES } from "@/lib/shared/flags";
  * client-user redirect (`if (actor.clientId != null) redirect("/portal")`,
  * AUD-025): every page in this group loads internal job telemetry
  * (percentComplete, forecastVarianceDays, overduePlans, openHoldPoints) via
- * the `Promise.all` below and hands it to `AppShell`'s job switcher, so a
+ * the `Promise.all` below and hands it to `AppShell`'s job switcher (AUD-020:
+ * the cheap `loadShellJobs`, not the portfolio-wide `loadJobs`), so a
  * client actor must never reach that far — the per-page copies of this
  * check (kept for defence in depth) are too late by the time this layout
  * has already loaded and rendered the data into the shell. `/portal` lives
@@ -49,9 +50,9 @@ export default async function AppGroupLayout({ children }: { children: ReactNode
   let teamOverdueCount = 0;
   let qcWaitingCount = 0;
   let notifications = { unreadCount: 0, recent: [] as Awaited<ReturnType<typeof loadNotifications>>["recent"] };
-  let jobs: JobListItem[] = [];
+  let jobs: ShellJob[] = [];
   if (actor) {
-    const [counts, n, j] = await Promise.all([loadOverdueCounts(actor), loadNotifications(actor), loadJobs(actor)]);
+    const [counts, n, j] = await Promise.all([loadOverdueCounts(actor), loadNotifications(actor), loadShellJobs(actor)]);
     // Today's badge is mine once the lean floor is on (L2.5); until then it is the department count it always was.
     overdueCount = FEATURES.leanFloor ? counts.mine : counts.dept;
     teamOverdueCount = counts.dept;

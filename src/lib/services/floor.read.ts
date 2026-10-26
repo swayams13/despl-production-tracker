@@ -430,7 +430,7 @@ export async function loadFloorUnit(
   const spine =
     opts.spine === false
       ? []
-      : ((await loadUnitSpinesBatch(actor, [seen.unit.jobId])).get(seen.unit.jobId)?.find((s) => s.unitId === seen.unit.id)?.segments ?? []);
+      : ((await loadUnitSpinesBatch(actor, [seen.unit.jobId], { unitId: seen.unit.id })).get(seen.unit.jobId)?.find((s) => s.unitId === seen.unit.id)?.segments ?? []);
 
   return {
     unit: {

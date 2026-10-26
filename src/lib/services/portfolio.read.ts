@@ -83,41 +83,59 @@ export async function loadPortfolio(actor: Actor): Promise<Portfolio> {
     // ("what changed since we last met"), so the window must not reset to zero
     // at 00:00 IST while people are still working. `loadDailyDigest` uses IST
     // calendar days because it is a dated report — the difference is deliberate.
+    // AUD-060: three grouped aggregates (one pass each over the window) joined by job id, not three
+    // correlated subqueries per job. Each count keeps its original predicate; a job with no matching
+    // rows reads 0, as the scalar subqueries did.
     const changes = jobIds.length
       ? await tx.$queryRaw<ChangeRow[]>`
-          WITH win AS (SELECT (now() AT TIME ZONE 'UTC') - interval '24 hours' AS since)
+          WITH win AS (SELECT (now() AT TIME ZONE 'UTC') - interval '24 hours' AS since),
+          verified AS (
+            SELECT jp.job_id, count(*)::int AS n
+              FROM domain_events de
+              JOIN process_plans pp ON pp.id::text = de.aggregate_id
+              JOIN job_processes jp ON jp.id = pp.job_process_id
+             WHERE de.aggregate_type = 'ProcessPlan'
+               AND de.type = 'ProcessVerified'
+               AND jp.job_id = ANY(${jobIds}::int[])
+               AND de.at >= (SELECT since FROM win)
+             GROUP BY jp.job_id
+          ),
+          newly_overdue AS (
+            SELECT sr.job_id, count(*)::int AS n
+              FROM process_plans pp
+              JOIN schedule_runs sr ON sr.id = pp.schedule_run_id AND sr.is_current = true
+             WHERE sr.job_id = ANY(${jobIds}::int[])
+               AND pp.status <> 'COMPLETE'
+               AND pp.planned_finish >= (SELECT since FROM win)
+               AND pp.planned_finish < ist_day_marker(now())
+             GROUP BY sr.job_id
+          ),
+          -- Same predicate as loadDailyDigest's "holds opened" (reports.read.ts):
+          -- a gated process (one carrying a blocks_completion QCP code) that
+          -- STARTED in the window. There is no "hold opened" event; the process
+          -- crossing NOT_STARTED -> IN_PROGRESS is the closest real signal that
+          -- its hold point's clock started. Only the window differs — rolling
+          -- 24h here, IST calendar day in the digest (spec §5.3).
+          holds AS (
+            SELECT jp.job_id, count(DISTINCT pp.id)::int AS n
+              FROM process_plans pp
+              JOIN job_processes jp ON jp.id = pp.job_process_id
+              JOIN qcp_item_processes qip ON qip.job_process_id = pp.job_process_id
+              JOIN qcp_item_party_codes qipc ON qipc.qcp_item_id = qip.qcp_item_id
+              JOIN qcp_code_refs qcr ON qcr.id = qipc.qcp_code_id AND qcr.blocks_completion = true
+             WHERE jp.job_id = ANY(${jobIds}::int[])
+               AND pp.actual_start >= (SELECT since FROM win)
+               AND pp.actual_start < (now() AT TIME ZONE 'UTC')
+             GROUP BY jp.job_id
+          )
           SELECT j.id AS job_id,
-                 (SELECT count(*)::int
-                    FROM domain_events de
-                    JOIN process_plans pp ON pp.id::text = de.aggregate_id
-                    JOIN job_processes jp ON jp.id = pp.job_process_id
-                   WHERE de.aggregate_type = 'ProcessPlan'
-                     AND de.type = 'ProcessVerified'
-                     AND jp.job_id = j.id
-                     AND de.at >= (SELECT since FROM win)) AS verified,
-                 (SELECT count(*)::int
-                    FROM process_plans pp
-                    JOIN schedule_runs sr ON sr.id = pp.schedule_run_id AND sr.is_current = true
-                   WHERE sr.job_id = j.id
-                     AND pp.status <> 'COMPLETE'
-                     AND pp.planned_finish >= (SELECT since FROM win)
-                     AND pp.planned_finish < ist_day_marker(now())) AS newly_overdue,
-                 -- Same predicate as loadDailyDigest's "holds opened" (reports.read.ts):
-                 -- a gated process (one carrying a blocks_completion QCP code) that
-                 -- STARTED in the window. There is no "hold opened" event; the process
-                 -- crossing NOT_STARTED -> IN_PROGRESS is the closest real signal that
-                 -- its hold point's clock started. Only the window differs — rolling
-                 -- 24h here, IST calendar day in the digest (spec §5.3).
-                 (SELECT count(DISTINCT pp.id)::int
-                    FROM process_plans pp
-                    JOIN job_processes jp ON jp.id = pp.job_process_id
-                    JOIN qcp_item_processes qip ON qip.job_process_id = pp.job_process_id
-                    JOIN qcp_item_party_codes qipc ON qipc.qcp_item_id = qip.qcp_item_id
-                    JOIN qcp_code_refs qcr ON qcr.id = qipc.qcp_code_id AND qcr.blocks_completion = true
-                   WHERE jp.job_id = j.id
-                     AND pp.actual_start >= (SELECT since FROM win)
-                     AND pp.actual_start < (now() AT TIME ZONE 'UTC')) AS holds_opened
+                 COALESCE(verified.n, 0) AS verified,
+                 COALESCE(newly_overdue.n, 0) AS newly_overdue,
+                 COALESCE(holds.n, 0) AS holds_opened
           FROM jobs j
+          LEFT JOIN verified ON verified.job_id = j.id
+          LEFT JOIN newly_overdue ON newly_overdue.job_id = j.id
+          LEFT JOIN holds ON holds.job_id = j.id
           WHERE j.id = ANY(${jobIds}::int[])
         `
       : [];

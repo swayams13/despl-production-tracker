@@ -171,15 +171,19 @@ export async function loadQcCockpitForTenant(tenantId: number): Promise<QcCockpi
     const holdPoints: GlobalHoldPoint[] = [];
     if (blockingItems.length > 0) {
       const itemIds = blockingItems.map((i) => i.id);
-      const execs = await tx.qcpExecution.findMany({
-        where: { qcpItemId: { in: itemIds } },
-        orderBy: { attemptNo: "desc" },
-        select: { qcpItemId: true, unitId: true, result: true, waiverApprovedBy: true, recordedAt: true },
-      });
+      // AUD-057: the latest attempt per (item, unit) straight from the database (the unique
+      // (qcp_item_id, unit_id, attempt_no) index serves it), not every attempt ever recorded sorted in JS.
+      const execs = await tx.$queryRaw<
+        { qcp_item_id: number; unit_id: number; result: LatestAttempt["result"]; waiver_approved_by: number | null; recorded_at: Date }[]
+      >`
+        SELECT DISTINCT ON (qcp_item_id, unit_id) qcp_item_id, unit_id, result, waiver_approved_by, recorded_at
+        FROM qcp_executions
+        WHERE qcp_item_id = ANY(${itemIds}::int[])
+        ORDER BY qcp_item_id, unit_id, attempt_no DESC
+      `;
       const latestByKey = new Map<string, LatestAttempt>();
       for (const e of execs) {
-        const k = `${e.qcpItemId}:${e.unitId}`;
-        if (!latestByKey.has(k)) latestByKey.set(k, e);
+        latestByKey.set(`${e.qcp_item_id}:${e.unit_id}`, { result: e.result, waiverApprovedBy: e.waiver_approved_by, recordedAt: e.recorded_at });
       }
 
       const linkedJp = new Map(blockingItems.map((i) => [i.id, i.processLinks[0]?.jobProcess]));
@@ -191,6 +195,13 @@ export async function loadQcCockpitForTenant(tenantId: number): Promise<QcCockpi
           })
         : [];
       const now = new Date();
+      // AUD-057: bucket the plans by process once, not a full `plans.filter` per blocking item.
+      const plansByJp = new Map<number, typeof plans>();
+      for (const p of plans) {
+        const b = plansByJp.get(p.jobProcessId);
+        if (b) b.push(p);
+        else plansByJp.set(p.jobProcessId, [p]);
+      }
 
       for (const item of blockingItems) {
         const jp = linkedJp.get(item.id);
@@ -198,7 +209,7 @@ export async function loadQcCockpitForTenant(tenantId: number): Promise<QcCockpi
         const blockingCode = item.partyCodes[0]?.qcpCode;
         const classCode = blockingCode?.code ?? "?";
         const requiresCall = blockingCode?.requiresCall ?? false;
-        const unitPlans = plans.filter((p) => p.jobProcessId === jp.id);
+        const unitPlans = plansByJp.get(jp.id) ?? [];
 
         for (const p of unitPlans) {
           if (p.unitId == null) continue;
@@ -227,19 +238,25 @@ export async function loadQcCockpitForTenant(tenantId: number): Promise<QcCockpi
     }
 
     // ── 6-week first-pass-yield trend ────────────────────────────────────────
+    // AUD-056: bounded below at the first of the six weeks (so date_trunc runs on six weeks of events,
+    // not every event ever recorded), then bucketed and joined to the week series. Same buckets as before.
     const weeklyRows = await tx.$queryRaw<{ week_start: Date; submitted: number; rejected: number }[]>`
       WITH weeks AS (
         SELECT date_trunc('week', now())::date - (n * 7) AS week_start
         FROM generate_series(5, 0, -1) AS n
+      ),
+      recent AS (
+        SELECT date_trunc('week', de.at)::date AS week_start, de.type
+        FROM domain_events de
+        WHERE de.aggregate_type = 'ProcessPlan'
+          AND de.type IN ('ProcessSubmitted', 'ProcessRejected')
+          AND de.at >= (SELECT min(week_start) FROM weeks)
       )
       SELECT w.week_start,
-             count(*) FILTER (WHERE de.type = 'ProcessSubmitted')::int AS submitted,
-             count(*) FILTER (WHERE de.type = 'ProcessRejected')::int AS rejected
+             count(*) FILTER (WHERE r.type = 'ProcessSubmitted')::int AS submitted,
+             count(*) FILTER (WHERE r.type = 'ProcessRejected')::int AS rejected
       FROM weeks w
-      LEFT JOIN domain_events de
-        ON de.aggregate_type = 'ProcessPlan'
-        AND date_trunc('week', de.at)::date = w.week_start
-        AND de.type IN ('ProcessSubmitted', 'ProcessRejected')
+      LEFT JOIN recent r ON r.week_start = w.week_start
       GROUP BY w.week_start
       ORDER BY w.week_start
     `;
