@@ -5,7 +5,7 @@ import { withTenant } from "@/lib/db";
 import { ROLES, type Actor } from "@/lib/authz";
 import { isOnTime, isOverdue } from "@/lib/shared/business-day";
 import { pctOf } from "@/lib/shared/metrics";
-import { loadJobRefs, loadJobs, loadShellJobs, SHELL_JOB_CAP } from "./jobs.read";
+import { loadJobPercents, loadJobRefs, loadJobs, loadShellJobs, SHELL_JOB_CAP } from "./jobs.read";
 import { loadDepartmentCards } from "./departments.read";
 import { loadEvents } from "./events.read";
 import { loadPortfolio } from "./portfolio.read";
@@ -189,11 +189,14 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("performance P0 reads return what the
     expect(shell.length).toBeGreaterThan(0);
     // Same jobs, same order, same values for every field the shell uses.
     expect(shell.map((j) => j.id)).toEqual(full.filter((j) => shellById.has(j.id)).map((j) => j.id));
+    // The switcher's % complete comes from loadJobPercents (on demand), with the figure loadJobs reports.
+    const percents = await loadJobPercents(actor, shell.map((j) => j.id));
     for (const f of full) {
       const s = shellById.get(f.id);
       if (!s) continue;
-      const { openHoldPoints: _h, lastActivityAt: _l, unitRollup: _u, ...fields } = f;
+      const { openHoldPoints: _h, lastActivityAt: _l, unitRollup: _u, percentComplete, ...fields } = f;
       expect(s).toEqual(fields);
+      expect(percents[f.id]).toBe(percentComplete);
     }
     const refs = await loadJobRefs(actor);
     expect(refs).toEqual(full.map((j) => ({ id: j.id, jobNumber: j.jobNumber, status: j.status })));
@@ -205,6 +208,8 @@ describe.skipIf(!process.env.RUN_DB_TESTS)("performance P0 reads return what the
     const clientFull = await loadJobs(clientActor);
     expect((await loadJobRefs(clientActor)).map((j) => j.id)).toEqual(clientFull.map((j) => j.id));
     expect((await loadShellJobs(clientActor)).every((j) => clientFull.some((f) => f.id === j.id))).toBe(true);
+    // ...and cannot read the percent of a job that is not theirs.
+    expect(Object.keys(await loadJobPercents(clientActor, full.map((j) => j.id))).map(Number).sort()).toEqual(clientFull.map((j) => j.id).sort());
   }, 180_000);
 
   it("AUD-022: department cards computed in SQL equal the old load-every-plan-into-JS numbers", async () => {

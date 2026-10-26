@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { withTenant } from "@/lib/db";
+import { withTenant, type Tx } from "@/lib/db";
 import type { Actor } from "@/lib/authz";
 import { loadUnitSpinesBatch, rollupJobSpine } from "./spine.read";
 import { loadOpenHoldPointsBatch } from "./workspace.read";
@@ -64,10 +64,10 @@ type JobRow = Omit<JobListItem, "committedDeliveryDate" | "forecastDispatch" | "
 
 /**
  * What the app shell needs of a job (sidebar, switcher, topbar): the cheap half of `JobListItem`.
- * No hold points, no spine, no last-activity — those cost a `domain_events` join and the whole
+ * No hold points, no spine, no last-activity, no percent — those cost a `domain_events` join and the whole
  * `v_unit_stage_status` view per job, and the shell renders on every page load (AUD-020).
  */
-export type ShellJob = Omit<JobListItem, "openHoldPoints" | "lastActivityAt" | "unitRollup">;
+export type ShellJob = Omit<JobListItem, "openHoldPoints" | "lastActivityAt" | "unitRollup" | "percentComplete">;
 
 /** Most jobs the shell lists. ACTIVE jobs are taken first, so the sidebar's worst-five and the switcher never lose a live job. */
 export const SHELL_JOB_CAP = 50;
@@ -82,7 +82,7 @@ export const loadShellJobs = cache(async (actor: Actor): Promise<ShellJob[]> => 
   return base.map(toShellJob);
 });
 
-function toShellJob({ lastActivityAt: _skipped, ...j }: JobRow): ShellJob {
+function toShellJob({ lastActivityAt: _a, percentComplete: _p, ...j }: JobRow): ShellJob {
   return {
     ...j,
     committedDeliveryDate: j.committedDeliveryDate ? j.committedDeliveryDate.toISOString() : null,
@@ -152,6 +152,34 @@ export async function loadJobs(
   return opts ? { items, total, page: opts.page, pageSize: opts.pageSize } : items;
 }
 
+/** duration-weighted % complete per job, from the one view every percent surface reads (see loadJobsBase). */
+async function percentsOf(tx: Tx, jobIds: number[]): Promise<Map<number, string | number>> {
+  const percents = await tx.$queryRaw<PercentRow[]>`
+    SELECT job_id, sum(percent * weight) / sum(weight) AS percent
+    FROM v_process_plan_percent
+    WHERE job_id = ANY(${jobIds}::int[])
+    GROUP BY job_id
+  `;
+  return new Map(percents.map((p) => [p.job_id, p.percent]));
+}
+
+/**
+ * `percentComplete` of the jobs the shell lists, exactly as `loadJobs` computes it, but only when the
+ * job switcher is opened (AUD-020): the view behind it walks every plan's mapped operations, so it
+ * stays out of the layout that runs on every page. A job the actor cannot see is absent.
+ */
+export async function loadJobPercents(actor: Actor, jobIds: number[]): Promise<Record<number, number>> {
+  if (jobIds.length === 0) return {};
+  return withTenant(actor.tenantId, async (tx) => {
+    const visible = await tx.job.findMany({
+      where: { id: { in: jobIds }, ...(actor.clientId != null ? { clientId: actor.clientId } : {}) },
+      select: { id: true },
+    });
+    const byJob = await percentsOf(tx, visible.map((j) => j.id));
+    return Object.fromEntries(visible.map((j) => [j.id, Math.round(Number(byJob.get(j.id) ?? 0))]));
+  });
+}
+
 /**
  * The shared first half of `loadJobs` and `loadShellJobs`: job rows + plan tallies + percent
  * (+ last activity unless `shell`). `shell` also picks the capped, ACTIVE-first job set.
@@ -211,13 +239,8 @@ async function loadJobsBase(
     // Phase 3, R1/R3: percentComplete is duration-weighted, mapped-ops-aware
     // completion from the single view every percent-complete surface reads —
     // never the plain complete/total ratio above (kept only for the raw counts).
-    const percents = await tx.$queryRaw<PercentRow[]>`
-      SELECT job_id, sum(percent * weight) / sum(weight) AS percent
-      FROM v_process_plan_percent
-      WHERE job_id = ANY(${jobIds}::int[])
-      GROUP BY job_id
-    `;
-    const percentByJob = new Map(percents.map((p) => [p.job_id, p.percent]));
+    // The shell does not carry it (the view is the costliest read in the layout; see loadJobPercents).
+    const percentByJob = shell ? new Map<number, string | number>() : await percentsOf(tx, jobIds);
 
     // The shell never shows last activity, and this is the join that scales with the whole event stream (AUD-020).
     // The shell never shows last activity, and this is the join that scales with the whole event stream (AUD-020).

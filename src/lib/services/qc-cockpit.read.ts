@@ -227,21 +227,25 @@ export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
     }
 
     // ── 6-week first-pass-yield trend ────────────────────────────────────────
+    // AUD-056: bounded below at the first of the six weeks (so date_trunc runs on six weeks of events,
+    // not every event ever recorded), then bucketed and joined to the week series. Same buckets as before.
     const weeklyRows = await tx.$queryRaw<{ week_start: Date; submitted: number; rejected: number }[]>`
       WITH weeks AS (
         SELECT date_trunc('week', now())::date - (n * 7) AS week_start
         FROM generate_series(5, 0, -1) AS n
+      ),
+      recent AS (
+        SELECT date_trunc('week', de.at)::date AS week_start, de.type
+        FROM domain_events de
+        WHERE de.aggregate_type = 'ProcessPlan'
+          AND de.type IN ('ProcessSubmitted', 'ProcessRejected')
+          AND de.at >= (SELECT min(week_start) FROM weeks)
       )
       SELECT w.week_start,
-             count(*) FILTER (WHERE de.type = 'ProcessSubmitted')::int AS submitted,
-             count(*) FILTER (WHERE de.type = 'ProcessRejected')::int AS rejected
+             count(*) FILTER (WHERE r.type = 'ProcessSubmitted')::int AS submitted,
+             count(*) FILTER (WHERE r.type = 'ProcessRejected')::int AS rejected
       FROM weeks w
-      LEFT JOIN domain_events de
-        ON de.aggregate_type = 'ProcessPlan'
-        -- AUD-056: a range on the indexed column, not date_trunc() on every event ever recorded.
-        AND de.at >= w.week_start
-        AND de.at < w.week_start + 7
-        AND de.type IN ('ProcessSubmitted', 'ProcessRejected')
+      LEFT JOIN recent r ON r.week_start = w.week_start
       GROUP BY w.week_start
       ORDER BY w.week_start
     `;

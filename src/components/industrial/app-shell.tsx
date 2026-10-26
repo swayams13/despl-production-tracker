@@ -190,6 +190,23 @@ export function AppShell({
     };
   }, [currentJobId, jobs]);
 
+  // % complete per job for the switcher's rows, fetched when the switcher opens (AUD-020): the figure
+  // is the costliest read the shell used to make on every page.
+  const [percents, setPercents] = useState<Record<number, number> | null>(null);
+  useEffect(() => {
+    if (!jobOpen) return;
+    let live = true;
+    fetch("/api/jobs/percent")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { percents?: Record<number, number> } | null) => {
+        if (live && d?.percents) setPercents(d.percents);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [jobOpen, jobs]);
+
   const openNotification = async (n: NotificationRow) => {
     if (!n.readAt) await markNotificationReadAction(n.id);
     setBellOpen(false);
@@ -453,7 +470,7 @@ export function AppShell({
                     >
                       <span className="mono">{j.jobNumber}</span> · {j.projectName ?? j.familyName}
                       <small>
-                        {j.unitCount} units · {j.percentComplete.toFixed(1)}% ·{" "}
+                        {j.unitCount} units · {percents?.[j.id] != null ? `${percents[j.id].toFixed(1)}%` : "…"} ·{" "}
                         {j.forecastVarianceDays == null
                           ? "no schedule"
                           : j.forecastVarianceDays === 0
