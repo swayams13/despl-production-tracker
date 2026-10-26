@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
 import { loadWeldMap } from "@/lib/services/weld-map.service";
@@ -9,7 +10,7 @@ import { WeldMapClient } from "./_client";
  */
 export default async function WeldMapPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ line?: string }> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   const jobId = Number((await params).id);
   if (!Number.isInteger(jobId) || jobId <= 0) notFound();

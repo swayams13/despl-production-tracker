@@ -61,7 +61,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
 
   // More: pages that exist but are not in a role's spec list. Sidebar only.
   { id: "materials-more", href: "/materials", label: "Materials", icon: "jobs", roles: ["ADMIN", "PRODUCTION_HEAD", "PLANNER"], group: "more" },
-  { id: "qc-holds", href: "/qc", label: "QC & hold points", icon: "qc", roles: [...QC_VIEW_ROLES, "SUPERVISOR", "PLANNER"], rolesWhenLean: QC_VIEW_ROLES, group: "more" },
+  { id: "qc-holds", href: "/qc", label: "QC & hold points", icon: "qc", roles: QC_VIEW_ROLES, group: "more" },
   { id: "departments", href: "/departments", label: "Departments", icon: "departments", roles: FLOOR_AND_OFFICE, group: "more" },
   { id: "welding", href: "/welding", label: "Welding", icon: "welding", roles: FLOOR_AND_OFFICE, group: "more" },
   { id: "reports", href: "/reports", label: "Reports", icon: "reports", roles: FLOOR_AND_OFFICE, group: "more" },

@@ -29,6 +29,8 @@ export const gu: Dict = {
   outcome: {
     notSent: "મોકલાયું નથી", // REVIEW: DESPL
     noConnection: "કનેક્શન નથી. કંઈ મોકલાયું નથી.", // REVIEW: DESPL
+    signedOut: "ફરીથી સાઇન ઇન કરો, પછી ફરી પ્રયાસ કરો.", // REVIEW: DESPL
+    signIn: "સાઇન ઇન", // REVIEW: DESPL
     otherUnitStep: "બીજા યુનિટનું સ્ટેપ", // REVIEW: DESPL
     partial: (done, blocked) => `${done} પૂરા · ${blocked} અટક્યા`, // REVIEW: DESPL
     recorded: (label) => `${label} — નોંધાયું`, // REVIEW: DESPL

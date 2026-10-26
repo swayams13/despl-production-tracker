@@ -1,5 +1,6 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { withTenant } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth/password";
@@ -14,9 +15,31 @@ export interface LoginState {
 
 /** Failed-attempt window (audit C4). Same shape as changeOwnPassword's rate
  * limit (lib/auth/change-password.ts) but keyed on the raw identifier, not a
- * userId — pre-auth, an unknown/wrong identifier never resolves to one. */
+ * userId — pre-auth, an unknown/wrong identifier never resolves to one.
+ *
+ * AUD-109: the count is per (identifier, client IP), so another address cannot
+ * lock a named user out; a per-IP ceiling across all identifiers still slows
+ * someone spraying many usernames from one address. */
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = 5;
+const RATE_LIMIT_MAX_PER_IP = 30;
+
+/**
+ * The caller's address as the reverse proxy reports it, null when unknown.
+ * ponytail: trusts `x-real-ip`, then the first `x-forwarded-for` entry — the
+ * proxy in front (Railway today, the on-prem proxy later) must overwrite both,
+ * or a caller can rotate them to dodge the throttle. No parsing or validation
+ * beyond trimming; the value is only ever compared and stored as text.
+ */
+async function clientIp(): Promise<string | null> {
+  try {
+    const h = await headers();
+    const ip = h.get("x-real-ip") ?? h.get("x-forwarded-for")?.split(",")[0];
+    return ip?.trim().slice(0, 64) || null;
+  } catch {
+    return null; // no request scope (tests, scripts)
+  }
+}
 
 export async function login(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const parsed = loginSchema.safeParse({
@@ -39,21 +62,21 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   // identifier to username-or-email needs no change here.
   const tenantId = await resolveTenantForLogin(identifier);
   if (tenantId === null) return invalid;
+  const ip = await clientIp();
 
   const { session, rateLimitedNow } = await withTenant(tenantId, async (tx) => {
     // Audit C4: brute force was unthrottled AND left no trace at all — the
     // pattern already exists for changeOwnPassword, just never applied here.
     // Keyed on the identifier attempted (entityId), since a userId isn't
     // known yet for an unknown/wrong identifier.
-    const recentFailures = await tx.auditLog.count({
-      where: {
-        tenantId,
-        action: "auth.loginFailed",
-        entityId: identifierKey,
-        at: { gte: new Date(Date.now() - RATE_LIMIT_WINDOW_MS) },
-      },
-    });
-    if (recentFailures >= RATE_LIMIT_MAX_ATTEMPTS) {
+    const since = { gte: new Date(Date.now() - RATE_LIMIT_WINDOW_MS) };
+    const base = { tenantId, action: "auth.loginFailed", at: since, ip };
+    const [byIdentifier, byIp] = await Promise.all([
+      tx.auditLog.count({ where: { ...base, entityId: identifierKey } }),
+      // No address, no ceiling: everyone without one would share a single bucket.
+      ip === null ? 0 : tx.auditLog.count({ where: base }),
+    ]);
+    if (byIdentifier >= RATE_LIMIT_MAX_ATTEMPTS || byIp >= RATE_LIMIT_MAX_PER_IP) {
       return { session: null, rateLimitedNow: true };
     }
 
@@ -67,7 +90,7 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     const verified = user ? await verifyPassword(user.passwordHash, password) : false;
     if (!user || !verified) {
       await tx.auditLog.create({
-        data: { tenantId, actorId: user?.id ?? null, action: "auth.loginFailed", entityType: "User", entityId: identifierKey },
+        data: { tenantId, actorId: user?.id ?? null, action: "auth.loginFailed", entityType: "User", entityId: identifierKey, ip },
       });
       return { session: null, rateLimitedNow: false };
     }

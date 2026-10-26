@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
@@ -44,7 +45,7 @@ export default async function JobDetail({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   // Lean Core freeze: false hides the Client View tab.

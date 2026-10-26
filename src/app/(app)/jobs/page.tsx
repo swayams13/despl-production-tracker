@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
@@ -40,7 +41,7 @@ export default async function JobsList({
   searchParams: Promise<{ page?: string }>;
 }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const { page: pageParam } = await searchParams;

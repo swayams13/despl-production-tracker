@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
@@ -13,7 +14,7 @@ import { PrintButton } from "./print-button";
  */
 export default async function TravellersPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const jobId = Number((await params).id);

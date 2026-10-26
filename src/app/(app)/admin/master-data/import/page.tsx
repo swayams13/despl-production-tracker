@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { redirect } from "next/navigation";
 import { getActor, hasRole, ROLES } from "@/lib/authz";
 import { IMPORT_APPLY_ROLES, IMPORT_VIEW_ROLES, MASTER_DATA_READ_ROLES } from "@/lib/services/master-data.service";
@@ -7,7 +8,7 @@ import { MasterImport } from "./_import";
 
 export default async function MasterImportPage() {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   if (!hasRole(actor, ...MASTER_DATA_READ_ROLES)) return <RefusalCard title="Import" />;
   if (!hasRole(actor, ...IMPORT_VIEW_ROLES)) {

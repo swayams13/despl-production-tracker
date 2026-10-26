@@ -12,7 +12,7 @@ import { LocaleProvider } from "@/lib/i18n/provider";
 import { notifyBlockerAction, raiseRuleNcrAction } from "@/app/actions/work";
 import { en } from "@/lib/i18n/en";
 import { hi } from "@/lib/i18n/hi";
-import { UNDO_MS, doneLabel, nudgeText, NotifyBlockerButton, RaiseRuleNcrButton, useFloorWrites } from "./floor-actions";
+import { UNDO_MS, FloorOutcomes, doneLabel, notSent, nudgeText, NotifyBlockerButton, RaiseRuleNcrButton, useFloorWrites } from "./floor-actions";
 
 /**
  * Rehearsal finding: after "marked done" the row still showed live Done / Start buttons until the Undo window had passed and
@@ -140,5 +140,32 @@ describe("floor messages (rehearsal polish)", () => {
       expect(screen.getByText("NCR raised")).toBeTruthy();
       expect(screen.queryByRole("button")).toBeNull();
     });
+  });
+});
+
+// AUD-062: a send refused because the session ended is "not sent", says to sign in again, and stores nothing on the device.
+describe("a send refused because the session ended", () => {
+  it("is not a generic error: it asks the person to sign in again and offers the way", () => {
+    expect(notSent(en, { code: "UNAUTHENTICATED", message: "Your session ended. Sign in again, then try again." })).toEqual({
+      applied: 0,
+      refused: [],
+      error: "Sign in again, then try again.",
+      signIn: true,
+    });
+    // any other refusal keeps its own message and offers no sign-in
+    expect(notSent(en, { code: "FORBIDDEN", message: "Not allowed." })).toEqual({ applied: 0, refused: [], error: "Not allowed." });
+  });
+
+  it("shows on the outcome card as Not sent, with a sign-in link back to this page", () => {
+    const store = vi.spyOn(Storage.prototype, "setItem");
+    render(
+      <FloorOutcomes dismiss={() => {}} outcomes={[{ id: "1", label: "Cutting", applied: 0, refused: [], error: en.outcome.signedOut, signIn: true }]} />,
+      { wrapper },
+    );
+    expect(screen.getByText("Not sent")).toBeTruthy();
+    expect(screen.getByText("Sign in again, then try again.")).toBeTruthy();
+    const link = screen.getByRole("link", { name: "Sign in" }).getAttribute("href") ?? "";
+    expect(new URL(link, "http://x").searchParams.get("next")).toBe(window.location.pathname + window.location.search);
+    expect(store).not.toHaveBeenCalled();
   });
 });

@@ -150,7 +150,7 @@ describe("changePassword action — the single exempt caller", () => {
     const form = new FormData();
     form.set("current", "temp-password-1");
     form.set("next", "brand-new-password-1");
-    expect(await changePassword({}, form)).toEqual({ error: "Please sign in." });
+    expect(await changePassword({}, form)).toEqual({ error: "Your session ended. Sign in again, then try again." });
     expect(changeOwnPassword).not.toHaveBeenCalled();
   });
 });

@@ -207,7 +207,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   REASON_REQUIRED:
     "This department has an overdue process on this unit. File a categorised delay reason to continue.",
   FORBIDDEN: "You do not have permission to do this.",
-  UNAUTHENTICATED: "Please sign in.",
+  UNAUTHENTICATED: "Your session ended. Sign in again, then try again.",
   CLIENT_SCOPE_VIOLATION: "This record belongs to a different client.",
   VALIDATION_FAILED: "Some of the values submitted are not valid.",
   NOT_FOUND: "That record does not exist, or you cannot see it.",

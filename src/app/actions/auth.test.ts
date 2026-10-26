@@ -25,7 +25,10 @@ import { ROLES, type Actor } from "@/lib/authz";
  * `despl_demo` — see .env.test / project memory).
  */
 let cookieValue: string | undefined;
+// The caller's address as the reverse proxy would report it (AUD-109).
+let callerIp = "203.0.113.1";
 vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ "x-real-ip": callerIp }),
   cookies: async () => ({
     get: (name: string) => (name === "despl_session" && cookieValue !== undefined ? { value: cookieValue } : undefined),
     set: (name: string, value: string) => {
@@ -155,5 +158,52 @@ describe.skipIf(!RUN_DB)("login() — identity resolution (DB)", async () => {
       where: { tenantId, action: "auth.loginFailed", entityId: identifier.toLowerCase() },
     });
     expect(rows).toBe(5); // the throttled 6th attempt never re-checked the password, so no 6th row
+  });
+
+  // AUD-109: the throttle must not let a stranger lock out a named user.
+  describe("throttle is per (identifier, client IP)", () => {
+    const password = "a-real-password-1";
+    async function attempt(identifier: string, pw: string, ip: string) {
+      const { login } = await import("./auth");
+      cookieValue = undefined;
+      callerIp = ip;
+      const form = new FormData();
+      form.set("identifier", identifier);
+      form.set("password", pw);
+      return login({}, form);
+    }
+
+    it("five bad attempts from one address do not lock the real user out from another", async () => {
+      const username = `lockout-${Date.now()}`;
+      const created = await createEmployee(admin, { displayName: "Lockout Victim", username, roles: ["QC"], departmentIds: [], password });
+      const attacker = "198.51.100.7";
+      for (let i = 0; i < 5; i++) {
+        expect((await attempt(username, "wrong-password-1", attacker))?.error).toBe("Incorrect username, email, or password");
+      }
+      // The attacker is now throttled for this identifier...
+      expect((await attempt(username, password, attacker))?.error).toBe("Too many attempts. Try again in a few minutes.");
+      // ...but the user at their own address signs in.
+      const { readSession } = await import("@/lib/auth/session");
+      expect((await attempt(username, password, "192.0.2.44"))?.error).toBeUndefined();
+      expect((await readSession())?.userId).toBe(created.userId);
+    });
+
+    it("failed attempts are audited with the address", async () => {
+      const identifier = `nobody-ip-${Date.now()}`;
+      await attempt(identifier, "whatever-not-real-1", "198.51.100.99");
+      const row = await owner.auditLog.findFirstOrThrow({ where: { tenantId, action: "auth.loginFailed", entityId: identifier } });
+      expect(row.ip).toBe("198.51.100.99");
+    });
+
+    it("one address spraying many identifiers is stopped by the per-IP ceiling", async () => {
+      const ip = `198.51.100.${100 + (Date.now() % 100)}`;
+      const stamp = Date.now();
+      for (let i = 0; i < 30; i++) {
+        expect((await attempt(`spray-${stamp}-${i}`, "whatever-not-real-1", ip))?.error).toBe("Incorrect username, email, or password");
+      }
+      expect((await attempt(`spray-${stamp}-fresh`, "whatever-not-real-1", ip))?.error).toBe("Too many attempts. Try again in a few minutes.");
+      // Another address is unaffected.
+      expect((await attempt(`spray-${stamp}-fresh`, "whatever-not-real-1", "192.0.2.200"))?.error).toBe("Incorrect username, email, or password");
+    });
   });
 });

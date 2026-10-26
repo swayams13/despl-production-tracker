@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor, hasRole } from "@/lib/authz";
@@ -17,7 +18,7 @@ const num = (n: number | null) => (n == null ? "—" : Number.isInteger(n) ? Str
 
 export default async function MaterialsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
   if (!hasRole(actor, ...MATERIALS_QUEUE_ROLES)) {
     return (

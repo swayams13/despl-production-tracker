@@ -1,8 +1,9 @@
 import { withTenant } from "@/lib/db";
-import type { Actor } from "@/lib/authz";
+import { hasRole, type Actor } from "@/lib/authz";
+import { AppError, ERROR_CODES } from "@/lib/shared/errors";
 import { pctOf } from "@/lib/shared/metrics";
 import { ncrTenantScope } from "./ncr.service";
-import { ageDaysOf, resolveHoldPointStatus, type HoldStatus, type LatestAttempt } from "@/lib/shared/qc-queue";
+import { ageDaysOf, QC_VIEW_ROLES, resolveHoldPointStatus, type HoldStatus, type LatestAttempt } from "@/lib/shared/qc-queue";
 
 const LEGACY_HOLD_LABEL: Record<HoldStatus, string> = {
   AWAITING_TPI: "Awaiting TPI",
@@ -108,6 +109,8 @@ interface QueueRow {
 }
 
 export async function loadQcCockpit(actor: Actor): Promise<QcCockpit> {
+  // AUD-037: raw tenant-wide SQL below, so the gate lives here too, not only in the page.
+  if (actor.clientId !== null || !hasRole(actor, ...QC_VIEW_ROLES)) throw new AppError(ERROR_CODES.FORBIDDEN);
   return withTenant(actor.tenantId, async (tx) => {
     // ── Awaiting verification queue, oldest submission first ────────────────
     const queueRows = await tx.$queryRaw<QueueRow[]>`

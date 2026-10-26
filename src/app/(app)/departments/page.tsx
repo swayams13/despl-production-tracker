@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getActor } from "@/lib/authz";
@@ -13,7 +14,7 @@ function onTimeColor(pct: number | null): string {
 
 export default async function Departments() {
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.clientId !== null) redirect("/portal");
 
   const departments = await loadDepartmentCards(actor);

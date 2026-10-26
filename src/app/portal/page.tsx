@@ -1,3 +1,4 @@
+import { redirectToLogin } from "@/lib/auth/login-redirect";
 import { notFound, redirect } from "next/navigation";
 import { FEATURES } from "@/lib/shared/flags";
 import { getActor } from "@/lib/authz";
@@ -14,7 +15,7 @@ import { ThemeRoot } from "@/components/industrial/theme-root";
 export default async function PortalPage() {
   if (!FEATURES.clientPortal) notFound();
   const actor = await getActor();
-  if (!actor) redirect("/login");
+  if (!actor) return redirectToLogin();
   if (actor.mustChangePassword) redirect("/account/password");
   if (actor.clientId === null) redirect("/");
 

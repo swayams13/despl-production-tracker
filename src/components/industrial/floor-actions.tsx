@@ -46,6 +46,8 @@ export interface Outcome {
   applied: number;
   refused: Array<{ title: string; message: string }>;
   error?: string;
+  /** The session ended: the card offers a way back to sign in (AUD-062). */
+  signIn?: boolean;
   retry?: () => void;
 }
 export interface PendingView {
@@ -60,6 +62,13 @@ export interface SendResult {
   applied: number;
   refused: Array<{ kind: Kind | "PROCESS_PLAN"; id: number; message: string }>;
   error?: string;
+  signIn?: boolean;
+}
+/** A refused send as an outcome card; a dead session says so and offers sign-in. */
+export function notSent(d: Dict, r: { code: string; message: string }): SendResult {
+  return r.code === "UNAUTHENTICATED"
+    ? { applied: 0, refused: [], error: d.outcome.signedOut, signIn: true }
+    : { applied: 0, refused: [], error: r.message };
 }
 /** What the sheet needs about the unit a row belongs to. */
 export interface SheetContext {
@@ -101,6 +110,7 @@ export function useFloorWrites(titleOf: Map<string, string>) {
           message: r.message,
         })),
         error: out.error,
+        signIn: out.signIn,
         retry: out.error ? () => { setOutcomes((o) => o.filter((x) => x.id !== id)); void finish(id, label, send, keys); } : undefined,
       };
       setOutcomes((o) => [outcome, ...o.filter((x) => x.id !== id)]);
@@ -181,6 +191,11 @@ export function FloorOutcomes({ outcomes, dismiss }: { outcomes: Outcome[]; dism
                 : d.outcome.recorded(o.label)}
           </b>
           {o.error && <span>{o.error}</span>}
+          {o.signIn && (
+            <a className="btn btn-accent" href={`/login?${new URLSearchParams({ next: window.location.pathname + window.location.search, session: "ended" })}`}>
+              {d.outcome.signIn}
+            </a>
+          )}
           {o.refused.map((r, i) => (
             <span key={i}>
               {r.title}: {r.message}
@@ -456,7 +471,7 @@ export function ActionSheet({
       ];
       if (needsWelder || (done && row.weld)) {
         const j = await ensureJointAction({ assemblyStepId: row.id, welderIds: welder ? [Number(welder)] : undefined });
-        if (!j.ok) return { applied: 0, refused: [], error: j.message };
+        if (!j.ok) return notSent(d, j);
         items[0].detail = { ...items[0].detail, weldJointId: j.weldJointId, ...(welder ? { performedByWelderId: Number(welder) } : {}) };
       }
       const r = await recordWorkAction({
@@ -470,7 +485,7 @@ export function ActionSheet({
           : {}),
         ...(category != null ? { lateReason: { categoryId: category, ...(lateNote.trim() ? { note: lateNote.trim() } : {}) } } : {}),
       });
-      if (!r.ok) return { applied: 0, refused: [], error: r.message };
+      if (!r.ok) return notSent(d, r);
       return {
         ...(done ? { label: doneLabel(d, row.title, count, r.result.applied) } : {}),
         applied: r.result.applied.length,

@@ -29,6 +29,8 @@ export const hi: Dict = {
   outcome: {
     notSent: "भेजा नहीं गया", // REVIEW: DESPL
     noConnection: "कनेक्शन नहीं है। कुछ भी नहीं भेजा गया।", // REVIEW: DESPL
+    signedOut: "फिर से साइन इन करें, फिर दोबारा कोशिश करें।", // REVIEW: DESPL
+    signIn: "साइन इन", // REVIEW: DESPL
     otherUnitStep: "दूसरी यूनिट का स्टेप", // REVIEW: DESPL
     partial: (done, blocked) => `${done} पूरे · ${blocked} रुके हैं`, // REVIEW: DESPL
     recorded: (label) => `${label} — दर्ज हुआ`, // REVIEW: DESPL
