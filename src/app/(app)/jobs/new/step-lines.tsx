@@ -3,13 +3,10 @@
 import Link from "next/link";
 import { plural } from "@/lib/shared/plural";
 import type { IntakeOptions, IntakeFamily } from "@/lib/services/job-intake.read";
-import { emptyBlock, generateSerials, type BomMode, type EquipBlockState, type WizardState } from "./wizard-state";
-
-const BOM_MODES: Array<{ value: BomMode; label: string }> = [
-  { value: "NONE", label: "No BOM yet: start it on the release screen" },
-  { value: "COPY", label: "Copy the BOM of a previous job" },
-  { value: "KIT", label: "Fill from the equipment type's standard kit" },
-];
+import { emptyBlock, generateSerials, type EquipBlockState, type WizardState } from "./wizard-state";
+import { BomPicker } from "./bom-picker";
+import { buildPickerEntries, pickerSummary, type PickerEntry } from "./bom-picker-entries";
+import { BomUpload } from "./bom-upload";
 
 /** Frame 13B: the family and route, then one card per equipment line. */
 export function StepLines({
@@ -36,17 +33,45 @@ export function StepLines({
   const addBlock = () => patch({ equipments: [...state.equipments, emptyBlock(state.equipments.every((b) => b.bomMode === "KIT") ? "KIT" : "NONE")] });
   const removeBlock = (key: string) => patch({ equipments: state.equipments.filter((b) => b.key !== key) });
 
-  const selectEquipmentType = (key: string, typeId: number | null) => {
-    const type = options.equipmentTypes.find((t) => t.id === typeId) ?? null;
-    updateBlock(key, (b) => ({ ...b, equipmentTypeId: typeId, name: type ? type.name : b.name }));
-    if (type) {
-      patch({
-        designCode: type.defaultDesignCode ?? state.designCode,
-        answers: type.defaultSpecs
-          ? Object.fromEntries(Object.entries(type.defaultSpecs).map(([k, v]) => [k, String(v)]))
-          : state.answers,
-      });
-    }
+  const entries = buildPickerEntries(options, state.familyId);
+
+  /** One choice from the picker: the equipment type and the BOM source it implies, in a single update. */
+  const pick = (key: string, entry: PickerEntry) => {
+    const source = entry.kind === "SOURCE" ? options.bomSources.find((x) => x.equipmentId === entry.equipmentId) ?? null : null;
+    const type =
+      entry.kind === "SOURCE"
+        ? typesForFamily.find((t) => t.id === source?.equipmentTypeId) ?? null
+        : typesForFamily.find((t) => t.id === entry.typeId) ?? null;
+    const equipments = state.equipments.map((b) => {
+      if (b.key !== key) return b;
+      if (entry.kind === "SOURCE") {
+        return {
+          ...b,
+          bomMode: "COPY" as const,
+          copyBomFromEquipmentId: entry.equipmentId,
+          copyWeldMapFromEquipmentId: b.copyWeldMapFromEquipmentId === entry.equipmentId ? b.copyWeldMapFromEquipmentId : null,
+          equipmentTypeId: type?.id ?? b.equipmentTypeId,
+          name: b.name.trim() ? b.name : source?.equipmentName ?? "",
+        };
+      }
+      return {
+        ...b,
+        equipmentTypeId: entry.typeId,
+        name: type ? type.name : b.name,
+        copyBomFromEquipmentId: null,
+        copyWeldMapFromEquipmentId: null,
+        bomMode: entry.kind === "KIT" ? ("KIT" as const) : b.bomMode === "UPLOAD" ? ("UPLOAD" as const) : ("NONE" as const),
+      };
+    });
+    patch({
+      equipments,
+      ...(type
+        ? {
+            designCode: type.defaultDesignCode ?? state.designCode,
+            answers: type.defaultSpecs ? Object.fromEntries(Object.entries(type.defaultSpecs).map(([k, v]) => [k, String(v)])) : state.answers,
+          }
+        : {}),
+    });
   };
 
   return (
@@ -116,19 +141,20 @@ export function StepLines({
               )}
             </div>
             <div style={{ padding: 16 }}>
+              <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Equipment type or master BOM</label>
+              <BomPicker
+                entries={entries}
+                label={`Equipment type or master BOM for line ${idx + 1}`}
+                summary={pickerSummary(b, options)}
+                selectedKey={b.bomMode === "COPY" && b.copyBomFromEquipmentId != null ? `src:${b.copyBomFromEquipmentId}` : b.equipmentTypeId != null ? `${b.bomMode === "KIT" ? "kit" : "type"}:${b.equipmentTypeId}` : null}
+                disabled={!family}
+                disabledHint="Choose a family first"
+                onPick={(e) => pick(b.key, e)}
+              />
+              <div className="emp-hint" style={{ marginBottom: 10 }}>
+                Pick an equipment type to use its standard kit, or an equipment line from an earlier job to copy its BOM. Type to search by name, job number, client or part code.
+              </div>
               <div className="emp-grid">
-                <div>
-                  <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Equipment type</label>
-                  <select
-                    className="ws-detail"
-                    value={b.equipmentTypeId ?? ""}
-                    onChange={(e) => selectEquipmentType(b.key, e.target.value ? Number(e.target.value) : null)}
-                    disabled={!family}
-                  >
-                    <option value="">{family ? "Select equipment type…" : "Choose a family first"}</option>
-                    {typesForFamily.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                </div>
                 <div>
                   <label className="emp-hint" style={{ display: "block", marginBottom: 4 }}>Block name *</label>
                   <input className="ws-detail" value={b.name} onChange={(e) => updateBlock(b.key, (x) => ({ ...x, name: e.target.value }))} />
@@ -236,33 +262,24 @@ export function StepLines({
             )}
             </>)}
               <div className="sh-sec">Bill of materials</div>
-              <select
-                className="ws-detail"
-                style={{ maxWidth: 460 }}
-                aria-label={`BOM source for line ${idx + 1}`}
-                value={b.bomMode}
-                onChange={(e) => updateBlock(b.key, (x) => ({ ...x, bomMode: e.target.value as BomMode }))}
-              >
-                {BOM_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
+              {b.bomMode === "NONE" && <p className="note" style={{ textAlign: "left", margin: 0 }}>No BOM yet: start it on the release screen, or pick a master BOM above, or upload an Excel file.</p>}
               {b.bomMode === "COPY" && (
-                <div style={{ marginTop: 8 }}>
-                  <select
-                    className="ws-detail"
-                    style={{ maxWidth: 460 }}
-                    aria-label={`Job to copy the BOM of line ${idx + 1} from`}
-                    value={b.copyBomFromEquipmentId ?? ""}
-                    onChange={(e) => updateBlock(b.key, (x) => ({ ...x, copyBomFromEquipmentId: e.target.value ? Number(e.target.value) : null }))}
-                  >
-                    <option value="">Choose a previous line…</option>
-                    {!knownSource && b.copyBomFromEquipmentId != null && <option value={b.copyBomFromEquipmentId}>The copied job&apos;s line (it has no BOM lines)</option>}
-                    {options.bomSources.map((s) => (
-                      <option key={s.equipmentId} value={s.equipmentId}>{s.label}: {plural(s.itemCount, "item")}</option>
-                    ))}
-                  </select>
-                  {options.bomSources.length === 0 && <div className="emp-hint">No earlier job has BOM lines to copy.</div>}
+                <div>
+                  {knownSource ? (
+                    <div className="emp-hint">The BOM is copied from the line chosen above as a draft. Engineering checks it and releases it.</div>
+                  ) : (
+                    <div className="emp-hint">The chosen earlier line is not in the list: it has no BOM lines, or it is older than the list shows. Pick another BOM, or the job is created with an empty BOM.</div>
+                  )}
                   {b.copyWeldMapFromEquipmentId != null && <div className="emp-hint">The weld map comes from the same earlier line. Every joint starts unconfirmed.</div>}
                 </div>
+              )}
+              {b.bomMode === "UPLOAD" && (
+                <BomUpload
+                  lineNo={idx + 1}
+                  value={b.bomUpload}
+                  onKeep={(u) => updateBlock(b.key, (x) => ({ ...x, bomMode: "UPLOAD", bomUpload: u }))}
+                  onRemove={() => updateBlock(b.key, (x) => ({ ...x, bomMode: "NONE", bomUpload: null }))}
+                />
               )}
               {b.bomMode === "KIT" && (
                 <div style={{ marginTop: 8 }}>
@@ -290,6 +307,18 @@ export function StepLines({
                   )}
                 </div>
               )}
+              <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                {b.bomMode !== "UPLOAD" && (
+                  <button className="btn" onClick={() => updateBlock(b.key, (x) => ({ ...x, bomMode: "UPLOAD", copyBomFromEquipmentId: null, copyWeldMapFromEquipmentId: null }))}>
+                    Upload a BOM Excel file instead
+                  </button>
+                )}
+                {b.bomMode !== "NONE" && (
+                  <button className="btn btn-ghost" onClick={() => updateBlock(b.key, (x) => ({ ...x, bomMode: "NONE", copyBomFromEquipmentId: null, copyWeldMapFromEquipmentId: null }))}>
+                    Start without a BOM
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         );
