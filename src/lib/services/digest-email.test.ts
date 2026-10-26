@@ -139,7 +139,7 @@ describe.skipIf(!RUN_DB)("L2.11 morning digest email (DB)", async () => {
     const f = await fixture("payload");
     const p = await loadDigestPayload(f.actor, { date: DATE, workDay: WORK_DAY, appUrl: null });
     expect(p).toMatchObject({
-      date: DATE, workDay: WORK_DAY, jobsAtRisk: [], overdueTotal: 0, overdueByDept: [], overrides: [], overridesTotal: 0,
+      date: DATE, workDay: WORK_DAY, jobsAtRisk: [], overdueTotal: 0, overdueByDept: [], overrides: [], overridesTotal: 0, unreviewedEarlyStarts: [],
       sameDay: { overall: { same: 0, total: 0, rate: null }, byDept: [] }, appUrl: null,
     });
   });

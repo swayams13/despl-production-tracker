@@ -211,6 +211,10 @@ export type DispositionNcrInput = z.infer<typeof dispositionNcrSchema>;
 export const ratifyConcessionSchema = z.object({ ncrId: id }).strict();
 export type RatifyConcessionInput = z.infer<typeof ratifyConcessionSchema>;
 
+/** D2: the Production Head acknowledges one out-of-sequence start. */
+export const acknowledgeOverrideSchema = z.object({ overrideId: id }).strict();
+export type AcknowledgeOverrideInput = z.infer<typeof acknowledgeOverrideSchema>;
+
 /** Put a process plan ON_HOLD with a recorded reason. */
 export const holdProcessSchema = z.object({ processPlanId: id, reason }).strict();
 export type HoldProcessInput = z.infer<typeof holdProcessSchema>;

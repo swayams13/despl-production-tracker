@@ -3,6 +3,7 @@ import { assertNotClientUser, hasRole, ROLES, type Actor } from "@/lib/authz";
 import { sameDayRate, summarizeTeam, type TeamPlanFact, type PersonLoad } from "@/lib/shared/team";
 import { loadCommandCenter, resolveCommandCenterAccess, type CommandCenterAccess, type CommandCenterRow } from "./command-center.read";
 import { loadWeldingView, type WelderCard } from "./welding.read";
+import { loadEarlyStarts, type EarlyStartsView } from "./override-review.read";
 
 /**
  * Lean Core L2.5: Team, the supervisor's crew and the Production Head's
@@ -54,7 +55,20 @@ export interface TeamView {
   overdueBlocked: TeamRow[];
   blocking: TeamRow[];
   waitingOnOthers: TeamRow[];
-  outOfSequence: Array<{ id: number; title: string; serialNo: string; jobNumber: string; category: string; note: string | null; by: string; at: string }>;
+  outOfSequence: Array<{
+    id: number;
+    title: string;
+    serialNo: string;
+    jobNumber: string;
+    category: string;
+    note: string | null;
+    by: string;
+    at: string;
+    /** D2: who acknowledged it and when (ISO), null while it waits for the Production Head. */
+    ack: { by: string; at: string } | null;
+  }>;
+  /** D2: every early start nobody has acknowledged (all departments). Production Head only; null for everyone else. */
+  earlyStarts: EarlyStartsView | null;
   byProcess: Array<{ processName: string; open: number; overdueIds: number[] }>;
   welders: WelderCard[];
   jobs: Array<{ id: number; jobNumber: string }>;
@@ -129,6 +143,7 @@ export async function loadTeam(
           creator: { select: { name: true } },
           unit: { select: { serialNo: true } },
           job: { select: { jobNumber: true } },
+          ack: { select: { acknowledgedAt: true, user: { select: { name: true } } } },
         },
       }),
       tx.delayCategoryRef.findMany({ where: { tenantId: actor.tenantId, active: true }, orderBy: { id: "asc" }, select: { id: true, name: true } }),
@@ -231,7 +246,9 @@ export async function loadTeam(
       note: o.note,
       by: o.creator.name,
       at: o.createdAt.toISOString(),
+      ack: o.ack ? { by: o.ack.user.name, at: o.ack.acknowledgedAt.toISOString() } : null,
     }));
+  const earlyStarts = hasRole(actor, ROLES.PRODUCTION_HEAD) ? await loadEarlyStarts(actor, now) : null;
 
   return {
     department: { ...department, supervisors },
@@ -257,6 +274,7 @@ export async function loadTeam(
     blocking: cc.blocking.map(toRow),
     waitingOnOthers: cc.waitingOnOthers.map(toRow),
     outOfSequence,
+    earlyStarts,
     byProcess: [...byProcess].map(([processName, g]) => ({ processName, ...g })).sort((a, b) => b.overdueIds.length - a.overdueIds.length || b.open - a.open),
     welders,
     jobs: [...new Map(teamRows.map((r) => [r.jobId, { id: r.jobId, jobNumber: r.jobNumber }])).values()],

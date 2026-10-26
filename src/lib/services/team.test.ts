@@ -150,6 +150,24 @@ describe.skipIf(!RUN_DB)("L2.5 Team (DB)", async () => {
       const jobNo = (await owner.job.findUniqueOrThrow({ where: { id: j.job.id } })).jobNumber;
       expect(ms.outOfSequence.filter((x) => x.jobNumber === jobNo)).toEqual([]);
     });
+
+    it("D2: the Production Head sees the early-starts list and the ack state; the supervisor sees neither the list nor a button", async () => {
+      const j = await o.job({ processes: [{ code: "20" }], steps: [{ seq: 1 }] });
+      const ov = await owner.sequenceOverride.create({
+        data: { jobId: j.job.id, targetKind: "ASSEMBLY_STEP", targetId: j.step(1), unitId: j.units[0].id, category: "CLIENT_PRIORITY", createdBy: sup.userId },
+      });
+      expect((await loadTeam(sup, dept))!.earlyStarts).toBeNull();
+      const before = (await loadTeam(head, dept))!;
+      expect(before.earlyStarts!.pending.map((p) => p.id)).toContain(ov.id);
+      expect(before.outOfSequence.find((x) => x.id === ov.id)!.ack).toBeNull();
+
+      await owner.sequenceOverrideAck.create({ data: { jobId: j.job.id, overrideId: ov.id, acknowledgedBy: head.userId } });
+      const after = (await loadTeam(head, dept))!;
+      expect(after.earlyStarts!.pending.map((p) => p.id)).not.toContain(ov.id);
+      expect(after.outOfSequence.find((x) => x.id === ov.id)!.ack).toMatchObject({ by: "head" });
+      // the supervisor still sees the entry, now marked, and never the list
+      expect((await loadTeam(sup, dept))!.outOfSequence.find((x) => x.id === ov.id)!.ack).not.toBeNull();
+    });
   });
 
   describe("assignPlans (bulk)", () => {

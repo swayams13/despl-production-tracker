@@ -78,6 +78,7 @@ const STATUS: Record<ErrorCode, number> = {
   SCHEDULE_ENVELOPE_INVALID: 409,
   // Same answer the frozen pages give (notFound()).
   FEATURE_FROZEN: 404,
+  OVERRIDE_ALREADY_ACKNOWLEDGED: 409,
   DELIVERY_DATE_REQUIRED: 400,
   REVISE_REQUIRED: 409,
   APPROVAL_BLOCKED: 409,

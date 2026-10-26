@@ -126,6 +126,8 @@ export const ERROR_CODES = {
   FLOOR_ROW_RETIRED: "FLOOR_ROW_RETIRED",
   /** resolveReviewRow (J5c): Replace or Cancel is blocked while the row waits for QC (reason QC_PENDING) or has an open NCR (reason NCR_OPEN). */
   BOM_REVIEW_BLOCKED: "BOM_REVIEW_BLOCKED",
+  /** acknowledgeOverride (D2): the Production Head has already acknowledged this early start. */
+  OVERRIDE_ALREADY_ACKNOWLEDGED: "OVERRIDE_ALREADY_ACKNOWLEDGED",
   /** releaseDraft (J7a): the draft was already turned into a job (once only). */
   DRAFT_ALREADY_RELEASED: "DRAFT_ALREADY_RELEASED",
   /** saveDraft / releaseDraft (J7a): the draft was discarded. */
@@ -290,6 +292,8 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
     "This job's envelope data is inconsistent (minimum duration exceeds maximum) and cannot be scheduled. Contact an administrator.",
   DELIVERY_DATE_REQUIRED:
     "Enter the committed delivery date, the date promised to the client. Without it the job cannot be scheduled.",
+  OVERRIDE_ALREADY_ACKNOWLEDGED:
+    "This early start has already been acknowledged.",
   FEATURE_FROZEN:
     "This feature is switched off while the pilot runs. Ask the Production Head if you need it; only the system administrator can switch it back on.",
   REVISE_REQUIRED:
